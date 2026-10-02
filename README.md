@@ -22,6 +22,18 @@ xcodebuild -project Uniboard.xcodeproj -scheme Uniboard \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' CODE_SIGNING_ALLOWED=NO test
 ```
 
+The ordinary UI tests cover name, code point, literal-character and block searches, block browsing, and favorites. The system-keyboard integration test is opt-in because it changes the simulator’s enabled keyboards. Use a dedicated QA simulator with its software keyboard visible. In Xcode 27’s Device Hub, **Controls → Toggle Software Keyboard** shows or hides the software keyboard; disable **Device → Simulate Hardware Keyboard** when necessary.
+
+```sh
+xcodebuild -project Uniboard.xcodeproj -scheme Uniboard \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO \
+  UNIBOARD_KEYBOARD_INTEGRATION=1 \
+  -only-testing:UniboardUITests/UniboardUITests/testSystemKeyboardSearchAndInsertion test
+```
+
+This test enables Uniboard through Settings and selects the installed extension from the system globe menu. It verifies that searching `U+1F680` keeps the query out of the host document, inserts 🚀, and handles space and deletion. It saves screenshots in the test results around search and after character insertion. This complete flow passed on an iPhone 16 Pro simulator running iOS 18.5.
+
 ## Latest Unicode draft
 
 The generator uses the latest official Unicode development data and records its provenance in `Shared/Resources/UnicodeSources.json`. It pins each fetch to one immutable upstream revision and records source hashes. It does not silently replace a failed draft fetch with the stable release. The complete catalog uses a small memory-mapped binary rather than materializing hundreds of thousands of Swift objects in the keyboard process. Algorithmic names cover Hangul and ideographic ranges.
@@ -36,6 +48,8 @@ Draft assignments and names can change. A character’s ability to display depen
 ## Monthly refresh and Xcode Cloud
 
 `.github/workflows/unicode-monthly.yml` runs on the first of every month at **03:17 UTC / 12:17 Japan time**, and supports manual dispatch. It fetches the latest draft, runs catalog tests, builds the app and embedded keyboard for the iOS simulator, and commits validated data and provenance to `master`. The repository’s default branch must be `master`.
+
+Each refresh records `refreshedAt` in the provenance manifest, creating a validated monthly commit even when upstream Unicode data is unchanged. This also triggers an Xcode Cloud workflow configured to build on pushes to `master`.
 
 Xcode Cloud uses the committed **Uniboard.xcodeproj** and shared **Uniboard** scheme, with `master` as its source branch. Executable hooks in `ci_scripts` check prerequisites after cloning and regenerate the latest draft immediately before building. A failed download or catalog test fails the build. XcodeGen, Homebrew, and third-party package managers are not needed in Xcode Cloud.
 

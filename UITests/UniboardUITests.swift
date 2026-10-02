@@ -95,9 +95,19 @@ final class UniboardUITests: XCTestCase {
         try XCTSkipUnless(enabled, "Set UNIBOARD_KEYBOARD_INTEGRATION=1 in the UI test runner to exercise the installed system keyboard.")
 
         enableUniboardInSettings()
-        app.activate()
-        app.tabBars.buttons["Setup"].tap()
-        let tryKeyboard = app.staticTexts["Try your keyboard"].firstMatch
+        // Reload UIKit's enabled-keyboard configuration after changing it in
+        // Settings, and start from a settled foreground navigation state.
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+        let setup = app.tabBars.buttons["Setup"].firstMatch
+        XCTAssertTrue(setup.waitForExistence(timeout: 5))
+        for _ in 0..<3 {
+            setup.tap()
+            if setup.waitUntilSelected(timeout: 2) { break }
+        }
+        XCTAssertTrue(setup.isSelected, "Setup must be selected before opening the keyboard host: \(app.debugDescription)")
+        let tryKeyboard = app.descendants(matching: .any)["tryKeyboard"].firstMatch
         revealByScrolling(tryKeyboard, in: app)
         tryKeyboard.tap()
 
@@ -107,11 +117,16 @@ final class UniboardUITests: XCTestCase {
         selectUniboardKeyboard()
 
         let search = app.buttons["keyboard.search"].firstMatch
-        XCTAssertTrue(search.waitForExistence(timeout: 10), "Expected the real Uniboard keyboard extension")
+        XCTAssertTrue(search.waitForExistence(timeout: 10), "Expected the real Uniboard keyboard extension: \(app.debugDescription)")
+        attachKeyboardScreenshot("System keyboard before search")
         search.tap()
+        let firstQueryKey = app.buttons["keyboard.query.u"].firstMatch
+        let didOpenSearch = firstQueryKey.waitForExistence(timeout: 5)
+        attachKeyboardScreenshot("System keyboard after opening search")
+        XCTAssertTrue(didOpenSearch, "Search should show the extension query keys; search frame \(search.frame): \(app.debugDescription)")
         for key in ["u", "+", "1", "f", "6", "8", "0"] {
             let queryKey = app.buttons["keyboard.query.\(key)"].firstMatch
-            XCTAssertTrue(queryKey.waitForExistence(timeout: 5))
+            XCTAssertTrue(queryKey.waitForExistence(timeout: 5), "Expected query key \(key): \(app.debugDescription)")
             queryKey.tap()
         }
         XCTAssertEqual(input.value as? String, "", "Search keys must edit the extension query, not the host document")
@@ -138,10 +153,11 @@ final class UniboardUITests: XCTestCase {
 
         // Return to the English keyboard so subsequent search tests can use
         // XCTest's system-keyboard text entry on this simulator.
-        let globe = app.buttons["keyboard.globe"].firstMatch
+        let extensionGlobe = app.buttons["keyboard.globe"].firstMatch
+        let globe = extensionGlobe.exists ? extensionGlobe : app.buttons["Next keyboard"].firstMatch
         if globe.exists {
             globe.press(forDuration: 1)
-            let english = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "English")).firstMatch
+            let english = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH[c] %@", "English")).firstMatch
             if english.waitForExistence(timeout: 3) { english.tap() }
         }
     }
@@ -167,17 +183,30 @@ final class UniboardUITests: XCTestCase {
         let existingKeyboard = settings.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Uniboard")).firstMatch
         if existingKeyboard.exists { return }
 
-        let addKeyboard = settings.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Add New Keyboard")).firstMatch
+        let addKeyboard = settings.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Add New Keyboard")).firstMatch
         revealByScrolling(addKeyboard, in: settings)
         addKeyboard.tap()
-        let uniboard = settings.staticTexts["Uniboard"].firstMatch
+        let uniboard = settings.descendants(matching: .any)["Uniboard"].firstMatch
         revealByScrolling(uniboard, in: settings)
         uniboard.tap()
         XCTAssertTrue(existingKeyboard.waitForExistence(timeout: 5), "Uniboard should appear in the enabled system keyboard list")
     }
 
+    private func attachKeyboardScreenshot(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     private func tapSettingsItem(_ title: String, in settings: XCUIApplication) {
-        let item = settings.staticTexts[title].firstMatch
+        // iOS 27 calls the keyboard preferences page "Keyboards", which is
+        // also the enabled-keyboards row. Searching all StaticTexts selects
+        // the navigation title; restrict selection to tappable body content.
+        let cell = settings.cells.containing(.staticText, identifier: title).firstMatch
+        let button = settings.buttons[title].firstMatch
+        let bodyText = settings.scrollViews.staticTexts[title].firstMatch
+        let item = cell.exists ? cell : button.exists ? button : bodyText
         revealByScrolling(item, in: settings)
         item.tap()
     }
@@ -197,7 +226,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(globe.waitForExistence(timeout: 5), "Expected the system keyboard globe key: \(app.debugDescription)")
         globe.press(forDuration: 1)
 
-        let keyboard = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Uniboard")).firstMatch
+        let keyboard = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Uniboard")).firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "Expected Uniboard in the system input-mode menu: \(app.debugDescription)")
         keyboard.tap()
     }
@@ -244,6 +273,11 @@ private extension XCUIElement {
 
     func waitUntilAbsent(timeout: TimeInterval = 5) -> Bool {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: self)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    func waitUntilSelected(timeout: TimeInterval = 5) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: self)
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 }

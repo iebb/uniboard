@@ -552,7 +552,6 @@ private struct UnicodeKeyboardView: View {
             .padding(.bottom, 2)
         }
         .scrollIndicators(.hidden)
-        .accessibilityIdentifier("keyboard.characterGrid")
     }
 
     private func emptyState(icon: String, title: String, detail: String) -> some View {
@@ -578,7 +577,6 @@ private struct UnicodeKeyboardView: View {
             searchKeyRow(Array("asdfghjkl").map(String.init), inset: 10)
             searchKeyRow(["+", "z", "x", "c", "v", "b", "n", "m", ":", "-"], inset: 0)
         }
-        .accessibilityIdentifier("keyboard.searchKeys")
     }
 
     private func searchKeyRow(_ keys: [String], inset: CGFloat = 0) -> some View {

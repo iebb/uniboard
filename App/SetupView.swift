@@ -36,7 +36,7 @@ struct SetupView: View {
                         Image(systemName: "chevron.right").font(.caption)
                     }.font(.subheadline.weight(.semibold)).padding(18)
                         .background(Palette.soft, in: RoundedRectangle(cornerRadius: 17))
-                }
+                }.accessibilityIdentifier("tryKeyboard")
 
                 VStack(alignment: .leading, spacing: 14) {
                     Label("Private, by design", systemImage: "lock.shield")

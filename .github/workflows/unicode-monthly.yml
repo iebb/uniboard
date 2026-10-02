@@ -1,0 +1,68 @@
+name: Refresh Unicode draft
+
+on:
+  schedule:
+    # The first day of each month at 03:17 UTC (12:17 Asia/Tokyo).
+    - cron: '17 3 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unicode-monthly-master
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.repository == 'iebb/uniboard' && github.ref == 'refs/heads/master'
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out master
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: master
+          fetch-depth: 1
+
+      - name: Fetch and generate the latest Unicode draft
+        run: python3 Scripts/generate_unicode.py --source draft --refresh
+
+      - name: Validate Unicode search and catalog
+        run: swift test
+
+      - name: Build the app and embedded keyboard
+        run: |
+          xcodebuild \
+            -project Uniboard.xcodeproj \
+            -scheme Uniboard \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/UniboardDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Commit validated catalog changes
+        run: |
+          set -euo pipefail
+          git add -- \
+            Shared/Resources/UnicodeCatalog.ucd \
+            Shared/Resources/Blocks.json \
+            Shared/Resources/UnicodeSources.json \
+            Shared/Resources/Unicode-LICENSE.txt
+          if git diff --cached --quiet; then
+            echo 'The latest Unicode draft catalog is unchanged.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore: refresh latest Unicode draft'
+          # A concurrent master update causes a normal push rejection. Never
+          # rebase or force-push a result built against a different revision.
+          git push origin HEAD:master
+          echo 'Updated the Unicode draft catalog on master after tests and the iOS build passed.' >> "$GITHUB_STEP_SUMMARY"

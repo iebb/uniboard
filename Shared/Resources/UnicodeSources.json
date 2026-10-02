@@ -1,0 +1,59 @@
+{
+  "unicodeVersion": "19.0.0",
+  "versionLabel": "19.0.0 draft",
+  "isDraft": true,
+  "source": "draft",
+  "sourceLastModified": "2026-09-25, 10:46:42 GMT",
+  "refreshedAt": "2026-10-02T19:13:23Z",
+  "sourceKind": "unicode-development-draft",
+  "sourceCommit": "03f128b76c2917bba02f497fccb44ba833855700",
+  "sourceCommitDate": "2026-09-30T00:49:31Z",
+  "sourceRepository": "https://github.com/unicode-org/unicodetools",
+  "formatVersion": 1,
+  "blocks": 353,
+  "explicitRecords": 35416,
+  "algorithmicRanges": 26,
+  "assignedScalarsIncludingPrivateUse": 310341,
+  "catalogBytes": 3928074,
+  "sources": {
+    "ReadMe.txt": {
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/03f128b76c2917bba02f497fccb44ba833855700/unicodetools/data/ucd/dev/ReadMe.txt",
+      "sha256": "75a1ce9e5b14164a22d35b2a56fb5a8f927de323a08c43791c6fb050901f84f8"
+    },
+    "UnicodeData.txt": {
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/03f128b76c2917bba02f497fccb44ba833855700/unicodetools/data/ucd/dev/UnicodeData.txt",
+      "sha256": "0736451de439ae7baf1425136617da495e09ee5afbe6e394374db7009ea08950"
+    },
+    "Blocks.txt": {
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/03f128b76c2917bba02f497fccb44ba833855700/unicodetools/data/ucd/dev/Blocks.txt",
+      "sha256": "f2fcb9fe1bc18c6b0298eead6d6cdec34021080d6ce85ee74387e3e4a03fab8e",
+      "sourceDate": "2026-09-23, 23:47:29 GMT",
+      "declaredVersion": "19.0.0"
+    },
+    "NamesList.txt": {
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/03f128b76c2917bba02f497fccb44ba833855700/unicodetools/data/ucd/dev/NamesList.txt",
+      "sha256": "437388f4710d55db0fd19462ab3af9bc33e53b1f37e468b989752d15f3dffa6a",
+      "sourceDate": "2026-09-25, 10:46:42 GMT",
+      "declaredVersion": "19.0.0"
+    },
+    "NameAliases.txt": {
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/03f128b76c2917bba02f497fccb44ba833855700/unicodetools/data/ucd/dev/NameAliases.txt",
+      "sha256": "3d5cf5e468901b080cd99adf2230061b748083705fe633db43ac8b73ec7a13da",
+      "sourceDate": "2026-02-03",
+      "declaredVersion": "18.0.0"
+    },
+    "extracted/DerivedName.txt": {
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/03f128b76c2917bba02f497fccb44ba833855700/unicodetools/data/ucd/dev/extracted/DerivedName.txt",
+      "sha256": "ac6cf808ea4ee29323031d5ba9449de13da51398a3f5ce401546d8fceb976df7",
+      "sourceDate": "2026-06-29, 15:25:03 GMT",
+      "declaredVersion": "18.0.0"
+    },
+    "DerivedCoreProperties.txt": {
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/03f128b76c2917bba02f497fccb44ba833855700/unicodetools/data/ucd/dev/DerivedCoreProperties.txt",
+      "sha256": "09c928886a178fcafd93c29e4bd59073a058e5a100b716d425cb563ab50f68c9",
+      "sourceDate": "2026-08-07, 16:19:42 GMT",
+      "declaredVersion": "18.0.0"
+    }
+  },
+  "notes": "NamesList annotations are informative prose. Algorithmic names use DerivedName and the normative Hangul syllable naming algorithm. Surrogates are excluded; direct scalar lookup labels reserved and noncharacter code points."
+}

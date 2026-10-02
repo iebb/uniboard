@@ -1,0 +1,727 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		063D78DFCF38A7B9AC219CAE /* Unicode-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1DF11D2AB41C1DB3C4E98E84 /* Unicode-LICENSE.txt */; };
+		0CA86A73BEE1761EFAB64A4E /* UniboardKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FADFF79503D90B10A9C8AEB2 /* UniboardKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		0D9181263267F12FC090A7CB /* Blocks.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E6909BB645FA5674134A126 /* Blocks.json */; };
+		1262E56C314CA8FAB23F5014 /* SavedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A791C3473CB60A05B20494 /* SavedView.swift */; };
+		18E0F035EBA7D7EE39166431 /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC58D1BB17A9004D6E334302 /* KeyboardViewController.swift */; };
+		229A7E40362FD588C2621C63 /* CharacterDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA39E9D562CC12833DB173DD /* CharacterDetailView.swift */; };
+		28C42E6074C8E415AEA640E2 /* UnicodeCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22CAA7A19492D753D0BC5772 /* UnicodeCatalogTests.swift */; };
+		40048BDF4538EC75565F2215 /* CharacterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36C0B886711536D6C72D540 /* CharacterStore.swift */; };
+		430FB248A00BA13AF115E347 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A9666760F5893403CE00B6 /* SetupView.swift */; };
+		53E92D441D2ED0FD013F2A49 /* Unicode-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1DF11D2AB41C1DB3C4E98E84 /* Unicode-LICENSE.txt */; };
+		59F9E36BF5D5A1566884BDEE /* UnicodeCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */; };
+		5A2291389771B024DE549E33 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB8050F1485946A042EFCDF /* ContentView.swift */; };
+		6A995752DA8E4B8FD0AEB3BA /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */; };
+		6E9C637749D4AA9EC16A7D1B /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50167B2ECEEF4DFCF3D6C893 /* Design.swift */; };
+		78768285C1D49F9A586E54BE /* UnicodeCatalog.ucd in Resources */ = {isa = PBXBuildFile; fileRef = B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */; };
+		87ED240C5FCF15F0EBADC0AF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0A43A2B3EBE1567FC006A4C /* Assets.xcassets */; };
+		8F7AF965AC9EDDE7615E6BA0 /* UnicodeSources.json in Resources */ = {isa = PBXBuildFile; fileRef = 8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */; };
+		93C4D52C9F879198F8426C63 /* BlocksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */; };
+		9A50C69D53213EF833C399EF /* UnicodeCatalog.ucd in Resources */ = {isa = PBXBuildFile; fileRef = B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */; };
+		B09CEAAD19C426CB3809D22E /* UniboardApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A751792BE65134112FCC8556 /* UniboardApp.swift */; };
+		BCDD2D2225E610AF83BA2879 /* CharacterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36C0B886711536D6C72D540 /* CharacterStore.swift */; };
+		C9D5DD46F5FE23D4EA10AB24 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */; };
+		D60A186652B4A1B4C861B102 /* UniboardUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0063C0A6A25322C5269D05E /* UniboardUITests.swift */; };
+		D946C028C1043F7CB96D15B4 /* UnicodeCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */; };
+		DF66ECAE7C39F7015B73A930 /* Blocks.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E6909BB645FA5674134A126 /* Blocks.json */; };
+		F5A017F5BA3746D69BF7C97F /* UnicodeSources.json in Resources */ = {isa = PBXBuildFile; fileRef = 8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		0DB0B211C2904E5D4AE7F930 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8D370C993E4B5FD9C194ED9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 04DB965FFDA6F7FA2EA84B8A;
+			remoteInfo = Uniboard;
+		};
+		3ECCA0322CBE11FF5EF89311 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8D370C993E4B5FD9C194ED9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3C00AF444915BB805817A27E;
+			remoteInfo = UniboardKeyboard;
+		};
+		59574778E7DA32BFFC1CF177 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F8D370C993E4B5FD9C194ED9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 04DB965FFDA6F7FA2EA84B8A;
+			remoteInfo = Uniboard;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		07CBE2EEC06EC65F2E5F6725 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0CA86A73BEE1761EFAB64A4E /* UniboardKeyboard.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		1DF11D2AB41C1DB3C4E98E84 /* Unicode-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Unicode-LICENSE.txt"; sourceTree = "<group>"; };
+		2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		22CAA7A19492D753D0BC5772 /* UnicodeCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeCatalogTests.swift; sourceTree = "<group>"; };
+		31FA979EFC9BB9E5936956F5 /* UniboardTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = UniboardTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3CB8050F1485946A042EFCDF /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		50167B2ECEEF4DFCF3D6C893 /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
+		5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlocksView.swift; sourceTree = "<group>"; };
+		5E6909BB645FA5674134A126 /* Blocks.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Blocks.json; sourceTree = "<group>"; };
+		8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = UnicodeSources.json; sourceTree = "<group>"; };
+		91A791C3473CB60A05B20494 /* SavedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedView.swift; sourceTree = "<group>"; };
+		A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeCatalog.swift; sourceTree = "<group>"; };
+		A751792BE65134112FCC8556 /* UniboardApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UniboardApp.swift; sourceTree = "<group>"; };
+		B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */ = {isa = PBXFileReference; path = UnicodeCatalog.ucd; sourceTree = "<group>"; };
+		BB9BAA50EF4DC94FB5B03CD1 /* UniboardUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = UniboardUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D36C0B886711536D6C72D540 /* CharacterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterStore.swift; sourceTree = "<group>"; };
+		DA39E9D562CC12833DB173DD /* CharacterDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterDetailView.swift; sourceTree = "<group>"; };
+		DB89BF7F18B9D5F91307A09A /* Uniboard.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Uniboard.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DC58D1BB17A9004D6E334302 /* KeyboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
+		E0063C0A6A25322C5269D05E /* UniboardUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UniboardUITests.swift; sourceTree = "<group>"; };
+		F0A43A2B3EBE1567FC006A4C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F3A9666760F5893403CE00B6 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		F891B014BE9874D5FCA7CC66 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FADFF79503D90B10A9C8AEB2 /* UniboardKeyboard.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = UniboardKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		FC6B6DEDCD4EC38CF03A67DA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1C61925C0EC64DB7998DD14E /* App */ = {
+			isa = PBXGroup;
+			children = (
+				F0A43A2B3EBE1567FC006A4C /* Assets.xcassets */,
+				5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */,
+				DA39E9D562CC12833DB173DD /* CharacterDetailView.swift */,
+				3CB8050F1485946A042EFCDF /* ContentView.swift */,
+				50167B2ECEEF4DFCF3D6C893 /* Design.swift */,
+				FC6B6DEDCD4EC38CF03A67DA /* Info.plist */,
+				91A791C3473CB60A05B20494 /* SavedView.swift */,
+				F3A9666760F5893403CE00B6 /* SetupView.swift */,
+				A751792BE65134112FCC8556 /* UniboardApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		251C77A73B3F04E09CAF5F49 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				5E6909BB645FA5674134A126 /* Blocks.json */,
+				1DF11D2AB41C1DB3C4E98E84 /* Unicode-LICENSE.txt */,
+				B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */,
+				8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		34B918AC3BD3739678E4133F /* Keyboard */ = {
+			isa = PBXGroup;
+			children = (
+				F891B014BE9874D5FCA7CC66 /* Info.plist */,
+				DC58D1BB17A9004D6E334302 /* KeyboardViewController.swift */,
+			);
+			path = Keyboard;
+			sourceTree = "<group>";
+		};
+		39020D2E0962B0BDFF9978A6 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				DB89BF7F18B9D5F91307A09A /* Uniboard.app */,
+				FADFF79503D90B10A9C8AEB2 /* UniboardKeyboard.appex */,
+				31FA979EFC9BB9E5936956F5 /* UniboardTests.xctest */,
+				BB9BAA50EF4DC94FB5B03CD1 /* UniboardUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		614E87A4C7032932620111C8 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				22CAA7A19492D753D0BC5772 /* UnicodeCatalogTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		82C2CF1B12F9AF6562C11778 = {
+			isa = PBXGroup;
+			children = (
+				1C61925C0EC64DB7998DD14E /* App */,
+				34B918AC3BD3739678E4133F /* Keyboard */,
+				964F00E045724BA9C9DE5BA3 /* Shared */,
+				614E87A4C7032932620111C8 /* Tests */,
+				D3D541788BF1B7AC90B20156 /* UITests */,
+				39020D2E0962B0BDFF9978A6 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		964F00E045724BA9C9DE5BA3 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				D36C0B886711536D6C72D540 /* CharacterStore.swift */,
+				2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */,
+				A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */,
+				251C77A73B3F04E09CAF5F49 /* Resources */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		D3D541788BF1B7AC90B20156 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				E0063C0A6A25322C5269D05E /* UniboardUITests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		04DB965FFDA6F7FA2EA84B8A /* Uniboard */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D57FF5E9BB8FC00D2DF43AEE /* Build configuration list for PBXNativeTarget "Uniboard" */;
+			buildPhases = (
+				E17E8EA272032DA22C8E9942 /* Sources */,
+				A2E4BD5A5E3A6B978EBD2F94 /* Resources */,
+				07CBE2EEC06EC65F2E5F6725 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				68DDEE27E04D14651302A50E /* PBXTargetDependency */,
+			);
+			name = Uniboard;
+			packageProductDependencies = (
+			);
+			productName = Uniboard;
+			productReference = DB89BF7F18B9D5F91307A09A /* Uniboard.app */;
+			productType = "com.apple.product-type.application";
+		};
+		3C00AF444915BB805817A27E /* UniboardKeyboard */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FFB6B0CF3EA71355AEA65B9B /* Build configuration list for PBXNativeTarget "UniboardKeyboard" */;
+			buildPhases = (
+				403420D087165E9E66B28DEE /* Sources */,
+				1E4DC81A730509CC27642026 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = UniboardKeyboard;
+			packageProductDependencies = (
+			);
+			productName = UniboardKeyboard;
+			productReference = FADFF79503D90B10A9C8AEB2 /* UniboardKeyboard.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		69127AC161BF657CFB00EA2E /* UniboardTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C328DCCDAED35BE05352CED9 /* Build configuration list for PBXNativeTarget "UniboardTests" */;
+			buildPhases = (
+				132656F0377266A36F3801E8 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				70974A80BE10E6B80CD01810 /* PBXTargetDependency */,
+			);
+			name = UniboardTests;
+			packageProductDependencies = (
+			);
+			productName = UniboardTests;
+			productReference = 31FA979EFC9BB9E5936956F5 /* UniboardTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		E796EC5DFE97C41163914793 /* UniboardUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BE1C97ACB2CE58DDB4FD03E7 /* Build configuration list for PBXNativeTarget "UniboardUITests" */;
+			buildPhases = (
+				EA6BA7A08D4EC9127690421D /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A87A2ED5EA075B43A095646B /* PBXTargetDependency */,
+			);
+			name = UniboardUITests;
+			packageProductDependencies = (
+			);
+			productName = UniboardUITests;
+			productReference = BB9BAA50EF4DC94FB5B03CD1 /* UniboardUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F8D370C993E4B5FD9C194ED9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					04DB965FFDA6F7FA2EA84B8A = {
+						DevelopmentTeam = 7P8CLHDH5G;
+						ProvisioningStyle = Automatic;
+					};
+					3C00AF444915BB805817A27E = {
+						DevelopmentTeam = 7P8CLHDH5G;
+						ProvisioningStyle = Automatic;
+					};
+					69127AC161BF657CFB00EA2E = {
+						DevelopmentTeam = 7P8CLHDH5G;
+						ProvisioningStyle = Automatic;
+					};
+					E796EC5DFE97C41163914793 = {
+						DevelopmentTeam = 7P8CLHDH5G;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 04DB965FFDA6F7FA2EA84B8A;
+					};
+				};
+			};
+			buildConfigurationList = BDE7ABCD44B0479D467B008E /* Build configuration list for PBXProject "Uniboard" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 82C2CF1B12F9AF6562C11778;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 39020D2E0962B0BDFF9978A6 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				04DB965FFDA6F7FA2EA84B8A /* Uniboard */,
+				3C00AF444915BB805817A27E /* UniboardKeyboard */,
+				69127AC161BF657CFB00EA2E /* UniboardTests */,
+				E796EC5DFE97C41163914793 /* UniboardUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1E4DC81A730509CC27642026 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DF66ECAE7C39F7015B73A930 /* Blocks.json in Resources */,
+				6A995752DA8E4B8FD0AEB3BA /* PrivacyInfo.xcprivacy in Resources */,
+				063D78DFCF38A7B9AC219CAE /* Unicode-LICENSE.txt in Resources */,
+				9A50C69D53213EF833C399EF /* UnicodeCatalog.ucd in Resources */,
+				8F7AF965AC9EDDE7615E6BA0 /* UnicodeSources.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A2E4BD5A5E3A6B978EBD2F94 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				87ED240C5FCF15F0EBADC0AF /* Assets.xcassets in Resources */,
+				0D9181263267F12FC090A7CB /* Blocks.json in Resources */,
+				C9D5DD46F5FE23D4EA10AB24 /* PrivacyInfo.xcprivacy in Resources */,
+				53E92D441D2ED0FD013F2A49 /* Unicode-LICENSE.txt in Resources */,
+				78768285C1D49F9A586E54BE /* UnicodeCatalog.ucd in Resources */,
+				F5A017F5BA3746D69BF7C97F /* UnicodeSources.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		132656F0377266A36F3801E8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				28C42E6074C8E415AEA640E2 /* UnicodeCatalogTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		403420D087165E9E66B28DEE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				40048BDF4538EC75565F2215 /* CharacterStore.swift in Sources */,
+				18E0F035EBA7D7EE39166431 /* KeyboardViewController.swift in Sources */,
+				D946C028C1043F7CB96D15B4 /* UnicodeCatalog.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E17E8EA272032DA22C8E9942 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				93C4D52C9F879198F8426C63 /* BlocksView.swift in Sources */,
+				229A7E40362FD588C2621C63 /* CharacterDetailView.swift in Sources */,
+				BCDD2D2225E610AF83BA2879 /* CharacterStore.swift in Sources */,
+				5A2291389771B024DE549E33 /* ContentView.swift in Sources */,
+				6E9C637749D4AA9EC16A7D1B /* Design.swift in Sources */,
+				1262E56C314CA8FAB23F5014 /* SavedView.swift in Sources */,
+				430FB248A00BA13AF115E347 /* SetupView.swift in Sources */,
+				B09CEAAD19C426CB3809D22E /* UniboardApp.swift in Sources */,
+				59F9E36BF5D5A1566884BDEE /* UnicodeCatalog.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EA6BA7A08D4EC9127690421D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D60A186652B4A1B4C861B102 /* UniboardUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		68DDEE27E04D14651302A50E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3C00AF444915BB805817A27E /* UniboardKeyboard */;
+			targetProxy = 3ECCA0322CBE11FF5EF89311 /* PBXContainerItemProxy */;
+		};
+		70974A80BE10E6B80CD01810 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 04DB965FFDA6F7FA2EA84B8A /* Uniboard */;
+			targetProxy = 59574778E7DA32BFFC1CF177 /* PBXContainerItemProxy */;
+		};
+		A87A2ED5EA075B43A095646B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 04DB965FFDA6F7FA2EA84B8A /* Uniboard */;
+			targetProxy = 0DB0B211C2904E5D4AE7F930 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0FC519006F5DA92A759C5B0B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = Keyboard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ad.neko.uniboard.keyboard;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		1353FB0C3B9A769C933048AA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 7P8CLHDH5G;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		17A6441BF1646CBAF2479140 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ad.neko.uniboard.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Uniboard.app/Uniboard";
+			};
+			name = Debug;
+		};
+		18BC774AC2C5E785349DE9EF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ad.neko.uniboard.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Uniboard.app/Uniboard";
+			};
+			name = Release;
+		};
+		20B6531EB08436224F0AE46C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Uniboard;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ad.neko.uniboard;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		31F96D34E745DA032AC39694 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ad.neko.uniboard.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Uniboard;
+			};
+			name = Release;
+		};
+		375542E378ED1827DB6E056B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ad.neko.uniboard.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Uniboard;
+			};
+			name = Debug;
+		};
+		3E48DB842E9D8A9B4C3AB942 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = Keyboard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ad.neko.uniboard.keyboard;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		882E81A47C42312E3EDC0E11 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 7P8CLHDH5G;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F87C4875B7B09E4C3144B505 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Uniboard;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ad.neko.uniboard;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BDE7ABCD44B0479D467B008E /* Build configuration list for PBXProject "Uniboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				882E81A47C42312E3EDC0E11 /* Debug */,
+				1353FB0C3B9A769C933048AA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BE1C97ACB2CE58DDB4FD03E7 /* Build configuration list for PBXNativeTarget "UniboardUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				375542E378ED1827DB6E056B /* Debug */,
+				31F96D34E745DA032AC39694 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C328DCCDAED35BE05352CED9 /* Build configuration list for PBXNativeTarget "UniboardTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				17A6441BF1646CBAF2479140 /* Debug */,
+				18BC774AC2C5E785349DE9EF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D57FF5E9BB8FC00D2DF43AEE /* Build configuration list for PBXNativeTarget "Uniboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F87C4875B7B09E4C3144B505 /* Debug */,
+				20B6531EB08436224F0AE46C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		FFB6B0CF3EA71355AEA65B9B /* Build configuration list for PBXNativeTarget "UniboardKeyboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3E48DB842E9D8A9B4C3AB942 /* Debug */,
+				0FC519006F5DA92A759C5B0B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = F8D370C993E4B5FD9C194ED9 /* Project object */;
+}

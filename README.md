@@ -12,6 +12,15 @@ The keyboard inserts the actual Unicode scalar at the host app’s cursor. It in
 
 Open `Uniboard.xcodeproj` and run the **Uniboard** scheme. Both targets use automatic signing with the Kitta Ltd team. For a different account, select the same team for the application and keyboard extension. The committed Xcode project can build without XcodeGen. After changes to `project.yml`, run `xcodegen generate`.
 
+Both bundle IDs are registered to Kitta Ltd, team **7P8CLHDH5G**. A Release device archive has been built and its app and embedded keyboard signatures independently verified against that team. To create a signed local archive with the configured Xcode account:
+
+```sh
+xcodebuild -project Uniboard.xcodeproj -scheme Uniboard \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath build/QA/Uniboard-Kitta.xcarchive \
+  -allowProvisioningUpdates archive
+```
+
 Enable the system keyboard in **Settings → General → Keyboard → Keyboards → Add New Keyboard → Uniboard**. In the app’s Setup tab, open **Try your keyboard**, tap the editor, hold the globe key, and select Uniboard. iOS uses the system keyboard in secure and phone-number fields; host apps may disallow custom keyboards.
 
 ```sh

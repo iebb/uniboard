@@ -53,6 +53,8 @@ Each refresh records `refreshedAt` in the provenance manifest, creating a valida
 
 Xcode Cloud uses the committed **Uniboard.xcodeproj** and shared **Uniboard** scheme, with `master` as its source branch. Executable hooks in `ci_scripts` check prerequisites after cloning and regenerate the latest draft immediately before building. A failed download or catalog test fails the build. XcodeGen, Homebrew, and third-party package managers are not needed in Xcode Cloud.
 
-Apple’s initial Xcode Cloud onboarding must connect the app, signing team, and GitHub repository. Use **Product → Xcode Cloud → Create Workflow** in Xcode, grant access to `iebb/uniboard`, and set a branch-change trigger for `master`. Configure an iOS archive action to produce signed builds; TestFlight distribution is configured in the Apple workflow. A committed CI script alone does not register or activate an Apple workflow.
+The repository is connected to the active **Uniboard iOS** Xcode Cloud workflow. It uses the latest release environment and builds iOS on pushes to `master`. The initial build and an automatic build of the keyboard accessibility fixes both succeeded; Cloud logs verified fresh Unicode 19.0.0 draft data and all 11 catalog tests.
+
+Signed archive and TestFlight actions additionally require an App Store Connect app record. The installed Xcode assistant cannot edit the unavailable listing name “Uniboard”; create the record on the App Store Connect website as **Uniboard: Unicode Keyboard**, using the existing **ad.neko.uniboard** bundle ID and Kitta Ltd team, then configure distribution in Xcode Cloud. The device display name remains Uniboard. No App Store release has been submitted.
 
 Apple documentation: [custom build scripts](https://developer.apple.com/documentation/xcode/writing-custom-build-scripts), [first workflow setup](https://developer.apple.com/documentation/xcode/configuring-your-first-xcode-cloud-workflow/).

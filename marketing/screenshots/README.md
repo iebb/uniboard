@@ -1,6 +1,6 @@
 # Uniboard App Store screenshots
 
-The artwork uses white and ivory backgrounds, the approved white `u+` icon, forest text and orange accents. Each screen is an actual app capture, placed whole inside a light decorative frame with one uniform resize. App labels, controls, glyphs, codepoints and results are never generated, translated, relabeled, stretched or replaced. Only the outer physical screen corners are rounded.
+The artwork uses white and ivory backgrounds, the approved keyboard icon with Omega, hiragana A and infinity character keys, forest text and orange accents. Each screen is an actual app capture, placed whole inside a light decorative frame with one uniform resize. App labels, controls, glyphs, codepoints and results are never generated, translated, relabeled, stretched or replaced. Only the outer physical screen corners are rounded.
 
 The iPhone exports are 1320 × 2868; the iPad exports are 2064 × 2752. Every export is an opaque RGB PNG. These are accepted portrait sizes for Apple's 6.9-inch iPhone and 13-inch iPad screenshot classes. [Apple screenshot specifications](https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications).
 

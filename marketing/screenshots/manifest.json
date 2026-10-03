@@ -1,6 +1,6 @@
 {
   "apple_size_reference": "https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications",
-  "approved_icon_sha256": "ef7cbff06c330be65b281bf70d6e9ed6f0742bb57dfdb152815b0f7fc8cb298f",
+  "approved_icon_sha256": "c532b020596f0fd8951e89f0ad50bab49ca6b56079845ffc5ace689033f0e356",
   "preview_only": false,
   "screenshots": [
     {
@@ -11,7 +11,7 @@
         1320,
         2868
       ],
-      "export_sha256": "af6169ac764bf42b7ed6f3153d13617b5bad820256a998840c9e51f1f2a04655",
+      "export_sha256": "0ec855147b3c3fa1899b864de1796fbc829d84cd9e846190ef419a114cc8c1d1",
       "size": [
         1320,
         2868
@@ -30,7 +30,7 @@
         1206,
         2622
       ],
-      "export_sha256": "4065b0f006aad38289126f9375082c16586b2de8315110b870a696ecbce17268",
+      "export_sha256": "8aa854a7baa2331f268d1bdb55b99a24ae6d0031d075ac47dff55590ca4a671d",
       "size": [
         1320,
         2868
@@ -49,7 +49,7 @@
         1320,
         2868
       ],
-      "export_sha256": "9050057794717115928dd670da3bb829affc037a7802a55278f84f673e42daea",
+      "export_sha256": "7a2a740d11b79c686fcd93a442c9cbd5122eb7253f46f28ef07ca77e6e9510f6",
       "size": [
         1320,
         2868
@@ -68,7 +68,7 @@
         1320,
         2868
       ],
-      "export_sha256": "d02dd3c8828bf25568770593df6d88167a7da390a8cd02a3507af72509b7a701",
+      "export_sha256": "52cd0e17bef70070ce8fa0f07b40834ad91f7bcab21850573b1f1862d5e770eb",
       "size": [
         1320,
         2868
@@ -87,7 +87,7 @@
         1320,
         2868
       ],
-      "export_sha256": "cdf6aa8ebe187b3368bc063cd21e0df6c5f4c620d131244cadfbd9e23bb9c6ce",
+      "export_sha256": "4f45b2de092b4dac97403e42b3998cd99cafd1925fe429dbb24f31f462e04577",
       "size": [
         1320,
         2868
@@ -106,7 +106,7 @@
         1320,
         2868
       ],
-      "export_sha256": "6aed38e4d45d590a4d98ca23528da413444eb2cdac74dd802243e752371b40db",
+      "export_sha256": "8a7e69175703e62376042310145ea2cb032e2e8cf96cf134995fc6c23a5e28e1",
       "size": [
         1320,
         2868
@@ -125,7 +125,7 @@
         1320,
         2868
       ],
-      "export_sha256": "6f97c14f3ed1fa85c2b95340f44d09e2b5fde54d3f99d258d0dc9337e723bd59",
+      "export_sha256": "12d1841e349c1f25036c77b524e80a29365b308b81ab1dfaf11fc2b9a0457081",
       "size": [
         1320,
         2868
@@ -144,7 +144,7 @@
         1206,
         2622
       ],
-      "export_sha256": "6ca59d416fa0a56106bd0c86109afef9df0df563f4ed166dddeec8f05474f728",
+      "export_sha256": "2d416349b150cf290e6a94ea1a9c3427d531ec0518e15d947c7ba69a5c5bcd1f",
       "size": [
         1320,
         2868
@@ -163,7 +163,7 @@
         2064,
         2752
       ],
-      "export_sha256": "a02906d2a6b4d768e8af6b45ec9931d61c6b06700bea0c46e9443193f02a9c13",
+      "export_sha256": "1aa8634021436118ca8f44e277315b3573fed08138c15bea041f6f4afc0d8414",
       "size": [
         2064,
         2752
@@ -182,7 +182,7 @@
         2064,
         2752
       ],
-      "export_sha256": "9fb80a64618766b9c93658fa191820977bb0dc703eaef56bac15697c5e69960f",
+      "export_sha256": "711a7069d985ab30cb0b80c5adce8ed9743ee95ab148d442fccd72fa43b11085",
       "size": [
         2064,
         2752
@@ -201,7 +201,7 @@
         2064,
         2752
       ],
-      "export_sha256": "0fd8492976a6db38af034c04344fe6a96d1c09f6aab98f68a0d7caa460d96f62",
+      "export_sha256": "45da6f79673963e68b0cc57837171833541e8eee10126d53de14f125831a195d",
       "size": [
         2064,
         2752
@@ -220,7 +220,7 @@
         2064,
         2752
       ],
-      "export_sha256": "340402edad537d2b2a4f061795ee2aba2926733dff1c49f757359577abc18548",
+      "export_sha256": "ff21a534a5e723bee4bf8e011cc371640b8830b365dafc09ad242d17853714f7",
       "size": [
         2064,
         2752

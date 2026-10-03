@@ -33,6 +33,9 @@ class AppStoreReleaseTest < Minitest::Test
         { 'id' => M::APP_ID, 'attributes' => { 'bundleId' => M::BUNDLE_ID, 'contentRightsDeclaration' => 'USES_THIRD_PARTY_CONTENT' } }
       when '/v1/ciBuildRuns/11111111-1111-1111-1111-111111111111'
         { 'id' => 'run', 'attributes' => { 'sourceCommit' => { 'commitSha' => @commit } } }
+      when '/v1/builds/build'
+        { 'id' => 'build', 'type' => 'builds', 'attributes' => { 'version' => '10', 'processingState' => @processing,
+          'buildAudienceType' => @audience, 'expired' => @expired, 'usesNonExemptEncryption' => false } }
       when '/v1/builds/build/preReleaseVersion'
         { 'attributes' => { 'version' => @binary_version, 'platform' => 'IOS' } }
       when %r{\A/v1/appCategories/(UTILITIES|REFERENCE)\z}
@@ -87,6 +90,28 @@ class AppStoreReleaseTest < Minitest::Test
     def patch(path, body)
       @writes << ['PATCH', path, body]
       { 'data' => { 'id' => body.dig('data', 'id'), 'attributes' => body.dig('data', 'attributes') } }
+    end
+  end
+  class BuildLinkageClient < FakeClient
+    attr_accessor :linkages, :records
+    attr_reader :hydrated_ids
+    def initialize
+      super
+      @linkages = [{ 'id' => 'build', 'type' => 'builds' }]
+      @records = {}
+      @hydrated_ids = []
+    end
+    def all(path, params = {})
+      return @linkages if path == '/v1/ciBuildRuns/run/builds'
+      super
+    end
+    def get(path, params = {})
+      if (match = path.match(%r{\A/v1/builds/([^/]+)\z}))
+        id = match[1]
+        @hydrated_ids << id
+        return { 'data' => @records[id] } if @records.key?(id)
+      end
+      super
     end
   end
   class ReadinessClient < FakeClient
@@ -256,6 +281,72 @@ class AppStoreReleaseTest < Minitest::Test
     assert_equal 'version', instance.version_id
     assert_includes @out.string, 'Dry run complete'
     refute_includes @out.string, 'approved-contactEmail'
+  end
+  def test_bare_cloud_linkage_is_hydrated_before_selecting_exact_build
+    @client = BuildLinkageClient.new
+    @client.linkages.unshift({ 'id' => 'previous', 'type' => 'builds' })
+    previous = FakeClient.new.get('/v1/builds/build').fetch('data')
+    previous['id'] = 'previous'
+    previous['attributes']['version'] = '9'
+    @client.records['previous'] = previous
+    instance = runner
+    instance.run
+    assert_equal %w[previous build], @client.hydrated_ids
+    assert_equal 'build', instance.build_id
+    assert_empty @client.writes
+    assert_includes @out.string, 'Dry run complete'
+  end
+  def test_relationship_attributes_cannot_override_hydrated_build_version
+    @client = BuildLinkageClient.new
+    @client.linkages = [FakeClient.new.all('/v1/ciBuildRuns/run/builds').first]
+    record = FakeClient.new.get('/v1/builds/build').fetch('data')
+    record['attributes']['version'] = '11'
+    @client.records['build'] = record
+    error = assert_raises(M::Error) { runner(apply: true).run }
+    assert_equal 'Exact Cloud build is absent or ambiguous', error.message
+    assert_equal ['build'], @client.hydrated_ids
+    assert_empty @client.writes
+  end
+  def test_malformed_linkage_identity_fails_before_fetch_or_write
+    [nil, {}, { 'id' => '' }, { 'id' => 12 }, { 'id' => 'bad/path' },
+     { 'id' => 'build', 'type' => 'apps' }, { 'id' => 'build', 'type' => nil }].each do |linkage|
+      @client = BuildLinkageClient.new
+      @client.linkages = [linkage]
+      assert_raises(M::Error) { runner(apply: true).run }
+      assert_empty @client.hydrated_ids
+      assert_empty @client.writes
+    end
+  end
+  def test_malformed_or_mismatched_hydrated_identity_fails_before_write
+    valid = FakeClient.new.get('/v1/builds/build').fetch('data')
+    [nil, [], 'build', {}, valid.merge('id' => 'different'), valid.merge('type' => 'apps'),
+     valid.merge('type' => nil), valid.merge('attributes' => nil)].each do |record|
+      @client = BuildLinkageClient.new
+      @client.records['build'] = record
+      assert_raises(M::Error) { runner(apply: true).run }
+      assert_equal ['build'], @client.hydrated_ids
+      assert_empty @client.writes
+    end
+  end
+  def test_hydrated_build_type_may_be_absent_but_identity_must_match
+    @client = BuildLinkageClient.new
+    record = FakeClient.new.get('/v1/builds/build').fetch('data')
+    record.delete('type')
+    @client.records['build'] = record
+    instance = runner
+    instance.run
+    assert_equal 'build', instance.build_id
+    assert_equal ['build'], @client.hydrated_ids
+    assert_empty @client.writes
+  end
+  def test_bare_linkage_does_not_bypass_existing_build_eligibility_guards
+    [{ processing: 'PROCESSING' }, { audience: 'INTERNAL_ONLY' }, { expired: true }, { binary_version: '2.0.0' }].each do |invalid|
+      @client = BuildLinkageClient.new
+      invalid.each { |key, value| @client.public_send("#{key}=", value) }
+      assert_raises(M::Error) { runner(apply: true).run }
+      assert_equal ['build'], @client.hydrated_ids
+      assert_empty @client.writes
+    end
   end
   def test_wrong_source_commit_fails_before_any_write
     @client.commit = 'b' * 40

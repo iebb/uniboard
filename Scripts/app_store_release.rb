@@ -365,7 +365,20 @@ module UniboardAppStoreRelease
       raise Error, 'Cloud signed Archive did not succeed' unless archives.one? && archives.first.dig('attributes', 'completionStatus') == 'SUCCEEDED'
       runs = @client.all("/v1/ciProducts/#{PRODUCT_ID}/buildRuns", 'limit' => '200')
       raise Error, 'Cloud run belongs to a different product' unless runs.any? { |r| r['id'] == run['id'] }
-      builds = @client.all("/v1/ciBuildRuns/#{run['id']}/builds", 'limit' => '200')
+      # Cloud can return resource linkage only. Select from authoritative build
+      # attributes, never from missing or stale relationship attributes.
+      builds = @client.all("/v1/ciBuildRuns/#{run['id']}/builds", 'limit' => '200').map do |link|
+        unless link.is_a?(Hash) && link['id'].is_a?(String) && link['id'].match?(/\A[A-Za-z0-9_-]+\z/)
+          raise Error, 'Cloud build linkage has a malformed identifier'
+        end
+        raise Error, 'Cloud build linkage has an unexpected type' if link.key?('type') && link['type'] != 'builds'
+        response = @client.get("/v1/builds/#{link['id']}")
+        build = response.is_a?(Hash) ? response['data'] : nil
+        raise Error, 'Hydrated Cloud build identity differs' unless build.is_a?(Hash) && build['id'] == link['id']
+        raise Error, 'Hydrated Cloud build has an unexpected type' if build.key?('type') && build['type'] != 'builds'
+        raise Error, 'Hydrated Cloud build attributes are absent' unless build['attributes'].is_a?(Hash)
+        build
+      end
       matches = builds.select { |b| b.dig('attributes', 'version') == @o[:build_number] }
       raise Error, 'Exact Cloud build is absent or ambiguous' unless matches.one?
       build = matches.first

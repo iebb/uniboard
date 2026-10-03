@@ -26,6 +26,7 @@ module UniboardAppStoreRelease
   EDITABLE = %w[PREPARE_FOR_SUBMISSION READY_FOR_REVIEW DEVELOPER_REJECTED REJECTED METADATA_REJECTED INVALID_BINARY].freeze
   SUBMITTED = %w[WAITING_FOR_REVIEW IN_REVIEW PENDING_DEVELOPER_RELEASE PENDING_APPLE_RELEASE READY_FOR_DISTRIBUTION READY_FOR_SALE PROCESSING_FOR_DISTRIBUTION].freeze
   REVIEW_STATES = %w[WAITING_FOR_REVIEW IN_REVIEW COMPLETE].freeze
+  VALID_REVIEW_ITEM_STATES = %w[READY_FOR_REVIEW ACCEPTED APPROVED].freeze
   CONTACT_KEYS = %w[contactFirstName contactLastName contactPhone contactEmail].freeze
   FILES = {
     'name' => ['name.txt', 30], 'subtitle' => ['subtitle.txt', 30],
@@ -254,7 +255,7 @@ module UniboardAppStoreRelease
       @version = select_version!
       @version_id = @version.fetch('id')
       @notes = File.read(@o.fetch(:review_notes), encoding: 'UTF-8').strip
-      raise Error, 'Review notes must contain instructions' if @notes.empty? || @notes.length > 4000
+      raise Error, 'Review notes must contain instructions within 4,000 UTF-8 bytes' if @notes.empty? || @notes.bytesize > 4000
       log("#{@apply ? 'APPLY' : 'DRY RUN'} #{BUNDLE_ID} #{@o[:version]} (#{@o[:build_number]}), exact build #{@build_id}, source #{@o[:source_commit]}")
       if SUBMITTED.include?(version_state(@version))
         verify_already_submitted!
@@ -609,7 +610,14 @@ module UniboardAppStoreRelease
       submissions = @client.all("/v1/apps/#{APP_ID}/reviewSubmissions", 'filter[platform]' => 'IOS', 'include' => 'appStoreVersionForReview', 'limit' => '200')
       matches = submissions.select { |s| s.dig('relationships', 'appStoreVersionForReview', 'data', 'id') == @version_id }
       raise Error, 'Cannot resolve exact submitted version' if matches.empty?
-      verify_submission!(matches.last['id'])
+      active = matches.reject { |s| s.dig('attributes', 'state') == 'COMPLETE' }
+      raise Error, 'Multiple active submissions reference the exact version' if active.length > 1
+      candidates = active.empty? ? matches : active
+      chosen = candidates.max_by do |s|
+        date = s.dig('attributes', 'submittedDate')
+        date ? Time.parse(date) : Time.at(0)
+      end
+      verify_submission!(chosen['id'])
     end
     def verify_submission!(id)
       submission = @client.get("/v1/reviewSubmissions/#{id}", 'include' => 'appStoreVersionForReview').fetch('data')
@@ -618,9 +626,11 @@ module UniboardAppStoreRelease
       raise Error, 'Submission version differs' unless submission.dig('relationships', 'appStoreVersionForReview', 'data', 'id') == @version_id
       version = @client.get("/v1/appStoreVersions/#{@version_id}", 'include' => 'build').fetch('data')
       raise Error, 'Submitted build differs' unless version.dig('relationships', 'build', 'data', 'id') == @build_id
+      raise Error, "App Store version is not submitted (#{version_state(version)})" unless SUBMITTED.include?(version_state(version))
       items = @client.all("/v1/reviewSubmissions/#{id}/items", 'include' => 'appStoreVersion', 'limit' => '200')
       raise Error, 'Submission does not contain the exact version' unless items.one? && items.first.dig('relationships', 'appStoreVersion', 'data', 'id') == @version_id
-      raise Error, 'Review item was rejected' if %w[REJECTED UNRESOLVED_ISSUES].include?(items.first.dig('attributes', 'state'))
+      item_state = items.first.dig('attributes', 'state')
+      raise Error, "Review item is not in a valid submitted state (#{item_state})" unless VALID_REVIEW_ITEM_STATES.include?(item_state)
       log("App Store submission #{id}: #{state}; version #{version_state(version)}; exact build #{@build_id}")
     end
     def change(method, path, type, attrs, id: nil, relationships: {}, label:)

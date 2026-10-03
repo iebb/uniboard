@@ -158,6 +158,39 @@ class AppStoreReleaseTest < Minitest::Test
       @restricted = true
     end
   end
+  class ReviewClient < FakeClient
+    attr_accessor :item_state, :version_state, :submissions
+    attr_reader :read_submission_ids
+    def initialize
+      super
+      @item_state = 'READY_FOR_REVIEW'
+      @version_state = 'WAITING_FOR_REVIEW'
+      @submissions = [{ 'id' => 'active', 'attributes' => { 'state' => 'WAITING_FOR_REVIEW', 'submittedDate' => '2026-10-03T10:00:00Z' },
+                        'relationships' => { 'appStoreVersionForReview' => { 'data' => { 'id' => 'version' } } } }]
+      @read_submission_ids = []
+    end
+    def get(path, params = {})
+      if path == '/v1/appStoreVersions/version'
+        return { 'data' => { 'id' => 'version', 'attributes' => { 'versionString' => '1.0.0', 'appStoreState' => @version_state },
+                            'relationships' => { 'build' => { 'data' => { 'id' => 'build' } } } } }
+      end
+      if path.start_with?('/v1/reviewSubmissions/')
+        id = path.split('/').last
+        @read_submission_ids << id
+        return { 'data' => @submissions.find { |s| s['id'] == id } }
+      end
+      super
+    end
+    def all(path, params = {})
+      return @submissions if path == "/v1/apps/#{M::APP_ID}/reviewSubmissions"
+      if path.start_with?('/v1/reviewSubmissions/')
+        id = path.split('/')[-2]
+        return [{ 'attributes' => { 'state' => id == 'old' ? 'REMOVED' : @item_state },
+                  'relationships' => { 'appStoreVersion' => { 'data' => { 'id' => 'version' } } } }]
+      end
+      super
+    end
+  end
 
   def setup
     @tmp = Dir.mktmpdir('uniboard-release-test')
@@ -314,5 +347,61 @@ class AppStoreReleaseTest < Minitest::Test
     client.restricted_availability!
     assert_raises(M::Error) { M::ReadinessRunner.new(client: client, apply: true, out: @out).run }
     assert_empty client.writes
+  end
+  def review_runner
+    @client = ReviewClient.new
+    instance = runner
+    instance.instance_variable_set(:@version_id, 'version')
+    instance.instance_variable_set(:@build_id, 'build')
+    instance.instance_variable_set(:@version, @client.get('/v1/appStoreVersions/version')['data'])
+    instance
+  end
+  def test_submission_verification_accepts_official_positive_item_states
+    instance = review_runner
+    %w[READY_FOR_REVIEW ACCEPTED APPROVED].each do |state|
+      @client.item_state = state
+      instance.send(:verify_submission!, 'active')
+    end
+    assert_includes @out.string, 'WAITING_FOR_REVIEW'
+    assert_empty @client.writes
+  end
+  def test_submission_verification_rejects_removed_rejected_missing_and_unknown_item_state
+    instance = review_runner
+    ['REMOVED', 'REJECTED', nil, 'UNKNOWN'].each do |state|
+      @client.item_state = state
+      assert_raises(M::Error) { instance.send(:verify_submission!, 'active') }
+    end
+    assert_empty @out.string
+    assert_empty @client.writes
+  end
+  def test_submission_verification_rejects_unsubmitted_version_even_if_review_resource_is_waiting
+    instance = review_runner
+    @client.version_state = 'PREPARE_FOR_SUBMISSION'
+    assert_raises(M::Error) { instance.send(:verify_submission!, 'active') }
+    assert_empty @out.string
+    assert_empty @client.writes
+  end
+  def test_existing_submission_prefers_active_exact_version_over_older_complete_history
+    instance = review_runner
+    @client.submissions << { 'id' => 'old', 'attributes' => { 'state' => 'COMPLETE', 'submittedDate' => '2026-10-01T10:00:00Z' },
+                             'relationships' => { 'appStoreVersionForReview' => { 'data' => { 'id' => 'version' } } } }
+    instance.send(:verify_already_submitted!)
+    assert_equal ['active'], @client.read_submission_ids
+    assert_empty @client.writes
+  end
+  def test_existing_submission_refuses_ambiguous_active_exact_version
+    instance = review_runner
+    other = Marshal.load(Marshal.dump(@client.submissions.first))
+    other['id'] = 'second-active'
+    @client.submissions << other
+    assert_raises(M::Error) { instance.send(:verify_already_submitted!) }
+    assert_empty @client.read_submission_ids
+    assert_empty @client.writes
+  end
+  def test_review_note_limit_counts_utf8_bytes_before_any_write
+    File.write(@notes, '語' * 1334)
+    error = assert_raises(M::Error) { runner(apply: true).run }
+    assert_includes error.message, '4,000 UTF-8 bytes'
+    assert_empty @client.writes
   end
 end

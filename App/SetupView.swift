@@ -47,7 +47,7 @@ struct SetupView: View {
                     Text("iOS uses its own keyboard in password and phone-number fields. Some apps also disable third-party keyboards.")
                         .font(.caption).foregroundStyle(Palette.muted)
                     HStack(spacing: 20) {
-                        Link("Privacy policy", destination: URL(string: "https://uniboard-dxm.pages.dev/privacy/")!)
+                        Link("Privacy policy", destination: URL(string: "https://docs.kitta.co/uniboard/")!)
                         Link("Help & support", destination: URL(string: "https://uniboard-dxm.pages.dev/support/")!)
                     }.font(.subheadline)
                 }
@@ -82,16 +82,25 @@ struct SetupView: View {
 struct KeyboardTestView: View {
     @State private var text = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Tap below, then hold 🌐 to choose Uniboard.")
-                .font(.subheadline).foregroundStyle(Palette.muted)
-            TextEditor(text: $text)
-                .font(.title2).padding(12).scrollContentBackground(.hidden)
-                .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
-                .accessibilityIdentifier("keyboardTestInput")
-            Text("Search by name, description, block, or code point. Tap any character to insert it at the cursor.")
-                .font(.caption).foregroundStyle(Palette.muted)
-        }.padding(22).background(Palette.background)
+        GeometryReader { geometry in
+            let compact = geometry.size.height < 220
+            VStack(alignment: .leading, spacing: compact ? 8 : 18) {
+                if !compact {
+                    Text("Tap below, then hold 🌐 to choose Uniboard.")
+                        .font(.subheadline).foregroundStyle(Palette.muted)
+                }
+                TextEditor(text: $text)
+                    .font(compact ? .body : .title2)
+                    .padding(compact ? 4 : 12).scrollContentBackground(.hidden)
+                    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+                    .accessibilityIdentifier("keyboardTestInput")
+                if !compact {
+                    Text("Search by name, description, block, or code point. Tap any character to insert it at the cursor.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                }
+            }
+            .padding(.horizontal, 22).padding(.vertical, compact ? 4 : 22)
+        }.background(Palette.background)
             .navigationTitle("Try Uniboard").navigationBarTitleDisplayMode(.inline)
     }
 }

@@ -266,9 +266,11 @@ final class UniboardUITests: XCTestCase {
         defer { restoreEnglishKeyboard() }
         assertControlValue("keyboard.order", equals: "newestFirst")
         assertDeleteIsOnlyAtTopRight()
+        assertKeyboardControlsAreVisible(isSearching: false)
         attachScreenshot("Single delete key at the top right of the real keyboard")
         enterKeyboardQuery("u+1f680")
         assertDeleteIsOnlyAtTopRight()
+        assertKeyboardControlsAreVisible(isSearching: true)
         XCTAssertEqual(input.value as? String, "", "Search keys must edit the extension query, not the host document")
 
         let rocket = app.buttons["keyboard.character.U+1F680"].firstMatch
@@ -298,6 +300,33 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(input.waitUntilValueEquals("🚀"))
         app.buttons["keyboard.delete"].tap()
         XCTAssertTrue(input.waitUntilValueEquals(""), "Delete must remove a supplementary character as a complete character")
+
+        // A compact keyboard must retain the same usable controls and insert
+        // into the same native text document after rotation.
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let landscape = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let frame = self.app.frame
+            return frame.width > frame.height
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 5), .completed)
+        assertDeleteIsOnlyAtTopRight()
+        assertKeyboardControlsAreVisible(isSearching: false)
+        attachScreenshot("Compact landscape keyboard keeps native controls visible")
+        reopenKeyboardSearch(expectedQuery: "u+1f680")
+        assertDeleteIsOnlyAtTopRight()
+        assertKeyboardControlsAreVisible(isSearching: true)
+        assertHostEditorIsVisibleAboveKeyboard(input)
+        XCTAssertEqual(input.value as? String, "")
+        let landscapeRocket = app.buttons["keyboard.character.U+1F680"].firstMatch
+        XCTAssertTrue(landscapeRocket.waitForExistence(timeout: 10))
+        XCTAssertTrue(landscapeRocket.isHittable)
+        landscapeRocket.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("🚀"))
+        attachScreenshot("Compact landscape search preserves Unicode host insertion")
+        closeKeyboardSearch()
+        app.buttons["keyboard.delete"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals(""))
     }
 
     func testSystemKeyboardLongPressShowsPropertiesWithoutInsertion() throws {
@@ -370,11 +399,14 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
         let setup = appTab("Setup")
         XCTAssertTrue(setup.waitForExistence(timeout: 5))
+        let setupPage = app.navigationBars["Set up Uniboard"].firstMatch
         for _ in 0..<3 {
             setup.tap()
-            if setup.waitUntilSelected(timeout: 2) { break }
+            if setupPage.waitForExistence(timeout: 2) { break }
         }
-        XCTAssertTrue(setup.isSelected, "Setup must be selected before opening the keyboard host: \(app.debugDescription)")
+        // iPad's sidebar button opens the page without reporting a selected
+        // trait. Verify the destination itself before opening its host editor.
+        XCTAssertTrue(setupPage.exists, "Setup must be open before opening the keyboard host: \(app.debugDescription)")
         let tryKeyboard = app.descendants(matching: .any)["tryKeyboard"].firstMatch
         revealByScrolling(tryKeyboard, in: app)
         tryKeyboard.tap()
@@ -456,6 +488,37 @@ final class UniboardUITests: XCTestCase {
             "Delete must be above the character and bottom-control areas", file: file, line: line)
     }
 
+    private func assertKeyboardControlsAreVisible(isSearching: Bool,
+                                                  file: StaticString = #filePath, line: UInt = #line) {
+        var identifiers = ["keyboard.search", "keyboard.delete", "keyboard.edition", "keyboard.order",
+                           "keyboard.space", "keyboard.return"]
+        identifiers += isSearching
+            ? ["keyboard.query.q", "keyboard.query.p", "keyboard.query.u"]
+            : ["keyboard.tab.symbols", "keyboard.tab.emojis", "keyboard.tab.blocks", "keyboard.tab.saved"]
+        let screen = app.frame.insetBy(dx: -1, dy: -1)
+        for identifier in identifiers {
+            let control = app.buttons[identifier].firstMatch
+            XCTAssertTrue(control.waitForExistence(timeout: 5), "Expected keyboard control \(identifier)", file: file, line: line)
+            XCTAssertTrue(control.isHittable, "Keyboard control \(identifier) must remain tappable", file: file, line: line)
+            let frame = control.frame
+            XCTAssertTrue(frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0,
+                          "Keyboard control \(identifier) must have a finite visible frame", file: file, line: line)
+            XCTAssertTrue(screen.contains(frame), "Keyboard control \(identifier) is clipped outside the screen: \(frame)", file: file, line: line)
+        }
+    }
+
+    private func assertHostEditorIsVisibleAboveKeyboard(_ input: XCUIElement,
+                                                       file: StaticString = #filePath, line: UInt = #line) {
+        let frame = input.frame
+        let search = app.buttons["keyboard.search"].firstMatch
+        XCTAssertTrue(input.isHittable, "The native host editor must remain tappable in landscape", file: file, line: line)
+        XCTAssertTrue(frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height >= 44,
+                      "The host needs a visible editing area, not a collapsed frame: \(frame)", file: file, line: line)
+        XCTAssertTrue(app.frame.contains(frame), "The host editor must remain inside the display", file: file, line: line)
+        XCTAssertLessThanOrEqual(frame.maxY, search.frame.minY,
+                                 "The native keyboard must leave the entire editor visible above its search header", file: file, line: line)
+    }
+
     private func selectKeyboardEdition(_ edition: String) {
         let selector = app.descendants(matching: .any)["keyboard.edition"].firstMatch
         XCTAssertTrue(selector.waitForExistence(timeout: 5))
@@ -481,6 +544,7 @@ final class UniboardUITests: XCTestCase {
         let description = app.descendants(matching: .any)["keyboard.properties.description"].firstMatch
         XCTAssertFalse(accessibleText(description).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             "Properties should retain descriptive metadata even when a glyph cannot render")
+        attachScreenshot("Keyboard inspector name and properties without insertion")
         let lastProperty = app.staticTexts["keyboard.properties.decomposition"].firstMatch
         let propertyScroll = app.scrollViews.containing(.staticText, identifier: "keyboard.properties.description").firstMatch
         XCTAssertTrue(propertyScroll.waitForExistence(timeout: 5))
@@ -491,11 +555,19 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(lastProperty.isHittable, "The full properties must remain reachable inside the keyboard's scroll area")
         attachScreenshot("Complete Unicode properties remain reachable in the keyboard")
         for _ in 0..<6 {
-            if propertyName.isHittable && points.isHittable { break }
+            if isInsideScrollViewport(propertyName, in: propertyScroll)
+                && isInsideScrollViewport(points, in: propertyScroll) { break }
             propertyScroll.swipeDown()
         }
-        XCTAssertTrue(propertyName.isHittable)
-        XCTAssertTrue(points.isHittable)
+        XCTAssertTrue(isInsideScrollViewport(propertyName, in: propertyScroll), "The inspector must return to its name after scrolling through all properties")
+        XCTAssertTrue(isInsideScrollViewport(points, in: propertyScroll))
+    }
+
+    private func isInsideScrollViewport(_ element: XCUIElement, in scrollView: XCUIElement) -> Bool {
+        guard element.exists && element.isHittable else { return false }
+        let frame = element.frame
+        return frame.width > 0 && frame.height > 0
+            && scrollView.frame.contains(CGPoint(x: frame.midX, y: frame.midY))
     }
 
     private func selectAppEdition(_ edition: String) {
@@ -614,7 +686,12 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func attachScreenshot(_ name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        // The keyboard belongs to a separate process. A full-screen capture
+        // also avoids application-window crops after landscape rotation.
+        // Materialize PNG bytes now, before a later orientation change can
+        // affect the deferred screenshot representation in the test bundle.
+        let png = XCUIScreen.main.screenshot().pngRepresentation
+        let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
@@ -643,13 +720,44 @@ final class UniboardUITests: XCTestCase {
 
     private func selectUniboardKeyboard() {
         if app.buttons["keyboard.search"].firstMatch.waitForExistence(timeout: 2) { return }
-        let globe = app.buttons["Next keyboard"].firstMatch
-        XCTAssertTrue(globe.waitForExistence(timeout: 5), "Expected the system keyboard globe key: \(app.debugDescription)")
-        globe.press(forDuration: 1)
-
         let keyboard = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Uniboard")).firstMatch
-        XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "Expected Uniboard in the system input-mode menu: \(app.debugDescription)")
-        keyboard.tap()
+        for _ in 0..<2 {
+            let globe = app.buttons["Next keyboard"].firstMatch
+            XCTAssertTrue(globe.waitForExistence(timeout: 5), "Expected the system keyboard globe key: \(app.debugDescription)")
+            globe.press(forDuration: 1)
+            if dismissKeyboardSwitcherTipIfPresent() { continue }
+            if keyboard.waitForExistence(timeout: 3) {
+                keyboard.tap()
+                return
+            }
+            break
+        }
+        // iPad can dismiss the native mode picker when a long press releases.
+        // Cycle its real system key instead; the extension identifier remains
+        // required before any insertion or layout assertion can run.
+        for _ in 0..<6 {
+            dismissKeyboardSwitcherTipIfPresent()
+            if app.buttons["keyboard.search"].firstMatch.waitForExistence(timeout: 1) { return }
+            let next = app.buttons["Next keyboard"].firstMatch
+            XCTAssertTrue(next.waitForExistence(timeout: 3), "Expected the native input-mode switch key: \(app.debugDescription)")
+            next.tap()
+        }
+        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitForExistence(timeout: 5),
+                      "Expected the installed Uniboard extension after native keyboard switching: \(app.debugDescription)")
+    }
+
+    @discardableResult
+    private func dismissKeyboardSwitcherTipIfPresent() -> Bool {
+        // Apple presents this first-use sheet over the iPad switch key. Match
+        // its exact heading so unrelated app or system dialogs stay untouched.
+        let heading = app.staticTexts["Quickly Change Keyboards"].firstMatch
+        guard heading.exists else { return false }
+        let button = app.buttons["Continue"].firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 3))
+        XCTAssertTrue(button.isHittable)
+        button.tap()
+        XCTAssertTrue(heading.waitUntilAbsent())
+        return true
     }
 
     private func searchUnicode(_ query: String) {

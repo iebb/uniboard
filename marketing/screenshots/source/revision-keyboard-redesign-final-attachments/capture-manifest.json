@@ -1,0 +1,135 @@
+{
+  "selection": "Final source native cases passed; root visually reviewed both complete original portrait screens before promotion.",
+  "productSourceFiles": {
+    "App/Assets.xcassets/AppIcon.appiconset/AppIcon.png": "c532b020596f0fd8951e89f0ad50bab49ca6b56079845ffc5ace689033f0e356",
+    "App/Assets.xcassets/AppIcon.appiconset/Contents.json": "6ad2c5c3bbcf972c7f02d217d6afcac3f24a10e30510c7e2d06c582371ed9d22",
+    "App/Assets.xcassets/Contents.json": "10e3b5dc202f1cd9fad1f688c8fc9fe9e9669bf3f8295e67d216b10fd99b6f49",
+    "App/BlocksView.swift": "ceda619aaec722c1b2131407ef1c2b3e32902cb0f1630d6ce2399e000190156a",
+    "App/CatalogPreferences.swift": "51006d07952e12e722fb52e137e65dabaff6ab1ae0a396bef2860244f3c158e7",
+    "App/CharacterDetailView.swift": "c1cd4cf56320496bfb7f250a47458ee3e486239df1723b05e6fe73bbf0a1a4a9",
+    "App/ContentView.swift": "521bd31fbf9db3987bd31fb3b1db625448605096d11cf39f9ca0c33b596ba690",
+    "App/Design.swift": "5fcb8feec30ea55fe73e2f557c511d5756102dc9ee03d3997095f58295d4ace2",
+    "App/EmojisView.swift": "375c559ffefdfc86a9b85aad9940cd2e81e2278215d68850e5f59093f4b81394",
+    "App/Info.plist": "c7fc165d1e0a4ccde3bae8647f2254b3e3816580a60749cd21873c90a942e667",
+    "App/SavedView.swift": "17519f08f2aeed2d32eda138bbb1d90a947b850c0ac9ec05902fe698fa2a0a69",
+    "App/SetupView.swift": "e0d68c4cffea0b5c8dc78dc73d9056f5e1f9d005fd1e6f42e4e3ec3e3d0b58ef",
+    "App/UniboardApp.swift": "0340f047025366a1e0dd5fa71f7ab5b070ffcf521d80c34f8e412d2842eac9eb",
+    "Keyboard/Info.plist": "a1117d64436da32a0bce602144bf0c9a78443421e2c5cb8bb41b96a86e679dcc",
+    "Keyboard/KeyboardViewController.swift": "e68e3daeb4f928071431591a2a43bbcc0f7697935f51f3835cfb20db6966c039",
+    "Package.swift": "79723e8cd0a0f8a0ac325216ad4afb950f1b833856683396522cc7a1602c894f",
+    "Shared/CharacterStore.swift": "172c72d17c7503cdba3d7420cd16b9ea0deb1498f4f02b4e64b8cabda15fb17c",
+    "Shared/EmojiCatalog.swift": "becf605213a72daf7249efa7301b0ce4028b452d7ad5475f19391202aafc8f03",
+    "Shared/PrivacyInfo.xcprivacy": "907dfe65befe9ba1bad83bbaf5fd937efadf759ee992465dd1db488b327f2107",
+    "Shared/Resources/Blocks-latest.json": "8cb291f4eaefc0dbb7eeeecff77ec3bbdb7878e8f101dd15460c4eb8c526d362",
+    "Shared/Resources/Blocks.json": "8cb291f4eaefc0dbb7eeeecff77ec3bbdb7878e8f101dd15460c4eb8c526d362",
+    "Shared/Resources/EmojiCatalog-draft.json": "c5a0dcff3c5f39aa2733c8ebce83899a36c16b170b9be1df000b33ba9b81e138",
+    "Shared/Resources/EmojiCatalog-latest.json": "0f47db6e60411e1332ef7ff59dedbfea2441e97ae3d3bdedaf456ea00400cae5",
+    "Shared/Resources/Unicode-LICENSE.txt": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+    "Shared/Resources/UnicodeCatalog-latest.ucd": "e046fe7672d7452da70749e2b673e4ed8d4c9909f7d43668bb3266f9d166dd1d",
+    "Shared/Resources/UnicodeCatalog.ucd": "349a0585b34e1e8003052403b3e65fe2510432076ee994c7bb75b1a0bdf5a7c0",
+    "Shared/Resources/UnicodeProperties-latest.json": "d815536c2976dcf69341f7c4fefaa7be6219163a8e468785a66b3d343c800104",
+    "Shared/Resources/UnicodeProperties.json": "ecaa4f359fbb0fc371755670f5dd8cd61df8f869db22e21c14b70ffe333f7f93",
+    "Shared/Resources/UnicodeSources-latest.json": "3b99f80b53cf9fbc7a7a4438c40d3c589d79feaadae3d2b01294d4de57ca0db2",
+    "Shared/Resources/UnicodeSources.json": "70a38019bfc3e9c35c30655db3b57f6a9a317b3548be82c3bc6b0e5020ef64f6",
+    "Shared/UnicodeCatalog.swift": "c85654a09032cf5524d7982a24ec7e229d37c6262940112bdea31be551506c41",
+    "Uniboard.xcodeproj/project.pbxproj": "7a3afb5599a8b061ffc0de36126c652d7fb49c743669b1d70bb6115b35e96d27",
+    "Uniboard.xcodeproj/project.xcworkspace/contents.xcworkspacedata": "7f3b00b5c3fdb45242d7b87e1e5c4e25d1fa8129a16c94295ecc4e8ea2235c5f",
+    "Uniboard.xcodeproj/xcshareddata/xcodecloud/manifest.json": "6bc8059417ed91a7fdc74c2156475d3609a0c125efd97f620aaa0b523f361c9b",
+    "Uniboard.xcodeproj/xcshareddata/xcschemes/Uniboard.xcscheme": "1b5f3e5e33804b856a5318352099dfa764041298e37682a4fdda0cbb3b8bfe2d",
+    "project.yml": "ae90a163732c26016d37ade977bebe40766b9fa9647faa2bb00b5b8853a07894"
+  },
+  "testSourceFiles": {
+    "UITests/UniboardUITests.swift": "06fbaff9d96594e35cabf111a458c4d9b1c77da2b1c1f5c9c7a5cf7b11294d71"
+  },
+  "captures": [
+    {
+      "originalAttachment": "source/revision-keyboard-redesign-final-attachments/A6201723-B29C-4DA7-8B82-642B1CD2A464.png",
+      "resultBundle": "build/QA/Keyboard-Redesign/iPhone-Final3-Light.xcresult",
+      "resultRootID": "0~4aa_26BQUs8a_PWu0Tg42R_WOwQXtlKAf7q13JMQFKH3U7gBnC9KrU-6CQsfDX2Sq9ASGlCgbRIA1OqaK6f04g==",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardSearchAndInsertion()",
+      "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardSearchAndInsertion",
+      "testResult": "Passed",
+      "appleExportedAttachmentID": "A6201723-B29C-4DA7-8B82-642B1CD2A464",
+      "appleAttachmentName": "System keyboard search and Unicode insertion_0_0C24494C-FC43-4C28-9C0F-B28F1FFE1C13.png",
+      "timestamp": 1791058032.181,
+      "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+      "deviceName": "Uniboard Keyboard QA",
+      "runtime": "iOS18.5",
+      "appearance": "light",
+      "size": [
+        1206,
+        2622
+      ],
+      "exifOrientation": 1,
+      "displaySize": [
+        1206,
+        2622
+      ],
+      "mode": "RGB",
+      "rawSHA256": "6c18dd4c2e1364ffcf3e2f8ba2177b46f4ae0436a48c517214aed500b4d7b8b3",
+      "rawMD5": "08ce22fa9eb0de516f424679e007c298",
+      "originalUnmodified": true,
+      "proposedSlot": "source/iphone/01-keyboard.png",
+      "slot": "source/iphone/01-keyboard.png"
+    },
+    {
+      "originalAttachment": "source/revision-keyboard-redesign-final-attachments/EFB0AE69-1B59-4195-B4CE-094EA8FD7646.png",
+      "resultBundle": "build/QA/Keyboard-Redesign/iPhone-Final3-Properties-Light.xcresult",
+      "resultRootID": "0~4EARclSPjur4orC_MFEGjZgZA8TEvUXjt2KAmGgv3kxcJy8cMtJwNShVJWhAx_Nhr-EiR6nHaSRzu-236vew7A==",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion()",
+      "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion",
+      "testResult": "Passed",
+      "appleExportedAttachmentID": "EFB0AE69-1B59-4195-B4CE-094EA8FD7646",
+      "appleAttachmentName": "Long press exposes character properties without insertion_0_9F5E9C58-E182-423D-B30C-574A46DA964F.png",
+      "timestamp": 1791058364.203,
+      "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+      "deviceName": "Uniboard Keyboard QA",
+      "runtime": "iOS18.5",
+      "appearance": "light",
+      "size": [
+        1206,
+        2622
+      ],
+      "exifOrientation": 1,
+      "displaySize": [
+        1206,
+        2622
+      ],
+      "mode": "RGB",
+      "rawSHA256": "bb149b72939076d365d18be3d71969f4c4be6808946c67d50c9d4cda60ccfadd",
+      "rawMD5": "4af27852461087b4a4631d37dc9ed0ac",
+      "originalUnmodified": true,
+      "proposedSlot": "source/iphone/09-properties.png",
+      "slot": "source/iphone/09-properties.png"
+    },
+    {
+      "originalAttachment": "source/revision-keyboard-redesign-final-attachments/6B36BC27-B4FF-47ED-9C26-5418A0A4D835.png",
+      "resultBundle": "build/QA/Keyboard-Redesign/iPhone-Final3-Properties-Light.xcresult",
+      "resultRootID": "0~4EARclSPjur4orC_MFEGjZgZA8TEvUXjt2KAmGgv3kxcJy8cMtJwNShVJWhAx_Nhr-EiR6nHaSRzu-236vew7A==",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion()",
+      "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion",
+      "testResult": "Passed",
+      "appleExportedAttachmentID": "6B36BC27-B4FF-47ED-9C26-5418A0A4D835",
+      "appleAttachmentName": "Complete Unicode properties remain reachable in the keyboard_0_16DEE2DA-2537-4F78-BF9E-4FB07855BACF.png",
+      "timestamp": 1791058362.103,
+      "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+      "deviceName": "Uniboard Keyboard QA",
+      "runtime": "iOS18.5",
+      "appearance": "light",
+      "size": [
+        1206,
+        2622
+      ],
+      "exifOrientation": 1,
+      "displaySize": [
+        1206,
+        2622
+      ],
+      "mode": "RGB",
+      "rawSHA256": "65bce8497d5d320343e36f7adce39c570192ca5d4bf8903cb878a0a77392a0ab",
+      "rawMD5": "52db3a8813a073855f81374f6e67a60a",
+      "originalUnmodified": true,
+      "slot": null
+    }
+  ]
+}

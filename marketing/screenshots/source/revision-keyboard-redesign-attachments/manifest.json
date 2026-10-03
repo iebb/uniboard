@@ -1,0 +1,56 @@
+[
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName": "Uniboard Keyboard QA",
+        "exportedFileName": "F6A5B7A2-4B28-45A0-BBB5-F273138C9687.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Whole emoji ZWJ sequence inserted into host_0_79961D8D-406F-4D16-A924-7B65ED3657F0.png",
+        "timestamp": 1791055554.533
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testSystemKeyboardInsertsWholeZWJEmojiAndVariationSelectorWithoutLeakingQuery()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardInsertsWholeZWJEmojiAndVariationSelectorWithoutLeakingQuery"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName": "Uniboard Keyboard QA",
+        "exportedFileName": "49FCD03B-2699-476B-B7FA-B5D2C0088026.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Long press exposes character properties without insertion_0_DB7BC521-31F6-4CEE-89B7-6996C72A49C2.png",
+        "timestamp": 1791055626.81
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName": "Uniboard Keyboard QA",
+        "exportedFileName": "C1565D68-5DBC-476A-A91C-0C292A3045C4.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Complete Unicode properties remain reachable in the keyboard_0_DA184475-24AF-48B3-8C7C-827AF46CEBFE.png",
+        "timestamp": 1791055624.719
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName": "Uniboard Keyboard QA",
+        "exportedFileName": "1F986FD4-5C55-4224-AE90-98AAA76A396D.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "System keyboard search and Unicode insertion_0_4B25E409-43CD-4B09-BDD0-2D21DA9F3386.png",
+        "timestamp": 1791055708.574
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testSystemKeyboardSearchAndInsertion()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardSearchAndInsertion"
+  }
+]

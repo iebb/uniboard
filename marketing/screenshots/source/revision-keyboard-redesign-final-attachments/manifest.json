@@ -1,0 +1,41 @@
+[
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName": "Uniboard Keyboard QA",
+        "exportedFileName": "A6201723-B29C-4DA7-8B82-642B1CD2A464.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "System keyboard search and Unicode insertion_0_0C24494C-FC43-4C28-9C0F-B28F1FFE1C13.png",
+        "timestamp": 1791058032.181
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testSystemKeyboardSearchAndInsertion()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardSearchAndInsertion"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName": "Uniboard Keyboard QA",
+        "exportedFileName": "EFB0AE69-1B59-4195-B4CE-094EA8FD7646.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Long press exposes character properties without insertion_0_9F5E9C58-E182-423D-B30C-574A46DA964F.png",
+        "timestamp": 1791058364.203
+      },
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName": "Uniboard Keyboard QA",
+        "exportedFileName": "6B36BC27-B4FF-47ED-9C26-5418A0A4D835.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Complete Unicode properties remain reachable in the keyboard_0_16DEE2DA-2537-4F78-BF9E-4FB07855BACF.png",
+        "timestamp": 1791058362.103
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion"
+  }
+]

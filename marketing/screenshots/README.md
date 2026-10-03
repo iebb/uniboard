@@ -19,7 +19,7 @@ Place the complete, unmodified screenshot under `source/iphone/` or `source/ipad
 | `06-private.png` | The app's offline-search and keyboard setup information. |
 | `07-emoji.png` | A complete emoji sequence, its codepoints, or verified ZWJ/variation-selector insertion. |
 | `08-editions.png` | The catalog selector showing Unicode 18 latest release and Unicode 19 development draft. |
-| `09-properties.png` | The real keyboard inspector, scrolled to script, direction, combining class and decomposition, with the host unchanged. |
+| `09-properties.png` | The real keyboard inspector showing names, descriptions and properties, with the host unchanged; further properties remain reachable by scrolling. |
 
 The current official Unicode 19 development data can have the same assigned characters and emoji as Unicode 18. The artwork describes the available catalogs and does not claim that the draft has invented extra assignments. Emoji introduction versions and the ages of individual Unicode scalars can differ.
 
@@ -61,9 +61,9 @@ The six active phone app slots come from the successful `build/QA/Revision-App-4
 
 The active phone inputs were replaced with this successful app capture set and the revised real keyboard capture set below.
 
-## Verified real system keyboard revision captures
+## Historical real system keyboard revision captures
 
-All five real system keyboard cases passed in `build/QA/Revision-Keyboard-2.xcresult` on the dedicated iPhone16Pro/iOS18.5 device. This exercises the installed extension and the real host text document, including exact Unicode insertion, space/delete, complete ZWJ+VS16 insertion/deletion, inspection without insertion, and independent catalog persistence. The successful source attachments and selected export manifest are retained under `source/revision-keyboard-2-attachments/`. The following active slot copies match their originals byte-for-byte.
+All five real system keyboard cases passed in `build/QA/Revision-Keyboard-2.xcresult` on the dedicated iPhone16Pro/iOS18.5 device. This exercises the installed extension and the real host text document, including exact Unicode insertion, space/delete, complete ZWJ+VS16 insertion/deletion, inspection without insertion, and independent catalog persistence. The successful source attachments and selected export manifest are retained under `source/revision-keyboard-2-attachments/`. These historical captures have been superseded by the redesigned keyboard captures below.
 
 | Slot | Passing UI test | Original attachment | Raw SHA-256 |
 | --- | --- | --- | --- |
@@ -73,6 +73,19 @@ All five real system keyboard cases passed in `build/QA/Revision-Keyboard-2.xcre
 The supporting `D47F7686-1192-41AF-9CE8-69868E0EE270.png` attachment from `testSystemKeyboardInsertsWholeZWJEmojiAndVariationSelectorWithoutLeakingQuery()` shows the exact `🙂‍↔️` sequence inserted into the host. The test verified all four scalars `[1F642, 200D, 2194, FE0F]` and no search-query leakage; raw SHA-256: `966b8b9d34b5dfb83e1db1bc70fa5c748626a78f5d46cf1c45eb7b83921acda8`.
 
 The follow-up unchanged-query tab-switch regression also passed in `build/QA/Revision-Keyboard-Regression.xcresult`. It verifies that reopening the same `u+1f680` query after switching Symbols → Emojis → Symbols refreshes the result type and preserves the host document.
+
+## Verified redesigned keyboard captures
+
+The active keyboard and inspector slots come from the passing `build/QA/Keyboard-Redesign/iPhone-Final3-Light.xcresult` and `iPhone-Final3-Properties-Light.xcresult` runs on the dedicated iPhone16Pro/iOS18.5 device. The revised layout uses larger white keycaps, a full-width search control, a single top-right delete key, compact catalog and ordering controls, and a charcoal Return key. Phone landscape search places results beside the query keys at 270 points. The built-in demo expands its editor when space is constrained.
+
+We reviewed both complete original portrait captures before promotion. `source/revision-keyboard-redesign-final-attachments/` retains their selected Apple attachment manifest, exact result and attachment IDs, final product/test source hashes, two unmodified slot originals, and supporting lower-properties proof. Both active slot copies match their originals byte-for-byte. Full-screen PNG bytes were captured immediately before any orientation change. The ten other upload images and their source captures remain unchanged.
+
+All five final native checks passed against the recorded final source: phone light search and properties, phone dark search, and iPad dark search and properties. They verify actual hit targets, a fully visible landscape editor of at least 44 points, exact host insertion and deletion, unclipped controls, and scrollable properties without insertion. Earlier comprehensive phone light/dark and iPad light runs passed ten cases covering complete ZWJ+VS16 insertion/deletion, independent catalog persistence, unchanged-query tab refresh and unsupported character descriptions. Their earlier originals remain historical evidence under `source/revision-keyboard-redesign-attachments/`.
+
+| Slot | Passing UI test | Original attachment | Raw SHA-256 |
+| --- | --- | --- | --- |
+| `01-keyboard.png` | `testSystemKeyboardSearchAndInsertion()` | `A6201723-B29C-4DA7-8B82-642B1CD2A464.png` | `6c18dd4c2e1364ffcf3e2f8ba2177b46f4ae0436a48c517214aed500b4d7b8b3` |
+| `09-properties.png` | `testSystemKeyboardLongPressShowsPropertiesWithoutInsertion()` | `EFB0AE69-1B59-4195-B4CE-094EA8FD7646.png` | `bb149b72939076d365d18be3d71969f4c4be6808946c67d50c9d4cda60ccfadd` |
 
 ## Verified iPad revision captures
 

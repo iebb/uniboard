@@ -1,0 +1,83 @@
+{
+  "resultBundle": "build/QA/Keyboard-Redesign/iPhone-Light.xcresult",
+  "selection": "Five native keyboard cases passed. Root reviewed both complete portrait captures; exact emoji and lower properties supporting proof retained.",
+  "keyboardSourceSha256": "711adb43bb587c8ac89bd36a89984ed25e2baeb54416b4635422f9a8a4ef2478",
+  "captures": [
+    {
+      "slot": "source/iphone/01-keyboard.png",
+      "originalAttachment": "source/revision-keyboard-redesign-attachments/1F986FD4-5C55-4224-AE90-98AAA76A396D.png",
+      "resultBundle": "build/QA/Keyboard-Redesign/iPhone-Light.xcresult",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardSearchAndInsertion()",
+      "testResult": "Passed",
+      "attachmentName": "System keyboard search and Unicode insertion_0_4B25E409-43CD-4B09-BDD0-2D21DA9F3386.png",
+      "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+      "deviceName": "Uniboard Keyboard QA",
+      "runtime": "iOS18.5",
+      "appearance": "light",
+      "size": [
+        1206,
+        2622
+      ],
+      "mode": "RGB",
+      "rawSHA256": "5cd481a49d9100ccc05b8222f457dc5e1cd6aefaf15b20b4331d34c8e3c9f821",
+      "originalUnmodified": true
+    },
+    {
+      "slot": "source/iphone/09-properties.png",
+      "originalAttachment": "source/revision-keyboard-redesign-attachments/49FCD03B-2699-476B-B7FA-B5D2C0088026.png",
+      "resultBundle": "build/QA/Keyboard-Redesign/iPhone-Light.xcresult",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion()",
+      "testResult": "Passed",
+      "attachmentName": "Long press exposes character properties without insertion_0_DB7BC521-31F6-4CEE-89B7-6996C72A49C2.png",
+      "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+      "deviceName": "Uniboard Keyboard QA",
+      "runtime": "iOS18.5",
+      "appearance": "light",
+      "size": [
+        1206,
+        2622
+      ],
+      "mode": "RGB",
+      "rawSHA256": "82d2c5610444a64c3256f50caf317cb4add6a681a1d2ac849d441e0b099e96fe",
+      "originalUnmodified": true
+    },
+    {
+      "slot": null,
+      "originalAttachment": "source/revision-keyboard-redesign-attachments/C1565D68-5DBC-476A-A91C-0C292A3045C4.png",
+      "resultBundle": "build/QA/Keyboard-Redesign/iPhone-Light.xcresult",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion()",
+      "testResult": "Passed",
+      "attachmentName": "Complete Unicode properties remain reachable in the keyboard_0_DA184475-24AF-48B3-8C7C-827AF46CEBFE.png",
+      "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+      "deviceName": "Uniboard Keyboard QA",
+      "runtime": "iOS18.5",
+      "appearance": "light",
+      "size": [
+        1206,
+        2622
+      ],
+      "mode": "RGB",
+      "rawSHA256": "4cdb1463b5eb0c2165bbdee10a382248a261cbb55f09e1b7281a14aafd00bdc0",
+      "originalUnmodified": true
+    },
+    {
+      "slot": null,
+      "originalAttachment": "source/revision-keyboard-redesign-attachments/F6A5B7A2-4B28-45A0-BBB5-F273138C9687.png",
+      "resultBundle": "build/QA/Keyboard-Redesign/iPhone-Light.xcresult",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardInsertsWholeZWJEmojiAndVariationSelectorWithoutLeakingQuery()",
+      "testResult": "Passed",
+      "attachmentName": "Whole emoji ZWJ sequence inserted into host_0_79961D8D-406F-4D16-A924-7B65ED3657F0.png",
+      "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+      "deviceName": "Uniboard Keyboard QA",
+      "runtime": "iOS18.5",
+      "appearance": "light",
+      "size": [
+        1206,
+        2622
+      ],
+      "mode": "RGB",
+      "rawSHA256": "08acd8f86df1c6ceb9ebc95f1cde7abfd1ac156733f67a4d06e1cff37dd9a548",
+      "originalUnmodified": true
+    }
+  ]
+}

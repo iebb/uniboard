@@ -1,0 +1,32 @@
+[
+  {
+    "locale": "en-US",
+    "displayType": "APP_IPHONE_67",
+    "files": [
+      "iphone/01-keyboard.png",
+      "iphone/00-explore.png"
+    ]
+  },
+  {
+    "locale": "en-US",
+    "displayType": "APP_IPAD_PRO_3GEN_129",
+    "files": [
+      "ipad/00-explore.png"
+    ]
+  },
+  {
+    "locale": "ja",
+    "displayType": "APP_IPHONE_67",
+    "files": [
+      "iphone/01-keyboard.png",
+      "iphone/00-explore.png"
+    ]
+  },
+  {
+    "locale": "ja",
+    "displayType": "APP_IPAD_PRO_3GEN_129",
+    "files": [
+      "ipad/00-explore.png"
+    ]
+  }
+]

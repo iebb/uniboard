@@ -64,10 +64,30 @@ Xcode Cloud uses the committed **Uniboard.xcodeproj** and shared **Uniboard** sc
 
 The repository is connected to the active [**Uniboard iOS** Xcode Cloud workflow](https://appstoreconnect.apple.com/teams/cbaca10a-f696-4d2b-959e-0d3fa1b23452/xcode-cloud/products/001084ae-fa0b-491c-b14a-2f03ad794f84/workflows). It uses the latest release environment and archives iOS for **TestFlight and App Store** on pushes to `master`. Each monthly validated data commit therefore triggers a signed archive with a fresh Unicode draft. The pre-build hook runs five download recovery tests and all 11 catalog tests. Automatic Cloud build **1.0.0 (7)** refreshed the draft, recovered a real interrupted download, passed those checks, uploaded successfully and became **Ready to Test**.
 
-The [App Store Connect record](https://appstoreconnect.apple.com/apps/6818750518/distribution/info) is registered under **Kitta Ltd** as **Uniboard: Unicode Keyboard**, Apple ID **6818750518**, bundle ID and SKU **ad.neko.uniboard**, with English (U.S.) as its primary language. The device display name remains Uniboard. No App Store release has been submitted.
+The [App Store Connect record](https://appstoreconnect.apple.com/apps/6818750518/distribution/info) is registered under **Kitta Ltd** as **Uniboard: Unicode Keyboard**, Apple ID **6818750518**, bundle ID and SKU **ad.neko.uniboard**, with English (U.S.) as its primary language. The device display name remains Uniboard. Public review, external beta review and public App Store availability are separate Apple states; check App Store Connect for the current status.
 
 The primary workflow starts automatically from `master` branch changes and has no manual start condition. Editing is restricted to admins and app managers, and builds use a clean environment. Its internal and external TestFlight post-actions deliver to **Internal Testers** and **External Testers**, respectively. The redundant setup workflow remains disabled and has no manual start condition.
 
 Both tester groups are created, and Cloud build **1.0.0 (8)** was delivered to **Internal Testers**. No individual testers or public invitation links have been added. The approved Kitta review contact and feedback email from Mithka are configured, along with Uniboard-specific keyboard review instructions. External distribution remains subject to Apple's beta review. `TestFlight/WhatToTest.en-US.txt` supplies tester instructions automatically with each Cloud upload.
 
 Apple documentation: [custom build scripts](https://developer.apple.com/documentation/xcode/writing-custom-build-scripts), [first workflow setup](https://developer.apple.com/documentation/xcode/configuring-your-first-xcode-cloud-workflow/), [automatic tester notes](https://developer.apple.com/documentation/xcode/including-notes-for-testers-with-a-beta-release-of-your-app), [external beta review](https://developer.apple.com/help/app-store-connect/test-a-beta-version/invite-external-testers/).
+
+## Branding and public release
+
+The approved icon master and generation prompt are in `marketing/icon`; run `swift Scripts/generate_icon.swift` to produce the opaque 1024-pixel iOS asset. Real simulator screenshots, provenance and reproducible artwork exports are in `marketing/screenshots`. `upload-manifest.json` defines the English and Japanese iPhone/iPad screenshot order. Storefront copy lives in `fastlane/metadata/{en-US,ja}`; the Japanese listing explicitly discloses the English interface and catalog names. See `docs/aso-strategy.md` for metadata limits and search positioning.
+
+The [public website](https://uniboard-dxm.pages.dev/), [support page](https://uniboard-dxm.pages.dev/support/) and [privacy policy](https://uniboard-dxm.pages.dev/privacy/) are served from the curated `website` directory through Cloudflare Pages. The private application repository is not published. The static site has no analytics scripts or external fonts and explains the website host separately from the offline app. The support address is Kitta's existing customer-feedback address.
+
+`Scripts/app_store_release.rb` prepares or submits only this app's exact verified Xcode Cloud archive. It is GET-only by default, with separate flags for factual readiness settings, listing preparation and review submission. See `Scripts/APP_STORE_RELEASE.md` for credentials, guards and usage. `AppStore/ReviewNotes.en-US.txt` supplies the reviewer's keyboard test instructions. App Privacy publication must be verified separately before submitting.
+
+### Publish website updates
+
+The website workflow validates changes on `master`; deployment uses the existing Cloudflare login locally so broad account credentials are not stored in GitHub. The Pages project is `uniboard` in Kitta Labs, with production branch `master`.
+
+```sh
+python3 Scripts/validate_website.py
+CLOUDFLARE_ACCOUNT_ID=58c982b69079141dd49d99076dd845b1 \
+  wrangler pages deploy website --project-name uniboard --branch master
+```
+
+Deploy only `website`, then verify the public pages and assets before updating App Store URLs. GitHub Pages cannot publish this private repository on its current plan.

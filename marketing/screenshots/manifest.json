@@ -1,0 +1,45 @@
+{
+  "apple_size_reference": "https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications",
+  "approved_icon_sha256": "aabd413c0e25feb760878f6ab858852723dbf39ce9e97a821fb04f052e10cbf3",
+  "screenshots": [
+    {
+      "export": "iphone/00-explore.png",
+      "source": "source/iphone/00-explore.png",
+      "source_sha256": "36f37aafb5495f2222a0a6b7ebd97a509e4f90fdcc8e23d952f573f6a44d68e0",
+      "size": [
+        1320,
+        2868
+      ],
+      "mode": "RGB",
+      "headline": "Unicode.\nWithin reach.",
+      "subtitle": "Find a symbol, letter or little detail.",
+      "composition": "Full actual screenshot, uniformly resized, inside decorative frame. No app UI relabeling or generation."
+    },
+    {
+      "export": "iphone/01-keyboard.png",
+      "source": "source/iphone/01-keyboard.png",
+      "source_sha256": "4c30bf040b1132a8632099dcb17069fd878b089b03d0708e3d391beee43760d5",
+      "size": [
+        1320,
+        2868
+      ],
+      "mode": "RGB",
+      "headline": "Type the\nunexpected.",
+      "subtitle": "Search a symbol. Tap to type.",
+      "composition": "Full actual screenshot, uniformly resized, inside decorative frame. No app UI relabeling or generation."
+    },
+    {
+      "export": "ipad/00-explore.png",
+      "source": "source/ipad/00-explore.png",
+      "source_sha256": "cdb38c58fb9f99e370a2eb76e4c99a49dcdf1bc4e4d6fce844cb1f995074752c",
+      "size": [
+        2064,
+        2752
+      ],
+      "mode": "RGB",
+      "headline": "Unicode.\nWithin reach.",
+      "subtitle": "Find a symbol, letter or little detail.",
+      "composition": "Full actual screenshot, uniformly resized, inside decorative frame. No app UI relabeling or generation."
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+Uniboard is an offline Unicode character explorer and custom keyboard for iPhone and iPad. No sign-in, account, purchase, network connection or keyboard Full Access is required.
+
+Keyboard test:
+1. Settings > General > Keyboard > Keyboards > Add New Keyboard > Uniboard. Leave Full Access off.
+2. Open Uniboard > Setup > Try your keyboard. Tap the editor and hold the system globe key to select Uniboard.
+3. Search U+1F680 using Uniboard's own query keys, then tap the rocket character. The query remains inside the keyboard; only the selected Unicode scalar is inserted into the host field. Space, return and repeating delete are available. Hold a character to inspect or save it.
+
+The Explore tab also supports names (infinity), code points (U+1F680, 0x1F680, 1F680, decimal:128640), descriptive annotations, aliases, block names (arrows), and literal characters. The Blocks tab opens paginated character grids. Character details show names, block, decimal values and UTF-8 bytes. Saved provides favorites and recent characters; the app and keyboard maintain separate local collections. The scratchpad collects text within the app.
+
+The interface, catalog names and descriptive annotations are English. Japanese storefront copy explicitly discloses this. The bundled data uses the latest official Unicode development draft, with source provenance and Unicode License v3 included. Draft names and assignments may change. iOS fonts may lack a glyph for a valid scalar; missing-glyph boxes are expected for some draft characters. Preview markers for invisible and combining characters are not inserted into the document.
+
+The app and extension collect no user data and contain no analytics or advertising SDK. Local saved characters and scratchpad text stay on the device. Characters inserted into another app are subsequently handled by that app. iOS uses its system keyboard for secure and phone-number fields; some host apps disable custom keyboards.

@@ -9,3 +9,4 @@ Scripts/.unicode-cache/
 .unicode-cache/
 __pycache__/
 *.pyc
+.wrangler/

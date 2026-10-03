@@ -41,10 +41,14 @@ struct SetupView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Label("Private, by design", systemImage: "lock.shield")
                         .font(.headline).foregroundStyle(Palette.ink)
-                    Text("Uniboard searches its bundled Unicode database. No internet, accounts, or Full Access required. Nothing you type leaves your device.")
+                    Text("Uniboard searches its bundled Unicode database. No internet, accounts, or Full Access required. Uniboard does not send your searches or typing to a server.")
                         .font(.subheadline).foregroundStyle(Palette.muted)
                     Text("iOS uses its own keyboard in password and phone-number fields. Some apps also disable third-party keyboards.")
                         .font(.caption).foregroundStyle(Palette.muted)
+                    HStack(spacing: 20) {
+                        Link("Privacy policy", destination: URL(string: "https://uniboard-dxm.pages.dev/privacy/")!)
+                        Link("Help & support", destination: URL(string: "https://uniboard-dxm.pages.dev/support/")!)
+                    }.font(.subheadline)
                 }
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {

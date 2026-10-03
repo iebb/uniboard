@@ -1,0 +1,19 @@
+Find and type Unicode symbols, special letters and emoji with a tap. Uniboard is an offline character browser and custom keyboard for iPhone and iPad.
+
+- Search by official character name, alias, descriptive note or block name. Try "arrow", "heart" or "Greek".
+- Look up code points in hex (U+1F680, 0x1F680 or 1F680) or decimal (decimal:128640). Paste a character into the app's search to identify it.
+- Browse the complete Unicode block list and scroll through character grids, from arrows and math symbols to alphabets and phonetic marks.
+- Type directly from the keyboard. Search, tap to insert, or hold a character to inspect and save it.
+- Keep favorite and recently used characters close at hand. The app and keyboard keep separate collections on your device.
+- Inspect a character's name, block, available annotations, decimal value, category and UTF-8 bytes in the app.
+- Copy individual characters or combine them in the scratchpad, then copy your text.
+
+Works offline, without an account or Full Access. Uniboard does not send your typing to a server.
+
+To enable the keyboard, open Settings > General > Keyboard > Keyboards > Add New Keyboard, then choose Uniboard. While typing, hold the globe key to switch to it.
+
+The catalog is built from the latest official Unicode draft available at build time. Draft names and assignments may change. Character display depends on your iOS version and fonts; some newer characters may appear as boxes. Preview markers for invisible characters and combining marks are not inserted.
+
+The interface and Unicode character names are in English. iOS uses its own keyboard in password and phone-number fields, and some apps disable custom keyboards.
+
+Requires iOS 17 or later.

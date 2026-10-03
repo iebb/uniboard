@@ -1,0 +1,35 @@
+[
+  {
+    "attachments" : [
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName" : "Uniboard Keyboard QA",
+        "exportedFileName" : "8255E695-6A74-4F02-BFB2-FC359C1B5D22.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "System keyboard search and Unicode insertion_0_88EBC318-CCFC-4BF4-B0D4-5A97721D8466.png",
+        "timestamp" : 1790970083.474
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName" : "Uniboard Keyboard QA",
+        "exportedFileName" : "7C959130-3C43-40BC-8D87-A68A436534DB.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "System keyboard after opening search_0_BCC8E914-4F59-4D46-AC18-4E80C33168BF.png",
+        "timestamp" : 1790970070.69
+      },
+      {
+        "configurationName" : "Test Scheme Action",
+        "deviceId" : "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName" : "Uniboard Keyboard QA",
+        "exportedFileName" : "34D5BFFA-192E-4F6F-990B-FBCAE39369B0.png",
+        "isAssociatedWithFailure" : false,
+        "suggestedHumanReadableName" : "System keyboard before search_0_EA34DD83-29B5-48F7-9676-B255C846CD08.png",
+        "timestamp" : 1790970069.146
+      }
+    ],
+    "testIdentifier" : "UniboardUITests/testSystemKeyboardSearchAndInsertion()",
+    "testIdentifierURL" : "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardSearchAndInsertion"
+  }
+]

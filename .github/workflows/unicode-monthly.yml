@@ -30,6 +30,9 @@ jobs:
           ref: master
           fetch-depth: 1
 
+      - name: Validate Unicode download recovery
+        run: python3 -m unittest discover -s Scripts/tests
+
       - name: Fetch and generate the latest Unicode draft
         run: python3 Scripts/generate_unicode.py --source draft --refresh
 

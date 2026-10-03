@@ -12,6 +12,7 @@ cd "$repository_path"
 
 # This mode fetches fresh sources and fails on network or format errors; the
 # build must never quietly continue using a stale cached draft.
+python3 -m unittest discover -s Scripts/tests
 python3 Scripts/generate_unicode.py --source draft --refresh
 swift test
 

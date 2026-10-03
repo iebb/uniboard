@@ -11,10 +11,14 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
+import http.client
 import json
 import re
 import struct
+import sys
+import time
 import unicodedata
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -22,13 +26,39 @@ FILES = ["ReadMe.txt", "UnicodeData.txt", "Blocks.txt", "NamesList.txt", "NameAl
          "extracted/DerivedName.txt", "DerivedCoreProperties.txt"]
 CATEGORIES = "Lu Ll Lt Lm Lo Mn Mc Me Nd Nl No Pc Pd Ps Pe Pi Pf Po Sm Sc Sk So Zs Zl Zp Cc Cf Cs Co Cn".split()
 ROOT = Path(__file__).resolve().parent.parent
+FETCH_ATTEMPTS = 3
+MAX_RETRY_DELAY = 5
 
 
 def fetch(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "UniBoard-Unicode-Catalog/1"})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        content = response.read()
-    return content
+    """Retry idempotent downloads without returning or caching partial content."""
+    for attempt in range(FETCH_ATTEMPTS):
+        delay = min(2 ** attempt, MAX_RETRY_DELAY)
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "UniBoard-Unicode-Catalog/1"})
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return response.read()
+        except urllib.error.HTTPError as error:
+            # HTTPError owns the response stream too; release it before retrying
+            # or propagating a permanent failure.
+            error.close()
+            if error.code != 429 and not 500 <= error.code < 600:
+                raise
+            if error.headers is not None:
+                try:
+                    delay = max(delay, min(int(error.headers.get("Retry-After", "0")), MAX_RETRY_DELAY))
+                except (TypeError, ValueError):
+                    pass
+            if attempt + 1 == FETCH_ATTEMPTS:
+                raise
+        except (urllib.error.URLError, http.client.IncompleteRead,
+                http.client.RemoteDisconnected, OSError):
+            if attempt + 1 == FETCH_ATTEMPTS:
+                raise
+        print(f"Download interrupted; retrying {url} "
+              f"({attempt + 2}/{FETCH_ATTEMPTS}) in {delay}s", file=sys.stderr)
+        time.sleep(delay)
+    raise AssertionError("Download retry loop did not return or raise")
 
 
 def resolve_source(source: str) -> tuple[str, dict]:
@@ -276,8 +306,7 @@ def main() -> None:
     (output / "UnicodeSources.json").write_text(json.dumps(manifest, indent=2) + "\n")
     license_path = output / "Unicode-LICENSE.txt"
     if not license_path.exists():
-        with urllib.request.urlopen("https://www.unicode.org/license.txt", timeout=60) as response:
-            license_path.write_bytes(response.read())
+        license_path.write_bytes(fetch("https://www.unicode.org/license.txt"))
     print(json.dumps({k: v for k, v in manifest.items() if k not in {"sources", "notes"}}, indent=2))
 
 

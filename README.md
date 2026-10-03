@@ -45,7 +45,7 @@ This test enables Uniboard through Settings and selects the installed extension 
 
 ## Latest Unicode draft
 
-The generator uses the latest official Unicode development data and records its provenance in `Shared/Resources/UnicodeSources.json`. It pins each fetch to one immutable upstream revision and records source hashes. It does not silently replace a failed draft fetch with the stable release. The complete catalog uses a small memory-mapped binary rather than materializing hundreds of thousands of Swift objects in the keyboard process. Algorithmic names cover Hangul and ideographic ranges.
+The generator uses the latest official Unicode development data and records its provenance in `Shared/Resources/UnicodeSources.json`. It pins each fetch to one immutable upstream revision and records source hashes. Transient download failures, including truncated responses, retry up to three times with bounded delays. An exhausted or invalid draft fetch fails without replacing the existing catalog with a stable release. Both CI paths run the download recovery regression tests before refreshing. The complete catalog uses a small memory-mapped binary rather than materializing hundreds of thousands of Swift objects in the keyboard process. Algorithmic names cover Hangul and ideographic ranges.
 
 ```sh
 python3 Scripts/generate_unicode.py --source draft --refresh
@@ -66,6 +66,6 @@ The repository is connected to the active [**Uniboard iOS** Xcode Cloud workflow
 
 The [App Store Connect record](https://appstoreconnect.apple.com/apps/6818750518/distribution/info) is registered under **Kitta Ltd** as **Uniboard: Unicode Keyboard**, Apple ID **6818750518**, bundle ID and SKU **ad.neko.uniboard**, with English (U.S.) as its primary language. The device display name remains Uniboard. No App Store release has been submitted.
 
-Signed Cloud archives upload to this app’s TestFlight build list. No tester groups or invitations are configured; distributing automatically to a group requires adding a TestFlight internal-testing post-action to the workflow.
+Signed Cloud archives upload to this app’s TestFlight build list. The first signed Cloud archive, **1.0.0 (5)**, completed Apple processing and is **Ready to Test**. No tester groups or invitations are configured; distributing automatically to a group requires adding a TestFlight internal-testing post-action to the workflow.
 
 Apple documentation: [custom build scripts](https://developer.apple.com/documentation/xcode/writing-custom-build-scripts), [first workflow setup](https://developer.apple.com/documentation/xcode/configuring-your-first-xcode-cloud-workflow/).

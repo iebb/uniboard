@@ -1,0 +1,7 @@
+Please test Unicode search by character name, description, alias, block name and code point (for example U+1F680). Browse blocks, inspect character details and save favorites.
+
+Enable Uniboard in Settings > General > Keyboard > Keyboards > Add New Keyboard. In Uniboard, open Setup > Try your keyboard, tap the editor, then hold the globe key and select Uniboard.
+
+Check that searching stays inside the keyboard, tapping a character inserts the correct Unicode character into the host app, and space, return, delete and globe switching work. No Full Access is required.
+
+This build uses the latest official Unicode development draft. Character assignments and names may change; display depends on the fonts in your iOS version. Please report missing or incorrect search results, insertion problems and layout issues on iPhone and iPad.

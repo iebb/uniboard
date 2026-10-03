@@ -1,0 +1,69 @@
+{
+  "resultBundle": "build/QA/Revision-iPad-2.xcresult",
+  "selection": "Three revised app UI cases passed on iPadOS27; fresh default framebuffer separately captured from finalReleaseBuild2. No failed or canceled iPad attempt captures.",
+  "captures": [
+    {
+      "slot": "source/ipad/00-explore.png",
+      "originalAttachment": "source/revision-ipad-2-attachments/00-explore-framebuffer.png",
+      "captureMethod": "simctl framebuffer screenshot after installing finalReleaseBuild2 and waiting for launch to settle",
+      "sourceBuild": "build/QA/FinalReleaseBuild/Build/Products/Release-iphonesimulator/Uniboard.app",
+      "bundleId": "ad.neko.uniboard",
+      "launchArguments": [
+        "--uitesting"
+      ],
+      "deviceId": "CB0142AB-D811-4694-84FE-FA4B3DA6A779",
+      "deviceName": "Uniboard App Store iPad",
+      "size": [
+        2064,
+        2752
+      ],
+      "rawSHA256": "69057e6af8caddab4244b3aa74ab8a12e708039ed7e7cb716fab0cf999c328f9",
+      "visualValidation": "Root verified actual default Unicode19draft/newestfirst screen and font fallback notices"
+    },
+    {
+      "slot": "source/ipad/03-blocks.png",
+      "originalAttachment": "source/revision-ipad-2-attachments/C6633DC4-6B77-40FA-AB6D-B9F62A8B5E3D.png",
+      "resultBundle": "build/QA/Revision-iPad-2.xcresult",
+      "testIdentifier": "UniboardUITests/testBrowseUnicodeBlockAndOpenCharacter()",
+      "testResult": "Passed",
+      "attachmentName": "Browse the real Arrows block and its characters_0_5EF4204C-C754-4176-B891-B49F0F4F57D8.png",
+      "deviceId": "CB0142AB-D811-4694-84FE-FA4B3DA6A779",
+      "deviceName": "Uniboard App Store iPad",
+      "size": [
+        2064,
+        2752
+      ],
+      "rawSHA256": "93d170b01ea14cc2712e68c15ea5edb6f3305b42bad3bafeeb7940bcbb13f542"
+    },
+    {
+      "slot": "source/ipad/04-details.png",
+      "originalAttachment": "source/revision-ipad-2-attachments/BCCE0E4B-816B-42F3-A112-173FBD2ED8D7.png",
+      "resultBundle": "build/QA/Revision-iPad-2.xcresult",
+      "testIdentifier": "UniboardUITests/testUnsupportedGlyphStillShowsNameDescriptionAndProperties()",
+      "testResult": "Passed",
+      "attachmentName": "Unicode18 cracking face retains meaning when the font lacks its glyph_0_3A1A865A-FA73-4031-9353-572B9871EFF8.png",
+      "deviceId": "CB0142AB-D811-4694-84FE-FA4B3DA6A779",
+      "deviceName": "Uniboard App Store iPad",
+      "size": [
+        2064,
+        2752
+      ],
+      "rawSHA256": "5d1b4d66298f404ed8727c5e60b610cc091e3a4395dc366cd1001a4844cd3a68"
+    },
+    {
+      "slot": "source/ipad/07-emoji.png",
+      "originalAttachment": "source/revision-ipad-2-attachments/CC209AA2-5967-4E2B-AD38-F9A84FF07FE4.png",
+      "resultBundle": "build/QA/Revision-iPad-2.xcresult",
+      "testIdentifier": "UniboardUITests/testEmojiDetailsAndScratchpadPreserveWholeZWJSequence()",
+      "testResult": "Passed",
+      "attachmentName": "Woman technologist whole sequence details_0_C549B9B6-F3A3-4B71-8C18-2694309D6491.png",
+      "deviceId": "CB0142AB-D811-4694-84FE-FA4B3DA6A779",
+      "deviceName": "Uniboard App Store iPad",
+      "size": [
+        2064,
+        2752
+      ],
+      "rawSHA256": "19a99d38d2489029ced89207f667f33a88764fc64c8ae4557d50c4cf0d4670d8"
+    }
+  ]
+}

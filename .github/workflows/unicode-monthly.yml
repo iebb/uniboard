@@ -1,4 +1,4 @@
-name: Refresh Unicode draft
+name: Refresh Unicode editions
 
 on:
   schedule:
@@ -33,8 +33,8 @@ jobs:
       - name: Validate Unicode download recovery
         run: python3 -m unittest discover -s Scripts/tests
 
-      - name: Fetch and generate the latest Unicode draft
-        run: python3 Scripts/generate_unicode.py --source draft --refresh
+      - name: Fetch the latest final Unicode release and development draft
+        run: python3 Scripts/generate_unicode.py --source all --refresh
 
       - name: Validate Unicode search and catalog
         run: swift test
@@ -55,17 +55,24 @@ jobs:
           set -euo pipefail
           git add -- \
             Shared/Resources/UnicodeCatalog.ucd \
+            Shared/Resources/UnicodeCatalog-latest.ucd \
             Shared/Resources/Blocks.json \
+            Shared/Resources/Blocks-latest.json \
+            Shared/Resources/UnicodeProperties.json \
+            Shared/Resources/UnicodeProperties-latest.json \
             Shared/Resources/UnicodeSources.json \
+            Shared/Resources/UnicodeSources-latest.json \
+            Shared/Resources/EmojiCatalog-draft.json \
+            Shared/Resources/EmojiCatalog-latest.json \
             Shared/Resources/Unicode-LICENSE.txt
           if git diff --cached --quiet; then
-            echo 'The latest Unicode draft catalog is unchanged.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'The Unicode catalogs and emoji sequences are unchanged.' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'chore: refresh latest Unicode draft'
+          git commit -m 'chore: refresh Unicode editions and emoji'
           # A concurrent master update causes a normal push rejection. Never
           # rebase or force-push a result built against a different revision.
           git push origin HEAD:master
-          echo 'Updated the Unicode draft catalog on master after tests and the iOS build passed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Updated both Unicode editions and emoji catalogs on master after tests and the iOS build passed.' >> "$GITHUB_STEP_SUMMARY"

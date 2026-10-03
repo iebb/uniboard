@@ -22,6 +22,7 @@ struct CharacterDetailView: View {
                             Text(character.codePointLabel)
                                 .font(.subheadline.monospaced().weight(.medium))
                                 .foregroundStyle(Palette.accent)
+                                .accessibilityIdentifier("characterProperties.codepoints")
                         }.padding(27)
                     }.frame(height: 223)
 
@@ -29,16 +30,24 @@ struct CharacterDetailView: View {
                         Text(character.name.capitalized)
                             .font(.system(size: 27, weight: .regular, design: .serif))
                             .multilineTextAlignment(.center).foregroundStyle(Palette.ink)
+                            .accessibilityIdentifier("characterProperties.name")
                         Text(character.blockName).font(.subheadline).foregroundStyle(Palette.muted)
+                        Text(character.category == "Cn" ? "Unassigned" : "Assigned")
+                            .font(.caption.weight(.semibold)).foregroundStyle(Palette.accent)
+                            .accessibilityIdentifier("characterProperties.status")
                     }
 
-                    if !character.detail.isEmpty {
-                        Text(character.detail)
+                        Text(character.detail.isEmpty ? character.categoryName : character.detail)
                             .font(.subheadline).foregroundStyle(Palette.muted)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 17))
-                    }
-                    if character.isInvisible {
+                            .accessibilityIdentifier("characterProperties.description")
+                    Text("The name and properties remain available even if your iOS font cannot display this glyph.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                    if character.category == "Cn" {
+                        Label("This code point is not assigned in the selected Unicode edition.", systemImage: "square.dashed")
+                            .font(.caption).foregroundStyle(Palette.muted)
+                    } else if character.isInvisible {
                         Label("This character is invisible. Its preview is a placeholder; copying inserts the actual character.", systemImage: "eye.slash")
                             .font(.caption).foregroundStyle(Palette.muted)
                     } else if character.category.hasPrefix("M") {
@@ -69,6 +78,7 @@ struct CharacterDetailView: View {
                             }
                             .accessibilityLabel(store.isFavorite(character.codePoint) ? "Remove from favorites" : "Add to favorites")
                             .accessibilityIdentifier("toggleFavorite")
+                            .disabled(character.category == "Cn" && !store.isFavorite(character.codePoint))
                             Button {
                                 scratchpad += character.text
                                 store.recordUse(character.codePoint)
@@ -81,13 +91,18 @@ struct CharacterDetailView: View {
                         }.font(.subheadline.weight(.semibold)).foregroundStyle(Palette.accent)
                     }.buttonStyle(.plain)
 
-                    HStack(spacing: 0) {
-                        metadata("DECIMAL", value: String(character.codePoint))
-                        Spacer()
-                        metadata("UTF-8", value: character.text.utf8.map { String(format: "%02X", $0) }.joined(separator: " "))
-                        Spacer()
-                        metadata("CATEGORY", value: character.category)
-                    }
+                    VStack(alignment: .leading, spacing: 20) {
+                        metadata("UNICODE AGE", value: character.age ?? (character.category == "Cn" ? "Not assigned" : "Pending in the draft data"), identifier: "age")
+                        metadata("GENERAL CATEGORY", value: "\(character.category) · \(character.categoryName)", identifier: "category")
+                        metadata("BLOCK", value: character.blockName, identifier: "block")
+                        metadata("SCRIPT", value: character.script ?? "Not listed in this source", identifier: "script")
+                        metadata("DECIMAL", value: String(character.codePoint), identifier: "decimal")
+                        metadata("UTF-8", value: character.text.utf8.map { String(format: "%02X", $0) }.joined(separator: " "), identifier: "utf8")
+                        metadata("UTF-16", value: character.text.utf16.map { String(format: "%04X", $0) }.joined(separator: " "), identifier: "utf16")
+                        metadata("BIDIRECTIONAL CLASS", value: character.bidirectionalClass ?? "Not listed in this source", identifier: "bidi")
+                        metadata("COMBINING CLASS", value: character.combiningClass.map(String.init) ?? "Not listed in this source", identifier: "combining")
+                        metadata("DECOMPOSITION", value: character.decomposition.flatMap { $0.isEmpty ? nil : $0 } ?? "None listed", identifier: "decomposition")
+                    }.frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 2)
                 }
                 .padding(24).frame(maxWidth: 620).frame(maxWidth: .infinity)
@@ -100,10 +115,11 @@ struct CharacterDetailView: View {
         .presentationDragIndicator(.visible)
     }
 
-    private func metadata(_ title: String, value: String) -> some View {
+    private func metadata(_ title: String, value: String, identifier: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title).font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1).foregroundStyle(Palette.muted)
             Text(value).font(.caption.monospaced()).foregroundStyle(Palette.ink).textSelection(.enabled)
+                .accessibilityIdentifier("characterProperties.\(identifier)")
         }
     }
 }

@@ -1,7 +1,11 @@
-Please test Unicode search by character name, description, alias, block name and code point (for example U+1F680). Browse blocks, inspect character details and save favorites.
+Please test name, description, alias, block-name and code-point searches, such as U+1F680. Browse all assigned characters newest first, then switch to oldest first or code point order. Change between the offline Unicode 18 latest release and Unicode 19 draft; the app and keyboard remember their own choices.
 
-Enable Uniboard in Settings > General > Keyboard > Keyboards > Add New Keyboard. In Uniboard, open Setup > Try your keyboard, tap the editor, then hold the globe key and select Uniboard.
+Enable Uniboard in Settings > General > Keyboard > Keyboards > Add New Keyboard. In Uniboard, open Setup > Try your keyboard, tap the editor, then hold the globe key and select Uniboard. No Full Access is required.
 
-Check that searching stays inside the keyboard, tapping a character inserts the correct Unicode character into the host app, and space, return, delete and globe switching work. No Full Access is required.
+Confirm that the query stays inside the keyboard and tapping inserts only the chosen character or complete emoji into the host document. Check the top-right backspace, repeating deletion, space, return and globe switching. Backspace during search must edit only the query.
 
-This build uses the latest official Unicode development draft. Character assignments and names may change; display depends on the fonts in your iOS version. Please report missing or incorrect search results, insertion problems and layout issues on iPhone and iPad.
+Hold a character or emoji, or keep a pointer over it, to open readable, scrollable properties without insertion. Check code points, Unicode age, names, descriptions, category, UTF-8 and other available properties. Try U+1FAEB CRACKING FACE on an older iOS font: its name and properties must remain available even if the glyph is a box.
+
+In Emojis, search head shaking horizontally and insert U+1F642 U+200D U+2194 U+FE0F as one complete sequence. Check flags, skin tones and keycaps, component details, copy, favorites, recents and scratchpad text. Emoji introduction version and component Unicode ages are distinct.
+
+Draft assignments and names may change. Display depends on your iOS fonts, and some emoji may render as separate glyphs. Please report search or insertion problems, missing metadata and layout issues on iPhone and iPad.

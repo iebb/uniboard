@@ -1,45 +1,235 @@
 {
   "apple_size_reference": "https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications",
-  "approved_icon_sha256": "aabd413c0e25feb760878f6ab858852723dbf39ce9e97a821fb04f052e10cbf3",
+  "approved_icon_sha256": "ef7cbff06c330be65b281bf70d6e9ed6f0742bb57dfdb152815b0f7fc8cb298f",
+  "preview_only": false,
   "screenshots": [
     {
       "export": "iphone/00-explore.png",
       "source": "source/iphone/00-explore.png",
-      "source_sha256": "36f37aafb5495f2222a0a6b7ebd97a509e4f90fdcc8e23d952f573f6a44d68e0",
+      "source_sha256": "c0ad9695b132ac035cdcdd8edf25160513284c9db94ef42b93e17619bb806060",
+      "source_size": [
+        1320,
+        2868
+      ],
+      "export_sha256": "af6169ac764bf42b7ed6f3153d13617b5bad820256a998840c9e51f1f2a04655",
       "size": [
         1320,
         2868
       ],
       "mode": "RGB",
-      "headline": "Unicode.\nWithin reach.",
-      "subtitle": "Find a symbol, letter or little detail.",
-      "composition": "Full actual screenshot, uniformly resized, inside decorative frame. No app UI relabeling or generation."
+      "headline": "The newest.\nFirst.",
+      "subtitle": "Characters sorted by Unicode introduction.",
+      "background": "#FFFFFF",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
     },
     {
       "export": "iphone/01-keyboard.png",
       "source": "source/iphone/01-keyboard.png",
-      "source_sha256": "4c30bf040b1132a8632099dcb17069fd878b089b03d0708e3d391beee43760d5",
+      "source_sha256": "7994cc431a97f7aaa4db3eb350d1bf435733844f814431594822a896d9643b61",
+      "source_size": [
+        1206,
+        2622
+      ],
+      "export_sha256": "4065b0f006aad38289126f9375082c16586b2de8315110b870a696ecbce17268",
       "size": [
         1320,
         2868
       ],
       "mode": "RGB",
-      "headline": "Type the\nunexpected.",
-      "subtitle": "Search a symbol. Tap to type.",
-      "composition": "Full actual screenshot, uniformly resized, inside decorative frame. No app UI relabeling or generation."
+      "headline": "Every character.\nIn your keyboard.",
+      "subtitle": "Search, hold for details, tap to type.",
+      "background": "#FFFFFF",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
+    },
+    {
+      "export": "iphone/02-search.png",
+      "source": "source/iphone/02-search.png",
+      "source_sha256": "19a5d35f18b4fcac137aef5c5d589ae2df498c3bd2c9545630fe92d6053d5cba",
+      "source_size": [
+        1320,
+        2868
+      ],
+      "export_sha256": "9050057794717115928dd670da3bb829affc037a7802a55278f84f673e42daea",
+      "size": [
+        1320,
+        2868
+      ],
+      "mode": "RGB",
+      "headline": "A name.\nA code. A match.",
+      "subtitle": "Find names, descriptions and code points.",
+      "background": "#F7F5F0",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
+    },
+    {
+      "export": "iphone/03-blocks.png",
+      "source": "source/iphone/03-blocks.png",
+      "source_sha256": "3bebb72551ac2dca62682268fa6a7c221326a1d3b64d18a2ceb128d01ceea071",
+      "source_size": [
+        1320,
+        2868
+      ],
+      "export_sha256": "d02dd3c8828bf25568770593df6d88167a7da390a8cd02a3507af72509b7a701",
+      "size": [
+        1320,
+        2868
+      ],
+      "mode": "RGB",
+      "headline": "A whole block.\nWorth exploring.",
+      "subtitle": "Browse scripts, symbols and writing systems.",
+      "background": "#FFFFFF",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
+    },
+    {
+      "export": "iphone/04-details.png",
+      "source": "source/iphone/04-details.png",
+      "source_sha256": "2bd9155b0988c0f6073877f1c017d28158a13c1962cda909f7b9d8277ca9122f",
+      "source_size": [
+        1320,
+        2868
+      ],
+      "export_sha256": "cdf6aa8ebe187b3368bc063cd21e0df6c5f4c620d131244cadfbd9e23bb9c6ce",
+      "size": [
+        1320,
+        2868
+      ],
+      "mode": "RGB",
+      "headline": "A glyph.\nAnd its meaning.",
+      "subtitle": "Hold for names, descriptions and properties.",
+      "background": "#F7F5F0",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
+    },
+    {
+      "export": "iphone/07-emoji.png",
+      "source": "source/iphone/07-emoji.png",
+      "source_sha256": "1c3bba3f116b542d3145d69fadaa78def3809f584cd6031c73aca1741513588b",
+      "source_size": [
+        1320,
+        2868
+      ],
+      "export_sha256": "6aed38e4d45d590a4d98ca23528da413444eb2cdac74dd802243e752371b40db",
+      "size": [
+        1320,
+        2868
+      ],
+      "mode": "RGB",
+      "headline": "One emoji.\nEvery code point.",
+      "subtitle": "Joiners, variation selectors and all.",
+      "background": "#FFFFFF",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
+    },
+    {
+      "export": "iphone/08-editions.png",
+      "source": "source/iphone/08-editions.png",
+      "source_sha256": "0e52388de90e9fbd21153d639ab1475d9a6e09312228fbc2750381e8691d5e59",
+      "source_size": [
+        1320,
+        2868
+      ],
+      "export_sha256": "6f97c14f3ed1fa85c2b95340f44d09e2b5fde54d3f99d258d0dc9337e723bd59",
+      "size": [
+        1320,
+        2868
+      ],
+      "mode": "RGB",
+      "headline": "Latest release.\nLatest draft.",
+      "subtitle": "Unicode 18 and 19 draft, bundled offline.",
+      "background": "#F7F5F0",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
+    },
+    {
+      "export": "iphone/09-properties.png",
+      "source": "source/iphone/09-properties.png",
+      "source_sha256": "0b5c570878d9cc487d14d3576572b823ec1bfcb346bd29eb8d07fff01093b088",
+      "source_size": [
+        1206,
+        2622
+      ],
+      "export_sha256": "6ca59d416fa0a56106bd0c86109afef9df0df563f4ed166dddeec8f05474f728",
+      "size": [
+        1320,
+        2868
+      ],
+      "mode": "RGB",
+      "headline": "Unicode properties.\nIn your keyboard.",
+      "subtitle": "Script, direction, combining class and more.",
+      "background": "#FFFFFF",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
     },
     {
       "export": "ipad/00-explore.png",
       "source": "source/ipad/00-explore.png",
-      "source_sha256": "cdb38c58fb9f99e370a2eb76e4c99a49dcdf1bc4e4d6fce844cb1f995074752c",
+      "source_sha256": "69057e6af8caddab4244b3aa74ab8a12e708039ed7e7cb716fab0cf999c328f9",
+      "source_size": [
+        2064,
+        2752
+      ],
+      "export_sha256": "a02906d2a6b4d768e8af6b45ec9931d61c6b06700bea0c46e9443193f02a9c13",
       "size": [
         2064,
         2752
       ],
       "mode": "RGB",
-      "headline": "Unicode.\nWithin reach.",
-      "subtitle": "Find a symbol, letter or little detail.",
-      "composition": "Full actual screenshot, uniformly resized, inside decorative frame. No app UI relabeling or generation."
+      "headline": "The newest.\nFirst.",
+      "subtitle": "Characters sorted by Unicode introduction.",
+      "background": "#FFFFFF",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
+    },
+    {
+      "export": "ipad/03-blocks.png",
+      "source": "source/ipad/03-blocks.png",
+      "source_sha256": "93d170b01ea14cc2712e68c15ea5edb6f3305b42bad3bafeeb7940bcbb13f542",
+      "source_size": [
+        2064,
+        2752
+      ],
+      "export_sha256": "9fb80a64618766b9c93658fa191820977bb0dc703eaef56bac15697c5e69960f",
+      "size": [
+        2064,
+        2752
+      ],
+      "mode": "RGB",
+      "headline": "A whole block.\nWorth exploring.",
+      "subtitle": "Browse scripts, symbols and writing systems.",
+      "background": "#FFFFFF",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
+    },
+    {
+      "export": "ipad/04-details.png",
+      "source": "source/ipad/04-details.png",
+      "source_sha256": "5d1b4d66298f404ed8727c5e60b610cc091e3a4395dc366cd1001a4844cd3a68",
+      "source_size": [
+        2064,
+        2752
+      ],
+      "export_sha256": "0fd8492976a6db38af034c04344fe6a96d1c09f6aab98f68a0d7caa460d96f62",
+      "size": [
+        2064,
+        2752
+      ],
+      "mode": "RGB",
+      "headline": "A glyph.\nAnd its meaning.",
+      "subtitle": "Hold for names, descriptions and properties.",
+      "background": "#F7F5F0",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
+    },
+    {
+      "export": "ipad/07-emoji.png",
+      "source": "source/ipad/07-emoji.png",
+      "source_sha256": "19a99d38d2489029ced89207f667f33a88764fc64c8ae4557d50c4cf0d4670d8",
+      "source_size": [
+        2064,
+        2752
+      ],
+      "export_sha256": "340402edad537d2b2a4f061795ee2aba2926733dff1c49f757359577abc18548",
+      "size": [
+        2064,
+        2752
+      ],
+      "mode": "RGB",
+      "headline": "One emoji.\nEvery code point.",
+      "subtitle": "Joiners, variation selectors and all.",
+      "background": "#FFFFFF",
+      "composition": "Complete actual screenshot with one uniform resize inside a decorative frame. Only outer physical screen corners are rounded. No app UI relabeling or generation."
     }
   ]
 }

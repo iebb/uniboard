@@ -406,20 +406,40 @@ module UniboardAppStoreRelease
              id: @version_id, relationships: { build: ref('builds', @build_id) }, label: 'version and exact build')
     end
     def sync_metadata!
-      info_locs = @client.all("/v1/appInfos/#{@app_info['id']}/appInfoLocalizations", 'limit' => '200').to_h { |l| [l.dig('attributes', 'locale'), l] }
-      version_locs = @client.all("/v1/appStoreVersions/#{@version_id}/appStoreVersionLocalizations", 'limit' => '200').to_h { |l| [l.dig('attributes', 'locale'), l] }
+      info_locs = localization_index!(@client.all("/v1/appInfos/#{@app_info['id']}/appInfoLocalizations", 'limit' => '200'), 'App Info')
+      version_locs = read_version_localizations!
       @version_localizations = version_locs
       @metadata.each do |locale, a|
         info_attrs = a.slice('name', 'subtitle').merge('privacyPolicyUrl' => @o[:privacy_url])
-        sync_localization(info_locs[locale], 'appInfoLocalizations', info_attrs, 'appInfo', @app_info['id'], locale)
+        new_info = info_locs[locale].nil?
+        updated_info = sync_localization(info_locs[locale], 'appInfoLocalizations', info_attrs, 'appInfo', @app_info['id'], locale)
+        if @apply && new_info
+          # Creating App Info can also create this locale on the App Store version.
+          # Refresh before deciding whether its metadata needs PATCH or POST.
+          info_locs[locale] = updated_info
+          version_locs = read_version_localizations!
+          @version_localizations = version_locs
+        end
         version_attrs = a.slice('description', 'keywords', 'promotionalText', 'whatsNew').merge('supportUrl' => @o[:support_url])
         version_attrs.delete('whatsNew') if @initial_release
         version_attrs['marketingUrl'] = @o[:marketing_url] if @o[:marketing_url]
         updated = sync_localization(version_locs[locale], 'appStoreVersionLocalizations', version_attrs, 'appStoreVersion', @version_id, locale)
         @version_localizations[locale] = updated if updated
       end
-      extras = version_locs.keys - @metadata.keys
+    end
+    def localization_index!(records, label)
+      records.each_with_object({}) do |record, indexed|
+        locale = record.dig('attributes', 'locale')
+        raise Error, "#{label} localization has missing identity/locale" if record['id'].to_s.empty? || !locale.is_a?(String) || locale.empty?
+        raise Error, "#{label} has ambiguous duplicate locale: #{locale}" if indexed.key?(locale)
+        indexed[locale] = record
+      end
+    end
+    def read_version_localizations!
+      indexed = localization_index!(@client.all("/v1/appStoreVersions/#{@version_id}/appStoreVersionLocalizations", 'limit' => '200'), 'App Store version')
+      extras = indexed.keys - @metadata.keys
       raise Error, "Existing locale metadata absent from source: #{extras.join(', ')}" unless extras.empty?
+      indexed
     end
     def sync_categories!
       categories = { 'primaryCategory' => 'UTILITIES', 'secondaryCategory' => 'REFERENCE' }

@@ -4,14 +4,23 @@
     "displayType": "APP_IPHONE_67",
     "files": [
       "iphone/01-keyboard.png",
-      "iphone/00-explore.png"
+      "iphone/00-explore.png",
+      "iphone/07-emoji.png",
+      "iphone/04-details.png",
+      "iphone/09-properties.png",
+      "iphone/08-editions.png",
+      "iphone/02-search.png",
+      "iphone/03-blocks.png"
     ]
   },
   {
     "locale": "en-US",
     "displayType": "APP_IPAD_PRO_3GEN_129",
     "files": [
-      "ipad/00-explore.png"
+      "ipad/00-explore.png",
+      "ipad/07-emoji.png",
+      "ipad/04-details.png",
+      "ipad/03-blocks.png"
     ]
   },
   {
@@ -19,14 +28,23 @@
     "displayType": "APP_IPHONE_67",
     "files": [
       "iphone/01-keyboard.png",
-      "iphone/00-explore.png"
+      "iphone/00-explore.png",
+      "iphone/07-emoji.png",
+      "iphone/04-details.png",
+      "iphone/09-properties.png",
+      "iphone/08-editions.png",
+      "iphone/02-search.png",
+      "iphone/03-blocks.png"
     ]
   },
   {
     "locale": "ja",
     "displayType": "APP_IPAD_PRO_3GEN_129",
     "files": [
-      "ipad/00-explore.png"
+      "ipad/00-explore.png",
+      "ipad/07-emoji.png",
+      "ipad/04-details.png",
+      "ipad/03-blocks.png"
     ]
   }
 ]

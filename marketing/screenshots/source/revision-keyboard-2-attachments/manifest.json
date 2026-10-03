@@ -1,0 +1,47 @@
+[
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName": "Uniboard Keyboard QA",
+        "exportedFileName": "D47F7686-1192-41AF-9CE8-69868E0EE270.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Whole emoji ZWJ sequence inserted into host_0_B7071C0C-E6AE-4BD1-B8D2-4EB7C4D4FC18.png",
+        "timestamp": 1791028294.701
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testSystemKeyboardInsertsWholeZWJEmojiAndVariationSelectorWithoutLeakingQuery()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardInsertsWholeZWJEmojiAndVariationSelectorWithoutLeakingQuery"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName": "Uniboard Keyboard QA",
+        "exportedFileName": "FA94531A-76E8-4D39-AD3E-0C58E9053252.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Long press exposes character properties without insertion_0_CF2F9C7F-068D-4181-9C16-2C672282F789.png",
+        "timestamp": 1791028365.177
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+        "deviceName": "Uniboard Keyboard QA",
+        "exportedFileName": "FF698BE7-E439-4911-BCC3-33F507F65EFE.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "System keyboard search and Unicode insertion_0_0E31E3EE-228F-4A43-B0DA-B7A58040BCC0.png",
+        "timestamp": 1791028421.353
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testSystemKeyboardSearchAndInsertion()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSystemKeyboardSearchAndInsertion"
+  }
+]

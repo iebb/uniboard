@@ -1,0 +1,76 @@
+{
+  "unicodeVersion": "18.0.0",
+  "versionLabel": "18.0.0",
+  "isDraft": false,
+  "source": "latest",
+  "sourceLastModified": "2026-08-10, 15:32:05 GMT",
+  "refreshedAt": "2026-10-03T11:48:13Z",
+  "sourceKind": "unicode-release",
+  "formatVersion": 2,
+  "blocks": 353,
+  "explicitRecords": 35416,
+  "algorithmicRanges": 26,
+  "assignedScalarsIncludingPrivateUse": 310341,
+  "catalogBytes": 3928105,
+  "fullyQualifiedEmoji": 3963,
+  "emojiVersion": "18.0",
+  "assignedScalarsWithPendingDraftAge": 0,
+  "sources": {
+    "ReadMe.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/ReadMe.txt",
+      "sha256": "b0ea442f29dee90584aacd3665a6e1ce87ffc917a4d31f34e1916d2d6f7f9205"
+    },
+    "UnicodeData.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/UnicodeData.txt",
+      "sha256": "0736451de439ae7baf1425136617da495e09ee5afbe6e394374db7009ea08950"
+    },
+    "Blocks.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/Blocks.txt",
+      "sha256": "a58f8d322f3c5e254f9f97b1cbf76a454a7e02de6ac35619a5e4f27aaabfd553",
+      "sourceDate": "2026-07-08",
+      "declaredVersion": "18.0.0"
+    },
+    "NamesList.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/NamesList.txt",
+      "sha256": "e0732f7cb47a08ee2186c83a18a91ae277126e8099b53c432b4c3e32488dac9b",
+      "sourceDate": "2026-08-10, 15:32:05 GMT",
+      "declaredVersion": "18.0.0"
+    },
+    "NameAliases.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/NameAliases.txt",
+      "sha256": "3d5cf5e468901b080cd99adf2230061b748083705fe633db43ac8b73ec7a13da",
+      "sourceDate": "2026-02-03",
+      "declaredVersion": "18.0.0"
+    },
+    "extracted/DerivedName.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/extracted/DerivedName.txt",
+      "sha256": "ac6cf808ea4ee29323031d5ba9449de13da51398a3f5ce401546d8fceb976df7",
+      "sourceDate": "2026-06-29, 15:25:03 GMT",
+      "declaredVersion": "18.0.0"
+    },
+    "DerivedCoreProperties.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/DerivedCoreProperties.txt",
+      "sha256": "09c928886a178fcafd93c29e4bd59073a058e5a100b716d425cb563ab50f68c9",
+      "sourceDate": "2026-08-07, 16:19:42 GMT",
+      "declaredVersion": "18.0.0"
+    },
+    "DerivedAge.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/DerivedAge.txt",
+      "sha256": "58b04334e3a31f9612694bbc3f6bff4a302b7d424565bca9c47e30aa74f8dbac",
+      "sourceDate": "2026-06-29, 15:24:58 GMT",
+      "declaredVersion": "18.0.0"
+    },
+    "Scripts.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/Scripts.txt",
+      "sha256": "0071fd81b6aeae25f6e8bce8efec3066a6476a91b49bdb2f52dc76e817862a6a",
+      "sourceDate": "2026-06-29, 15:25:26 GMT",
+      "declaredVersion": "18.0.0"
+    },
+    "emoji/emoji-test.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/emoji/emoji-test.txt",
+      "sha256": "8f3735cda1f92a779d78af67cf86066bb1f07143dc22f2ac29394d9bc57ab21a",
+      "sourceDate": "2026-04-30, 22:40:18 GMT"
+    }
+  },
+  "notes": "NamesList annotations are informative prose. Age and Script retain official generated property values; new draft assignments missing upstream Age have no inferred Age label and use the draft edition only for ordering. Emoji introduction version is distinct from the maximum official Unicode Age of its component scalars. Algorithmic names use DerivedName and the normative Hangul naming algorithm. Surrogates are excluded."
+}

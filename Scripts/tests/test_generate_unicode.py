@@ -3,6 +3,7 @@ import contextlib
 import http.client
 import importlib.util
 import io
+import json
 import tempfile
 import unittest
 import urllib.error
@@ -109,6 +110,49 @@ class DownloadTests(unittest.TestCase):
             self.assertFalse((root / ".unicode-cache" / "draft" / "ReadMe.txt").exists())
             for name, content in originals.items():
                 self.assertEqual((resources / name).read_bytes(), content)
+
+    def test_both_editions_validate_before_any_resource_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            resources = root / "Shared" / "Resources"
+            resources.mkdir(parents=True)
+            originals = {name: ("old " + name).encode() for name in (
+                "UnicodeCatalog.ucd", "UnicodeCatalog-latest.ucd", "UnicodeProperties.json",
+                "UnicodeProperties-latest.json", "EmojiCatalog-draft.json", "EmojiCatalog-latest.json")}
+            for name, content in originals.items():
+                (resources / name).write_bytes(content)
+            with mock.patch.object(generator, "ROOT", root), \
+                    mock.patch.object(generator.sys, "argv", ["generate_unicode.py", "--source", "all", "--refresh"]), \
+                    mock.patch.object(generator, "generate_catalog", side_effect=[
+                        {"UnicodeCatalog-latest.ucd": b"new final edition"}, ValueError("invalid draft")]) as generate:
+                with self.assertRaisesRegex(ValueError, "invalid draft"):
+                    generator.main()
+            self.assertEqual([call.args[0] for call in generate.call_args_list], ["latest", "draft"])
+            for name, content in originals.items():
+                self.assertEqual((resources / name).read_bytes(), content)
+
+    def test_latest_release_resolves_final_version_to_immutable_directory(self):
+        with mock.patch.object(generator, "fetch", return_value=b"This directory contains final data files for version 18.0.0 of the Unicode Character Database."):
+            base, provenance = generator.resolve_source("latest")
+        self.assertEqual(base, "https://www.unicode.org/Public/18.0.0/ucd/")
+        self.assertEqual(provenance["sourceKind"], "unicode-release")
+        with mock.patch.object(generator, "fetch", return_value=b"This directory contains draft data files for version 19.0.0"):
+            with self.assertRaisesRegex(ValueError, "not an official final release"):
+                generator.resolve_source("latest")
+
+    def test_numeric_versions_do_not_use_lexicographic_sorting(self):
+        self.assertGreater(generator.version_key("10.0"), generator.version_key("9.0"))
+        self.assertGreater(generator.version_key("15.1"), generator.version_key("15.0"))
+
+    def test_draft_pins_repository_head_so_emoji_only_changes_are_included(self):
+        sha = "a" * 40
+        commit = [{"sha": sha, "commit": {"committer": {"date": "2026-10-03T00:00:00Z"}}}]
+        with mock.patch.object(generator, "fetch", return_value=json.dumps(commit).encode()) as fetch:
+            base, provenance = generator.resolve_source("draft")
+        fetch.assert_called_once_with("https://api.github.com/repos/unicode-org/unicodetools/commits?per_page=1")
+        self.assertIn(sha + "/unicodetools/data/ucd/dev/", base)
+        self.assertEqual(provenance["sourceCommit"], sha)
+        self.assertIn(sha + "/unicodetools/data/emoji/dev/", base.replace("/ucd/dev/", "/emoji/dev/"))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,47 @@
+[
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "CB0142AB-D811-4694-84FE-FA4B3DA6A779",
+        "deviceName": "Uniboard App Store iPad",
+        "exportedFileName": "C6633DC4-6B77-40FA-AB6D-B9F62A8B5E3D.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Browse the real Arrows block and its characters_0_5EF4204C-C754-4176-B891-B49F0F4F57D8.png",
+        "timestamp": 1791028749.062
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testBrowseUnicodeBlockAndOpenCharacter()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testBrowseUnicodeBlockAndOpenCharacter"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "CB0142AB-D811-4694-84FE-FA4B3DA6A779",
+        "deviceName": "Uniboard App Store iPad",
+        "exportedFileName": "CC209AA2-5967-4E2B-AD38-F9A84FF07FE4.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Woman technologist whole sequence details_0_C549B9B6-F3A3-4B71-8C18-2694309D6491.png",
+        "timestamp": 1791028768.214
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testEmojiDetailsAndScratchpadPreserveWholeZWJSequence()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testEmojiDetailsAndScratchpadPreserveWholeZWJSequence"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "CB0142AB-D811-4694-84FE-FA4B3DA6A779",
+        "deviceName": "Uniboard App Store iPad",
+        "exportedFileName": "BCCE0E4B-816B-42F3-A112-173FBD2ED8D7.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Unicode18 cracking face retains meaning when the font lacks its glyph_0_3A1A865A-FA73-4031-9353-572B9871EFF8.png",
+        "timestamp": 1791028792.473
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testUnsupportedGlyphStillShowsNameDescriptionAndProperties()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testUnsupportedGlyphStillShowsNameDescriptionAndProperties"
+  }
+]

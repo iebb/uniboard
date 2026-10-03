@@ -1,0 +1,96 @@
+{
+  "resultBundle": "build/QA/Revision-App-4.xcresult",
+  "selection": "Successful app UI test captures only; no failed run3 assets.",
+  "captures": [
+    {
+      "slot": "source/iphone/00-explore.png",
+      "originalAttachment": "source/revision-app-4-attachments/09DD1C36-D738-4350-A441-6B59BE8078B6.png",
+      "resultBundle": "build/QA/Revision-App-4.xcresult",
+      "testIdentifier": "UniboardUITests/testDefaultNewestFirstUsesNumericUnicodeAges()",
+      "testResult": "Passed",
+      "attachmentName": "Default Explore displays newest Unicode characters first_0_9F142C57-63A9-4A17-A751-2BFE087CFB2F.png",
+      "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+      "deviceName": "Uniboard App Store iPhone",
+      "size": [
+        1320,
+        2868
+      ],
+      "rawSHA256": "c0ad9695b132ac035cdcdd8edf25160513284c9db94ef42b93e17619bb806060"
+    },
+    {
+      "slot": "source/iphone/02-search.png",
+      "originalAttachment": "source/revision-app-4-attachments/02D14FC8-F751-40C1-910E-853F07C05F4D.png",
+      "resultBundle": "build/QA/Revision-App-4.xcresult",
+      "testIdentifier": "UniboardUITests/testSearchBySupplementaryCodepointAndAlias()",
+      "testResult": "Passed",
+      "attachmentName": "Search by code point finds the original rocket_0_AA48BE33-D7A7-4A9B-8457-55EB46D8F777.png",
+      "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+      "deviceName": "Uniboard App Store iPhone",
+      "size": [
+        1320,
+        2868
+      ],
+      "rawSHA256": "19a5d35f18b4fcac137aef5c5d589ae2df498c3bd2c9545630fe92d6053d5cba"
+    },
+    {
+      "slot": "source/iphone/03-blocks.png",
+      "originalAttachment": "source/revision-app-4-attachments/5418AED6-9AC3-4817-A5F4-F8E668EE53E2.png",
+      "resultBundle": "build/QA/Revision-App-4.xcresult",
+      "testIdentifier": "UniboardUITests/testBrowseUnicodeBlockAndOpenCharacter()",
+      "testResult": "Passed",
+      "attachmentName": "Browse the real Arrows block and its characters_0_8DDF20F5-8568-4707-93E1-37E744130704.png",
+      "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+      "deviceName": "Uniboard App Store iPhone",
+      "size": [
+        1320,
+        2868
+      ],
+      "rawSHA256": "3bebb72551ac2dca62682268fa6a7c221326a1d3b64d18a2ceb128d01ceea071"
+    },
+    {
+      "slot": "source/iphone/04-details.png",
+      "originalAttachment": "source/revision-app-4-attachments/08C1B6E1-7EBE-4F10-AA42-CCDD5ADDA984.png",
+      "resultBundle": "build/QA/Revision-App-4.xcresult",
+      "testIdentifier": "UniboardUITests/testUnsupportedGlyphStillShowsNameDescriptionAndProperties()",
+      "testResult": "Passed",
+      "attachmentName": "Unicode18 cracking face retains meaning when the font lacks its glyph_0_1CA67579-8098-4B8C-B0BD-B976B4DB1630.png",
+      "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+      "deviceName": "Uniboard App Store iPhone",
+      "size": [
+        1320,
+        2868
+      ],
+      "rawSHA256": "2bd9155b0988c0f6073877f1c017d28158a13c1962cda909f7b9d8277ca9122f"
+    },
+    {
+      "slot": "source/iphone/07-emoji.png",
+      "originalAttachment": "source/revision-app-4-attachments/343AD1B6-CDD1-4E28-BF10-CC3B2801234C.png",
+      "resultBundle": "build/QA/Revision-App-4.xcresult",
+      "testIdentifier": "UniboardUITests/testEmojiDetailsAndScratchpadPreserveWholeZWJSequence()",
+      "testResult": "Passed",
+      "attachmentName": "Woman technologist whole sequence details_0_A32DBA24-1396-4C0B-805D-07EB84B1D9DE.png",
+      "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+      "deviceName": "Uniboard App Store iPhone",
+      "size": [
+        1320,
+        2868
+      ],
+      "rawSHA256": "1c3bba3f116b542d3145d69fadaa78def3809f584cd6031c73aca1741513588b"
+    },
+    {
+      "slot": "source/iphone/08-editions.png",
+      "originalAttachment": "source/revision-app-4-attachments/B9527280-E86C-466F-91BC-5D1BF80B64E4.png",
+      "resultBundle": "build/QA/Revision-App-4.xcresult",
+      "testIdentifier": "UniboardUITests/testCatalogSelectionPreservesLookupStatusAndLocalChoice()",
+      "testResult": "Passed",
+      "attachmentName": "Offline catalog menu offers latest release and development draft_0_FB3D08AA-1BE3-4365-90EC-B538E556B433.png",
+      "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+      "deviceName": "Uniboard App Store iPhone",
+      "size": [
+        1320,
+        2868
+      ],
+      "rawSHA256": "0e52388de90e9fbd21153d639ab1475d9a6e09312228fbc2750381e8691d5e59"
+    }
+  ]
+}

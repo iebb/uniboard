@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SetupView: View {
+    @EnvironmentObject private var preferences: CatalogPreferences
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 27) {
@@ -52,9 +53,10 @@ struct SetupView: View {
                 }
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("UNICODE \(UnicodeCatalog.shared.version)")
+                    CatalogControls(showSort: false)
+                    Text("UNICODE \(preferences.catalog.version)")
                         .font(.caption.monospaced().weight(.semibold)).foregroundStyle(Palette.accent)
-                    Text("Built from the latest Unicode draft. Draft assignments may change, and your iOS fonts may not display every new character.")
+                    Text("Switch between the latest Unicode release and the development draft, both bundled offline. The app and keyboard remember their own choices. Draft assignments may change, and your iOS fonts may not display every new character. Hold or hover over any character for its name, description and properties.")
                         .font(.caption).foregroundStyle(Palette.muted)
                     NavigationLink("Unicode data & license") { UnicodeLicenseView() }.font(.caption)
                 }

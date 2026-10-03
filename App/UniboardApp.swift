@@ -3,11 +3,13 @@ import SwiftUI
 @main
 struct UniboardApp: App {
     @StateObject private var store = CharacterStore.shared
+    @StateObject private var preferences = CatalogPreferences.shared
 
     init() {
         if ProcessInfo.processInfo.arguments.contains("--uitesting") {
             CharacterStore.shared.reset()
             UserDefaults.standard.removeObject(forKey: "scratchpad")
+            CatalogPreferences.shared.reset()
         }
     }
 
@@ -15,6 +17,7 @@ struct UniboardApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(store)
+                .environmentObject(preferences)
                 .tint(Palette.accent)
         }
     }

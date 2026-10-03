@@ -191,6 +191,37 @@ class AppStoreReleaseTest < Minitest::Test
       super
     end
   end
+  class AutomaticLocaleClient < FakeClient
+    attr_accessor :duplicate_infos, :duplicate_versions
+    def initialize
+      super
+      @created_ja = false
+    end
+    def all(path, params = {})
+      if path == '/v1/appInfos/info/appInfoLocalizations'
+        records = [{ 'id' => 'info-en-US', 'attributes' => { 'locale' => 'en-US' } }]
+        records << { 'id' => 'info-ja', 'attributes' => { 'locale' => 'ja' } } if @created_ja
+        records << { 'id' => 'info-duplicate', 'attributes' => { 'locale' => 'en-US' } } if @duplicate_infos
+        return records
+      end
+      if path == '/v1/appStoreVersions/version/appStoreVersionLocalizations'
+        records = [{ 'id' => 'version-en-US', 'attributes' => { 'locale' => 'en-US' } }]
+        records << { 'id' => 'version-ja', 'attributes' => { 'locale' => 'ja' } } if @created_ja
+        records << { 'id' => 'version-duplicate', 'attributes' => { 'locale' => 'en-US' } } if @duplicate_versions
+        return records
+      end
+      super
+    end
+    def post(path, body)
+      locale = body.dig('data', 'attributes', 'locale')
+      if path == '/v1/appStoreVersionLocalizations' && locale == 'ja' && @created_ja
+        raise M::ApiError.new(409, 'POST', path, 'errors' => [{ 'code' => 'ENTITY_ERROR.ATTRIBUTE.DUPLICATE' }])
+      end
+      # Mirrors the observed ASC side effect of a new App Info locale.
+      @created_ja = true if path == '/v1/appInfoLocalizations' && locale == 'ja'
+      super
+    end
+  end
 
   def setup
     @tmp = Dir.mktmpdir('uniboard-release-test')
@@ -403,5 +434,37 @@ class AppStoreReleaseTest < Minitest::Test
     error = assert_raises(M::Error) { runner(apply: true).run }
     assert_includes error.message, '4,000 UTF-8 bytes'
     assert_empty @client.writes
+  end
+  def metadata_runner
+    instance = runner(apply: true)
+    instance.instance_variable_set(:@version_id, 'version')
+    instance.instance_variable_set(:@app_info, { 'id' => 'info' })
+    instance.instance_variable_set(:@initial_release, true)
+    instance.instance_variable_set(:@metadata, instance.send(:read_metadata))
+    instance
+  end
+  def test_new_app_info_locale_refreshes_auto_created_version_locale_and_patches_it
+    @client = AutomaticLocaleClient.new
+    instance = metadata_runner
+    instance.send(:sync_metadata!)
+    assert @client.writes.any? { |method, path, body| method == 'POST' && path == '/v1/appInfoLocalizations' && body.dig('data', 'attributes', 'locale') == 'ja' }
+    patch = @client.writes.find { |method, path, _| method == 'PATCH' && path == '/v1/appStoreVersionLocalizations/version-ja' }
+    refute_nil patch
+    assert_equal 'Valid listing copy', patch.last.dig('data', 'attributes', 'description')
+    refute @client.writes.any? { |method, path, _| method == 'POST' && path == '/v1/appStoreVersionLocalizations' }
+    assert_equal 'version-ja', instance.instance_variable_get(:@version_localizations).dig('ja', 'id')
+    # A repeated preparation now uses the same resources instead of creating more.
+    @client.writes.clear
+    instance.send(:sync_metadata!)
+    assert @client.writes.all? { |method, _, _| method == 'PATCH' }
+  end
+  def test_ambiguous_app_info_or_version_locales_fail_before_metadata_writes
+    [:duplicate_infos, :duplicate_versions].each do |flag|
+      @client = AutomaticLocaleClient.new
+      @client.public_send("#{flag}=", true)
+      error = assert_raises(M::Error) { metadata_runner.send(:sync_metadata!) }
+      assert_includes error.message, 'ambiguous duplicate locale'
+      assert_empty @client.writes
+    end
   end
 end

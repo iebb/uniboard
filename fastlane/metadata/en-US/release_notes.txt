@@ -1,1 +1,1 @@
-Introducing Uniboard: search Unicode by name, description, alias, block or code point; type from the offline keyboard; and keep favorite characters close at hand. No account or Full Access required.
+Introducing Uniboard: offline Unicode search and keyboard input, complete emoji sequences, Unicode 18 and 19 draft editions, newest-first browsing, readable properties and local favorites.

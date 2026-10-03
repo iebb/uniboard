@@ -1,0 +1,51 @@
+{
+  "resultBundle": "build/QA/Revision-Keyboard-2.xcresult",
+  "selection": "Five real system keyboard tests passed on iOS18.5. Exact ZWJ+VS16 insertion supporting proof retained.",
+  "captures": [
+    {
+      "slot": null,
+      "originalAttachment": "source/revision-keyboard-2-attachments/D47F7686-1192-41AF-9CE8-69868E0EE270.png",
+      "resultBundle": "build/QA/Revision-Keyboard-2.xcresult",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardInsertsWholeZWJEmojiAndVariationSelectorWithoutLeakingQuery()",
+      "testResult": "Passed",
+      "attachmentName": "Whole emoji ZWJ sequence inserted into host_0_B7071C0C-E6AE-4BD1-B8D2-4EB7C4D4FC18.png",
+      "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+      "deviceName": "Uniboard Keyboard QA",
+      "size": [
+        1206,
+        2622
+      ],
+      "rawSHA256": "966b8b9d34b5dfb83e1db1bc70fa5c748626a78f5d46cf1c45eb7b83921acda8"
+    },
+    {
+      "slot": "source/iphone/09-properties.png",
+      "originalAttachment": "source/revision-keyboard-2-attachments/FA94531A-76E8-4D39-AD3E-0C58E9053252.png",
+      "resultBundle": "build/QA/Revision-Keyboard-2.xcresult",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardLongPressShowsPropertiesWithoutInsertion()",
+      "testResult": "Passed",
+      "attachmentName": "Long press exposes character properties without insertion_0_CF2F9C7F-068D-4181-9C16-2C672282F789.png",
+      "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+      "deviceName": "Uniboard Keyboard QA",
+      "size": [
+        1206,
+        2622
+      ],
+      "rawSHA256": "0b5c570878d9cc487d14d3576572b823ec1bfcb346bd29eb8d07fff01093b088"
+    },
+    {
+      "slot": "source/iphone/01-keyboard.png",
+      "originalAttachment": "source/revision-keyboard-2-attachments/FF698BE7-E439-4911-BCC3-33F507F65EFE.png",
+      "resultBundle": "build/QA/Revision-Keyboard-2.xcresult",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardSearchAndInsertion()",
+      "testResult": "Passed",
+      "attachmentName": "System keyboard search and Unicode insertion_0_0E31E3EE-228F-4A43-B0DA-B7A58040BCC0.png",
+      "deviceId": "908BF4AC-FE98-4165-A769-A748AE7CECE9",
+      "deviceName": "Uniboard Keyboard QA",
+      "size": [
+        1206,
+        2622
+      ],
+      "rawSHA256": "7994cc431a97f7aaa4db3eb350d1bf435733844f814431594822a896d9643b61"
+    }
+  ]
+}

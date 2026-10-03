@@ -37,10 +37,14 @@ struct CharacterTile: View {
     let character: UnicodeCharacter
     var saved = false
     var action: () -> Void
+    @State private var hoverTask: Task<Void, Never>?
+    private var ageText: String {
+        if let age = character.age { return "Unicode " + age }
+        return character.category == "Cn" ? "Unassigned" : "Age pending"
+    }
 
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 9) {
+            VStack(spacing: 5) {
                 Text(character.displayText)
                     .font(.system(size: 31))
                     .foregroundStyle(Palette.ink)
@@ -50,17 +54,42 @@ struct CharacterTile: View {
                 Text(character.codePointLabel)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(Palette.muted)
+                Text(character.name.capitalized)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(2).multilineTextAlignment(.center)
+                    .frame(height: 26)
+                Text(ageText)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Palette.muted)
+                    .accessibilityIdentifier("age-\(character.codePointLabel)")
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 91)
+            .frame(height: 126)
+            .padding(.horizontal, 3)
             .background(Palette.surface, in: RoundedRectangle(cornerRadius: 15))
             .overlay(alignment: .topTrailing) {
                 if saved { Image(systemName: "star.fill").font(.system(size: 8)).foregroundStyle(Palette.accent).padding(8) }
             }
+        .contentShape(RoundedRectangle(cornerRadius: 15))
+        .gesture(LongPressGesture(minimumDuration: 0.4).exclusively(before: TapGesture()).onEnded { _ in action() })
+        .onHover { hovering in
+            hoverTask?.cancel()
+            if hovering {
+                hoverTask = Task { @MainActor in
+                    do { try await Task.sleep(for: .milliseconds(550)) } catch { return }
+                    guard !Task.isCancelled else { return }
+                    action()
+                }
+            }
         }
-        .buttonStyle(.plain)
+        .onDisappear { hoverTask?.cancel() }
         .accessibilityLabel("\(character.name), \(character.codePointLabel)")
-        .accessibilityHint("Show character details and copy options")
+        .accessibilityValue(ageText)
+        .accessibilityHint("Tap, hold, or hover to show Unicode properties and description")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { action() }
+        .accessibilityAction(named: Text("Inspect character"), action)
         .accessibilityIdentifier("character-\(character.codePointLabel)")
     }
 }
@@ -71,7 +100,7 @@ struct CharacterGrid: View {
     var select: (UnicodeCharacter) -> Void
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 73, maximum: 120), spacing: 9)], spacing: 9) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: 9)], spacing: 9) {
             ForEach(characters) { character in
                 CharacterTile(character: character, saved: store.isFavorite(character.codePoint)) { select(character) }
             }

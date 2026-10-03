@@ -52,16 +52,16 @@ final class UnicodeCatalogTests: XCTestCase {
     }
 
     func testBlockNameSearchIncludesCharactersAndRanksExactBlock() {
-        let arrows = catalog.search("Arrows")
+        let arrows = catalog.search("Arrows", order: .codePoint)
         XCTAssertEqual(arrows.first?.codePoint, 0x2190)
         XCTAssertTrue(arrows.contains { $0.codePoint == 0x2192 })
         XCTAssertTrue(arrows.prefix(112).allSatisfy { $0.blockName == "Arrows" })
         let operators = catalog.search("Mathematical Operators", limit: 50)
         XCTAssertEqual(operators.count, 50)
         XCTAssertTrue(operators.allSatisfy { $0.blockName == "Mathematical Operators" })
-        XCTAssertEqual(catalog.search("CJK Unified Ideographs Extension B", limit: 3).map(\.codePoint),
+        XCTAssertEqual(catalog.search("CJK Unified Ideographs Extension B", limit: 3, order: .codePoint).map(\.codePoint),
                        [0x20000, 0x20001, 0x20002])
-        XCTAssertTrue(catalog.search("Greek").contains { $0.codePoint == 0x03A9 })
+        XCTAssertTrue(catalog.search("Greek", order: .codePoint).contains { $0.codePoint == 0x03A9 })
         for name in ["Tangut Supplement", "CJK Unified Ideographs Extension D"] {
             let points = catalog.search(name).map(\.codePoint)
             XCTAssertEqual(Set(points).count, points.count, "Small algorithmic block must have unique results: \(name)")
@@ -110,7 +110,7 @@ final class UnicodeCatalogTests: XCTestCase {
 
     func testLargeAlgorithmicRangePagination() throws {
         let cjk = try XCTUnwrap(catalog.blocks.first { $0.name == "CJK Unified Ideographs Extension B" })
-        XCTAssertEqual(catalog.characters(in: cjk, offset: 256, limit: 3).map(\.codePoint),
+        XCTAssertEqual(catalog.characters(in: cjk, offset: 256, limit: 3, order: .codePoint).map(\.codePoint),
                        [0x20100, 0x20101, 0x20102])
         XCTAssertTrue(catalog.characters(in: cjk, offset: 100_000).isEmpty)
         let surrogates = try XCTUnwrap(catalog.blocks.first { $0.name == "High Surrogates" })
@@ -127,7 +127,7 @@ final class UnicodeCatalogTests: XCTestCase {
             XCTAssertTrue(catalog.search(query).isEmpty, query)
         }
         XCTAssertTrue(catalog.search("rocket", limit: 0).isEmpty)
-        XCTAssertEqual(catalog.search("", limit: 3), Array(catalog.featured.prefix(3)))
+        XCTAssertEqual(catalog.search("", limit: 3), catalog.newestCharacters(limit: 3))
     }
 
     func testCorruptOrAbsentResourceDoesNotCrash() throws {
@@ -140,5 +140,85 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertEqual(invalid.version, "Unavailable")
         XCTAssertEqual(invalid.character(at: 0x41)?.name, "UNASSIGNED")
         XCTAssertTrue(invalid.search("rocket").isEmpty)
+    }
+
+    func testSeparateFinalAndDraftEditionsRetainOfficialAges() throws {
+        let latest = UnicodeEdition.latest.catalog
+        XCTAssertNil(latest.resourceError)
+        XCTAssertFalse(latest.version.contains("draft"))
+        XCTAssertTrue(UnicodeEdition.draft.catalog.version.hasSuffix(" draft"))
+        XCTAssertGreaterThanOrEqual(unicodeVersionKey(UnicodeEdition.draft.catalog.version), unicodeVersionKey(latest.version))
+        XCTAssertTrue(UnicodeEdition.draft.catalog === UnicodeCatalog.shared)
+        XCTAssertEqual(UnicodeEdition.latest.rawValue, "latest")
+        XCTAssertEqual(UnicodeEdition.draft.rawValue, "draft")
+        for edition in UnicodeEdition.allCases {
+            let major = edition.catalog.version.split(separator: ".").first.map(String.init) ?? ""
+            XCTAssertEqual(edition.title, "Unicode \(major) · \(edition.rawValue)")
+            XCTAssertEqual(edition.catalog.character(at: 0x1FAEB)?.name, "CRACKING FACE")
+            XCTAssertEqual(edition.catalog.character(at: 0x1FAEB)?.age, "18.0")
+            XCTAssertEqual(edition.catalog.character(at: 0x41)?.age, "1.1")
+            XCTAssertNil(edition.catalog.character(at: 0x0378)?.age)
+            XCTAssertEqual(edition.catalog.character(at: 0x0378)?.category, "Cn")
+        }
+    }
+
+    func testNormativeCharacterProperties() throws {
+        let mark = try XCTUnwrap(catalog.character(at: 0x0301))
+        XCTAssertEqual(mark.categoryName, "Nonspacing combining mark")
+        XCTAssertEqual(mark.combiningClass, 230)
+        XCTAssertEqual(mark.bidirectionalClass, "NSM")
+        XCTAssertEqual(mark.script, "Inherited")
+        let accent = try XCTUnwrap(catalog.character(at: 0x00C5))
+        XCTAssertEqual(accent.script, "Latin")
+        XCTAssertEqual(accent.decomposition, "0041 030A")
+        XCTAssertEqual(catalog.character(at: 0x05D0)?.bidirectionalClass, "R")
+        XCTAssertEqual(catalog.character(at: 0xAC00)?.decomposition, "1100 1161")
+        XCTAssertEqual(catalog.character(at: 0xAC01)?.decomposition, "1100 1161 11A8")
+        for edition in UnicodeEdition.allCases {
+            XCTAssertEqual(edition.catalog.character(at: 0xF900)?.decomposition, "8C48")
+            XCTAssertEqual(edition.catalog.character(at: 0x2F800)?.decomposition, "4E3D")
+        }
+        XCTAssertNil(catalog.character(at: 0x0378)?.combiningClass)
+    }
+
+    func testNumericVersionOrderingAndGlobalPagination() {
+        XCTAssertGreaterThan(unicodeVersionKey("10.0"), unicodeVersionKey("9.0"))
+        XCTAssertGreaterThan(unicodeVersionKey("15.1"), unicodeVersionKey("15.0"))
+        let newest = catalog.orderedCharacters(limit: 300)
+        XCTAssertGreaterThanOrEqual(newest.first?.versionSortKey ?? 0, unicodeVersionKey("18.0"))
+        XCTAssertTrue(newest.allSatisfy { $0.category != "Cn" })
+        for pair in zip(newest, newest.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(pair.0.versionSortKey, pair.1.versionSortKey)
+        }
+        XCTAssertEqual(catalog.newestCharacters(offset: 120, limit: 45), Array(newest[120..<165]))
+        let oldest = catalog.orderedCharacters(limit: 300, order: .oldestFirst)
+        XCTAssertEqual(oldest.first?.codePoint, 0)
+        XCTAssertEqual(oldest.first?.age, "1.1")
+        XCTAssertEqual(catalog.orderedCharacters(offset: 200, limit: 30, order: .oldestFirst), Array(oldest[200..<230]))
+        let codePoints = catalog.orderedCharacters(limit: 300, order: .codePoint)
+        XCTAssertEqual(codePoints.map(\.codePoint), codePoints.map(\.codePoint).sorted())
+        XCTAssertTrue(catalog.orderedCharacters(offset: 500_000).isEmpty)
+        XCTAssertTrue(catalog.orderedCharacters(offset: -1).isEmpty)
+    }
+
+    func testSearchSortsEntireMatchSetBeforeLimiting() {
+        for order in UnicodeSortOrder.allCases {
+            let complete = catalog.search("letter", limit: 100_000, order: order)
+            XCTAssertGreaterThan(complete.count, 10_000)
+            XCTAssertEqual(catalog.search("letter", limit: 7, order: order), Array(complete.prefix(7)))
+            if order == .newestFirst { XCTAssertGreaterThanOrEqual(complete.first?.versionSortKey ?? 0, unicodeVersionKey("18.0")) }
+        }
+        XCTAssertEqual(catalog.search("rocket", limit: 1).first?.codePoint, 0x1F680)
+    }
+
+    func testBlockPaginationOrdersEntireBlockBeforeLimiting() throws {
+        let arrows = try XCTUnwrap(catalog.blocks.first { $0.name == "Arrows" })
+        let all = catalog.characters(in: arrows, limit: 1000)
+        XCTAssertNotEqual(all.first?.codePoint, arrows.start)
+        XCTAssertEqual(catalog.characters(in: arrows, limit: 5), Array(all.prefix(5)))
+        XCTAssertEqual(catalog.characters(in: arrows, offset: 10, limit: 5), Array(all[10..<15]))
+        let oldest = catalog.characters(in: arrows, limit: 1000, order: .oldestFirst)
+        XCTAssertEqual(oldest.first?.age, "1.1")
+        XCTAssertEqual(catalog.characters(in: arrows, offset: 10, limit: 5, order: .oldestFirst), Array(oldest[10..<15]))
     }
 }

@@ -1,1 +1,1 @@
-Find the symbol you need by name, description or code point. Type it with a tap, save favorites, and explore Unicode blocks. Works offline without Full Access.
+Find symbols and complete emoji by name or code point. Type with a tap, inspect properties with a hold, and choose Unicode 18 or the 19 draft. Offline, no Full Access.

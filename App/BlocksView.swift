@@ -3,7 +3,8 @@ import SwiftUI
 struct BlocksView: View {
     var select: (UnicodeCharacter) -> Void
     @State private var query = ""
-    private let catalog = UnicodeCatalog.shared
+    @EnvironmentObject private var preferences: CatalogPreferences
+    private var catalog: UnicodeCatalog { preferences.catalog }
 
     private var blocks: [UnicodeBlock] {
         let tokens = query.lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init)
@@ -24,6 +25,7 @@ struct BlocksView: View {
                         .font(.subheadline).foregroundStyle(Palette.muted)
                 }.padding(.top, 6)
                 SearchBar(text: $query, placeholder: "Find a block, like Arrows or Hiragana", identifier: "blockSearch")
+                CatalogControls()
 
                 LazyVStack(spacing: 10) {
                     ForEach(blocks) { block in
@@ -68,6 +70,7 @@ struct BlockDetailView: View {
     var select: (UnicodeCharacter) -> Void
     @State private var characters: [UnicodeCharacter] = []
     @State private var hasMore = true
+    @EnvironmentObject private var preferences: CatalogPreferences
 
     var body: some View {
         ScrollView {
@@ -78,9 +81,10 @@ struct BlockDetailView: View {
                     Text("Tap a character to see its name, description, and copy options.")
                         .font(.subheadline).foregroundStyle(Palette.muted)
                 }
+                CatalogControls()
                 CharacterGrid(characters: characters, select: select)
                 if characters.isEmpty && !hasMore {
-                    EmptyCollection(symbol: "square.dashed", title: "No Unicode scalars", message: "Surrogate code points encode other characters and cannot be inserted on their own.")
+                    EmptyCollection(symbol: "square.dashed", title: "No assigned characters", message: block.name.contains("Surrogate") ? "Surrogate code points encode other characters and cannot be inserted on their own." : "This block has no assigned characters in the selected Unicode edition.")
                 }
                 if hasMore {
                     Button("Load more characters") { loadMore() }
@@ -98,11 +102,14 @@ struct BlockDetailView: View {
         .navigationTitle(block.name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { if characters.isEmpty && hasMore { loadMore() } }
+        .onChange(of: preferences.edition) { _, _ in reload() }
+        .onChange(of: preferences.order) { _, _ in reload() }
     }
 
     private func loadMore() {
-        let page = UnicodeCatalog.shared.characters(in: block, offset: characters.count, limit: 256)
+        let page = preferences.catalog.characters(in: block, offset: characters.count, limit: 256, order: preferences.order)
         characters += page
         hasMore = page.count == 256
     }
+    private func reload() { characters = []; hasMore = true; loadMore() }
 }

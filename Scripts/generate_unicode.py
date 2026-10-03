@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build UniBoard's compact, reproducible offline Unicode catalog.
 
-Run: python3 Scripts/generate_unicode.py --source draft --refresh
+Run: python3 Scripts/generate_unicode.py --source all --refresh
 All character properties/names come from UnicodeData and DerivedName. NamesList
 supplies informative prose only, never normative properties. The keyboard maps
 the generated file on demand; algorithmic names remain compact ranges.
@@ -9,6 +9,7 @@ the generated file on demand; algorithmic names remain compact ranges.
 from __future__ import annotations
 
 import argparse
+import bisect
 import datetime
 import hashlib
 import http.client
@@ -16,6 +17,7 @@ import json
 import re
 import struct
 import sys
+import tempfile
 import time
 import unicodedata
 import urllib.error
@@ -23,8 +25,9 @@ import urllib.request
 from pathlib import Path
 
 FILES = ["ReadMe.txt", "UnicodeData.txt", "Blocks.txt", "NamesList.txt", "NameAliases.txt",
-         "extracted/DerivedName.txt", "DerivedCoreProperties.txt"]
+         "extracted/DerivedName.txt", "DerivedCoreProperties.txt", "DerivedAge.txt", "Scripts.txt"]
 CATEGORIES = "Lu Ll Lt Lm Lo Mn Mc Me Nd Nl No Pc Pd Ps Pe Pi Pf Po Sm Sc Sk So Zs Zl Zp Cc Cf Cs Co Cn".split()
+BIDI_CLASSES = "L R AL EN ES ET AN CS NSM BN B S WS ON LRE LRO RLE RLO PDF LRI RLI FSI PDI".split()
 ROOT = Path(__file__).resolve().parent.parent
 FETCH_ATTEMPTS = 3
 MAX_RETRY_DELAY = 5
@@ -62,6 +65,12 @@ def fetch(url: str) -> bytes:
 
 
 def resolve_source(source: str) -> tuple[str, dict]:
+    if source == "latest":
+        readme = fetch("https://www.unicode.org/Public/UCD/latest/ucd/ReadMe.txt").decode("utf-8")
+        match = re.search(r"final data files for version ([0-9]+\.[0-9]+\.[0-9]+)", readme)
+        if match is None:
+            raise ValueError("Latest Unicode source is not an official final release")
+        source = match[1]
     base = f"https://www.unicode.org/Public/{source}/ucd/"
     if source != "draft":
         return base, {"sourceKind": "unicode-release"}
@@ -69,7 +78,9 @@ def resolve_source(source: str) -> tuple[str, dict]:
     # release-review snapshots can lag ongoing development. The official dev
     # repository consistently supplies the newest draft throughout both phases.
     # Pin one commit so every file in this generation is the same snapshot.
-    api = "https://api.github.com/repos/unicode-org/unicodetools/commits?path=unicodetools/data/ucd/dev&per_page=1"
+    # Default-branch HEAD also includes emoji-only changes after the last UCD
+    # change. Both development directories must come from this one snapshot.
+    api = "https://api.github.com/repos/unicode-org/unicodetools/commits?per_page=1"
     commit = json.loads(fetch(api))[0]
     sha = commit["sha"]
     if not re.fullmatch(r"[a-f0-9]{40}", sha):
@@ -91,14 +102,27 @@ def span(value: str) -> tuple[int, int]:
     return int(bits[0], 16), int(bits[-1], 16)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", default="draft", help="Official Unicode source: draft (default), or a version such as 17.0.0")
-    parser.add_argument("--cache-dir", "--cache", dest="cache", type=Path)
-    parser.add_argument("--refresh", action="store_true", help="Fetch every source again; required for live draft CI builds")
-    args = parser.parse_args()
-    if args.source != "draft" and not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.source):
-        parser.error("--source must be draft or a Unicode version (for example 17.0.0)")
+def version_key(value: str) -> int:
+    parts = value.split(".")
+    return int(parts[0]) * 100 + int(parts[1] if len(parts) > 1 else 0)
+
+
+def atomic_write(path: Path, content: bytes) -> None:
+    """Replace one completed artifact; a failed download never reaches this step."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix="." + path.name, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str, bytes]:
+    args = argparse.Namespace(source=source, cache=cache, refresh=refresh)
     base, provenance = resolve_source(args.source)
     args.cache = args.cache or ROOT / ".unicode-cache" / args.source
     args.cache.mkdir(parents=True, exist_ok=True)
@@ -108,16 +132,19 @@ def main() -> None:
     if args.refresh or not same_source or not timestamp_file.exists():
         timestamp_file.write_text(datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"))
     sources = {}
-    for filename in FILES:
+    emoji_base = (base.replace("/ucd/dev/", "/emoji/dev/") if provenance["sourceKind"] == "unicode-development-draft"
+                  else base.removesuffix("ucd/") + "emoji/")
+    for filename in FILES + ["emoji/emoji-test.txt"]:
         path = args.cache / Path(filename).name
+        url = emoji_base + "emoji-test.txt" if filename == "emoji/emoji-test.txt" else base + filename
         if args.refresh or not same_source or not path.exists():
-            content = fetch(base + filename)
+            content = fetch(url)
             if content.lstrip().startswith(b"<"):
-                raise ValueError(f"Expected Unicode text data, received HTML: {base + filename}")
-            path.write_bytes(content)
+                raise ValueError(f"Expected Unicode text data, received HTML: {url}")
+            atomic_write(path, content)
         source_text = path.read_text("utf-8")
         source_date = re.search(r"(?:# Date:|Generation Date:)\s*([^\n]+)", source_text)
-        sources[filename] = {"url": base + filename,
+        sources[filename] = {"url": url,
                              "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
         if source_date:
             sources[filename]["sourceDate"] = source_date[1].strip()
@@ -138,13 +165,29 @@ def main() -> None:
         raise ValueError("Could not determine the official Unicode source version")
     version = version_match[1]
     is_draft = development or "draft data files" in readme.lower()
-    if args.source != "draft" and version != args.source:
+    if args.source not in {"draft", "latest"} and version != args.source:
         raise ValueError(f"Source version mismatch: requested {args.source}, received {version}")
     version_label = version + (" draft" if is_draft else "")
-    for filename in ["Blocks.txt", "NameAliases.txt", "extracted/DerivedName.txt", "DerivedCoreProperties.txt"]:
+    for filename in ["Blocks.txt", "NameAliases.txt", "extracted/DerivedName.txt", "DerivedCoreProperties.txt", "DerivedAge.txt", "Scripts.txt"]:
         first = lines(filename)[0]
         if version not in first and not development:
             raise ValueError(f"Mixed Unicode versions: {filename} does not declare {version}")
+
+    def property_ranges(filename: str) -> list[dict]:
+        result = []
+        for line in lines(filename):
+            line = line.split("#")[0].strip()
+            if line:
+                extent, value = (part.strip() for part in line.split(";", 1))
+                start, end = span(extent)
+                result.append({"start": start, "end": end, "value": value})
+        result.sort(key=lambda item: item["start"])
+        if any(left["end"] >= right["start"] for left, right in zip(result, result[1:])):
+            raise ValueError(f"Overlapping property ranges: {filename}")
+        return result
+
+    ages = property_ranges("DerivedAge.txt")
+    scripts = property_ranges("Scripts.txt")
 
     blocks = []
     for line in lines("Blocks.txt"):
@@ -161,6 +204,7 @@ def main() -> None:
         return "No Block"
 
     records = {}
+    decompositions = {}
     ranges = []
     pending = None
     patterns = []
@@ -173,10 +217,13 @@ def main() -> None:
     for line in lines("UnicodeData.txt"):
         fields = line.split(";")
         cp, name, category = int(fields[0], 16), fields[1], fields[2]
+        combining_class, bidi_class = int(fields[3]), fields[4]
         if name.endswith(", First>"):
-            pending = (cp, name, category)
+            pending = (cp, name, category, combining_class, bidi_class)
         elif name.endswith(", Last>"):
             assert pending is not None and pending[2] == category
+            if category != "Cs" and (pending[3:] != (0, "L") or (combining_class, bidi_class) != (0, "L")):
+                raise ValueError(f"Unsupported algorithmic range properties: {pending[1]}")
             if category == "Co":
                 ranges.append((pending[0], cp, "PRIVATE USE-", category, 2))
             elif pending[1].startswith("<Hangul"):
@@ -194,7 +241,13 @@ def main() -> None:
             # Surrogates are code units, not Unicode scalars, and cannot be text.
             pending = None
         else:
-            records[cp] = {"name": name, "category": category, "aliases": [], "notes": []}
+            records[cp] = {"name": name, "category": category, "aliases": [], "notes": [],
+                           "combiningClass": combining_class, "bidiClass": bidi_class,
+                           "decomposition": fields[5]}
+            if fields[5]:
+                # Name compression must not discard normative properties on
+                # algorithmically named compatibility ideographs.
+                decompositions[cp] = fields[5]
 
     for line in lines("extracted/DerivedName.txt"):
         line = line.split("#")[0].strip()
@@ -215,6 +268,37 @@ def main() -> None:
             records.pop(cp, None)
     ranges.sort()
     assert all(left[1] < right[0] for left, right in zip(ranges, ranges[1:]))
+
+    # Assigned spans and Age intervals keep global ordering compact, including
+    # large algorithmic/private-use ranges, without serializing 300K objects.
+    assigned = sorted([(cp, cp) for cp in records] + [(start, end) for start, end, *_ in ranges])
+    merged = []
+    for start, end in assigned:
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    assigned_spans = []
+    age_index = 0
+    for start, end in merged:
+        cp = start
+        while cp <= end:
+            while age_index < len(ages) and ages[age_index]["end"] < cp:
+                age_index += 1
+            age = ages[age_index] if age_index < len(ages) else None
+            covered = age is not None and age["start"] <= cp
+            last = min(end, age["end"] if covered else (age["start"] - 1 if age else end))
+            if not covered and not development:
+                raise ValueError(f"Assigned final-release scalar has no official Age: U+{cp:04X}")
+            assigned_spans.append({"start": cp, "end": last,
+                                   "sortKey": version_key(age["value"] if covered else version),
+                                   "draftAddition": not covered})
+            cp = last + 1
+
+    age_starts = [item["start"] for item in ages]
+    def official_age(cp: int) -> str | None:
+        index = bisect.bisect_right(age_starts, cp) - 1
+        return ages[index]["value"] if index >= 0 and ages[index]["end"] >= cp else None
 
     for line in lines("NameAliases.txt"):
         line = line.split("#")[0].strip()
@@ -271,9 +355,10 @@ def main() -> None:
         search_offset, search_length = string(fold(record["name"] + " " + detail + " " + block_name(cp)))
         flags = int(cp in invisible or record["category"] in {"Cc", "Cf", "Zs", "Zl", "Zp"})
         assert name_length <= 65535 and detail_length <= 65535
-        record_data.extend(struct.pack("<IIHHIIIBBH", cp, name_offset, name_length,
+        record_data.extend(struct.pack("<IIHHIIIBBBB", cp, name_offset, name_length,
                                        detail_length, detail_offset, search_offset,
-                                       search_length, CATEGORIES.index(record["category"]), flags, 0))
+                                       search_length, CATEGORIES.index(record["category"]), flags,
+                                       record["combiningClass"], BIDI_CLASSES.index(record["bidiClass"])))
 
     range_data = bytearray()
     for start, end, prefix, category, kind in ranges:
@@ -286,28 +371,89 @@ def main() -> None:
     assigned_count = len(records) + sum(end - start + 1 for start, end, *_ in ranges)
     header = struct.pack("<8s10I", b"UBOARD17", len(records), record_offset,
                          len(ranges), range_offset, pool_offset, len(pool),
-                         version_offset, version_length, assigned_count, 1)
-    output = ROOT / "Shared" / "Resources"
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "UnicodeCatalog.ucd").write_bytes(header + record_data + range_data + pool)
-    (output / "Blocks.json").write_text(json.dumps(blocks, ensure_ascii=False,
-                                                   separators=(",", ":")) + "\n")
+                         version_offset, version_length, assigned_count, 2)
+    properties = {"unicodeVersion": version_label, "ages": ages, "scripts": scripts,
+                  "assignedSpans": assigned_spans,
+                  "decompositions": [{"codePoint": cp, "value": value}
+                                     for cp, value in sorted(decompositions.items())]}
+
+    emoji_lines = lines("emoji/emoji-test.txt")
+    emoji_version_match = re.search(r"^# Version:\s*([0-9]+\.[0-9]+)", "\n".join(emoji_lines), re.MULTILINE)
+    if emoji_version_match is None:
+        raise ValueError("Could not determine official Emoji source version")
+    emoji_version = emoji_version_match[1]
+    if emoji_version != ".".join(version.split(".")[:2]):
+        raise ValueError(f"Mixed Unicode/Emoji editions: Unicode {version}, Emoji {emoji_version}")
+    emoji_entries = []
+    group = subgroup = None
+    for line in emoji_lines:
+        if line.startswith("# group: "):
+            group = line.removeprefix("# group: ")
+        elif line.startswith("# subgroup: "):
+            subgroup = line.removeprefix("# subgroup: ")
+        elif "; fully-qualified" in line:
+            match = re.fullmatch(r"([0-9A-F ]+)\s*;\s*fully-qualified\s*#\s*\S+\s+E([0-9]+\.[0-9]+)\s+(.+)", line)
+            if match is None or group is None or subgroup is None:
+                raise ValueError(f"Invalid fully-qualified emoji record: {line}")
+            points = [int(part, 16) for part in match[1].split()]
+            if not points or any(cp > 0x10FFFF or 0xD800 <= cp <= 0xDFFF for cp in points):
+                raise ValueError("Emoji sequence contains an invalid Unicode scalar")
+            component_ages = [official_age(cp) for cp in points]
+            unicode_age = (max(component_ages, key=version_key) if all(component_ages)
+                           else "Pending draft age")
+            if not all(component_ages) and not development:
+                raise ValueError("Final emoji sequence component is missing an official Unicode Age")
+            emoji_entries.append({"id": "-".join(f"{cp:04X}" for cp in points), "codePoints": points,
+                                  "name": match[3], "emojiVersion": match[2], "unicodeVersion": unicode_age,
+                                  "group": group, "subgroup": subgroup})
+    if not emoji_entries or len({entry["id"] for entry in emoji_entries}) != len(emoji_entries):
+        raise ValueError("Emoji catalog is empty or has duplicate fully-qualified sequences")
+    emoji = {"version": emoji_version + (" draft" if is_draft else ""),
+             "unicodeVersion": version_label, "entries": emoji_entries}
     source_dates = [value["sourceDate"] for value in sources.values() if "sourceDate" in value]
     manifest = {"unicodeVersion": version, "versionLabel": version_label, "isDraft": is_draft,
                 "source": args.source, "sourceLastModified": max(source_dates) if source_dates else None,
                 "refreshedAt": timestamp_file.read_text(),
                 **provenance,
-                "formatVersion": 1, "blocks": len(blocks),
+                "formatVersion": 2, "blocks": len(blocks),
                 "explicitRecords": len(records), "algorithmicRanges": len(ranges),
                 "assignedScalarsIncludingPrivateUse": assigned_count,
                 "catalogBytes": len(header + record_data + range_data + pool),
+                "fullyQualifiedEmoji": len(emoji_entries), "emojiVersion": emoji["version"],
+                "assignedScalarsWithPendingDraftAge": sum(item["end"] - item["start"] + 1 for item in assigned_spans if item["draftAddition"]),
                 "sources": sources,
-                "notes": "NamesList annotations are informative prose. Algorithmic names use DerivedName and the normative Hangul syllable naming algorithm. Surrogates are excluded; direct scalar lookup labels reserved and noncharacter code points."}
-    (output / "UnicodeSources.json").write_text(json.dumps(manifest, indent=2) + "\n")
+                "notes": "NamesList annotations are informative prose. Age and Script retain official generated property values; new draft assignments missing upstream Age have no inferred Age label and use the draft edition only for ordering. Emoji introduction version is distinct from the maximum official Unicode Age of its component scalars. Algorithmic names use DerivedName and the normative Hangul naming algorithm. Surrogates are excluded."}
+    suffix = "" if args.source == "draft" else "-latest"
+    def json_bytes(value: object) -> bytes:
+        return (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+    artifacts = {f"UnicodeCatalog{suffix}.ucd": bytes(header + record_data + range_data + pool),
+                 f"Blocks{suffix}.json": json_bytes(blocks),
+                 f"UnicodeProperties{suffix}.json": json_bytes(properties),
+                 f"UnicodeSources{suffix}.json": (json.dumps(manifest, indent=2) + "\n").encode("utf-8"),
+                 f"EmojiCatalog-{'draft' if args.source == 'draft' else 'latest'}.json": json_bytes(emoji)}
+    print(json.dumps({k: v for k, v in manifest.items() if k not in {"sources", "notes"}}, indent=2))
+    return artifacts
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", default="all", help="all (default), latest official final release, draft, or a pinned release such as 18.0.0")
+    parser.add_argument("--cache-dir", "--cache", dest="cache", type=Path)
+    parser.add_argument("--refresh", action="store_true", help="Fetch every source again; required for live CI builds")
+    args = parser.parse_args()
+    if args.source not in {"all", "latest", "draft"} and not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.source):
+        parser.error("--source must be all, latest, draft or a Unicode version")
+    artifacts = {}
+    for source in (["latest", "draft"] if args.source == "all" else [args.source]):
+        cache = args.cache / source if args.cache is not None and args.source == "all" else args.cache
+        artifacts.update(generate_catalog(source, cache, args.refresh))
+    output = ROOT / "Shared" / "Resources"
     license_path = output / "Unicode-LICENSE.txt"
     if not license_path.exists():
-        license_path.write_bytes(fetch("https://www.unicode.org/license.txt"))
-    print(json.dumps({k: v for k, v in manifest.items() if k not in {"sources", "notes"}}, indent=2))
+        artifacts["Unicode-LICENSE.txt"] = fetch("https://www.unicode.org/license.txt")
+    # Fetch and validate both complete editions before changing any resource.
+    for filename, content in artifacts.items():
+        atomic_write(output / filename, content)
 
 
 if __name__ == "__main__":

@@ -1,1 +1,1 @@
-codepoint,charmap,emoji,math,arrows,greek,accent,diacritics,hex,copy,paste,offline,lookup,phonetic
+charmap,math,arrows,greek,accent,diacritics,hex,copy,paste,offline,lookup,phonetic,zwj,utf8,latin

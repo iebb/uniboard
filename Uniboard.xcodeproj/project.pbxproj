@@ -10,12 +10,21 @@
 		063D78DFCF38A7B9AC219CAE /* Unicode-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1DF11D2AB41C1DB3C4E98E84 /* Unicode-LICENSE.txt */; };
 		0CA86A73BEE1761EFAB64A4E /* UniboardKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FADFF79503D90B10A9C8AEB2 /* UniboardKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0D9181263267F12FC090A7CB /* Blocks.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E6909BB645FA5674134A126 /* Blocks.json */; };
+		106ED12704C39D4C693646BF /* UnicodeProperties-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = 107C19BC010C3CBBC642AC42 /* UnicodeProperties-latest.json */; };
 		1262E56C314CA8FAB23F5014 /* SavedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A791C3473CB60A05B20494 /* SavedView.swift */; };
+		1459D2941080CE1C3D7A75BB /* UnicodeCatalog-latest.ucd in Resources */ = {isa = PBXBuildFile; fileRef = AAE6E346B7955C1B12E0338E /* UnicodeCatalog-latest.ucd */; };
 		18E0F035EBA7D7EE39166431 /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC58D1BB17A9004D6E334302 /* KeyboardViewController.swift */; };
 		229A7E40362FD588C2621C63 /* CharacterDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA39E9D562CC12833DB173DD /* CharacterDetailView.swift */; };
 		28C42E6074C8E415AEA640E2 /* UnicodeCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22CAA7A19492D753D0BC5772 /* UnicodeCatalogTests.swift */; };
+		2B716A3963AD5A258E9C4F94 /* Blocks-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E75C4427C3A099357E49BC6 /* Blocks-latest.json */; };
+		33367954F1970C5F09CB4018 /* UnicodeProperties.json in Resources */ = {isa = PBXBuildFile; fileRef = A24745F2DC10363D8E1053AA /* UnicodeProperties.json */; };
+		3F142D5FF6B918F3FF4B4BB2 /* EmojiCatalog-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = C0C20A0D596CCC44AB869917 /* EmojiCatalog-latest.json */; };
 		40048BDF4538EC75565F2215 /* CharacterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36C0B886711536D6C72D540 /* CharacterStore.swift */; };
 		430FB248A00BA13AF115E347 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A9666760F5893403CE00B6 /* SetupView.swift */; };
+		44D6271BB541B1F1A9EC55F5 /* EmojiCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3DCCA512819F343E378874 /* EmojiCatalog.swift */; };
+		4947270AD85808EFFFF26231 /* UnicodeProperties-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = 107C19BC010C3CBBC642AC42 /* UnicodeProperties-latest.json */; };
+		498B01D0E44243E753969DBE /* EmojiCatalog-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = C0C20A0D596CCC44AB869917 /* EmojiCatalog-latest.json */; };
+		4F5823B90C266C49C2557168 /* EmojiCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B6F9FAEABD4F15AA4EDC7AD /* EmojiCatalogTests.swift */; };
 		53E92D441D2ED0FD013F2A49 /* Unicode-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1DF11D2AB41C1DB3C4E98E84 /* Unicode-LICENSE.txt */; };
 		59F9E36BF5D5A1566884BDEE /* UnicodeCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */; };
 		5A2291389771B024DE549E33 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB8050F1485946A042EFCDF /* ContentView.swift */; };
@@ -24,15 +33,25 @@
 		78768285C1D49F9A586E54BE /* UnicodeCatalog.ucd in Resources */ = {isa = PBXBuildFile; fileRef = B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */; };
 		87ED240C5FCF15F0EBADC0AF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0A43A2B3EBE1567FC006A4C /* Assets.xcassets */; };
 		8F7AF965AC9EDDE7615E6BA0 /* UnicodeSources.json in Resources */ = {isa = PBXBuildFile; fileRef = 8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */; };
+		915F4383C87AB64D135A6B5C /* UnicodeProperties.json in Resources */ = {isa = PBXBuildFile; fileRef = A24745F2DC10363D8E1053AA /* UnicodeProperties.json */; };
 		93C4D52C9F879198F8426C63 /* BlocksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */; };
 		9A50C69D53213EF833C399EF /* UnicodeCatalog.ucd in Resources */ = {isa = PBXBuildFile; fileRef = B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */; };
+		A1576FCAC1F35187DC610EDB /* CatalogPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52D9BC9C1D5A569CC0D9FA4E /* CatalogPreferences.swift */; };
+		A5E11B89A1F2E1E4961B8495 /* EmojiCatalog-draft.json in Resources */ = {isa = PBXBuildFile; fileRef = C6B5A677ABB9118AF14E1B2C /* EmojiCatalog-draft.json */; };
+		AA26193F861F3E54D40A3DD4 /* EmojisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7843518DDC3C9656827D184 /* EmojisView.swift */; };
 		B09CEAAD19C426CB3809D22E /* UniboardApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A751792BE65134112FCC8556 /* UniboardApp.swift */; };
+		B31BEE3D2BA746AD3C608C2D /* UnicodeSources-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = 3BD257CE430069C4D4200695 /* UnicodeSources-latest.json */; };
 		BCDD2D2225E610AF83BA2879 /* CharacterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36C0B886711536D6C72D540 /* CharacterStore.swift */; };
 		C9D5DD46F5FE23D4EA10AB24 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */; };
+		CBAC928D9996EE0FC0A9FABD /* UnicodeSources-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = 3BD257CE430069C4D4200695 /* UnicodeSources-latest.json */; };
 		D60A186652B4A1B4C861B102 /* UniboardUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0063C0A6A25322C5269D05E /* UniboardUITests.swift */; };
+		D6251D9340222CA5D07DBA50 /* Blocks-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E75C4427C3A099357E49BC6 /* Blocks-latest.json */; };
 		D946C028C1043F7CB96D15B4 /* UnicodeCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */; };
 		DF66ECAE7C39F7015B73A930 /* Blocks.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E6909BB645FA5674134A126 /* Blocks.json */; };
+		E25DE401A8933C9BFAC6ABD1 /* UnicodeCatalog-latest.ucd in Resources */ = {isa = PBXBuildFile; fileRef = AAE6E346B7955C1B12E0338E /* UnicodeCatalog-latest.ucd */; };
+		E922C4FE06C66E51C3F36346 /* EmojiCatalog-draft.json in Resources */ = {isa = PBXBuildFile; fileRef = C6B5A677ABB9118AF14E1B2C /* EmojiCatalog-draft.json */; };
 		F5A017F5BA3746D69BF7C97F /* UnicodeSources.json in Resources */ = {isa = PBXBuildFile; fileRef = 8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */; };
+		FE07DF89E53353E8E507EB1E /* EmojiCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3DCCA512819F343E378874 /* EmojiCatalog.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -74,21 +93,32 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		107C19BC010C3CBBC642AC42 /* UnicodeProperties-latest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "UnicodeProperties-latest.json"; sourceTree = "<group>"; };
+		1B6F9FAEABD4F15AA4EDC7AD /* EmojiCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiCatalogTests.swift; sourceTree = "<group>"; };
 		1DF11D2AB41C1DB3C4E98E84 /* Unicode-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Unicode-LICENSE.txt"; sourceTree = "<group>"; };
 		2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		22CAA7A19492D753D0BC5772 /* UnicodeCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeCatalogTests.swift; sourceTree = "<group>"; };
+		2F3DCCA512819F343E378874 /* EmojiCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiCatalog.swift; sourceTree = "<group>"; };
 		31FA979EFC9BB9E5936956F5 /* UniboardTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = UniboardTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3BD257CE430069C4D4200695 /* UnicodeSources-latest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "UnicodeSources-latest.json"; sourceTree = "<group>"; };
 		3CB8050F1485946A042EFCDF /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		50167B2ECEEF4DFCF3D6C893 /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
+		52D9BC9C1D5A569CC0D9FA4E /* CatalogPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogPreferences.swift; sourceTree = "<group>"; };
 		5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlocksView.swift; sourceTree = "<group>"; };
 		5E6909BB645FA5674134A126 /* Blocks.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Blocks.json; sourceTree = "<group>"; };
+		5E75C4427C3A099357E49BC6 /* Blocks-latest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Blocks-latest.json"; sourceTree = "<group>"; };
 		8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = UnicodeSources.json; sourceTree = "<group>"; };
 		91A791C3473CB60A05B20494 /* SavedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedView.swift; sourceTree = "<group>"; };
+		A24745F2DC10363D8E1053AA /* UnicodeProperties.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = UnicodeProperties.json; sourceTree = "<group>"; };
 		A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeCatalog.swift; sourceTree = "<group>"; };
 		A751792BE65134112FCC8556 /* UniboardApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UniboardApp.swift; sourceTree = "<group>"; };
+		AAE6E346B7955C1B12E0338E /* UnicodeCatalog-latest.ucd */ = {isa = PBXFileReference; path = "UnicodeCatalog-latest.ucd"; sourceTree = "<group>"; };
 		B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */ = {isa = PBXFileReference; path = UnicodeCatalog.ucd; sourceTree = "<group>"; };
 		BB9BAA50EF4DC94FB5B03CD1 /* UniboardUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = UniboardUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0C20A0D596CCC44AB869917 /* EmojiCatalog-latest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "EmojiCatalog-latest.json"; sourceTree = "<group>"; };
+		C6B5A677ABB9118AF14E1B2C /* EmojiCatalog-draft.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "EmojiCatalog-draft.json"; sourceTree = "<group>"; };
 		D36C0B886711536D6C72D540 /* CharacterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterStore.swift; sourceTree = "<group>"; };
+		D7843518DDC3C9656827D184 /* EmojisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojisView.swift; sourceTree = "<group>"; };
 		DA39E9D562CC12833DB173DD /* CharacterDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterDetailView.swift; sourceTree = "<group>"; };
 		DB89BF7F18B9D5F91307A09A /* Uniboard.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Uniboard.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC58D1BB17A9004D6E334302 /* KeyboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
@@ -106,9 +136,11 @@
 			children = (
 				F0A43A2B3EBE1567FC006A4C /* Assets.xcassets */,
 				5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */,
+				52D9BC9C1D5A569CC0D9FA4E /* CatalogPreferences.swift */,
 				DA39E9D562CC12833DB173DD /* CharacterDetailView.swift */,
 				3CB8050F1485946A042EFCDF /* ContentView.swift */,
 				50167B2ECEEF4DFCF3D6C893 /* Design.swift */,
+				D7843518DDC3C9656827D184 /* EmojisView.swift */,
 				FC6B6DEDCD4EC38CF03A67DA /* Info.plist */,
 				91A791C3473CB60A05B20494 /* SavedView.swift */,
 				F3A9666760F5893403CE00B6 /* SetupView.swift */,
@@ -120,9 +152,16 @@
 		251C77A73B3F04E09CAF5F49 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				5E75C4427C3A099357E49BC6 /* Blocks-latest.json */,
 				5E6909BB645FA5674134A126 /* Blocks.json */,
+				C6B5A677ABB9118AF14E1B2C /* EmojiCatalog-draft.json */,
+				C0C20A0D596CCC44AB869917 /* EmojiCatalog-latest.json */,
 				1DF11D2AB41C1DB3C4E98E84 /* Unicode-LICENSE.txt */,
+				AAE6E346B7955C1B12E0338E /* UnicodeCatalog-latest.ucd */,
 				B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */,
+				107C19BC010C3CBBC642AC42 /* UnicodeProperties-latest.json */,
+				A24745F2DC10363D8E1053AA /* UnicodeProperties.json */,
+				3BD257CE430069C4D4200695 /* UnicodeSources-latest.json */,
 				8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */,
 			);
 			path = Resources;
@@ -151,6 +190,7 @@
 		614E87A4C7032932620111C8 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				1B6F9FAEABD4F15AA4EDC7AD /* EmojiCatalogTests.swift */,
 				22CAA7A19492D753D0BC5772 /* UnicodeCatalogTests.swift */,
 			);
 			path = Tests;
@@ -172,6 +212,7 @@
 			isa = PBXGroup;
 			children = (
 				D36C0B886711536D6C72D540 /* CharacterStore.swift */,
+				2F3DCCA512819F343E378874 /* EmojiCatalog.swift */,
 				2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */,
 				A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */,
 				251C77A73B3F04E09CAF5F49 /* Resources */,
@@ -319,10 +360,17 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2B716A3963AD5A258E9C4F94 /* Blocks-latest.json in Resources */,
 				DF66ECAE7C39F7015B73A930 /* Blocks.json in Resources */,
+				E922C4FE06C66E51C3F36346 /* EmojiCatalog-draft.json in Resources */,
+				3F142D5FF6B918F3FF4B4BB2 /* EmojiCatalog-latest.json in Resources */,
 				6A995752DA8E4B8FD0AEB3BA /* PrivacyInfo.xcprivacy in Resources */,
 				063D78DFCF38A7B9AC219CAE /* Unicode-LICENSE.txt in Resources */,
+				1459D2941080CE1C3D7A75BB /* UnicodeCatalog-latest.ucd in Resources */,
 				9A50C69D53213EF833C399EF /* UnicodeCatalog.ucd in Resources */,
+				4947270AD85808EFFFF26231 /* UnicodeProperties-latest.json in Resources */,
+				33367954F1970C5F09CB4018 /* UnicodeProperties.json in Resources */,
+				CBAC928D9996EE0FC0A9FABD /* UnicodeSources-latest.json in Resources */,
 				8F7AF965AC9EDDE7615E6BA0 /* UnicodeSources.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -332,10 +380,17 @@
 			buildActionMask = 2147483647;
 			files = (
 				87ED240C5FCF15F0EBADC0AF /* Assets.xcassets in Resources */,
+				D6251D9340222CA5D07DBA50 /* Blocks-latest.json in Resources */,
 				0D9181263267F12FC090A7CB /* Blocks.json in Resources */,
+				A5E11B89A1F2E1E4961B8495 /* EmojiCatalog-draft.json in Resources */,
+				498B01D0E44243E753969DBE /* EmojiCatalog-latest.json in Resources */,
 				C9D5DD46F5FE23D4EA10AB24 /* PrivacyInfo.xcprivacy in Resources */,
 				53E92D441D2ED0FD013F2A49 /* Unicode-LICENSE.txt in Resources */,
+				E25DE401A8933C9BFAC6ABD1 /* UnicodeCatalog-latest.ucd in Resources */,
 				78768285C1D49F9A586E54BE /* UnicodeCatalog.ucd in Resources */,
+				106ED12704C39D4C693646BF /* UnicodeProperties-latest.json in Resources */,
+				915F4383C87AB64D135A6B5C /* UnicodeProperties.json in Resources */,
+				B31BEE3D2BA746AD3C608C2D /* UnicodeSources-latest.json in Resources */,
 				F5A017F5BA3746D69BF7C97F /* UnicodeSources.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -347,6 +402,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4F5823B90C266C49C2557168 /* EmojiCatalogTests.swift in Sources */,
 				28C42E6074C8E415AEA640E2 /* UnicodeCatalogTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -356,6 +412,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				40048BDF4538EC75565F2215 /* CharacterStore.swift in Sources */,
+				44D6271BB541B1F1A9EC55F5 /* EmojiCatalog.swift in Sources */,
 				18E0F035EBA7D7EE39166431 /* KeyboardViewController.swift in Sources */,
 				D946C028C1043F7CB96D15B4 /* UnicodeCatalog.swift in Sources */,
 			);
@@ -366,10 +423,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				93C4D52C9F879198F8426C63 /* BlocksView.swift in Sources */,
+				A1576FCAC1F35187DC610EDB /* CatalogPreferences.swift in Sources */,
 				229A7E40362FD588C2621C63 /* CharacterDetailView.swift in Sources */,
 				BCDD2D2225E610AF83BA2879 /* CharacterStore.swift in Sources */,
 				5A2291389771B024DE549E33 /* ContentView.swift in Sources */,
 				6E9C637749D4AA9EC16A7D1B /* Design.swift in Sources */,
+				FE07DF89E53353E8E507EB1E /* EmojiCatalog.swift in Sources */,
+				AA26193F861F3E54D40A3DD4 /* EmojisView.swift in Sources */,
 				1262E56C314CA8FAB23F5014 /* SavedView.swift in Sources */,
 				430FB248A00BA13AF115E347 /* SetupView.swift in Sources */,
 				B09CEAAD19C426CB3809D22E /* UniboardApp.swift in Sources */,

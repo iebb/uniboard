@@ -1,0 +1,92 @@
+[
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+        "deviceName": "Uniboard App Store iPhone",
+        "exportedFileName": "5418AED6-9AC3-4817-A5F4-F8E668EE53E2.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Browse the real Arrows block and its characters_0_8DDF20F5-8568-4707-93E1-37E744130704.png",
+        "timestamp": 1791028056.499
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testBrowseUnicodeBlockAndOpenCharacter()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testBrowseUnicodeBlockAndOpenCharacter"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+        "deviceName": "Uniboard App Store iPhone",
+        "exportedFileName": "B9527280-E86C-466F-91BC-5D1BF80B64E4.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Offline catalog menu offers latest release and development draft_0_FB3D08AA-1BE3-4365-90EC-B538E556B433.png",
+        "timestamp": 1791028071.531
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testCatalogSelectionPreservesLookupStatusAndLocalChoice()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testCatalogSelectionPreservesLookupStatusAndLocalChoice"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+        "deviceName": "Uniboard App Store iPhone",
+        "exportedFileName": "09DD1C36-D738-4350-A441-6B59BE8078B6.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Default Explore displays newest Unicode characters first_0_9F142C57-63A9-4A17-A751-2BFE087CFB2F.png",
+        "timestamp": 1791028148.63
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testDefaultNewestFirstUsesNumericUnicodeAges()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testDefaultNewestFirstUsesNumericUnicodeAges"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+        "deviceName": "Uniboard App Store iPhone",
+        "exportedFileName": "343AD1B6-CDD1-4E28-BF10-CC3B2801234C.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Woman technologist whole sequence details_0_A32DBA24-1396-4C0B-805D-07EB84B1D9DE.png",
+        "timestamp": 1791028303.049
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testEmojiDetailsAndScratchpadPreserveWholeZWJSequence()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testEmojiDetailsAndScratchpadPreserveWholeZWJSequence"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+        "deviceName": "Uniboard App Store iPhone",
+        "exportedFileName": "02D14FC8-F751-40C1-910E-853F07C05F4D.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Search by code point finds the original rocket_0_AA48BE33-D7A7-4A9B-8457-55EB46D8F777.png",
+        "timestamp": 1791028375.362
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testSearchBySupplementaryCodepointAndAlias()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testSearchBySupplementaryCodepointAndAlias"
+  },
+  {
+    "attachments": [
+      {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "50F73B2C-CCFE-424B-938F-54FB72558690",
+        "deviceName": "Uniboard App Store iPhone",
+        "exportedFileName": "08C1B6E1-7EBE-4F10-AA42-CCDD5ADDA984.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Unicode18 cracking face retains meaning when the font lacks its glyph_0_1CA67579-8098-4B8C-B0BD-B976B4DB1630.png",
+        "timestamp": 1791028427.659
+      }
+    ],
+    "testIdentifier": "UniboardUITests/testUnsupportedGlyphStillShowsNameDescriptionAndProperties()",
+    "testIdentifierURL": "test://com.apple.xcode/Uniboard/UniboardUITests/UniboardUITests/testUnsupportedGlyphStillShowsNameDescriptionAndProperties"
+  }
+]

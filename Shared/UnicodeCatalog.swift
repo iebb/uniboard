@@ -1,5 +1,34 @@
 import Foundation
 
+enum UnicodeEdition: String, CaseIterable, Identifiable, Sendable {
+    case latest, draft
+    var id: String { rawValue }
+    var title: String {
+        let number = catalog.version.split(separator: ".").first.map(String.init) ?? catalog.version
+        return "Unicode \(number) · \(self == .latest ? "latest" : "draft")"
+    }
+    var catalog: UnicodeCatalog { self == .latest ? .latest : .shared }
+    var emojiCatalog: EmojiCatalog { self == .latest ? .latest : .shared }
+}
+
+enum UnicodeSortOrder: String, CaseIterable, Identifiable, Sendable {
+    case newestFirst, oldestFirst, codePoint
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .newestFirst: return "Newest first"
+        case .oldestFirst: return "Oldest first"
+        case .codePoint: return "Code point"
+        }
+    }
+}
+
+func unicodeVersionKey(_ version: String) -> Int {
+    let components = version.split(separator: ".")
+    guard let major = components.first.flatMap({ Int($0) }) else { return 0 }
+    return major * 100 + (components.count > 1 ? Int(components[1]) ?? 0 : 0)
+}
+
 /// One Unicode scalar. A displayed placeholder never changes the inserted text.
 struct UnicodeCharacter: Identifiable, Hashable, Sendable {
     let codePoint: UInt32
@@ -7,12 +36,19 @@ struct UnicodeCharacter: Identifiable, Hashable, Sendable {
     let detail: String
     let blockName: String
     let category: String
+    let age: String?
+    let versionSortKey: Int
+    let combiningClass: Int?
+    let bidirectionalClass: String?
+    let script: String?
+    let decomposition: String?
     private let invisible: Bool
 
     var id: UInt32 { codePoint }
     var text: String { Unicode.Scalar(codePoint).map { String($0) } ?? "" }
     var codePointLabel: String { String(format: "U+%04X", codePoint) }
     var isInvisible: Bool { invisible }
+    var categoryName: String { UnicodeCatalog.categoryDescriptions[category] ?? category }
     var displayText: String {
         switch codePoint {
         case 0x20: return "␣"
@@ -27,12 +63,20 @@ struct UnicodeCharacter: Identifiable, Hashable, Sendable {
     }
 
     init(codePoint: UInt32, name: String, detail: String, blockName: String,
-         category: String, isInvisible: Bool = false) {
+         category: String, isInvisible: Bool = false, age: String? = nil,
+         versionSortKey: Int? = nil, combiningClass: Int? = nil,
+         bidirectionalClass: String? = nil, script: String? = nil, decomposition: String? = nil) {
         self.codePoint = codePoint
         self.name = name
         self.detail = detail
         self.blockName = blockName
         self.category = category
+        self.age = age
+        self.versionSortKey = versionSortKey ?? age.map(unicodeVersionKey) ?? 0
+        self.combiningClass = combiningClass
+        self.bidirectionalClass = bidirectionalClass
+        self.script = script
+        self.decomposition = decomposition
         self.invisible = isInvisible
     }
 }
@@ -67,10 +111,12 @@ struct UnicodeBlock: Identifiable, Hashable, Sendable, Decodable {
 }
 
 /// Immutable, memory-mapped Unicode data shared by the containing app and keyboard.
-/// A search allocates only the returned characters, rather than 297,334 objects.
+/// Browsing materializes only a page, rather than hundreds of thousands of objects.
 final class UnicodeCatalog: @unchecked Sendable {
     static let shared = UnicodeCatalog()
+    static let latest = UnicodeCatalog(edition: .latest)
 
+    let edition: UnicodeEdition
     let blocks: [UnicodeBlock]
     let version: String
     let resourceError: String?
@@ -80,10 +126,12 @@ final class UnicodeCatalog: @unchecked Sendable {
     private let rangeCount: Int
     private let rangeOffset: Int
     private let poolOffset: Int
+    private let properties: UnicodePropertyData
     private static let recordSize = 28
     private static let rangeSize = 16
     private static let categories = "Lu Ll Lt Lm Lo Mn Mc Me Nd Nl No Pc Pd Ps Pe Pi Pf Po Sm Sc Sk So Zs Zl Zp Cc Cf Cs Co Cn".split(separator: " ").map(String.init)
-    private static let categoryDescriptions = [
+    private static let bidiClasses = "L R AL EN ES ET AN CS NSM BN B S WS ON LRE LRO RLE RLO PDF LRI RLI FSI PDI".split(separator: " ").map(String.init)
+    fileprivate static let categoryDescriptions = [
         "Lu": "Uppercase letter", "Ll": "Lowercase letter", "Lt": "Titlecase letter",
         "Lm": "Modifier letter", "Lo": "Letter", "Mn": "Nonspacing combining mark",
         "Mc": "Spacing combining mark", "Me": "Enclosing combining mark", "Nd": "Decimal digit",
@@ -97,25 +145,34 @@ final class UnicodeCatalog: @unchecked Sendable {
     ]
 
     /// Pass a resource directory or UnicodeCatalog.ucd URL for tests/custom bundles.
-    init(resourceURL: URL? = nil) {
+    init(edition: UnicodeEdition = .draft, resourceURL: URL? = nil) {
+        self.edition = edition
         let catalogURL: URL?
         let blocksURL: URL?
+        let propertiesURL: URL?
+        let suffix = edition == .latest ? "-latest" : ""
         if let resourceURL {
             let directory = resourceURL.pathExtension == "ucd" ? resourceURL.deletingLastPathComponent() : resourceURL
-            catalogURL = directory.appendingPathComponent("UnicodeCatalog.ucd")
-            blocksURL = directory.appendingPathComponent("Blocks.json")
+            catalogURL = resourceURL.pathExtension == "ucd" ? resourceURL : directory.appendingPathComponent("UnicodeCatalog\(suffix).ucd")
+            blocksURL = directory.appendingPathComponent("Blocks\(suffix).json")
+            propertiesURL = directory.appendingPathComponent("UnicodeProperties\(suffix).json")
         } else {
             #if SWIFT_PACKAGE
             let bundles = [Bundle.module, Bundle.main, Bundle(for: UnicodeCatalog.self)]
             #else
             let bundles = [Bundle.main, Bundle(for: UnicodeCatalog.self)]
             #endif
-            catalogURL = bundles.lazy.compactMap { $0.url(forResource: "UnicodeCatalog", withExtension: "ucd") }.first
-            blocksURL = bundles.lazy.compactMap { $0.url(forResource: "Blocks", withExtension: "json") }.first
+            catalogURL = bundles.lazy.compactMap { $0.url(forResource: "UnicodeCatalog\(suffix)", withExtension: "ucd") }.first
+            blocksURL = bundles.lazy.compactMap { $0.url(forResource: "Blocks\(suffix)", withExtension: "json") }.first
+            propertiesURL = bundles.lazy.compactMap { $0.url(forResource: "UnicodeProperties\(suffix)", withExtension: "json") }.first
         }
         blocks = blocksURL.flatMap { try? Data(contentsOf: $0) }
             .flatMap { try? JSONDecoder().decode([UnicodeBlock].self, from: $0) } ?? []
         let loaded = catalogURL.flatMap { try? Data(contentsOf: $0, options: .mappedIfSafe) }
+        let decodedProperties = propertiesURL.flatMap { try? Data(contentsOf: $0) }
+            .flatMap { try? JSONDecoder().decode(UnicodePropertyData.self, from: $0) }
+            .flatMap { $0.isValid ? $0 : nil }
+        properties = decodedProperties ?? .empty
         if let loaded, Self.valid(loaded) {
             data = loaded
             recordCount = Self.uint32(loaded, 8)
@@ -125,7 +182,8 @@ final class UnicodeCatalog: @unchecked Sendable {
             poolOffset = Self.uint32(loaded, 24)
             let start = poolOffset + Self.uint32(loaded, 32)
             version = String(decoding: loaded[start..<(start + Self.uint32(loaded, 36))], as: UTF8.self)
-            resourceError = blocks.isEmpty ? "Unicode block resources could not be loaded." : nil
+            resourceError = blocks.isEmpty ? "Unicode block resources could not be loaded."
+                : decodedProperties?.unicodeVersion != version ? "Unicode property resources could not be loaded for this edition." : nil
         } else {
             data = Data()
             recordCount = 0
@@ -165,66 +223,81 @@ final class UnicodeCatalog: @unchecked Sendable {
                     ? "Reserved for private agreements. Appearance depends on the font and application."
                     : Self.categoryDescriptions[category] ?? category
                 return UnicodeCharacter(codePoint: codePoint, name: name, detail: description,
-                                        blockName: block, category: category)
+                                        blockName: block, category: category, age: age(at: codePoint),
+                                        versionSortKey: sortKey(at: codePoint), combiningClass: 0,
+                                        bidirectionalClass: "L", script: script(at: codePoint),
+                                        decomposition: decomposition(at: codePoint))
             }
             let noncharacter = Self.isNoncharacter(codePoint)
             return UnicodeCharacter(codePoint: codePoint,
                                     name: noncharacter ? "NONCHARACTER" : "UNASSIGNED",
                                     detail: noncharacter ? "Permanently reserved for internal use. Not an assigned Unicode character."
                                         : "No character is assigned to this code point in Unicode \(version).",
-                                    blockName: block, category: "Cn", isInvisible: true)
+                                    blockName: block, category: "Cn", isInvisible: true,
+                                    age: age(at: codePoint), script: script(at: codePoint))
         }
     }
 
     /// Pagination counts assigned Unicode scalars, not unused code-point slots.
     /// This keeps sparse blocks useful and excludes UTF-16 surrogates.
-    func characters(in block: UnicodeBlock, offset: Int = 0, limit: Int = 256) -> [UnicodeCharacter] {
+    func characters(in block: UnicodeBlock, offset: Int = 0, limit: Int = 256,
+                    order: UnicodeSortOrder = .newestFirst) -> [UnicodeCharacter] {
         guard offset >= 0, limit > 0, block.start <= block.end, block.end <= 0x10FFFF else { return [] }
-        return data.withUnsafeBytes { bytes in
-            var codePoints: [UInt32] = []
-            var skipped = 0
-            var cp = block.start
-            var record = lowerBound(block.start, bytes: bytes)
-            while cp <= block.end && codePoints.count < limit {
-                if let range = algorithmicRange(cp, bytes: bytes) {
-                    let end = min(block.end, Self.u32(bytes, range + 4))
-                    let available = Int(end - cp + 1)
-                    if skipped + available <= offset {
-                        skipped += available
-                        cp = end + 1
-                        continue
-                    }
-                    cp += UInt32(max(0, offset - skipped))
-                    skipped = offset
-                    let count = min(Int(end - cp + 1), limit - codePoints.count)
-                    codePoints.append(contentsOf: cp..<(cp + UInt32(count)))
-                    cp += UInt32(count)
-                } else {
-                    while record < recordCount && Self.u32(bytes, recordOffset + record * Self.recordSize) < cp { record += 1 }
-                    if record < recordCount, Self.u32(bytes, recordOffset + record * Self.recordSize) == cp {
-                        if skipped >= offset { codePoints.append(cp) } else { skipped += 1 }
-                        record += 1
-                    }
-                    cp += 1
-                }
-            }
-            return codePoints.compactMap { character(at: $0) }
+        let spans = properties.assignedSpans.compactMap { span -> UnicodeAssignedSpan? in
+            guard span.start <= block.end && span.end >= block.start else { return nil }
+            return UnicodeAssignedSpan(start: max(block.start, span.start), end: min(block.end, span.end),
+                                       sortKey: span.sortKey, draftAddition: span.draftAddition)
         }
+        return page(in: spans, offset: offset, limit: limit, order: order)
+    }
+
+    /// Applies global ordering before pagination and creates only the requested page.
+    func orderedCharacters(offset: Int = 0, limit: Int = 256,
+                           order: UnicodeSortOrder = .newestFirst) -> [UnicodeCharacter] {
+        page(in: properties.assignedSpans, offset: offset, limit: limit, order: order)
+    }
+
+    func newestCharacters(offset: Int = 0, limit: Int = 256) -> [UnicodeCharacter] {
+        orderedCharacters(offset: offset, limit: limit, order: .newestFirst)
+    }
+
+    private func page(in spans: [UnicodeAssignedSpan], offset: Int, limit: Int,
+                      order: UnicodeSortOrder) -> [UnicodeCharacter] {
+        guard offset >= 0, limit > 0 else { return [] }
+        let ordered = spans.sorted { left, right in
+            if order != .codePoint && left.sortKey != right.sortKey {
+                return order == .newestFirst ? left.sortKey > right.sortKey : left.sortKey < right.sortKey
+            }
+            return left.start < right.start
+        }
+        var remainingOffset = offset
+        var points: [UInt32] = []
+        for span in ordered {
+            let count = Int(span.end - span.start + 1)
+            if remainingOffset >= count { remainingOffset -= count; continue }
+            let start = span.start + UInt32(remainingOffset)
+            remainingOffset = 0
+            let take = min(Int(span.end - start + 1), limit - points.count)
+            points.append(contentsOf: start..<(start + UInt32(take)))
+            if points.count == limit { break }
+        }
+        return points.compactMap { character(at: $0) }
     }
 
     /// Supports names, informative descriptions, formal aliases, literal glyphs,
     /// U+1F680 / 0x1F680 / 1F680 and decimal:128640. Bare hexadecimal values
     /// need a numeric digit, so names such as "face" remain text searches.
-    func search(_ query: String, limit: Int = 240) -> [UnicodeCharacter] {
+    func search(_ query: String, limit: Int = 240,
+                order: UnicodeSortOrder = .newestFirst) -> [UnicodeCharacter] {
         guard limit > 0 else { return [] }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return Array(featured.prefix(limit)) }
+        guard !trimmed.isEmpty else { return orderedCharacters(limit: limit, order: order) }
         if let cp = Self.parseCodePoint(trimmed) {
             return character(at: cp).map { [$0] } ?? []
         }
         let lower = trimmed.lowercased()
         if lower.hasPrefix("u+") || lower.hasPrefix("0x") || lower.hasPrefix("decimal:") { return [] }
-        if trimmed.unicodeScalars.count == 1 || trimmed.unicodeScalars.contains(where: { $0.value > 0x7F }) && !trimmed.unicodeScalars.contains(where: { CharacterSet.letters.contains($0) }) {
+        if trimmed.count == 1 || trimmed.unicodeScalars.contains(where: { $0.value > 0x7F }) && !trimmed.unicodeScalars.contains(where: { CharacterSet.letters.contains($0) }) {
             var seen = Set<UInt32>()
             return trimmed.unicodeScalars.compactMap { scalar in
                 seen.insert(scalar.value).inserted ? character(at: scalar.value) : nil
@@ -237,27 +310,18 @@ final class UnicodeCatalog: @unchecked Sendable {
         let stringTokens = tokens.map { String(decoding: $0, as: UTF8.self) }
         return data.withUnsafeBytes { bytes in
             var points: [UInt32] = []
-            var seen = Set<UInt32>()
-            func appendUnique(_ cp: UInt32) {
-                if seen.insert(cp).inserted { points.append(cp) }
-            }
-            if let exactBlock {
-                characters(in: exactBlock, limit: limit).forEach { appendUnique($0.codePoint) }
-            }
             for index in 0..<recordCount {
-                if points.count >= limit { break }
                 let record = recordOffset + index * Self.recordSize
                 let start = poolOffset + Int(Self.u32(bytes, record + 16))
                 let length = Int(Self.u32(bytes, record + 20))
                 if tokens.allSatisfy({ Self.contains($0, bytes: bytes, start: start, length: length) }) {
                     let cp = Self.u32(bytes, record)
-                    appendUnique(cp)
-                    if points.count == limit { break }
+                    points.append(cp)
                 }
             }
             // Algorithmic ranges are only expanded when their naming prefix or
             // a hexadecimal suffix could match. Ordinary searches stay compact.
-            if points.count < limit {
+            do {
                 for index in 0..<rangeCount {
                     let range = rangeOffset + index * Self.rangeSize
                     let prefix = string(offset: Int(Self.u32(bytes, range + 8)),
@@ -278,8 +342,7 @@ final class UnicodeCatalog: @unchecked Sendable {
                         let blockEnd = min(block.end, end)
                         if stringTokens.allSatisfy({ prefixAndBlock.contains($0) }) {
                             for cp in blockStart...blockEnd {
-                                appendUnique(cp)
-                                if points.count == limit { break }
+                                points.append(cp)
                             }
                         } else {
                             let blockName = Self.normalized(block.name)
@@ -287,28 +350,34 @@ final class UnicodeCatalog: @unchecked Sendable {
                                 let text = algorithmicName(cp, range: range, bytes: bytes)
                                     .lowercased().replacingOccurrences(of: "-", with: " ") + " " + blockName
                                 if stringTokens.allSatisfy({ text.contains($0) }) {
-                                    appendUnique(cp)
-                                    if points.count == limit { break }
+                                    points.append(cp)
                                 }
                             }
                         }
-                        if points.count == limit { break }
                     }
-                    if points.count == limit { break }
                 }
             }
-            let results = points.compactMap { character(at: $0) }
-            // Prefer an exact name over a name containing the same words.
-            return results.sorted {
-                let leftExact = Self.normalized($0.name) == normalized
-                let rightExact = Self.normalized($1.name) == normalized
-                if let exactBlock {
-                    let leftBlock = $0.blockName == exactBlock.name
-                    let rightBlock = $1.blockName == exactBlock.name
-                    if leftBlock != rightBlock { return leftBlock }
-                }
-                return leftExact == rightExact ? $0.codePoint < $1.codePoint : leftExact
+            // Rank exact meanings naturally, then sort ALL matches before limiting.
+            // Candidates are compact numbers, not hundreds of thousands of objects.
+            let candidates = points.map { cp -> (point: UInt32, key: Int, rank: Int) in
+                let block = block(containing: cp)
+                let name: String
+                if let index = recordIndex(cp, bytes: bytes) {
+                    let record = recordOffset + index * Self.recordSize
+                    name = string(offset: Int(Self.u32(bytes, record + 4)), length: Self.u16(bytes, record + 8), bytes: bytes)
+                } else if let range = algorithmicRange(cp, bytes: bytes) {
+                    name = algorithmicName(cp, range: range, bytes: bytes)
+                } else { name = "" }
+                let rank = Self.normalized(name) == normalized ? 0 : block?.name == exactBlock?.name && exactBlock != nil ? 1 : 2
+                return (cp, sortKey(at: cp), rank)
             }
+            return candidates.sorted {
+                if $0.rank != $1.rank { return $0.rank < $1.rank }
+                if order != .codePoint && $0.key != $1.key {
+                    return order == .newestFirst ? $0.key > $1.key : $0.key < $1.key
+                }
+                return $0.point < $1.point
+            }.prefix(limit).compactMap { character(at: $0.point) }
         }
     }
 
@@ -344,7 +413,49 @@ final class UnicodeCatalog: @unchecked Sendable {
         return UnicodeCharacter(codePoint: Self.u32(bytes, record),
                                 name: string(offset: Int(Self.u32(bytes, record + 4)), length: Self.u16(bytes, record + 8), bytes: bytes),
                                 detail: detail.isEmpty ? Self.categoryDescriptions[category] ?? category : detail,
-                                blockName: blockName, category: category, isInvisible: bytes[record + 25] & 1 != 0)
+                                blockName: blockName, category: category, isInvisible: bytes[record + 25] & 1 != 0,
+                                age: age(at: Self.u32(bytes, record)), versionSortKey: sortKey(at: Self.u32(bytes, record)),
+                                combiningClass: Int(bytes[record + 26]),
+                                bidirectionalClass: Self.bidiClasses[Int(bytes[record + 27])],
+                                script: script(at: Self.u32(bytes, record)),
+                                decomposition: decomposition(at: Self.u32(bytes, record)))
+    }
+
+    private func age(at cp: UInt32) -> String? { property(at: cp, in: properties.ages) }
+    private func script(at cp: UInt32) -> String? {
+        properties.unicodeVersion.isEmpty ? nil : property(at: cp, in: properties.scripts) ?? "Unknown"
+    }
+    private func property(at cp: UInt32, in ranges: [UnicodePropertyRange]) -> String? {
+        var low = 0, high = ranges.count
+        while low < high {
+            let mid = (low + high) / 2
+            if ranges[mid].end < cp { low = mid + 1 } else { high = mid }
+        }
+        return low < ranges.count && ranges[low].start <= cp ? ranges[low].value : nil
+    }
+    private func sortKey(at cp: UInt32) -> Int {
+        var low = 0, high = properties.assignedSpans.count
+        while low < high {
+            let mid = (low + high) / 2
+            if properties.assignedSpans[mid].end < cp { low = mid + 1 } else { high = mid }
+        }
+        return low < properties.assignedSpans.count && properties.assignedSpans[low].start <= cp
+            ? properties.assignedSpans[low].sortKey : age(at: cp).map(unicodeVersionKey) ?? 0
+    }
+    private func decomposition(at cp: UInt32) -> String? {
+        if (0xAC00...0xD7A3).contains(cp) {
+            let index = cp - 0xAC00
+            var points = [UInt32(0x1100) + index / 588, UInt32(0x1161) + index % 588 / 28]
+            if index % 28 != 0 { points.append(0x11A7 + index % 28) }
+            return points.map { String(format: "%04X", $0) }.joined(separator: " ")
+        }
+        var low = 0, high = properties.decompositions.count
+        while low < high {
+            let mid = (low + high) / 2
+            if properties.decompositions[mid].codePoint < cp { low = mid + 1 } else { high = mid }
+        }
+        return low < properties.decompositions.count && properties.decompositions[low].codePoint == cp
+            ? properties.decompositions[low].value : nil
     }
 
     private func algorithmicRange(_ cp: UInt32, bytes: UnsafeRawBufferPointer) -> Int? {
@@ -425,7 +536,7 @@ final class UnicodeCatalog: @unchecked Sendable {
             let records = Int(u32(bytes, 8)), recordStart = Int(u32(bytes, 12))
             let ranges = Int(u32(bytes, 16)), rangeStart = Int(u32(bytes, 20))
             let pool = Int(u32(bytes, 24)), poolLength = Int(u32(bytes, 28))
-            guard u32(bytes, 44) == 1, recordStart == 48,
+            guard u32(bytes, 44) == 2, recordStart == 48,
                   recordStart + records * recordSize == rangeStart,
                   rangeStart + ranges * rangeSize == pool,
                   pool + poolLength == bytes.count,
@@ -433,6 +544,7 @@ final class UnicodeCatalog: @unchecked Sendable {
             for index in 0..<records {
                 let record = recordStart + index * recordSize
                 guard Int(bytes[record + 24]) < categories.count,
+                      Int(bytes[record + 27]) < bidiClasses.count,
                       Int(u32(bytes, record + 4)) + u16(bytes, record + 8) <= poolLength,
                       Int(u32(bytes, record + 12)) + u16(bytes, record + 10) <= poolLength,
                       Int(u32(bytes, record + 16)) + Int(u32(bytes, record + 20)) <= poolLength else { return false }
@@ -445,5 +557,43 @@ final class UnicodeCatalog: @unchecked Sendable {
             }
             return true
         }
+    }
+}
+
+private struct UnicodePropertyRange: Decodable {
+    let start: UInt32
+    let end: UInt32
+    let value: String
+}
+private struct UnicodeAssignedSpan: Decodable {
+    let start: UInt32
+    let end: UInt32
+    let sortKey: Int
+    let draftAddition: Bool
+}
+private struct UnicodeDecomposition: Decodable {
+    let codePoint: UInt32
+    let value: String
+}
+private struct UnicodePropertyData: Decodable {
+    let unicodeVersion: String
+    let ages: [UnicodePropertyRange]
+    let scripts: [UnicodePropertyRange]
+    let assignedSpans: [UnicodeAssignedSpan]
+    let decompositions: [UnicodeDecomposition]
+    static let empty = UnicodePropertyData(unicodeVersion: "", ages: [], scripts: [], assignedSpans: [], decompositions: [])
+    var isValid: Bool {
+        func validRanges(_ ranges: [UnicodePropertyRange]) -> Bool {
+            ranges.allSatisfy { $0.start <= $0.end && $0.end <= 0x10FFFF }
+                && zip(ranges, ranges.dropFirst()).allSatisfy { $0.end < $1.start }
+        }
+        return !unicodeVersion.isEmpty && validRanges(ages) && validRanges(scripts)
+            && assignedSpans.allSatisfy {
+                $0.start <= $0.end && $0.end <= 0x10FFFF && $0.sortKey >= 0
+                    && !($0.start <= 0xDFFF && $0.end >= 0xD800)
+            }
+            && zip(assignedSpans, assignedSpans.dropFirst()).allSatisfy { $0.end < $1.start }
+            && decompositions.allSatisfy { Unicode.Scalar($0.codePoint) != nil }
+            && zip(decompositions, decompositions.dropFirst()).allSatisfy { $0.codePoint < $1.codePoint }
     }
 }

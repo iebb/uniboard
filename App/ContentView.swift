@@ -230,7 +230,7 @@ struct ExploreView: View {
             BlocksView(select: select)
         } label: {
             HStack(spacing: 16) {
-                Text("あ").font(.system(size: 31)).foregroundStyle(Palette.accent)
+                Text("あ").font(Font(UnicodeFontSupport.font(for: "あ", size: 31, enabled: preferences.useUnicodeFonts))).foregroundStyle(Palette.accent)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Take the scenic route").font(.subheadline.weight(.semibold)).foregroundStyle(Palette.ink)
                     Text("Wander through \(catalog.blocks.count) Unicode blocks.").font(.caption).foregroundStyle(Palette.muted)

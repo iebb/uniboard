@@ -12,6 +12,8 @@ Hold a character or emoji key, or keep a pointer over it, to open a scrollable p
 
 The keyboard inserts the selected scalar or complete emoji at the host app’s cursor. It includes its own search keys, the native globe menu, space, return and a persistent top-right repeating backspace. Search keys, space and backspace edit only the query while search is open; close the search keys to type into the host document. No network or Full Access is required at runtime.
 
+**Extra Unicode fonts** is optional and **off by default**. Enable it in the app's Setup tab or the keyboard's Fonts menu; each remembers its own choice. Bundled Noto Sans Symbols 2 and GNU Unifont improve some missing character previews while keeping supported system glyphs and emoji unchanged. They cannot change fonts in receiving apps or display every new Unicode 18/19 character. Full font licenses are available in Setup. See [font sources, verified coverage and update policy](docs/font-pack.md).
+
 ## Run locally
 
 Open `Uniboard.xcodeproj` and run the **Uniboard** scheme. Both targets use automatic signing with the Kitta Ltd team. For a different account, select the same team for the application and keyboard extension. The committed Xcode project can build without XcodeGen. After changes to `project.yml`, run `xcodegen generate`.

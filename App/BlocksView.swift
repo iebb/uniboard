@@ -34,7 +34,7 @@ struct BlocksView: View {
                         } label: {
                             HStack(spacing: 15) {
                                 Text(block.symbol)
-                                    .font(.system(size: 27))
+                                    .font(Font(UnicodeFontSupport.font(for: block.symbol, size: 27, enabled: preferences.useUnicodeFonts)))
                                     .foregroundStyle(Palette.accent)
                                     .frame(width: 44, height: 48)
                                     .background(Palette.soft, in: RoundedRectangle(cornerRadius: 12))

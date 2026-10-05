@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [.library(name: "UniboardCore", targets: ["UniboardCore"])],
     targets: [
-        .target(name: "UniboardCore", path: "Shared", exclude: ["CharacterStore.swift", "PrivacyInfo.xcprivacy"], sources: ["UnicodeCatalog.swift", "EmojiCatalog.swift"], resources: [.process("Resources")]),
+        .target(name: "UniboardCore", path: "Shared", exclude: ["CharacterStore.swift", "UnicodeFontSupport.swift", "PrivacyInfo.xcprivacy"], sources: ["UnicodeCatalog.swift", "EmojiCatalog.swift"], resources: [.process("Resources")]),
         .testTarget(name: "UniboardCoreTests", dependencies: ["UniboardCore"], path: "Tests")
     ]
 )

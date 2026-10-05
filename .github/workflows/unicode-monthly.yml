@@ -33,6 +33,9 @@ jobs:
       - name: Validate Unicode download recovery
         run: python3 -m unittest discover -s Scripts/tests
 
+      - name: Validate bundled optional font pack
+        run: python3 Scripts/validate_fonts.py
+
       - name: Fetch the latest final Unicode release and development draft
         run: python3 Scripts/generate_unicode.py --source all --refresh
 

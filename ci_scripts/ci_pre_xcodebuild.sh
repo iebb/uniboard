@@ -10,6 +10,8 @@ fi
 repository_path="${CI_PRIMARY_REPOSITORY_PATH:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
 cd "$repository_path"
 
+python3 Scripts/validate_fonts.py
+
 # This mode fetches fresh sources and fails on network or format errors; the
 # build must never quietly continue using a stale cached draft.
 python3 -m unittest discover -s Scripts/tests

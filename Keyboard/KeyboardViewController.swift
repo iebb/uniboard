@@ -195,6 +195,12 @@ private final class KeyboardModel: ObservableObject {
             refreshCatalog()
         }
     }
+    @Published var useUnicodeFonts: Bool {
+        didSet {
+            defaults.set(useUnicodeFonts, forKey: "keyboardUnicodeFonts")
+            if !useUnicodeFonts { UnicodeFontSupport.clearCache() }
+        }
+    }
     @Published private(set) var results: [UnicodeCharacter] = []
     @Published private(set) var emojiResults: [UnicodeEmojiEntry] = []
     @Published private(set) var searchInProgress = false
@@ -242,6 +248,7 @@ private final class KeyboardModel: ObservableObject {
         case "codePoint": order = .codePoint
         default: order = .newestFirst
         }
+        useUnicodeFonts = defaults.bool(forKey: "keyboardUnicodeFonts")
         refreshCatalog()
     }
 
@@ -621,6 +628,26 @@ private struct UnicodeKeyboardView: View {
             .accessibilityValue(model.orderValue)
             .accessibilityIdentifier("keyboard.order")
             Spacer(minLength: 0)
+            Menu {
+                Button { model.useUnicodeFonts = false } label: {
+                    Label("Extra Unicode fonts: Off", systemImage: model.useUnicodeFonts ? "circle" : "checkmark")
+                }
+                .accessibilityIdentifier("keyboard.unicodeFonts.off")
+                Button { model.useUnicodeFonts = true } label: {
+                    Label("Extra Unicode fonts: On", systemImage: model.useUnicodeFonts ? "checkmark" : "circle")
+                }
+                .accessibilityIdentifier("keyboard.unicodeFonts.on")
+                Text("Character previews only. Emoji and host-app fonts stay unchanged. Draft coverage is limited.")
+            } label: {
+                Image(systemName: "textformat")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(model.useUnicodeFonts ? KeyboardPalette.accent : KeyboardPalette.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(model.useUnicodeFonts ? KeyboardPalette.accent.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+            }
+            .accessibilityLabel("Fonts: Extra Unicode fonts")
+            .accessibilityValue(model.useUnicodeFonts ? "On" : "Off")
+            .accessibilityIdentifier("keyboard.unicodeFonts")
             if let item = model.lastItem {
                 Button { model.inspect(item) } label: {
                     Image(systemName: "info.circle").font(.system(size: 16)).frame(width: 28, height: 28)
@@ -632,9 +659,6 @@ private struct UnicodeKeyboardView: View {
                 }
                 .accessibilityLabel(isFavorite(item) ? "Remove from favorites" : "Save to favorites")
                 .disabled(!canToggleFavorite(item))
-            } else if !model.isCompactLayout {
-                Text("Hold for details").font(.system(size: 10))
-                    .lineLimit(1).minimumScaleFactor(0.8).layoutPriority(-1)
             }
         }
         .foregroundStyle(KeyboardPalette.secondary)
@@ -731,7 +755,7 @@ private struct UnicodeKeyboardView: View {
                     ForEach(model.catalog.blocks) { block in
                         Button { model.openBlock(block) } label: {
                             HStack(spacing: 10) {
-                                Text(block.symbol).font(.system(size: 21)).foregroundStyle(KeyboardPalette.accent).frame(width: 31)
+                                Text(block.symbol).font(Font(UnicodeFontSupport.font(for: block.symbol, size: 21, enabled: model.useUnicodeFonts))).foregroundStyle(KeyboardPalette.accent).frame(width: 31)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(block.name).font(.system(size: 13, weight: .medium)).foregroundStyle(Color.primary).lineLimit(1)
                                     Text(block.rangeLabel).font(.system(size: 9, design: .monospaced)).foregroundStyle(KeyboardPalette.secondary)
@@ -804,7 +828,7 @@ private struct UnicodeKeyboardView: View {
     private func characterTiles(_ characters: [UnicodeCharacter], pagination: (() -> Void)? = nil) -> some View {
         LazyVGrid(columns: columns, spacing: 7) {
             ForEach(characters) { character in
-                InspectableCharacterKey(item: .character(character), favorite: store.isFavorite(character.codePoint), compact: model.isCompactLayout, insert: { insert(character) }, inspect: { model.inspect(.character(character)) })
+                InspectableCharacterKey(item: .character(character), favorite: store.isFavorite(character.codePoint), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, insert: { insert(character) }, inspect: { model.inspect(.character(character)) })
                     .frame(height: keyHeight)
                     .onAppear { if character.id == characters.last?.id { pagination?() } }
             }
@@ -813,7 +837,7 @@ private struct UnicodeKeyboardView: View {
     private func emojiTiles(_ emojis: [UnicodeEmojiEntry], pagination: (() -> Void)? = nil) -> some View {
         LazyVGrid(columns: columns, spacing: 7) {
             ForEach(emojis) { emoji in
-                InspectableCharacterKey(item: .emoji(emoji), favorite: store.isFavoriteEmoji(emoji.id), compact: model.isCompactLayout, insert: { insertEmoji(emoji) }, inspect: { model.inspect(.emoji(emoji)) })
+                InspectableCharacterKey(item: .emoji(emoji), favorite: store.isFavoriteEmoji(emoji.id), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, insert: { insertEmoji(emoji) }, inspect: { model.inspect(.emoji(emoji)) })
                     .frame(height: keyHeight)
                     .onAppear { if emoji.id == emojis.last?.id { pagination?() } }
             }
@@ -862,7 +886,7 @@ private struct UnicodeKeyboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .top, spacing: 10) {
-                        Text(item.displayText).font(.system(size: 36)).lineLimit(2).minimumScaleFactor(0.5)
+                        Text(item.displayText).font(previewFont(item, size: 36)).lineLimit(2).minimumScaleFactor(0.5)
                             .frame(width: 64).frame(minHeight: 64)
                             .background(KeyboardPalette.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .accessibilityHidden(true)
@@ -886,6 +910,9 @@ private struct UnicodeKeyboardView: View {
     @ViewBuilder private func inspectionProperties(_ item: KeyboardItem) -> some View {
         switch item {
         case .character(let character):
+            if let source = UnicodeFontSupport.sourceName(for: character.displayText, size: 36, enabled: model.useUnicodeFonts) {
+                property("Preview font", value: source, identifier: "fontSource")
+            }
             property("Code point", value: character.codePointLabel, identifier: "codepoints", monospaced: true)
             Text(character.detail.isEmpty ? "No additional annotation is listed. The official Unicode name and properties are shown below." : character.detail)
                 .font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
@@ -926,6 +953,15 @@ private struct UnicodeKeyboardView: View {
                 .padding(8)
                 .background(KeyboardPalette.background, in: RoundedRectangle(cornerRadius: 7))
             }
+        }
+    }
+
+    private func previewFont(_ item: KeyboardItem, size: CGFloat) -> Font {
+        switch item {
+        case .character(let character):
+            return Font(UnicodeFontSupport.font(for: character.displayText, size: size, enabled: model.useUnicodeFonts))
+        case .emoji:
+            return .system(size: size)
         }
     }
 
@@ -1016,12 +1052,13 @@ private struct InspectableCharacterKey: UIViewRepresentable {
     let item: KeyboardItem
     let favorite: Bool
     let compact: Bool
+    let useUnicodeFonts: Bool
     let insert: () -> Void
     let inspect: () -> Void
 
     func makeUIView(context: Context) -> InspectableKeyButton { InspectableKeyButton() }
     func updateUIView(_ uiView: InspectableKeyButton, context: Context) {
-        uiView.configure(item: item, favorite: favorite, compact: compact, insert: insert, inspect: inspect)
+        uiView.configure(item: item, favorite: favorite, compact: compact, useUnicodeFonts: useUnicodeFonts, insert: insert, inspect: inspect)
     }
 }
 
@@ -1111,13 +1148,19 @@ private final class InspectableKeyButton: UIControl {
         layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: 12).cgPath
     }
 
-    func configure(item: KeyboardItem, favorite: Bool, compact: Bool, insert: @escaping () -> Void, inspect: @escaping () -> Void) {
+    func configure(item: KeyboardItem, favorite: Bool, compact: Bool, useUnicodeFonts: Bool, insert: @escaping () -> Void, inspect: @escaping () -> Void) {
         glyph.text = item.displayText
         glyphHeight.constant = compact ? 24 : 34
         stackTop.constant = compact ? 5 : 6
         stackBottom.constant = compact ? -5 : -6
-        if case .character(let character) = item { glyph.font = .systemFont(ofSize: character.isInvisible ? 17 : compact ? 24 : 32) }
-        else { glyph.font = .systemFont(ofSize: compact ? 24 : 32) }
+        if case .character(let character) = item {
+            let size: CGFloat = character.isInvisible ? 17 : compact ? 24 : 32
+            glyph.font = UnicodeFontSupport.font(for: character.displayText, size: size, enabled: useUnicodeFonts)
+            accessibilityValue = UnicodeFontSupport.sourceName(for: character.displayText, size: size, enabled: useUnicodeFonts).map { "Preview font: \($0)" }
+        } else {
+            glyph.font = .systemFont(ofSize: compact ? 24 : 32)
+            accessibilityValue = nil
+        }
         code.text = item.footer
         age.text = item.ageLabel
         star.isHidden = !favorite

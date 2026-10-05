@@ -39,6 +39,24 @@ struct SetupView: View {
                         .background(Palette.soft, in: RoundedRectangle(cornerRadius: 17))
                 }.accessibilityIdentifier("tryKeyboard")
 
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Extra Unicode fonts", isOn: $preferences.useUnicodeFonts)
+                        .font(.headline).foregroundStyle(Palette.ink)
+                        .accessibilityIdentifier("extraUnicodeFonts")
+                    Text("Off by default. Use bundled fonts for some missing character previews. Emoji and interface text keep iOS fonts; other apps use their own fonts. New draft coverage is limited.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                    Text("The app and keyboard remember this setting separately. Use the Fonts menu in the keyboard to change its previews.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                    NavigationLink {
+                        FontLicenseView()
+                    } label: {
+                        Label("Font licenses", systemImage: "doc.text")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .accessibilityIdentifier("fontLicenses")
+                }
+                .padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+
                 VStack(alignment: .leading, spacing: 14) {
                     Label("Private, by design", systemImage: "lock.shield")
                         .font(.headline).foregroundStyle(Palette.ink)
@@ -122,5 +140,24 @@ struct UnicodeLicenseView: View {
                 Text(license).font(.caption).textSelection(.enabled)
             }.padding(24).foregroundStyle(Palette.ink)
         }.background(Palette.background).navigationTitle("Data & license").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct FontLicenseView: View {
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Bundled preview fonts").font(.title2.weight(.semibold))
+                Text("Extra Unicode fonts are optional and off by default. They are used only for character previews in Uniboard. Coverage is incomplete, especially for new draft characters; inserted text keeps the receiving app’s fonts.")
+                    .font(.subheadline).foregroundStyle(Palette.muted)
+                Text(UnicodeFontSupport.licenseText)
+                    .font(.caption).textSelection(.enabled)
+                    .accessibilityIdentifier("fontLicenseText")
+            }
+            .padding(24).frame(maxWidth: 680).frame(maxWidth: .infinity)
+            .foregroundStyle(Palette.ink)
+        }
+        .background(Palette.background)
+        .navigationTitle("Font licenses").navigationBarTitleDisplayMode(.inline)
     }
 }

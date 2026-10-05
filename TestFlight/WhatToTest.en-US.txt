@@ -8,4 +8,6 @@ Hold a character or emoji, or keep a pointer over it, to open readable, scrollab
 
 In Emojis, search head shaking horizontally and insert U+1F642 U+200D U+2194 U+FE0F as one complete sequence. Check flags, skin tones and keycaps, component details, copy, favorites, recents and scratchpad text. Emoji introduction version and component Unicode ages are distinct.
 
+Extra Unicode fonts is optional and off by default. Enable it in Setup for app previews or the keyboard's Fonts menu for keyboard previews; these choices are independent and survive relaunch. On older iOS, compare U+0558 or U+10940 with the option off/on, then confirm the original scalar is inserted. Emoji and already-supported characters should keep their native appearance. Disable it to restore system fonts. Read full font notices under Setup > Font licenses. Coverage is incomplete, and the receiving app still controls its own fonts.
+
 Draft assignments and names may change. Display depends on your iOS fonts, and some emoji may render as separate glyphs. Please report search or insertion problems, missing metadata and layout issues on iPhone and iPad.

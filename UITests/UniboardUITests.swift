@@ -205,6 +205,178 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("Unicode18 cracking face retains meaning when the font lacks its glyph")
     }
 
+    func testOptionalUnicodeFontsDefaultOffAndAppChoicePersists() {
+        let fonts = appUnicodeFontsSwitch()
+        XCTAssertTrue(fonts.waitUntilValueEquals("0"), "Extra preview fonts must default off")
+        appTab("Explore").tap()
+        searchUnicode("U+0558")
+        dismissAppSearchKeyboard()
+        assertCharacterVisible("U+0558").tap()
+        assertCharacterProperty("name", contains: "Armenian small eh")
+        assertCharacterProperty("codepoints", equals: "U+0558")
+        XCTAssertTrue(app.staticTexts["characterGlyph"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["characterProperties.fontSource"].firstMatch.exists,
+                       "An off setting must preserve the native preview font")
+        attachScreenshot("Extra fonts off preserves the native Armenian preview and meaning")
+        app.buttons["Done"].tap()
+
+        setAppUnicodeFonts(true)
+        appTab("Explore").tap()
+        searchUnicode("U+0558")
+        dismissAppSearchKeyboard()
+        assertCharacterVisible("U+0558").tap()
+        assertCharacterProperty("fontSource", contains: "GNU Unifont")
+        assertCharacterProperty("codepoints", equals: "U+0558")
+        attachScreenshot("Extra fonts on displays the missing Unicode18 Armenian glyph")
+        let add = app.buttons["addToScratchpad"].firstMatch
+        revealByScrolling(add, in: app)
+        add.tap()
+        app.buttons["Done"].tap()
+        let scratchpad = app.buttons["openScratchpad"].firstMatch
+        revealByScrolling(scratchpad, in: app)
+        scratchpad.tap()
+        let input = app.textViews["scratchpadInput"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertTrue(input.waitUntilValueEquals("\u{0558}"))
+        XCTAssertEqual((input.value as? String)?.unicodeScalars.map { $0.value }, [0x0558],
+                       "A preview font must not add a placeholder or change copied text")
+        app.buttons["Done"].tap()
+
+        // The normal relaunch deliberately omits the testing preference reset.
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+        XCTAssertTrue(appUnicodeFontsSwitch().waitUntilValueEquals("1"))
+        let licenses = app.descendants(matching: .any)["fontLicenses"].firstMatch
+        revealByScrolling(licenses, in: app)
+        licenses.tap()
+        let licenseText = app.staticTexts["fontLicenseText"].firstMatch
+        XCTAssertTrue(licenseText.waitForExistence(timeout: 5))
+        for text in ["Unifont", "Noto", "SIL OPEN FONT LICENSE"] {
+            XCTAssertTrue(accessibleText(licenseText).contains(text), "Bundled font credits must include \(text)")
+        }
+        app.navigationBars["Font licenses"].buttons.firstMatch.tap()
+        setAppUnicodeFonts(false)
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+        XCTAssertTrue(appUnicodeFontsSwitch().waitUntilValueEquals("0"), "Turning fonts off must also persist")
+        attachScreenshot("App preview-font choice persists and can be disabled")
+    }
+
+    func testSystemKeyboardOptionalFontsAreLocalAndPreserveExactInsertion() throws {
+        try requireKeyboardIntegration()
+        XCTAssertTrue(appUnicodeFontsSwitch().waitUntilValueEquals("0"))
+        setAppUnicodeFonts(true)
+        app.launchArguments = []
+        var input = openSystemKeyboardHost()
+        defer {
+            XCUIDevice.shared.orientation = .portrait
+            if app.buttons["keyboard.properties.close"].firstMatch.exists {
+                app.buttons["keyboard.properties.close"].firstMatch.tap()
+            }
+            if app.buttons["keyboard.query.u"].firstMatch.exists { closeKeyboardSearch() }
+            if app.buttons["keyboard.unicodeFonts"].firstMatch.exists { selectKeyboardFonts(false) }
+            restoreEnglishKeyboard()
+        }
+        assertControlValue("keyboard.unicodeFonts", equals: "Off")
+        enterKeyboardQuery("u+0558")
+        let armenian = app.buttons["keyboard.character.U+0558"].firstMatch
+        XCTAssertTrue(armenian.waitForExistence(timeout: 10))
+        XCTAssertFalse((armenian.value as? String ?? "").contains("Preview font:"))
+        XCTAssertEqual(input.value as? String, "")
+        attachScreenshot("Keyboard fonts remain independently off despite app setting on")
+        selectKeyboardFonts(true)
+        XCTAssertTrue(armenian.waitUntilValueEquals("Preview font: GNU Unifont"))
+        armenian.press(forDuration: 1)
+        assertKeyboardProperties(codepoints: "U+0558", nameContaining: "Armenian small eh")
+        let source = app.staticTexts["keyboard.properties.fontSource"].firstMatch
+        XCTAssertTrue(source.waitForExistence(timeout: 5))
+        XCTAssertEqual(accessibleText(source), "GNU Unifont")
+        XCTAssertEqual(input.value as? String, "", "Font-backed inspection must not insert a preview")
+        attachScreenshot("Bundled Armenian glyph inspection preserves original Unicode properties")
+        app.buttons["keyboard.properties.close"].tap()
+        armenian.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\u{0558}"))
+        assertLastItemFontToolbarIsVisible()
+        attachScreenshot("Optional font preview inserts the original scalar with intact portrait toolbar")
+        closeKeyboardSearch()
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let landscape = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let frame = self.app.frame
+            return frame.width > frame.height
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 5), .completed)
+        assertLastItemFontToolbarIsVisible()
+        enterKeyboardQuery("u+10940")
+        assertKeyboardControlsAreVisible(isSearching: true)
+        assertHostEditorIsVisibleAboveKeyboard(input)
+        let sidetic = app.buttons["keyboard.character.U+10940"].firstMatch
+        XCTAssertTrue(sidetic.waitForExistence(timeout: 10))
+        XCTAssertTrue(sidetic.waitUntilValueEquals("Preview font: GNU Unifont Upper"))
+        XCTAssertTrue(sidetic.isHittable)
+        XCTAssertEqual(input.value as? String, "\u{0558}", "Query typing must stay inside the extension")
+        sidetic.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\u{0558}\u{10940}"))
+        XCTAssertEqual((input.value as? String)?.unicodeScalars.map { $0.value }, [0x0558, 0x10940])
+        assertLastItemFontToolbarIsVisible()
+        attachScreenshot("Supplementary fallback glyph inserts exact text in compact landscape")
+        closeKeyboardSearch()
+        app.buttons["keyboard.inspectLast"].tap()
+        assertKeyboardProperties(codepoints: "U+10940", nameContaining: "Sidetic letter n01")
+        XCTAssertEqual(accessibleText(app.staticTexts["keyboard.properties.fontSource"].firstMatch), "GNU Unifont Upper")
+        XCTAssertEqual(input.value as? String, "\u{0558}\u{10940}")
+        attachScreenshot("Compact Fonts and last-item inspector remain usable after insertion")
+        app.buttons["keyboard.properties.close"].tap()
+
+        XCUIDevice.shared.orientation = .portrait
+        let portrait = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let frame = self.app.frame
+            return frame.width < frame.height
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [portrait], timeout: 5), .completed)
+        let emojis = app.buttons["keyboard.tab.emojis"].firstMatch
+        XCTAssertTrue(emojis.waitForExistence(timeout: 5))
+        XCTAssertTrue(emojis.isHittable)
+        XCTAssertTrue(app.frame.contains(emojis.frame), "The native portrait tab must settle onscreen before tapping")
+        emojis.tap()
+        XCTAssertTrue(emojis.waitUntilSelected(), "The extension must actually select Emojis before its query: \(app.debugDescription)")
+        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitUntilLabelEquals("Search emoji sequences"))
+        attachScreenshot("Portrait emoji section settles before querying native sequence")
+        enterKeyboardQuery("head shaking horizontally")
+        let emoji = app.buttons["keyboard.emoji.1F642-200D-2194-FE0F"].firstMatch
+        XCTAssertTrue(emoji.waitForExistence(timeout: 10))
+        XCTAssertFalse((emoji.value as? String ?? "").contains("Preview font:"), "Whole emoji sequences must retain iOS rendering")
+        emoji.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\u{0558}\u{10940}🙂‍↔️"))
+        XCTAssertEqual((input.value as? String)?.unicodeScalars.map { $0.value },
+                       [0x0558, 0x10940, 0x1F642, 0x200D, 0x2194, 0xFE0F])
+        attachScreenshot("Extra character fonts preserve complete native emoji sequence insertion")
+        closeKeyboardSearch()
+        for expected in ["\u{0558}\u{10940}", "\u{0558}", ""] {
+            app.buttons["keyboard.delete"].tap()
+            XCTAssertTrue(input.waitUntilValueEquals(expected), "Delete must remove each complete original character")
+        }
+
+        input = openSystemKeyboardHost()
+        assertControlValue("keyboard.unicodeFonts", equals: "On")
+        XCTAssertEqual(input.value as? String, "")
+        selectKeyboardFonts(false)
+        input = openSystemKeyboardHost()
+        assertControlValue("keyboard.unicodeFonts", equals: "Off")
+        XCTAssertEqual(input.value as? String, "")
+        attachScreenshot("Keyboard extra fonts off persists after ordinary host relaunch")
+        restoreEnglishKeyboard()
+        let back = app.navigationBars["Try Uniboard"].buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(appUnicodeFontsSwitch().waitUntilValueEquals("1"),
+                      "Disabling keyboard preview fonts must not change the app preference")
+        setAppUnicodeFonts(false)
+    }
+
     func testSystemKeyboardUnsupportedGlyphInspectionDoesNotInsert() throws {
         try requireKeyboardIntegration()
         let input = openSystemKeyboardHost()
@@ -382,6 +554,47 @@ final class UniboardUITests: XCTestCase {
         let floating = app.cells.matching(NSPredicate(format: "label == %@", title)).firstMatch
         if floating.exists { return floating }
         return app.buttons[title].firstMatch
+    }
+
+    private func appUnicodeFontsSwitch() -> XCUIElement {
+        appTab("Setup").tap()
+        XCTAssertTrue(app.navigationBars["Set up Uniboard"].firstMatch.waitForExistence(timeout: 5))
+        let fonts = app.switches["extraUnicodeFonts"].firstMatch
+        revealByScrolling(fonts, in: app)
+        return fonts
+    }
+
+    private func setAppUnicodeFonts(_ enabled: Bool) {
+        let fonts = appUnicodeFontsSwitch()
+        let value = enabled ? "1" : "0"
+        if fonts.value as? String != value { fonts.tap() }
+        XCTAssertTrue(fonts.waitUntilValueEquals(value))
+    }
+
+    private func selectKeyboardFonts(_ enabled: Bool) {
+        let menu = app.buttons["keyboard.unicodeFonts"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.tap()
+        let option = app.descendants(matching: .any)["keyboard.unicodeFonts.\(enabled ? "on" : "off")"].firstMatch
+        XCTAssertTrue(option.waitForExistence(timeout: 5))
+        option.tap()
+        assertControlValue("keyboard.unicodeFonts", equals: enabled ? "On" : "Off")
+    }
+
+    private func assertLastItemFontToolbarIsVisible(file: StaticString = #filePath, line: UInt = #line) {
+        let favorite = app.buttons.matching(NSPredicate(format: "label IN %@",
+            ["Save to favorites", "Remove from favorites"])).firstMatch
+        let controls = [app.buttons["keyboard.unicodeFonts"].firstMatch,
+                        app.buttons["keyboard.inspectLast"].firstMatch, favorite]
+        for control in controls {
+            XCTAssertTrue(control.waitForExistence(timeout: 5), "Expected Fonts, Inspect and Save after insertion", file: file, line: line)
+            XCTAssertTrue(control.isHittable, file: file, line: line)
+            let frame = control.frame
+            XCTAssertTrue(frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0,
+                          "Last-item toolbar control has an invalid frame", file: file, line: line)
+            XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(frame),
+                          "Last-item toolbar control must not be clipped: \(frame)", file: file, line: line)
+        }
     }
 
     private func requireKeyboardIntegration() throws {

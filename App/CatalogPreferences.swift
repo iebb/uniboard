@@ -9,16 +9,23 @@ final class CatalogPreferences: ObservableObject {
     @Published var order: UnicodeSortOrder {
         didSet { defaults.set(order.rawValue, forKey: "appUnicodeSort") }
     }
+    @Published var useUnicodeFonts: Bool {
+        didSet {
+            defaults.set(useUnicodeFonts, forKey: "appUnicodeFonts")
+            if !useUnicodeFonts { UnicodeFontSupport.clearCache() }
+        }
+    }
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         edition = defaults.string(forKey: "appUnicodeEdition").flatMap(UnicodeEdition.init(rawValue:)) ?? .draft
         order = defaults.string(forKey: "appUnicodeSort").flatMap(UnicodeSortOrder.init(rawValue:)) ?? .newestFirst
+        useUnicodeFonts = defaults.bool(forKey: "appUnicodeFonts")
     }
     var catalog: UnicodeCatalog { edition.catalog }
     var emojis: EmojiCatalog { edition.emojiCatalog }
-    func reset() { edition = .draft; order = .newestFirst }
+    func reset() { edition = .draft; order = .newestFirst; useUnicodeFonts = false }
 }
 
 struct CatalogControls: View {

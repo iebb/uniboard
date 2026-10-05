@@ -35,6 +35,7 @@ struct SectionLabel: View {
 
 struct CharacterTile: View {
     let character: UnicodeCharacter
+    @EnvironmentObject private var preferences: CatalogPreferences
     var saved = false
     var action: () -> Void
     @State private var hoverTask: Task<Void, Never>?
@@ -46,7 +47,7 @@ struct CharacterTile: View {
     var body: some View {
             VStack(spacing: 5) {
                 Text(character.displayText)
-                    .font(.system(size: 31))
+                    .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 31, enabled: preferences.useUnicodeFonts)))
                     .foregroundStyle(Palette.ink)
                     .frame(height: 39)
                     .lineLimit(1)

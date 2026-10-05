@@ -21,6 +21,9 @@ targets:
     sources:
       - path: App
       - path: Shared
+      - path: Fonts
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ad.neko.uniboard
@@ -54,6 +57,9 @@ targets:
     sources:
       - path: Keyboard
       - path: Shared
+      - path: Fonts
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ad.neko.uniboard.keyboard

@@ -4,6 +4,7 @@ struct CharacterDetailView: View {
     let character: UnicodeCharacter
     @Binding var scratchpad: String
     @EnvironmentObject private var store: CharacterStore
+    @EnvironmentObject private var preferences: CatalogPreferences
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
     @State private var added = false
@@ -16,8 +17,9 @@ struct CharacterDetailView: View {
                         RoundedRectangle(cornerRadius: 26).fill(Palette.soft)
                         VStack(spacing: 18) {
                             Text(character.displayText)
-                                .font(.system(size: 104, weight: .regular))
+                                .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts)))
                                 .foregroundStyle(Palette.ink)
+                                .accessibilityIdentifier("characterGlyph")
                                 .minimumScaleFactor(0.5).lineLimit(1)
                             Text(character.codePointLabel)
                                 .font(.subheadline.monospaced().weight(.medium))
@@ -92,6 +94,9 @@ struct CharacterDetailView: View {
                     }.buttonStyle(.plain)
 
                     VStack(alignment: .leading, spacing: 20) {
+                        if let source = UnicodeFontSupport.sourceName(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts) {
+                            metadata("PREVIEW FONT", value: source, identifier: "fontSource")
+                        }
                         metadata("UNICODE AGE", value: character.age ?? (character.category == "Cn" ? "Not assigned" : "Pending in the draft data"), identifier: "age")
                         metadata("GENERAL CATEGORY", value: "\(character.category) · \(character.categoryName)", identifier: "category")
                         metadata("BLOCK", value: character.blockName, identifier: "block")

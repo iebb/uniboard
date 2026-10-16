@@ -1,1 +1,1 @@
-Introducing Uniboard: offline Unicode search and keyboard input, complete emoji sequences, Unicode 18 and 19 draft editions, newest-first browsing, readable properties and local favorites.
+A smaller keyboard that leaves more of your text visible. Search and navigation now share a compact toolbar, with Liquid Glass controls on iOS 26 and later. Version, sorting and optional Unicode fonts are available in the options menu. Hold any character for its full Unicode properties.

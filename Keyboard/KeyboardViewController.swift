@@ -1,6 +1,41 @@
 import SwiftUI
 import UIKit
 
+/// Remote keyboard scenes can retain a stale interfaceOrientation after the
+/// host rotates. Phone layout follows the actual view width, never its height.
+enum KeyboardLayoutPolicy {
+    struct Metrics {
+        let isCompactLayout: Bool
+        let height: CGFloat
+    }
+
+    static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
+                        compactVertical: Bool, isSearching: Bool, isInspecting: Bool) -> Metrics {
+        let edges: (short: CGFloat, long: CGFloat)? = displaySize.flatMap { size in
+            guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return nil }
+            return (min(size.width, size.height), max(size.width, size.height))
+        }
+        let compact: Bool
+        if isPad { compact = false }
+        else if let edges, viewWidth.isFinite, viewWidth > 0 {
+            compact = viewWidth > edges.short + max(24, edges.short * 0.10)
+        } else {
+            compact = compactVertical
+        }
+        let expanded = isSearching || isInspecting
+        let target: CGFloat = isPad ? (expanded ? 380 : 340) : compact ? 220 : (expanded ? 340 : 300)
+        let effectiveHeight: CGFloat?
+        if !isPad, let edges {
+            effectiveHeight = compact ? edges.short : edges.long
+        } else {
+            effectiveHeight = sceneHeight
+        }
+        let fraction: CGFloat = isPad ? 0.50 : compact ? 0.60 : isInspecting ? 0.50 : isSearching ? 0.55 : 0.47
+        let height = effectiveHeight.flatMap { $0.isFinite && $0 > 0 ? min(target, $0 * fraction) : nil } ?? target
+        return Metrics(isCompactLayout: compact, height: height)
+    }
+}
+
 /// Query keys edit only the extension's local search. Insertion always sends the
 /// original scalar or complete emoji sequence to the host's document proxy.
 final class KeyboardViewController: UIInputViewController {
@@ -8,9 +43,20 @@ final class KeyboardViewController: UIInputViewController {
     private var keyboardHeight: NSLayoutConstraint?
     private var hostingController: UIHostingController<UnicodeKeyboardView>?
 
+    override func loadView() {
+        // Use the keyboard's system blur and tint instead of stacking another
+        // full-size material behind the control glass.
+        view = UIInputView(frame: .zero, inputViewStyle: .keyboard)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = KeyboardPalette.backgroundUI
+        view.backgroundColor = .clear
+        view.isOpaque = false
+        inputView?.backgroundColor = .clear
+        inputView?.isOpaque = false
+        NotificationCenter.default.addObserver(self, selector: #selector(updateBackdrop), name: UIAccessibility.reduceTransparencyStatusDidChangeNotification, object: nil)
+        updateBackdrop()
         let root = UnicodeKeyboardView(
             model: model, store: CharacterStore.shared, controller: self,
             insert: { [weak self] character in
@@ -29,6 +75,7 @@ final class KeyboardViewController: UIInputViewController {
         )
         let host = UIHostingController(rootView: root)
         host.view.backgroundColor = .clear
+        host.view.isOpaque = false
         host.view.translatesAutoresizingMaskIntoConstraints = false
         addChild(host)
         view.addSubview(host.view)
@@ -40,7 +87,7 @@ final class KeyboardViewController: UIInputViewController {
         ])
         host.didMove(toParent: self)
         hostingController = host
-        let height = view.heightAnchor.constraint(equalToConstant: 420)
+        let height = view.heightAnchor.constraint(equalToConstant: 300)
         height.priority = .init(999)
         height.isActive = true
         keyboardHeight = height
@@ -69,20 +116,24 @@ final class KeyboardViewController: UIInputViewController {
         model.returnTitle = Self.returnTitle(for: textDocumentProxy.returnKeyType)
     }
 
+    @objc private func updateBackdrop() {
+        let opaque = UIAccessibility.isReduceTransparencyEnabled
+        view.backgroundColor = opaque ? KeyboardPalette.backgroundUI : .clear
+        view.isOpaque = opaque
+    }
+
     private func updateKeyboardHeight() {
-        let landscape = view.window?.windowScene?.interfaceOrientation.isLandscape == true
         let pad = traitCollection.userInterfaceIdiom == .pad
-        if model.isCompactLayout != (landscape && !pad) { model.isCompactLayout = landscape && !pad }
+        let scene = view.window?.windowScene
+        let metrics = KeyboardLayoutPolicy.metrics(
+            viewWidth: view.bounds.width, displaySize: scene?.screen.bounds.size,
+            sceneHeight: scene?.coordinateSpace.bounds.height, isPad: pad,
+            compactVertical: traitCollection.verticalSizeClass == .compact,
+            isSearching: model.isSearching, isInspecting: model.inspection != nil
+        )
+        if model.isCompactLayout != metrics.isCompactLayout { model.isCompactLayout = metrics.isCompactLayout }
         if model.isPadLayout != pad { model.isPadLayout = pad }
-        let height: CGFloat
-        if pad {
-            height = model.inspection != nil ? 480 : model.isSearching ? 480 : 420
-        } else if landscape {
-            height = model.inspection != nil ? 320 : model.isSearching ? 270 : 290
-        } else {
-            height = model.inspection != nil ? 440 : model.isSearching ? 480 : 420
-        }
-        if keyboardHeight?.constant != height { keyboardHeight?.constant = height }
+        if keyboardHeight?.constant != metrics.height { keyboardHeight?.constant = metrics.height }
     }
 
     private func deleteKey() {
@@ -115,6 +166,8 @@ final class KeyboardViewController: UIInputViewController {
         default: return "Return"
         }
     }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
 }
 
 private enum KeyboardSection: String, CaseIterable {
@@ -434,7 +487,9 @@ private enum KeyboardPalette {
     static let backgroundUI = UIColor.systemGroupedBackground
     static let keyUI = UIColor.secondarySystemGroupedBackground
     static let pressedUI = UIColor.systemGray5
-    static let borderUI = UIColor.separator.withAlphaComponent(0.18)
+    static let borderUI = UIColor { traits in
+        UIColor.separator.resolvedColor(with: traits).withAlphaComponent(traits.accessibilityContrast == .high ? 0.65 : 0.16)
+    }
     static let actionUI = UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? .systemGray3
@@ -452,9 +507,51 @@ private enum KeyboardPalette {
 
 private extension View {
     func keyboardKeySurface(radius: CGFloat = 10) -> some View {
-        background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(KeyboardPalette.separator, lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.06), radius: 0, x: 0, y: 1)
+        modifier(KeyboardKeySurface(radius: radius))
+    }
+
+    func keyboardControlSurface(radius: CGFloat = 12) -> some View {
+        modifier(KeyboardControlSurface(radius: radius))
+    }
+}
+
+private struct KeyboardKeySurface: ViewModifier {
+    let radius: CGFloat
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        content.background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(KeyboardPalette.separator, lineWidth: contrast == .increased ? 1 : 0.4))
+    }
+}
+
+/// Glass belongs to navigation controls, while the character grid stays quiet.
+private struct KeyboardControlSurface: ViewModifier {
+    let radius: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.keyboardKeySurface(radius: radius)
+        } else if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: .rect(cornerRadius: radius))
+                .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(contrast == .increased ? Color.primary.opacity(0.4) : Color.clear, lineWidth: 1))
+        } else {
+            content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(KeyboardPalette.separator, lineWidth: contrast == .increased ? 1 : 0.5))
+        }
+    }
+}
+
+private struct KeyboardTray: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        if reduceTransparency {
+            KeyboardPalette.background
+        } else {
+            Color.clear
+        }
     }
 }
 
@@ -474,160 +571,153 @@ private struct UnicodeKeyboardView: View {
     let space: () -> Void
     let returnKey: () -> Void
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: model.isPadLayout ? 76 : 64, maximum: 100), spacing: 7)]
+        [GridItem(.adaptive(minimum: model.isPadLayout ? 70 : 58, maximum: 92), spacing: 6)]
     }
-    private var keyHeight: CGFloat { model.isCompactLayout ? 60 : model.isPadLayout ? 80 : 72 }
-    private var headerHeight: CGFloat { model.isCompactLayout ? 38 : 42 }
-    private var controlHeight: CGFloat { model.isCompactLayout ? 38 : 44 }
+    private var keyHeight: CGFloat { model.isCompactLayout ? 50 : model.isPadLayout ? 60 : 56 }
+    private var headerHeight: CGFloat { model.isCompactLayout ? 36 : 40 }
+    private var controlHeight: CGFloat { model.isCompactLayout ? 34 : 38 }
 
     var body: some View {
         VStack(spacing: 6) {
-            header
+            toolbar
             if let inspected = model.inspection {
                 inspectionPanel(inspected)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .layoutPriority(1)
             } else {
-                if !model.isSearching { sectionTabs }
-                optionsBar
-                if model.isCompactLayout && model.isSearching {
-                    compactSearchContent
+                if model.isSearching {
+                    searchContent
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
                 } else {
                     content
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
-                    if model.isSearching { searchKeys }
                 }
             }
             controls
         }
-        .padding(.horizontal, 10)
-        .padding(.top, model.isCompactLayout ? 6 : 10)
+        .padding(.horizontal, 8)
+        .padding(.top, model.isCompactLayout ? 4 : 6)
         .padding(.bottom, 6)
-        .background(KeyboardPalette.background.ignoresSafeArea())
+        .background(KeyboardTray().ignoresSafeArea())
         .tint(KeyboardPalette.accent)
         .environment(\.layoutDirection, .leftToRight)
         .dynamicTypeSize(.xSmall ... .xxxLarge)
     }
 
+    @ViewBuilder private var toolbar: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 4) { header }
+        } else {
+            header
+        }
+    }
+
     private var header: some View {
-        HStack(spacing: 8) {
-            Button { model.beginSearch() } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(model.isSearching ? KeyboardPalette.accent : KeyboardPalette.secondary)
-                    Text(model.query.isEmpty ? (model.section == .emojis ? "Search emoji names" : "Search names, descriptions or U+…") : model.query)
-                        .font(.system(size: 14, weight: model.query.isEmpty ? .regular : .medium))
-                        .foregroundStyle(model.query.isEmpty ? KeyboardPalette.secondary : Color.primary)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if model.isSearching {
-                        RoundedRectangle(cornerRadius: 1).fill(KeyboardPalette.accent).frame(width: 2, height: 18)
+        HStack(spacing: 6) {
+            HStack(spacing: 0) {
+                Button { model.beginSearch() } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(model.isSearching ? KeyboardPalette.accent : KeyboardPalette.secondary)
+                        Text(model.query.isEmpty ? (model.section == .emojis ? "Search emoji" : "Search Unicode") : model.query)
+                            .font(.system(size: 14, weight: model.query.isEmpty ? .regular : .medium))
+                            .foregroundStyle(model.query.isEmpty ? KeyboardPalette.secondary : Color.primary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if model.isSearching {
+                            RoundedRectangle(cornerRadius: 1).fill(KeyboardPalette.accent).frame(width: 2, height: 16)
+                        }
                     }
+                    .padding(.leading, 11).padding(.trailing, 8)
+                    .frame(maxWidth: .infinity).frame(height: headerHeight)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 12)
-                .frame(height: headerHeight)
-                .keyboardKeySurface(radius: 12)
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(model.isSearching ? KeyboardPalette.accent.opacity(0.65) : Color.clear, lineWidth: 1.5))
-            }
-            .buttonStyle(KeyboardPressStyle())
-            .accessibilityLabel(model.section == .emojis ? "Search emoji sequences" : "Search Unicode characters")
-            .accessibilityValue(model.query.isEmpty ? "No query" : model.query)
-            .accessibilityIdentifier("keyboard.search")
-            if model.isSearching {
-                if !model.query.isEmpty {
+                .buttonStyle(KeyboardPressStyle())
+                .accessibilityLabel(model.section == .emojis ? "Search emoji sequences" : "Search Unicode characters")
+                .accessibilityValue(model.query.isEmpty ? "No query" : model.query)
+                .accessibilityIdentifier("keyboard.search")
+                if model.isSearching && !model.query.isEmpty {
                     Button { model.query = "" } label: {
-                        Image(systemName: "xmark.circle.fill").font(.system(size: 19))
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 16))
                             .foregroundStyle(KeyboardPalette.secondary)
-                            .frame(width: 28, height: headerHeight)
+                            .frame(width: 30, height: headerHeight)
                     }
                     .buttonStyle(KeyboardPressStyle())
                     .accessibilityLabel("Clear search")
                     .accessibilityIdentifier("keyboard.search.clear")
                 }
-                Button("Done") { model.endSearch() }
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(height: headerHeight)
-                    .buttonStyle(KeyboardPressStyle())
-                    .accessibilityLabel("Close search keys")
             }
+            .frame(height: headerHeight)
+            .keyboardControlSurface()
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(model.isSearching ? KeyboardPalette.accent.opacity(0.55) : Color.clear, lineWidth: 1))
+
+            sectionMenu
+            optionsMenu
             // A single fixed trailing key in search, browsing and inspection.
             RepeatingDeleteKey(action: delete, isQuery: model.isSearching)
-                .frame(width: 46, height: headerHeight)
+                .frame(width: 42, height: headerHeight)
+                .keyboardControlSurface()
         }
         .frame(height: headerHeight)
     }
 
-    private var sectionTabs: some View {
-        HStack(spacing: 2) {
+    private var sectionMenu: some View {
+        Menu {
             ForEach(KeyboardSection.allCases, id: \.self) { section in
-                Button { model.section = section } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: section.icon).font(.system(size: 12, weight: .medium))
-                        Text(section.rawValue).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: model.isCompactLayout ? 28 : 32)
-                    .foregroundStyle(model.section == section ? KeyboardPalette.accent : KeyboardPalette.secondary)
-                    .background(model.section == section ? KeyboardPalette.key : Color.clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .overlay(alignment: .bottom) {
-                        if model.section == section {
-                            Capsule().fill(KeyboardPalette.accent).frame(width: 18, height: 2).padding(.bottom, 3)
-                        }
-                    }
+                Button {
+                    model.closeInspection()
+                    if section == .blocks || section == .saved { model.endSearch() }
+                    model.section = section
+                } label: {
+                    Label(section.rawValue, systemImage: model.section == section ? "checkmark" : section.icon)
                 }
-                .buttonStyle(KeyboardPressStyle())
                 .accessibilityAddTraits(model.section == section ? .isSelected : [])
                 .accessibilityIdentifier("keyboard.tab.\(section.rawValue.lowercased())")
             }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: model.section.icon).font(.system(size: 14, weight: .medium))
+                if !model.isSearching && !model.isCompactLayout {
+                    Text(model.section.rawValue).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                }
+                Image(systemName: "chevron.down").font(.system(size: 7, weight: .semibold))
+            }
+            .foregroundStyle(KeyboardPalette.accent)
+            .frame(width: model.isSearching || model.isCompactLayout ? 40 : 86, height: headerHeight)
+            .keyboardControlSurface()
         }
-        .padding(2)
-        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .buttonStyle(KeyboardPressStyle())
+        .accessibilityLabel("Keyboard section")
+        .accessibilityValue(model.section.rawValue.lowercased())
+        .accessibilityIdentifier("keyboard.section")
     }
 
-    private var optionsBar: some View {
-        HStack(spacing: 6) {
+    private var optionsMenu: some View {
+        Menu {
             Menu {
                 Button { model.edition = .latest } label: { Label("Unicode \(UnicodeEdition.latest.catalog.version) · latest", systemImage: model.edition == .latest ? "checkmark" : "circle") }
                     .accessibilityIdentifier("keyboard.edition.latest")
                 Button { model.edition = .draft } label: { Label("Unicode \(UnicodeEdition.draft.catalog.version)", systemImage: model.edition == .draft ? "checkmark" : "circle") }
                     .accessibilityIdentifier("keyboard.edition.draft")
             } label: {
-                HStack(spacing: 4) {
-                    Text("Unicode \(model.catalog.version)")
-                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
-                }
-                .font(.system(size: 11, weight: .medium))
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .padding(.horizontal, 7)
-                .frame(height: 28)
+                Label("Unicode \(model.catalog.version)", systemImage: "books.vertical")
             }
             .accessibilityLabel("Unicode edition")
             .accessibilityValue(model.editionValue)
             .accessibilityIdentifier("keyboard.edition")
-            Rectangle().fill(KeyboardPalette.separator).frame(width: 1, height: 14)
             Menu {
                 sortOption(.newestFirst, identifier: "newest")
                 sortOption(.oldestFirst, identifier: "oldest")
                 sortOption(.codePoint, identifier: "codepoint")
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.up.arrow.down").font(.system(size: 10, weight: .medium))
-                    Text(model.order.title)
-                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
-                }
-                .font(.system(size: 11, weight: .medium))
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .padding(.horizontal, 7)
-                .frame(height: 28)
+                Label("Order: \(model.order.title)", systemImage: "arrow.up.arrow.down")
             }
             .accessibilityLabel("Character order")
             .accessibilityValue(model.orderValue)
             .accessibilityIdentifier("keyboard.order")
-            Spacer(minLength: 0)
             Menu {
                 Button { model.useUnicodeFonts = false } label: {
                     Label("Extra Unicode fonts: Off", systemImage: model.useUnicodeFonts ? "circle" : "checkmark")
@@ -639,31 +729,34 @@ private struct UnicodeKeyboardView: View {
                 .accessibilityIdentifier("keyboard.unicodeFonts.on")
                 Text("Character previews only. Emoji and host-app fonts stay unchanged. Draft coverage is limited.")
             } label: {
-                Image(systemName: "textformat")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(model.useUnicodeFonts ? KeyboardPalette.accent : KeyboardPalette.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(model.useUnicodeFonts ? KeyboardPalette.accent.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+                Label("Extra Unicode fonts: \(model.useUnicodeFonts ? "On" : "Off")", systemImage: "textformat")
             }
             .accessibilityLabel("Fonts: Extra Unicode fonts")
             .accessibilityValue(model.useUnicodeFonts ? "On" : "Off")
             .accessibilityIdentifier("keyboard.unicodeFonts")
             if let item = model.lastItem {
-                Button { model.inspect(item) } label: {
-                    Image(systemName: "info.circle").font(.system(size: 16)).frame(width: 28, height: 28)
+                Section("Last inserted or inspected") {
+                    Button { model.inspect(item) } label: {
+                        Label("Inspect \(item.name)", systemImage: "info.circle")
+                    }
+                    .accessibilityIdentifier("keyboard.inspectLast")
+                    Button { toggleFavorite(item) } label: {
+                        Label(isFavorite(item) ? "Remove from favorites" : "Save to favorites", systemImage: isFavorite(item) ? "star.fill" : "star")
+                    }
+                    .disabled(!canToggleFavorite(item))
                 }
-                .accessibilityLabel("Inspect \(item.name)")
-                .accessibilityIdentifier("keyboard.inspectLast")
-                Button { toggleFavorite(item) } label: {
-                    Image(systemName: isFavorite(item) ? "star.fill" : "star").font(.system(size: 15)).frame(width: 28, height: 28)
-                }
-                .accessibilityLabel(isFavorite(item) ? "Remove from favorites" : "Save to favorites")
-                .disabled(!canToggleFavorite(item))
             }
+            Text("Hold a key for Unicode properties.")
+        } label: {
+            Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.primary)
+                .frame(width: 36, height: headerHeight)
+                .keyboardControlSurface()
         }
-        .foregroundStyle(KeyboardPalette.secondary)
         .buttonStyle(KeyboardPressStyle())
-        .frame(height: model.isCompactLayout ? 26 : 30)
+        .accessibilityLabel("Keyboard options")
+        .accessibilityValue("\(model.editionValue), \(model.orderValue), extra fonts \(model.useUnicodeFonts ? "on" : "off")")
+        .accessibilityIdentifier("keyboard.options")
     }
 
     private func sortOption(_ order: UnicodeSortOrder, identifier: String) -> some View {
@@ -689,41 +782,64 @@ private struct UnicodeKeyboardView: View {
         }
     }
 
-    /// Landscape leaves room for the host editor: two result rows beside the
-    /// local query keys, sharing the same search header and document controls.
-    private var compactSearchContent: some View {
+    /// Short, wide scenes put results beside the query keys. Narrow scenes keep
+    /// a complete result key visible by fitting only the query row heights.
+    private var searchContent: some View {
         GeometryReader { geometry in
             let width = geometry.size.width.isFinite ? max(0, geometry.size.width) : 0
             let height = geometry.size.height.isFinite ? max(0, geometry.size.height) : 0
-            let available = max(2, width - 12)
-            let resultsWidth = available * 0.35
-            HStack(spacing: 12) {
-                searchResults
-                    .frame(width: resultsWidth, height: height)
-                searchKeys
-                    .frame(width: available - resultsWidth, height: height)
+            if model.isCompactLayout || (model.isPadLayout && width >= 520 && height < keyHeight + 154) {
+                let available = max(2, width - 12)
+                let resultsWidth = available * 0.35
+                HStack(spacing: 12) {
+                    searchResults
+                        .frame(width: resultsWidth, height: height)
+                    queryKeys(rowHeight: max(16, min(model.isCompactLayout ? 28 : 34, (height - 12) / 4)))
+                        .frame(width: available - resultsWidth, height: height)
+                }
+                .frame(width: width, height: height)
+            } else {
+                let rowHeight = max(16, min(34, (height - keyHeight - 18) / 4))
+                let queryHeight = rowHeight * 4 + 12
+                VStack(spacing: 6) {
+                    searchResults
+                        .frame(width: width, height: max(0, height - queryHeight - 6))
+                    queryKeys(rowHeight: rowHeight)
+                        .frame(width: width, height: queryHeight)
+                }
+                .frame(width: width, height: height)
             }
-            .frame(width: width, height: height)
+        }
+        .clipped()
+    }
+
+    private var emptySearchSuggestions: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 4) {
+                Text(model.section == .emojis ? "Find an emoji sequence" : "Find your character").font(.system(size: 13, weight: .semibold))
+                if geometry.size.height >= 48 {
+                    Text(model.section == .emojis ? "Try “woman technologist”, “flag Japan”, or a complete emoji" : "Try “arrow”, “heart”, “U+03C0”, or “decimal:960”")
+                        .font(.system(size: 11)).foregroundStyle(KeyboardPalette.secondary).multilineTextAlignment(.center).lineLimit(2)
+                }
+                if geometry.size.height >= 78 && !model.isCompactLayout {
+                    HStack(spacing: 6) {
+                        ForEach(model.section == .emojis ? ["woman technologist", "flag Japan"] : ["arrow", "heart", "U+03C0"], id: \.self) { example in
+                            Button(example) { model.query = example }
+                                .font(.system(size: 11, weight: .medium))
+                                .padding(.horizontal, 9).padding(.vertical, 4)
+                                .background(KeyboardPalette.accent.opacity(0.08), in: Capsule())
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(width: max(0, geometry.size.width), height: max(0, geometry.size.height))
         }
     }
 
     @ViewBuilder private var searchResults: some View {
         if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            VStack(spacing: 8) {
-                Text(model.section == .emojis ? "Find an emoji sequence" : "Find your character").font(.system(size: 16, weight: .semibold))
-                Text(model.section == .emojis ? "Try “woman technologist”, “flag Japan”, or a complete emoji" : "Try “arrow”, “heart”, “U+03C0”, or “decimal:960”")
-                    .font(.system(size: 11)).foregroundStyle(KeyboardPalette.secondary).multilineTextAlignment(.center)
-                HStack(spacing: 6) {
-                    ForEach(model.section == .emojis ? ["woman technologist", "flag Japan"] : ["arrow", "heart", "U+03C0"], id: \.self) { example in
-                        Button(example) { model.query = example }
-                            .font(.system(size: 11, weight: .medium))
-                            .padding(.horizontal, 9).padding(.vertical, 6)
-                            .background(KeyboardPalette.accent.opacity(0.08), in: Capsule())
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            emptySearchSuggestions
         } else if model.searchInProgress {
             ProgressView("Searching…").font(.system(size: 12))
         } else if model.section == .emojis {
@@ -751,7 +867,7 @@ private struct UnicodeKeyboardView: View {
             }
         } else {
             ScrollView {
-                LazyVStack(spacing: 7) {
+                LazyVStack(spacing: 6) {
                     ForEach(model.catalog.blocks) { block in
                         Button { model.openBlock(block) } label: {
                             HStack(spacing: 10) {
@@ -763,7 +879,7 @@ private struct UnicodeKeyboardView: View {
                                 Spacer(minLength: 0)
                                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(KeyboardPalette.secondary)
                             }
-                            .padding(.horizontal, 12).frame(height: model.isCompactLayout ? 44 : 50)
+                            .padding(.horizontal, 10).frame(height: 44)
                             .keyboardKeySurface(radius: 11)
                         }
                         .buttonStyle(KeyboardPressStyle())
@@ -826,7 +942,7 @@ private struct UnicodeKeyboardView: View {
             .scrollIndicators(.hidden)
     }
     private func characterTiles(_ characters: [UnicodeCharacter], pagination: (() -> Void)? = nil) -> some View {
-        LazyVGrid(columns: columns, spacing: 7) {
+        LazyVGrid(columns: columns, spacing: 6) {
             ForEach(characters) { character in
                 InspectableCharacterKey(item: .character(character), favorite: store.isFavorite(character.codePoint), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, insert: { insert(character) }, inspect: { model.inspect(.character(character)) })
                     .frame(height: keyHeight)
@@ -835,7 +951,7 @@ private struct UnicodeKeyboardView: View {
         }
     }
     private func emojiTiles(_ emojis: [UnicodeEmojiEntry], pagination: (() -> Void)? = nil) -> some View {
-        LazyVGrid(columns: columns, spacing: 7) {
+        LazyVGrid(columns: columns, spacing: 6) {
             ForEach(emojis) { emoji in
                 InspectableCharacterKey(item: .emoji(emoji), favorite: store.isFavoriteEmoji(emoji.id), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, insert: { insertEmoji(emoji) }, inspect: { model.inspect(.emoji(emoji)) })
                     .frame(height: keyHeight)
@@ -987,20 +1103,20 @@ private struct UnicodeKeyboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var searchKeys: some View {
-        VStack(spacing: 5) {
-            searchKeyRow(Array("1234567890").map(String.init))
-            searchKeyRow(Array("qwertyuiop").map(String.init))
-            searchKeyRow(Array("asdfghjkl").map(String.init), inset: 10)
-            searchKeyRow(["+", "z", "x", "c", "v", "b", "n", "m", ":", "-"], inset: 0)
+    private func queryKeys(rowHeight: CGFloat) -> some View {
+        VStack(spacing: 4) {
+            searchKeyRow(Array("1234567890").map(String.init), rowHeight: rowHeight)
+            searchKeyRow(Array("qwertyuiop").map(String.init), rowHeight: rowHeight)
+            searchKeyRow(Array("asdfghjkl").map(String.init), rowHeight: rowHeight, inset: 10)
+            searchKeyRow(["+", "z", "x", "c", "v", "b", "n", "m", ":", "-"], rowHeight: rowHeight)
         }
     }
-    private func searchKeyRow(_ keys: [String], inset: CGFloat = 0) -> some View {
-        HStack(spacing: 5) {
+    private func searchKeyRow(_ keys: [String], rowHeight: CGFloat, inset: CGFloat = 0) -> some View {
+        HStack(spacing: 4) {
             ForEach(keys, id: \.self) { key in
                 Button { model.appendQuery(key) } label: {
                     Text(key).font(.system(size: model.isCompactLayout ? 16 : 18)).foregroundStyle(Color.primary)
-                        .frame(maxWidth: .infinity).frame(height: model.isCompactLayout ? 28 : 34)
+                        .frame(maxWidth: .infinity).frame(height: rowHeight)
                         .keyboardKeySurface(radius: 7)
                 }
                 .buttonStyle(KeyboardPressStyle())
@@ -1065,11 +1181,8 @@ private struct InspectableCharacterKey: UIViewRepresentable {
 private final class InspectableKeyButton: UIControl {
     private let glyph = UILabel()
     private let code = UILabel()
-    private let age = UILabel()
     private let star = UIImageView(image: UIImage(systemName: "star.fill"))
     private var glyphHeight: NSLayoutConstraint!
-    private var stackTop: NSLayoutConstraint!
-    private var stackBottom: NSLayoutConstraint!
     private var insertAction: (() -> Void)?
     private var inspectAction: (() -> Void)?
     private var hoverTimer: Timer?
@@ -1079,14 +1192,10 @@ private final class InspectableKeyButton: UIControl {
     init() {
         super.init(frame: .zero)
         backgroundColor = KeyboardPalette.keyUI
-        layer.cornerRadius = 12
+        layer.cornerRadius = 9
         layer.cornerCurve = .continuous
-        layer.borderWidth = 0.5
+        layer.borderWidth = 0.4
         layer.borderColor = KeyboardPalette.borderUI.resolvedColor(with: traitCollection).cgColor
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOffset = CGSize(width: 0, height: 1)
-        layer.shadowRadius = 0
-        layer.shadowOpacity = 0.08
         isAccessibilityElement = true
         accessibilityTraits = .button
         glyph.textAlignment = .center
@@ -1099,15 +1208,11 @@ private final class InspectableKeyButton: UIControl {
         code.minimumScaleFactor = 0.7
         code.textColor = .secondaryLabel
         code.lineBreakMode = .byTruncatingTail
-        age.textAlignment = .center
-        age.font = .systemFont(ofSize: 9, weight: .regular)
-        age.textColor = .secondaryLabel
-        let stack = UIStackView(arrangedSubviews: [glyph, code, age])
+        let stack = UIStackView(arrangedSubviews: [glyph, code])
         // Touches must reach this control rather than the decorative label stack.
         stack.isUserInteractionEnabled = false
         glyph.isUserInteractionEnabled = false
         code.isUserInteractionEnabled = false
-        age.isUserInteractionEnabled = false
         star.isUserInteractionEnabled = false
         stack.axis = .vertical
         stack.spacing = 2
@@ -1116,13 +1221,11 @@ private final class InspectableKeyButton: UIControl {
         star.translatesAutoresizingMaskIntoConstraints = false
         star.tintColor = KeyboardPalette.accentUI
         glyphHeight = glyph.heightAnchor.constraint(equalToConstant: 34)
-        stackTop = stack.topAnchor.constraint(equalTo: topAnchor, constant: 6)
-        stackBottom = stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6)
         addSubview(star)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            stackTop, stackBottom, glyphHeight,
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor), glyphHeight,
             code.heightAnchor.constraint(equalToConstant: 11),
             star.widthAnchor.constraint(equalToConstant: 9),
             star.heightAnchor.constraint(equalToConstant: 9),
@@ -1136,23 +1239,16 @@ private final class InspectableKeyButton: UIControl {
         addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:))))
         addTarget(self, action: #selector(touchBegan), for: .touchDown)
         addTarget(self, action: #selector(tapped), for: .touchUpInside)
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (key: InspectableKeyButton, _: UITraitCollection) in
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (key: InspectableKeyButton, _: UITraitCollection) in
             key.layer.borderColor = KeyboardPalette.borderUI.resolvedColor(with: key.traitCollection).cgColor
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    override var intrinsicContentSize: CGSize { CGSize(width: 64, height: 72) }
+    override var intrinsicContentSize: CGSize { CGSize(width: 58, height: 56) }
     override var isHighlighted: Bool { didSet { backgroundColor = isHighlighted ? KeyboardPalette.pressedUI : KeyboardPalette.keyUI } }
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: 12).cgPath
-    }
-
     func configure(item: KeyboardItem, favorite: Bool, compact: Bool, useUnicodeFonts: Bool, insert: @escaping () -> Void, inspect: @escaping () -> Void) {
         glyph.text = item.displayText
-        glyphHeight.constant = compact ? 24 : 34
-        stackTop.constant = compact ? 5 : 6
-        stackBottom.constant = compact ? -5 : -6
+        glyphHeight.constant = compact ? 26 : 34
         if case .character(let character) = item {
             let size: CGFloat = character.isInvisible ? 17 : compact ? 24 : 32
             glyph.font = UnicodeFontSupport.font(for: character.displayText, size: size, enabled: useUnicodeFonts)
@@ -1162,7 +1258,6 @@ private final class InspectableKeyButton: UIControl {
             accessibilityValue = nil
         }
         code.text = item.footer
-        age.text = item.ageLabel
         star.isHidden = !favorite
         insertAction = insert
         inspectAction = inspect
@@ -1231,11 +1326,7 @@ private struct InputModeSwitchKey: UIViewRepresentable {
         button.layer.cornerCurve = .continuous
         button.layer.borderWidth = 0.5
         button.layer.borderColor = KeyboardPalette.borderUI.resolvedColor(with: button.traitCollection).cgColor
-        button.layer.shadowColor = UIColor.black.cgColor
-        button.layer.shadowOffset = CGSize(width: 0, height: 1)
-        button.layer.shadowRadius = 0
-        button.layer.shadowOpacity = 0.06
-        button.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (key: UIButton, _: UITraitCollection) in
+        button.registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (key: UIButton, _: UITraitCollection) in
             key.layer.borderColor = KeyboardPalette.borderUI.resolvedColor(with: key.traitCollection).cgColor
         }
         button.accessibilityLabel = "Next keyboard"
@@ -1267,25 +1358,17 @@ private final class RepeatingDeleteButton: UIButton {
         super.init(frame: .zero)
         setImage(UIImage(systemName: "delete.left", withConfiguration: UIImage.SymbolConfiguration(pointSize: 19)), for: .normal)
         tintColor = .label
-        backgroundColor = KeyboardPalette.keyUI
+        backgroundColor = .clear
+        isOpaque = false
         layer.cornerRadius = 12
         layer.cornerCurve = .continuous
-        layer.borderWidth = 0.5
-        layer.borderColor = KeyboardPalette.borderUI.resolvedColor(with: traitCollection).cgColor
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOffset = CGSize(width: 0, height: 1)
-        layer.shadowRadius = 0
-        layer.shadowOpacity = 0.06
         accessibilityIdentifier = "keyboard.delete"
         accessibilityHint = "Hold to delete repeatedly"
         addTarget(self, action: #selector(startDeleting), for: .touchDown)
         addTarget(self, action: #selector(stopDeleting), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (key: RepeatingDeleteButton, _: UITraitCollection) in
-            key.layer.borderColor = KeyboardPalette.borderUI.resolvedColor(with: key.traitCollection).cgColor
-        }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    override var isHighlighted: Bool { didSet { backgroundColor = isHighlighted ? KeyboardPalette.pressedUI : KeyboardPalette.keyUI } }
+    override var isHighlighted: Bool { didSet { backgroundColor = isHighlighted ? UIColor.tertiarySystemFill : .clear } }
     override func accessibilityActivate() -> Bool { action?(); return true }
     @objc private func startDeleting() {
         stopDeleting()

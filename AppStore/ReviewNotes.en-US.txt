@@ -1,13 +1,15 @@
 Uniboard is an offline Unicode character and complete emoji explorer with a custom keyboard for iPhone and iPad. No sign-in, account, purchase, network connection or keyboard Full Access is required.
 
+This update reduces keyboard height and consolidates controls in a single toolbar. Liquid Glass controls are used on iOS 26 and later; older iOS versions and Reduce Transparency remain supported.
+
 Keyboard test:
 1. Settings > General > Keyboard > Keyboards > Add New Keyboard > Uniboard. Full Access is not requested.
 2. Open Uniboard > Setup > Try your keyboard. Tap the editor and hold the system globe key to select Uniboard.
 3. Tap the keyboard's search bar, enter U+1F680 using Uniboard's query keys, then tap the rocket character. The query remains inside the keyboard; only the selected Unicode scalar is inserted into the host field.
 4. Hold a character key to open the scrollable Unicode properties panel without inserting it. Inspect its name, description, code point, Unicode age, block, category, script, bidirectional class, combining class, decomposition and UTF-8 bytes. Back returns to the keys; Save adds a local favorite. Sustained pointer hover opens the same panel on devices with a pointer.
 5. Tap Done to close the search keys before testing host space, return and the top-right backspace. Hold backspace for repeating deletion; during search it deletes only the local query.
-6. Open the keyboard's Emojis tab, clear the previous query and search head shaking horizontally. Tap it to insert the complete sequence U+1F642 U+200D U+2194 U+FE0F, including ZWJ and VS16. Hold an emoji to inspect the sequence, introduction version and component names without insertion.
-7. Use the edition menu to switch between Unicode 18.0.0 (latest release) and Unicode 19.0.0 draft. Newest first orders all assigned characters by official Unicode Age; Oldest first and Code point are also available. Emoji ordering uses Emoji introduction version separately from component ages. Edition and order are persisted locally in the keyboard.
+6. Use the keyboard's section menu to select Emojis, clear the previous query and search head shaking horizontally. Tap it to insert the complete sequence U+1F642 U+200D U+2194 U+FE0F, including ZWJ and VS16. Hold an emoji to inspect the sequence, introduction version and component names without insertion.
+7. Open Options > Unicode edition to switch between Unicode 18.0.0 (latest release) and Unicode 19.0.0 draft. Newest first orders all assigned characters by official Unicode Age; Oldest first and Code point are also available. Emoji ordering uses Emoji introduction version separately from component ages. Edition and order are persisted locally in the keyboard.
 
 The containing app supports names (infinity), code points (U+1F680, 0x1F680, 1F680, decimal:128640), descriptive annotations, aliases, block names (arrows), and literal characters. Explore and Blocks show paginated character grids. Emojis browses and copies complete fully qualified emoji sequences, with component details and scratchpad support. Tap, hold or hover a tile to inspect properties. Saved includes favorite and recent characters and emoji. The app and keyboard maintain separate local collections and edition/order preferences.
 

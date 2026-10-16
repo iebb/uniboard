@@ -45,7 +45,7 @@ struct SetupView: View {
                         .accessibilityIdentifier("extraUnicodeFonts")
                     Text("Off by default. Use bundled fonts for some missing character previews. Emoji and interface text keep iOS fonts; other apps use their own fonts. New draft coverage is limited.")
                         .font(.caption).foregroundStyle(Palette.muted)
-                    Text("The app and keyboard remember this setting separately. Use the Fonts menu in the keyboard to change its previews.")
+                    Text("The app and keyboard remember this setting separately. In the keyboard, open Options → Extra Unicode fonts to change its previews.")
                         .font(.caption).foregroundStyle(Palette.muted)
                     NavigationLink {
                         FontLicenseView()

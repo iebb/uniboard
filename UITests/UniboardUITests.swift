@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 @MainActor
 final class UniboardUITests: XCTestCase {
@@ -6,9 +7,14 @@ final class UniboardUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
         app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
         app.launch()
+        let portrait = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.app.frame.height > self.app.frame.width
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [portrait], timeout: 5), .completed)
     }
 
     func testSearchByCharacterNameAndLiteral() {
@@ -277,7 +283,7 @@ final class UniboardUITests: XCTestCase {
                 app.buttons["keyboard.properties.close"].firstMatch.tap()
             }
             if app.buttons["keyboard.query.u"].firstMatch.exists { closeKeyboardSearch() }
-            if app.buttons["keyboard.unicodeFonts"].firstMatch.exists { selectKeyboardFonts(false) }
+            if app.buttons["keyboard.options"].firstMatch.exists || app.buttons["keyboard.unicodeFonts"].firstMatch.exists { selectKeyboardFonts(false) }
             restoreEnglishKeyboard()
         }
         assertControlValue("keyboard.unicodeFonts", equals: "Off")
@@ -324,7 +330,7 @@ final class UniboardUITests: XCTestCase {
         assertLastItemFontToolbarIsVisible()
         attachScreenshot("Supplementary fallback glyph inserts exact text in compact landscape")
         closeKeyboardSearch()
-        app.buttons["keyboard.inspectLast"].tap()
+        keyboardOption("keyboard.inspectLast").tap()
         assertKeyboardProperties(codepoints: "U+10940", nameContaining: "Sidetic letter n01")
         XCTAssertEqual(accessibleText(app.staticTexts["keyboard.properties.fontSource"].firstMatch), "GNU Unifont Upper")
         XCTAssertEqual(input.value as? String, "\u{0558}\u{10940}")
@@ -337,12 +343,7 @@ final class UniboardUITests: XCTestCase {
             return frame.width < frame.height
         }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [portrait], timeout: 5), .completed)
-        let emojis = app.buttons["keyboard.tab.emojis"].firstMatch
-        XCTAssertTrue(emojis.waitForExistence(timeout: 5))
-        XCTAssertTrue(emojis.isHittable)
-        XCTAssertTrue(app.frame.contains(emojis.frame), "The native portrait tab must settle onscreen before tapping")
-        emojis.tap()
-        XCTAssertTrue(emojis.waitUntilSelected(), "The extension must actually select Emojis before its query: \(app.debugDescription)")
+        selectKeyboardSection("emojis")
         XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitUntilLabelEquals("Search emoji sequences"))
         attachScreenshot("Portrait emoji section settles before querying native sequence")
         enterKeyboardQuery("head shaking horizontally")
@@ -375,6 +376,165 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(appUnicodeFontsSwitch().waitUntilValueEquals("1"),
                       "Disabling keyboard preview fonts must not change the app preference")
         setAppUnicodeFonts(false)
+    }
+
+
+    func testSystemKeyboardCompactLayoutPreservesVisibleHostAndExactInput() throws {
+        try requireKeyboardIntegration()
+        let context = "Host context stays visible."
+        let input = openSystemKeyboardHost(initialText: context)
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        assertControlValue("keyboard.unicodeFonts", equals: "Off")
+        assertCompactKeyboardGeometry("portrait.browse", input: input, searching: false)
+        enterKeyboardQuery("u+1f680")
+        XCTAssertEqual(input.value as? String, context)
+        assertCompactKeyboardGeometry("portrait.search", input: input, searching: true)
+        let rocket = app.buttons["keyboard.character.U+1F680"].firstMatch
+        XCTAssertTrue(rocket.waitForExistence(timeout: 10))
+        XCTAssertTrue(rocket.isHittable)
+        rocket.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "🚀"))
+        attachScreenshot("Compact glass keyboard portrait rocket insertion with visible host context")
+        selectKeyboardSection("emojis")
+        XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.exists, "Emoji selection keeps the active query interface")
+        enterKeyboardQuery("head shaking horizontally")
+        XCTAssertEqual(input.value as? String, context + "🚀")
+        let emoji = app.buttons["keyboard.emoji.1F642-200D-2194-FE0F"].firstMatch
+        XCTAssertTrue(emoji.waitForExistence(timeout: 10))
+        emoji.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "🚀🙂‍↔️"))
+        XCTAssertEqual((input.value as? String)?.unicodeScalars.map(\.value),
+                       context.unicodeScalars.map(\.value) + [0x1F680, 0x1F642, 0x200D, 0x2194, 0xFE0F])
+        closeKeyboardSearch()
+        app.buttons["keyboard.delete"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "🚀"), "Delete removes the complete ZWJ grapheme")
+        selectKeyboardSection("symbols")
+        settleKeyboardOrientation(.landscapeLeft)
+        assertCompactKeyboardGeometry("landscape.browse", input: input, searching: false)
+        enterKeyboardQuery("u+1f680")
+        assertCompactKeyboardGeometry("landscape.search", input: input, searching: true)
+        XCTAssertTrue(rocket.waitForExistence(timeout: 10))
+        rocket.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "🚀🚀"))
+        attachScreenshot("Compact glass keyboard landscape preserves host context and exact insertion")
+        closeKeyboardSearch()
+        app.buttons["keyboard.delete"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "🚀"))
+        settleKeyboardOrientation(.portrait)
+        assertCompactKeyboardGeometry("portrait.returned.browse", input: input, searching: false)
+        enterKeyboardQuery("u+1f680")
+        assertCompactKeyboardGeometry("portrait.returned.search", input: input, searching: true)
+        XCTAssertEqual(input.value as? String, context + "🚀", "Rotation and query controls never leak into the host")
+        attachScreenshot("Compact glass keyboard returns to portrait without stale landscape layout")
+        closeKeyboardSearch()
+    }
+
+    func testSystemKeyboardCompactMenusAndInspectionPreserveContext() throws {
+        try requireKeyboardIntegration()
+        let context = "Host context stays visible."
+        let input = openSystemKeyboardHost(initialText: context)
+        defer { restoreEnglishKeyboard() }
+        enterKeyboardQuery("u+2603")
+        let snowman = app.buttons["keyboard.character.U+2603"].firstMatch
+        XCTAssertTrue(snowman.waitForExistence(timeout: 10))
+        snowman.press(forDuration: 1)
+        assertKeyboardProperties(codepoints: "U+2603", nameContaining: "snowman")
+        XCTAssertEqual(input.value as? String, context, "Holding inspects the scalar without inserting it")
+        assertCompactKeyboardGeometry("portrait.properties", input: input, searching: false, inspecting: true)
+        attachScreenshot("Compact glass Unicode properties keep host context visible without insertion")
+        app.buttons["keyboard.properties.close"].tap()
+        openKeyboardOptions()
+        let remove = app.buttons["Remove from favorites"].firstMatch
+        if remove.exists {
+            remove.tap()
+            openKeyboardOptions()
+        }
+        let save = app.buttons["Save to favorites"].firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertTrue(save.isHittable)
+        save.tap()
+        selectKeyboardSection("blocks")
+        XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitUntilAbsent(), "Blocks must exit query mode")
+        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitUntilValueEquals("u+2603"))
+        let basicLatin = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Basic Latin")).firstMatch
+        XCTAssertTrue(basicLatin.waitForExistence(timeout: 5), "The actual block list must replace search results")
+        XCTAssertTrue(basicLatin.isHittable)
+        XCTAssertEqual(input.value as? String, context)
+        attachScreenshot("Compact section menu opens Blocks while retaining the local query")
+        selectKeyboardSection("symbols")
+        reopenKeyboardSearch(expectedQuery: "u+2603")
+        selectKeyboardSection("saved")
+        XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitUntilAbsent(), "Saved must exit query mode")
+        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitUntilValueEquals("u+2603"))
+        XCTAssertTrue(app.staticTexts["On this keyboard"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(snowman.waitForExistence(timeout: 5), "The saved scalar must appear in actual Saved content")
+        snowman.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "☃"))
+        attachScreenshot("Compact Saved section inserts the original saved scalar")
+        keyboardOption("keyboard.inspectLast").tap()
+        XCTAssertTrue(app.staticTexts["keyboard.properties.name"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(accessibleText(app.staticTexts["keyboard.properties.codepoints"].firstMatch), "U+2603")
+        XCTAssertEqual(input.value as? String, context + "☃")
+        app.buttons["keyboard.properties.close"].tap()
+        openKeyboardOptions()
+        XCTAssertTrue(remove.waitForExistence(timeout: 5))
+        remove.tap()
+        selectKeyboardEdition("latest")
+        selectKeyboardOrder("codepoint")
+        selectKeyboardFonts(true)
+        selectKeyboardFonts(false)
+        selectKeyboardEdition("draft")
+        selectKeyboardOrder("newest")
+        assertControlValue("keyboard.unicodeFonts", equals: "Off")
+        XCTAssertEqual(input.value as? String, context + "☃", "Menus must not enter text into the host")
+        selectKeyboardSection("symbols")
+        assertCompactKeyboardGeometry("portrait.menus.closed", input: input, searching: false)
+    }
+
+    private func settleKeyboardOrientation(_ orientation: UIDeviceOrientation) {
+        XCUIDevice.shared.orientation = orientation
+        let landscape = orientation == .landscapeLeft || orientation == .landscapeRight
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let frame = self.app.frame
+            return landscape ? frame.width > frame.height : frame.width < frame.height
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed)
+        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    private func assertCompactKeyboardGeometry(_ mode: String, input: XCUIElement, searching: Bool,
+                                               inspecting: Bool = false, file: StaticString = #filePath, line: UInt = #line) {
+        func rect(_ frame: CGRect) -> [String: Double] {
+            ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height]
+        }
+        assertDeleteIsOnlyAtTopRight(file: file, line: line)
+        assertKeyboardControlsAreVisible(isSearching: searching, file: file, line: line)
+        assertHostEditorIsVisibleAboveKeyboard(input, file: file, line: line)
+        let search = app.buttons["keyboard.search"].firstMatch.frame
+        let footer = app.buttons["keyboard.return"].firstMatch.frame
+        let candidates = app.otherElements.containing(.button, identifier: "keyboard.search").allElementsBoundByIndex
+            .map(\.frame).filter { $0.width > app.frame.width * 0.7 && $0.contains(search) && $0.contains(footer) }
+            .sorted { $0.height < $1.height }
+        let landscape = app.frame.width > app.frame.height
+        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        let maximum: CGFloat = pad ? (searching || inspecting ? 380 : 340)
+            : landscape ? 220 : (searching || inspecting ? 340 : 300)
+        XCTAssertFalse(candidates.isEmpty, "Expected the actual keyboard surface ancestor", file: file, line: line)
+        if let surface = candidates.first {
+            XCTAssertLessThanOrEqual(surface.height, maximum + 1, "Keyboard must leave host space instead of reverting to tall chrome", file: file, line: line)
+            XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(surface), "Keyboard surface must not extend above or outside the display", file: file, line: line)
+        }
+        let value: [String: Any] = ["mode": mode, "app": rect(app.frame), "hostEditor": rect(input.frame),
+            "hostText": input.value as? String ?? "", "hostIsHittable": input.isHittable,
+            "surfaceCandidates": candidates.map(rect), "search": rect(search), "footer": rect(footer),
+            "visibleControlSpan": footer.maxY - search.minY, "maximumSurfaceHeight": maximum]
+        let data = try! JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "Compact native keyboard geometry \(mode)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("UNIBOARD_COMPACT_GEOMETRY " + String(data: data, encoding: .utf8)!.replacingOccurrences(of: "\n", with: ""))
+        attachScreenshot("Compact native keyboard \(mode)")
     }
 
     func testSystemKeyboardUnsupportedGlyphInspectionDoesNotInsert() throws {
@@ -456,12 +616,12 @@ final class UniboardUITests: XCTestCase {
 
         // Reopening after a tab switch must rerun the unchanged query against
         // the active catalog type, rather than reusing stale scalar results.
-        app.buttons["keyboard.tab.emojis"].tap()
+        selectKeyboardSection("emojis")
         reopenKeyboardSearch(expectedQuery: "u+1f680")
         XCTAssertTrue(app.buttons["keyboard.emoji.1F680"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertEqual(input.value as? String, "🚀", "Changing the result kind must not insert text")
         closeKeyboardSearch()
-        app.buttons["keyboard.tab.symbols"].tap()
+        selectKeyboardSection("symbols")
         reopenKeyboardSearch(expectedQuery: "u+1f680")
         XCTAssertTrue(app.buttons["keyboard.character.U+1F680"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertEqual(input.value as? String, "🚀")
@@ -525,9 +685,7 @@ final class UniboardUITests: XCTestCase {
         try requireKeyboardIntegration()
         let input = openSystemKeyboardHost()
         defer { restoreEnglishKeyboard() }
-        let emojis = app.buttons["keyboard.tab.emojis"].firstMatch
-        XCTAssertTrue(emojis.waitForExistence(timeout: 5))
-        emojis.tap()
+        selectKeyboardSection("emojis")
         enterKeyboardQuery("head shaking horizontally")
         XCTAssertEqual(input.value as? String, "", "Emoji search must remain inside the extension")
 
@@ -544,6 +702,68 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(input.waitUntilValueEquals("🙂‍↔️"))
         app.buttons["keyboard.delete"].tap()
         XCTAssertTrue(input.waitUntilValueEquals(""), "Delete must remove the complete emoji grapheme")
+    }
+
+
+    private func selectKeyboardSection(_ section: String) {
+        let menu = app.buttons["keyboard.section"].firstMatch
+        let usesMenu = menu.exists
+        if usesMenu, menu.value as? String == section { return }
+        if usesMenu { menu.tap() }
+        let option = app.descendants(matching: .any)["keyboard.tab.\(section)"].firstMatch
+        XCTAssertTrue(option.waitForExistence(timeout: 5))
+        option.tap()
+        // The extension toolbar disappears briefly while the native menu
+        // dismisses. Preserve which interface opened rather than interpreting
+        // that transient absence as the older segmented-tab implementation.
+        if usesMenu {
+            XCTAssertTrue(menu.waitForExistence(timeout: 5))
+            assertControlValue("keyboard.section", equals: section)
+        } else { XCTAssertTrue(option.waitUntilSelected()) }
+    }
+
+    private func openKeyboardOptions() {
+        let menu = app.buttons["keyboard.options"].firstMatch
+        if menu.exists && !app.descendants(matching: .any)["keyboard.edition"].firstMatch.exists { menu.tap() }
+    }
+
+    private func closeKeyboardOptions() {
+        let menu = app.buttons["keyboard.options"].firstMatch
+        let option = app.descendants(matching: .any)["keyboard.edition"].firstMatch
+        if menu.exists && option.exists {
+            menu.tap()
+            XCTAssertTrue(option.waitUntilAbsent())
+        }
+    }
+
+    private func keyboardOption(_ identifier: String) -> XCUIElement {
+        openKeyboardOptions()
+        var item = app.descendants(matching: .any)[identifier].firstMatch
+        if identifier == "keyboard.inspectLast", !item.waitForExistence(timeout: 2) {
+            // iOS 27's native Menu can omit the identifier on this dynamic
+            // action while retaining its real, actionable button label.
+            item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Inspect ")).firstMatch
+        }
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "Expected keyboard option \(identifier): \(app.debugDescription)")
+        if identifier == "keyboard.inspectLast" {
+            let menu = app.collectionViews.containing(.button, identifier: "keyboard.edition").firstMatch
+            for _ in 0..<3 {
+                guard menu.exists else { break }
+                if isInsideScrollViewport(item, in: menu) { break }
+                menu.swipeUp()
+            }
+            XCTAssertTrue(isInsideScrollViewport(item, in: menu), "The actual Inspect action must be reachable in its native menu")
+        }
+        return item
+    }
+
+    private func selectKeyboardOrder(_ order: String) {
+        keyboardOption("keyboard.order").tap()
+        let option = app.descendants(matching: .any)["keyboard.order.\(order)"].firstMatch
+        XCTAssertTrue(option.waitForExistence(timeout: 5))
+        option.tap()
+        let value = ["newest": "newestFirst", "oldest": "oldestFirst", "codepoint": "codePoint"][order]!
+        assertControlValue("keyboard.order", equals: value)
     }
 
     private func appTab(_ title: String) -> XCUIElement {
@@ -572,8 +792,7 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func selectKeyboardFonts(_ enabled: Bool) {
-        let menu = app.buttons["keyboard.unicodeFonts"].firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        let menu = keyboardOption("keyboard.unicodeFonts")
         menu.tap()
         let option = app.descendants(matching: .any)["keyboard.unicodeFonts.\(enabled ? "on" : "off")"].firstMatch
         XCTAssertTrue(option.waitForExistence(timeout: 5))
@@ -584,8 +803,10 @@ final class UniboardUITests: XCTestCase {
     private func assertLastItemFontToolbarIsVisible(file: StaticString = #filePath, line: UInt = #line) {
         let favorite = app.buttons.matching(NSPredicate(format: "label IN %@",
             ["Save to favorites", "Remove from favorites"])).firstMatch
-        let controls = [app.buttons["keyboard.unicodeFonts"].firstMatch,
-                        app.buttons["keyboard.inspectLast"].firstMatch, favorite]
+        openKeyboardOptions()
+        defer { closeKeyboardOptions() }
+        let controls = [app.descendants(matching: .any)["keyboard.unicodeFonts"].firstMatch,
+                        app.descendants(matching: .any)["keyboard.inspectLast"].firstMatch, favorite]
         for control in controls {
             XCTAssertTrue(control.waitForExistence(timeout: 5), "Expected Fonts, Inspect and Save after insertion", file: file, line: line)
             XCTAssertTrue(control.isHittable, file: file, line: line)
@@ -603,7 +824,7 @@ final class UniboardUITests: XCTestCase {
         try XCTSkipUnless(enabled, "Set UNIBOARD_KEYBOARD_INTEGRATION=1 in the UI test runner to exercise the installed system keyboard.")
     }
 
-    private func openSystemKeyboardHost() -> XCUIElement {
+    private func openSystemKeyboardHost(initialText: String = "") -> XCUIElement {
         enableUniboardInSettings()
         // Reload UIKit's enabled-keyboard configuration after changing it in
         // Settings, and start from a settled foreground navigation state.
@@ -626,14 +847,21 @@ final class UniboardUITests: XCTestCase {
         let input = app.textViews["keyboardTestInput"].firstMatch
         XCTAssertTrue(input.waitForExistence(timeout: 5))
         input.tap()
+        if !initialText.isEmpty {
+            // Seed through the actual English keyboard before selecting the
+            // extension. Avoid repeated remote keyboard scene handoffs merely
+            // to prepare context for geometry and insertion assertions.
+            restoreEnglishKeyboard()
+            input.tap()
+            input.typeText(initialText)
+            XCTAssertTrue(input.waitUntilValueEquals(initialText))
+        }
         selectUniboardKeyboard()
         XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitForExistence(timeout: 10),
             "Expected the real Uniboard keyboard extension: \(app.debugDescription)")
-        XCTAssertEqual(input.value as? String, "")
+        XCTAssertEqual(input.value as? String, initialText)
         if app.buttons["keyboard.query.u"].firstMatch.exists { closeKeyboardSearch() }
-        let symbols = app.buttons["keyboard.tab.symbols"].firstMatch
-        XCTAssertTrue(symbols.waitForExistence(timeout: 5))
-        symbols.tap()
+        selectKeyboardSection("symbols")
         return input
     }
 
@@ -703,11 +931,9 @@ final class UniboardUITests: XCTestCase {
 
     private func assertKeyboardControlsAreVisible(isSearching: Bool,
                                                   file: StaticString = #filePath, line: UInt = #line) {
-        var identifiers = ["keyboard.search", "keyboard.delete", "keyboard.edition", "keyboard.order",
+        var identifiers = ["keyboard.search", "keyboard.delete", "keyboard.section", "keyboard.options",
                            "keyboard.space", "keyboard.return"]
-        identifiers += isSearching
-            ? ["keyboard.query.q", "keyboard.query.p", "keyboard.query.u"]
-            : ["keyboard.tab.symbols", "keyboard.tab.emojis", "keyboard.tab.blocks", "keyboard.tab.saved"]
+        if isSearching { identifiers += ["keyboard.query.q", "keyboard.query.p", "keyboard.query.u"] }
         let screen = app.frame.insetBy(dx: -1, dy: -1)
         for identifier in identifiers {
             let control = app.buttons[identifier].firstMatch
@@ -724,7 +950,7 @@ final class UniboardUITests: XCTestCase {
                                                        file: StaticString = #filePath, line: UInt = #line) {
         let frame = input.frame
         let search = app.buttons["keyboard.search"].firstMatch
-        XCTAssertTrue(input.isHittable, "The native host editor must remain tappable in landscape", file: file, line: line)
+        XCTAssertTrue(input.isHittable, "The native host editor must remain tappable", file: file, line: line)
         XCTAssertTrue(frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height >= 44,
                       "The host needs a visible editing area, not a collapsed frame: \(frame)", file: file, line: line)
         XCTAssertTrue(app.frame.contains(frame), "The host editor must remain inside the display", file: file, line: line)
@@ -733,8 +959,7 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func selectKeyboardEdition(_ edition: String) {
-        let selector = app.descendants(matching: .any)["keyboard.edition"].firstMatch
-        XCTAssertTrue(selector.waitForExistence(timeout: 5))
+        let selector = keyboardOption("keyboard.edition")
         selector.tap()
         let option = app.descendants(matching: .any)["keyboard.edition.\(edition)"].firstMatch
         XCTAssertTrue(option.waitForExistence(timeout: 5))
@@ -762,10 +987,10 @@ final class UniboardUITests: XCTestCase {
         let propertyScroll = app.scrollViews.containing(.staticText, identifier: "keyboard.properties.description").firstMatch
         XCTAssertTrue(propertyScroll.waitForExistence(timeout: 5))
         for _ in 0..<6 {
-            if lastProperty.isHittable { break }
+            if isInsideScrollViewport(lastProperty, in: propertyScroll) { break }
             propertyScroll.swipeUp()
         }
-        XCTAssertTrue(lastProperty.isHittable, "The full properties must remain reachable inside the keyboard's scroll area")
+        XCTAssertTrue(isInsideScrollViewport(lastProperty, in: propertyScroll), "The full properties must remain reachable inside the keyboard's scroll area")
         attachScreenshot("Complete Unicode properties remain reachable in the keyboard")
         for _ in 0..<6 {
             if isInsideScrollViewport(propertyName, in: propertyScroll)
@@ -777,10 +1002,15 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func isInsideScrollViewport(_ element: XCUIElement, in scrollView: XCUIElement) -> Bool {
-        guard element.exists && element.isHittable else { return false }
+        guard element.exists && scrollView.exists else { return false }
         let frame = element.frame
-        return frame.width > 0 && frame.height > 0
-            && scrollView.frame.contains(CGPoint(x: frame.midX, y: frame.midY))
+        let viewport = scrollView.frame
+        guard frame.minX.isFinite && frame.minY.isFinite && frame.width.isFinite && frame.height.isFinite,
+              frame.width > 0 && frame.height > 0,
+              viewport.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
+        // iOS 27 can throw an AX activation-point error for an offscreen
+        // property. Establish viewport containment before asking hittability.
+        return element.isHittable
     }
 
     private func selectAppEdition(_ edition: String) {
@@ -812,6 +1042,19 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func assertControlValue(_ identifier: String, equals expected: String) {
+        let optionFields = ["keyboard.edition": 0, "keyboard.order": 1, "keyboard.unicodeFonts": 2]
+        if let index = optionFields[identifier], app.buttons["keyboard.options"].firstMatch.exists {
+            let options = app.buttons["keyboard.options"].firstMatch
+            let predicate = NSPredicate { element, _ in
+                guard let element = element as? XCUIElement, let value = element.value as? String else { return false }
+                let parts = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                guard parts.indices.contains(index) else { return false }
+                return index == 2 ? parts[index] == "extra fonts \(expected.lowercased())" : parts[index] == expected
+            }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: options)], timeout: 5), .completed,
+                           "Expected \(identifier)=\(expected) in the visible options summary, got \(accessibleText(options))")
+            return
+        }
         let control = app.descendants(matching: .any)[identifier].firstMatch
         XCTAssertTrue(control.waitForExistence(timeout: 5))
         let matches = NSPredicate(format: "value == %@ OR label == %@", expected, expected)

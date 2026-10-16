@@ -30,6 +30,11 @@ jobs:
           ref: master
           fetch-depth: 1
 
+      - name: Select Xcode with Liquid Glass SDK support
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+
       - name: Validate Unicode download recovery
         run: python3 -m unittest discover -s Scripts/tests
 

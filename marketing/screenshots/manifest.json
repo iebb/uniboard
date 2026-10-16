@@ -25,12 +25,12 @@
     {
       "export": "iphone/01-keyboard.png",
       "source": "source/iphone/01-keyboard.png",
-      "source_sha256": "6c18dd4c2e1364ffcf3e2f8ba2177b46f4ae0436a48c517214aed500b4d7b8b3",
+      "source_sha256": "b599803b5ddbd090fd4663b7defb2b8017ba36d2c0fb2100445e9d771c62df83",
       "source_size": [
         1206,
         2622
       ],
-      "export_sha256": "7c74c963e1d4a6c1a56a8b8988d3ec33baa7311faeddb118d78fe11d64dcdf7f",
+      "export_sha256": "21b4ace34186b9e985f7f30b0c75749d3b72e9d4e315ae7f2581237eb211fc53",
       "size": [
         1320,
         2868
@@ -139,12 +139,12 @@
     {
       "export": "iphone/09-properties.png",
       "source": "source/iphone/09-properties.png",
-      "source_sha256": "bb149b72939076d365d18be3d71969f4c4be6808946c67d50c9d4cda60ccfadd",
+      "source_sha256": "d267abf6e3721eb63e69fc3de639958b9bf3b6a649cc4b5d34f8215379c83ef1",
       "source_size": [
         1206,
         2622
       ],
-      "export_sha256": "bbc19931cc7f27a815f0a5a1c7db529201f11aa2668ac85771f66c4a28d3e0bb",
+      "export_sha256": "3eee0bcdccd95032eb53d1c7a876a4bc6fb72f1b4d0027e42b52dec7abeeced0",
       "size": [
         1320,
         2868

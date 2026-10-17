@@ -17,6 +17,66 @@ generator = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(generator)
 
 
+class NamesListTests(unittest.TestCase):
+    @staticmethod
+    def record(name):
+        return {"name": name, "aliases": [], "notes": []}
+
+    def test_informative_group_heading_and_notice_apply_to_all_members_not_neighbors(self):
+        records = {cp: self.record(f"HANGZHOU NUMERAL {cp - 0x3020}") for cp in range(0x3021, 0x302A)}
+        records[0x302A] = self.record("IDEOGRAPHIC LEVEL TONE MARK")
+        lines = ["@@\t3000\tCJK Symbols and Punctuation\t303F", "@\t\tSuzhou numerals",
+                 '@+\t\tThe use of "HANGZHOU" in the names is a misnomer.']
+        lines += [f"{cp:04X}\t{record['name']}" for cp, record in records.items() if cp < 0x302A]
+        lines += ["@\t\tCombining tone marks", "302A\tIDEOGRAPHIC LEVEL TONE MARK"]
+        generator.add_names_list(records, lines)
+        for cp in range(0x3021, 0x302A):
+            payload = generator.detail_payload(records[cp])
+            self.assertEqual(payload["section"], "Suzhou numerals")
+            self.assertIn("misnomer", payload["sectionAnnotations"][0])
+            self.assertNotIn("aliases", payload)
+            self.assertTrue(records[cp]["name"].startswith("HANGZHOU"))
+        self.assertEqual(records[0x302A]["section"], "Combining tone marks")
+        self.assertEqual(records[0x302A]["sectionNotes"], [])
+
+    def test_character_notice_does_not_erase_references_or_leak_to_next_character(self):
+        records = {cp: self.record(name) for cp, name in [(0x301C, "WAVE DASH"), (0x301D, "REVERSED DOUBLE PRIME QUOTATION MARK"), (0x3030, "WAVY DASH")]}
+        generator.add_names_list(records, ["@@\t3000\tCJK Symbols and Punctuation\t303F", "@\t\tPunctuation",
+            "301C\tWAVE DASH", "@+\t\tThis character matches JIS C 6226.", "\tx (wavy dash - 3030)",
+            "301D\tREVERSED DOUBLE PRIME QUOTATION MARK"])
+        self.assertEqual(records[0x301C]["notes"], ["This character matches JIS C 6226."])
+        self.assertEqual(records[0x301C]["references"], [{"codePoint": 0x3030, "name": "WAVY DASH"}])
+        self.assertEqual(records[0x301D]["notes"], [])
+        self.assertEqual(records[0x301D]["sectionNotes"], [])
+
+    def test_formal_alias_kinds_are_authoritative_and_informal_aliases_stay_distinct(self):
+        records = {0xFE18: self.record("PRESENTATION FORM FOR VERTICAL RIGHT WHITE LENTICULAR BRAKCET"),
+                   0xFEFF: self.record("ZERO WIDTH NO-BREAK SPACE"), 0x2603: self.record("SNOWMAN")}
+        generator.add_name_aliases(records, ["FE18;PRESENTATION FORM FOR VERTICAL RIGHT WHITE LENTICULAR BRACKET;correction",
+                                             "FEFF;BOM;abbreviation", "FEFF;ZWNBSP;abbreviation"])
+        generator.add_names_list(records, ["@@\tFE00\tVariation Selectors\tFEFF", "FE18\tIGNORED CHART NAME",
+            "\t% PRESENTATION FORM FOR VERTICAL RIGHT WHITE LENTICULAR BRACKET", "FEFF\tZERO WIDTH NO-BREAK SPACE",
+            "\t= BOM, ZWNBSP", "2603\tSNOWMAN", "\t= snowy weather"])
+        self.assertEqual(records[0xFE18]["aliases"][0]["kind"], "correction")
+        self.assertEqual(len(records[0xFE18]["aliases"]), 1)
+        self.assertTrue(records[0xFE18]["name"].endswith("BRAKCET"))
+        self.assertEqual(len(records[0xFEFF]["aliases"]), 2)
+        self.assertEqual(records[0x2603]["aliases"], [{"name": "snowy weather", "kind": "informal"}])
+
+    def test_reserved_character_notice_and_new_block_do_not_pollute_neighbor_details(self):
+        records = {0x0370: self.record("GREEK CAPITAL LETTER HETA"), 0x0400: self.record("CYRILLIC CAPITAL LETTER IE WITH GRAVE")}
+        generator.add_names_list(records, ["@@\t0370\tGreek\t03FF", "@\t\tGreek letters",
+            "0378\t<reserved>", "@+\t\tReserved-only warning.", "0370\tGREEK CAPITAL LETTER HETA",
+            "@@\t0400\tCyrillic\t04FF", "0400\tCYRILLIC CAPITAL LETTER IE WITH GRAVE"])
+        self.assertEqual(records[0x0370]["sectionNotes"], [])
+        self.assertIsNone(records[0x0400]["section"])
+        self.assertEqual(records[0x0400]["sectionNotes"], [])
+
+    def test_unknown_formal_alias_kind_fails_instead_of_inventing_a_correction(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported formal name alias kind"):
+            generator.add_name_aliases({0x3021: self.record("HANGZHOU NUMERAL ONE")}, ["3021;SUZHOU NUMERAL ONE;informal-correction"])
+
+
 class DownloadTests(unittest.TestCase):
     URL = "https://raw.githubusercontent.com/unicode-org/unicodetools/pinned/UnicodeData.txt"
 

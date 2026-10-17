@@ -39,13 +39,14 @@ struct CharacterDetailView: View {
                             .accessibilityIdentifier("characterProperties.status")
                     }
 
-                        Text(character.detail.isEmpty ? character.categoryName : character.detail)
+                        Text(characterDescription)
                             .font(.subheadline).foregroundStyle(Palette.muted)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 17))
                             .accessibilityIdentifier("characterProperties.description")
                     Text("The name and properties remain available even if your iOS font cannot display this glyph.")
                         .font(.caption).foregroundStyle(Palette.muted)
+                    namingInformation
                     if character.category == "Cn" {
                         Label("This code point is not assigned in the selected Unicode edition.", systemImage: "square.dashed")
                             .font(.caption).foregroundStyle(Palette.muted)
@@ -107,6 +108,15 @@ struct CharacterDetailView: View {
                         metadata("BIDIRECTIONAL CLASS", value: character.bidirectionalClass ?? "Not listed in this source", identifier: "bidi")
                         metadata("COMBINING CLASS", value: character.combiningClass.map(String.init) ?? "Not listed in this source", identifier: "combining")
                         metadata("DECOMPOSITION", value: character.decomposition.flatMap { $0.isEmpty ? nil : $0 } ?? "None listed", identifier: "decomposition")
+                        if let value = character.numericValue {
+                            metadata("NUMERIC VALUE", value: value, identifier: "numericValue")
+                        }
+                        if let type = character.numericType {
+                            metadata("NUMERIC TYPE", value: type, identifier: "numericType")
+                        }
+                        if let point = character.simpleUppercase { metadata("UPPERCASE", value: codePointText(point), identifier: "uppercase") }
+                        if let point = character.simpleLowercase { metadata("LOWERCASE", value: codePointText(point), identifier: "lowercase") }
+                        if let point = character.simpleTitlecase { metadata("TITLECASE", value: codePointText(point), identifier: "titlecase") }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 2)
                 }
@@ -120,10 +130,40 @@ struct CharacterDetailView: View {
         .presentationDragIndicator(.visible)
     }
 
-    private func metadata(_ title: String, value: String, identifier: String) -> some View {
+    private var namingInformation: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if !character.nameAliases.isEmpty {
+                metadata("ALIASES", value: character.nameAliases.map { "\($0.kindLabel): \($0.name)" }.joined(separator: "\n"), identifier: "aliases", monospaced: false)
+            }
+            if let section = character.namesListSection {
+                metadata("UNICODE SECTION", value: section, identifier: "section", monospaced: false)
+            }
+            let notes = character.sectionAnnotations + character.annotations
+            if !notes.isEmpty { metadata("UNICODE NOTES", value: (Array(NSOrderedSet(array: notes)) as? [String] ?? notes).joined(separator: "\n"), identifier: "notes", monospaced: false) }
+            if let oldName = character.unicode1Name {
+                metadata("UNICODE 1.0 NAME", value: oldName, identifier: "unicode1Name")
+            }
+            if !character.crossReferences.isEmpty {
+                metadata("RELATED CHARACTERS", value: character.crossReferences.map { "\($0.codePointLabel) · \($0.name)" }.joined(separator: "\n"), identifier: "references", monospaced: false)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var characterDescription: String {
+        // Structured notes are shown once below, with their source context.
+        if !character.annotations.isEmpty || !character.sectionAnnotations.isEmpty { return character.categoryName }
+        return character.detail.isEmpty ? character.categoryName : character.detail
+    }
+
+    private func codePointText(_ value: UInt32) -> String {
+        String(format: "U+%04X", value) + (UnicodeScalar(value).map { " · \(String($0))" } ?? "")
+    }
+
+    private func metadata(_ title: String, value: String, identifier: String, monospaced: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title).font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1).foregroundStyle(Palette.muted)
-            Text(value).font(.caption.monospaced()).foregroundStyle(Palette.ink).textSelection(.enabled)
+            Text(value).font(monospaced ? .caption.monospaced() : .subheadline).foregroundStyle(Palette.ink).textSelection(.enabled)
                 .accessibilityIdentifier("characterProperties.\(identifier)")
         }
     }

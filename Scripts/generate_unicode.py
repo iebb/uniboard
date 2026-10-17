@@ -107,6 +107,108 @@ def version_key(value: str) -> int:
     return int(parts[0]) * 100 + int(parts[1] if len(parts) > 1 else 0)
 
 
+def add_name_aliases(records: dict, source_lines: list[str]) -> None:
+    """Only NameAliases supplies authoritative alias types; names stay stable."""
+    kinds = {"correction", "control", "alternate", "figment", "abbreviation"}
+    for line in source_lines:
+        line = line.split("#")[0].strip()
+        if not line:
+            continue
+        code, alias, kind = (part.strip() for part in line.split(";"))
+        if kind not in kinds:
+            raise ValueError(f"Unsupported formal name alias kind: {kind}")
+        record = records.get(int(code, 16))
+        if record is not None:
+            record.setdefault("aliases", []).append({"name": alias, "kind": kind})
+            # Controls have no Name property, only a pseudo-name. Keep the
+            # existing useful control label without changing assigned names.
+            if record["name"] == "<control>" and kind == "control":
+                record["name"] = alias
+
+
+def add_names_list(records: dict, source_lines: list[str]) -> None:
+    """Read editorial prose with its documented character/subhead scope.
+
+    NamesList is never used for normative names, block ranges, properties or
+    formal alias types. In particular, @+ notices after a character apply only
+    to it; notices after a subhead apply to that informative group.
+    https://www.unicode.org/Public/UCD/latest/ucd/NamesList.html
+    """
+    current = None
+    in_character = False
+    in_block = False
+    section = None
+    block_notes, section_notes = [], []
+    for line in source_lines:
+        match = re.match(r"^([0-9A-F]{4,6})\t", line)
+        if match:
+            current = records.get(int(match[1], 16))
+            in_character = True
+            if current is not None:
+                current["section"] = section
+                current["sectionNotes"] = list(dict.fromkeys(block_notes + section_notes))
+            continue
+        if re.match(r"^@@\t[0-9A-F]{4,6}\t", line):
+            current, in_character, in_block, section = None, False, True, None
+            block_notes, section_notes = [], []
+        elif line.startswith("@\t"):
+            current, in_character = None, False
+            section = line[1:].strip() or None
+            section_notes = []
+        elif line.startswith("@+\t"):
+            note = line[2:].strip().removeprefix("* ")
+            if note and in_block:
+                if in_character:
+                    if current is not None:
+                        current.setdefault("notes", []).append(note)
+                elif section is not None:
+                    section_notes.append(note)
+                else:
+                    block_notes.append(note)
+        elif line.startswith("@"):
+            current, in_character = None, False
+            if line.startswith(("@~", "@@~", "@@@")):
+                section, section_notes = None, []
+        elif current is not None and line.startswith("\t"):
+            content = line.strip()
+            aliases = current.setdefault("aliases", [])
+            if content.startswith(("= ", "% ")):
+                name = content[2:]
+                formal = {alias["name"].casefold() for alias in aliases if alias["kind"] != "informal"}
+                # Some chart aliases combine already-listed formal abbreviations.
+                if name.casefold() not in formal and not all(part.strip().casefold() in formal for part in name.split(",")):
+                    aliases.append({"name": name, "kind": "namesListFormal" if content[0] == "%" else "informal"})
+            elif content.startswith("x "):
+                reference = re.fullmatch(r"x \((.+) - ([0-9A-F]{4,6})\)", content)
+                simple = re.fullmatch(r"x ([0-9A-F]{4,6})(?: (.+))?", content)
+                if reference or simple:
+                    cp = int(reference[2] if reference else simple[1], 16)
+                    hint = reference[1] if reference else simple[2] or ""
+                    if cp <= 0x10FFFF and not 0xD800 <= cp <= 0xDFFF:
+                        name = records.get(cp, {}).get("name") or hint.upper() or f"U+{cp:04X}"
+                        current.setdefault("references", []).append({"codePoint": cp, "name": name})
+                else:
+                    raise ValueError(f"Unsupported NamesList cross reference: {content}")
+            elif content.startswith("* "):
+                current.setdefault("notes", []).append(content[2:].replace("\\", ""))
+            elif content.startswith("~ "):
+                current.setdefault("notes", []).append("Variation: " + content[2:])
+            elif content and not content.startswith((": ", "# ", ";")):
+                current.setdefault("notes", []).append(content.replace("\\", ""))
+
+
+def detail_payload(record: dict) -> dict:
+    """Compact, lazily decoded per-character metadata in the mapped string pool."""
+    fields = {"aliases": list({(item["name"], item["kind"]): item for item in record["aliases"]}.values()),
+              "annotations": list(dict.fromkeys(record["notes"])),
+              "section": record.get("section"), "sectionAnnotations": record.get("sectionNotes", []),
+              "references": list({item["codePoint"]: item for item in record.get("references", [])}.values()),
+              "unicode1Name": record.get("unicode1Name"), "numericValue": record.get("numericValue"),
+              "numericType": record.get("numericType"),
+              **{key: record.get(key) for key in ("simpleUppercase", "simpleLowercase", "simpleTitlecase")}}
+    return {key: value for key, value in fields.items() if value is not None and value != [] and value != ""}
+
+
 def atomic_write(path: Path, content: bytes) -> None:
     """Replace one completed artifact; a failed download never reaches this step."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -243,12 +345,19 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
         else:
             records[cp] = {"name": name, "category": category, "aliases": [], "notes": [],
                            "combiningClass": combining_class, "bidiClass": bidi_class,
-                           "decomposition": fields[5]}
+                           "decomposition": fields[5], "unicode1Name": fields[10],
+                           "numericValue": fields[8],
+                           "numericType": "Decimal" if fields[6] else "Digit" if fields[7] else "Numeric" if fields[8] else None,
+                           **{key: int(value, 16) if value else None for key, value in zip(
+                               ("simpleUppercase", "simpleLowercase", "simpleTitlecase"), fields[12:15])}}
             if fields[5]:
                 # Name compression must not discard normative properties on
                 # algorithmically named compatibility ideographs.
                 decompositions[cp] = fields[5]
 
+    # Preserve original explicit records so annotated algorithmic characters can
+    # be exceptions to a compressed range without losing their character notes.
+    source_records = dict(records)
     for line in lines("extracted/DerivedName.txt"):
         line = line.split("#")[0].strip()
         if not line:
@@ -300,29 +409,22 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
         index = bisect.bisect_right(age_starts, cp) - 1
         return ages[index]["value"] if index >= 0 and ages[index]["end"] >= cp else None
 
-    for line in lines("NameAliases.txt"):
-        line = line.split("#")[0].strip()
-        if line:
-            code, alias, kind = line.split(";")
-            record = records.get(int(code, 16))
-            if record is not None:
-                record["aliases"].append(alias)
-                if record["name"] == "<control>" and kind == "control":
-                    record["name"] = alias
-
-    current = None
-    for line in lines("NamesList.txt"):
-        match = re.match(r"^([0-9A-F]{4,6})\t", line)
-        if match:
-            current = records.get(int(match[1], 16))
-        elif line.startswith("@"):
-            current = None
-        elif current is not None and line.startswith("\t"):
-            content = line.strip()
-            if content.startswith(("= ", "% ")):
-                current["aliases"].append(content[2:])
-            elif content.startswith("* "):
-                current["notes"].append(content[2:].replace("\\", ""))
+    add_name_aliases(source_records, lines("NameAliases.txt"))
+    add_names_list(source_records, lines("NamesList.txt"))
+    restored = sorted(cp for cp, record in source_records.items() if cp not in records and detail_payload(record))
+    for cp in restored:
+        records[cp] = source_records[cp]
+    if restored:
+        split_ranges = []
+        for start, end, prefix, category, kind in ranges:
+            cursor = start
+            for cp in restored[bisect.bisect_left(restored, start):bisect.bisect_right(restored, end)]:
+                if cursor < cp:
+                    split_ranges.append((cursor, cp - 1, prefix, category, kind))
+                cursor = cp + 1
+            if cursor <= end:
+                split_ranges.append((cursor, end, prefix, category, kind))
+        ranges = split_ranges
 
     invisible = set()
     for line in lines("DerivedCoreProperties.txt"):
@@ -347,18 +449,29 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
     version_offset, version_length = string(version_label)
     record_data = bytearray()
     for cp, record in sorted(records.items()):
-        aliases = list(dict.fromkeys(record["aliases"]))
-        notes = list(dict.fromkeys(record["notes"]))
-        detail = "\n".join((["Also called: " + "; ".join(aliases)] if aliases else []) + notes)
+        payload = detail_payload(record)
+        context = {key: payload.pop(key) for key in ("section", "sectionAnnotations") if key in payload}
+        detail = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) if payload else ""
+        context_detail = json.dumps(context, ensure_ascii=False, separators=(",", ":")) if context else ""
+        search_parts = [record["name"], block_name(cp), payload.get("unicode1Name", "")]
+        search_parts += [item["name"] for item in payload.get("aliases", [])]
+        search_parts += payload.get("annotations", [])
         name_offset, name_length = string(record["name"])
         detail_offset, detail_length = string(detail)
-        search_offset, search_length = string(fold(record["name"] + " " + detail + " " + block_name(cp)))
+        search_offset, search_length = string(fold(" ".join(search_parts)))
+        context_offset, context_length = string(context_detail)
+        context_search_offset, context_search_length = string(fold(" ".join(
+            [context.get("section", "")] + context.get("sectionAnnotations", []))))
         flags = int(cp in invisible or record["category"] in {"Cc", "Cf", "Zs", "Zl", "Zp"})
         assert name_length <= 65535 and detail_length <= 65535
         record_data.extend(struct.pack("<IIHHIIIBBBB", cp, name_offset, name_length,
                                        detail_length, detail_offset, search_offset,
                                        search_length, CATEGORIES.index(record["category"]), flags,
                                        record["combiningClass"], BIDI_CLASSES.index(record["bidiClass"])))
+        # Shared subhead/notice blobs and their folded search text are interned
+        # once, rather than repeated in thousands of per-character strings.
+        record_data.extend(struct.pack("<IIII", context_offset, context_length,
+                                       context_search_offset, context_search_length))
 
     range_data = bytearray()
     for start, end, prefix, category, kind in ranges:
@@ -371,7 +484,7 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
     assigned_count = len(records) + sum(end - start + 1 for start, end, *_ in ranges)
     header = struct.pack("<8s10I", b"UBOARD17", len(records), record_offset,
                          len(ranges), range_offset, pool_offset, len(pool),
-                         version_offset, version_length, assigned_count, 2)
+                         version_offset, version_length, assigned_count, 3)
     properties = {"unicodeVersion": version_label, "ages": ages, "scripts": scripts,
                   "assignedSpans": assigned_spans,
                   "decompositions": [{"codePoint": cp, "value": value}
@@ -415,14 +528,16 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
                 "source": args.source, "sourceLastModified": max(source_dates) if source_dates else None,
                 "refreshedAt": timestamp_file.read_text(),
                 **provenance,
-                "formatVersion": 2, "blocks": len(blocks),
+                "formatVersion": 3, "blocks": len(blocks),
                 "explicitRecords": len(records), "algorithmicRanges": len(ranges),
                 "assignedScalarsIncludingPrivateUse": assigned_count,
                 "catalogBytes": len(header + record_data + range_data + pool),
                 "fullyQualifiedEmoji": len(emoji_entries), "emojiVersion": emoji["version"],
                 "assignedScalarsWithPendingDraftAge": sum(item["end"] - item["start"] + 1 for item in assigned_spans if item["draftAddition"]),
                 "sources": sources,
-                "notes": "NamesList annotations are informative prose. Age and Script retain official generated property values; new draft assignments missing upstream Age have no inferred Age label and use the draft edition only for ordering. Emoji introduction version is distinct from the maximum official Unicode Age of its component scalars. Algorithmic names use DerivedName and the normative Hangul naming algorithm. Surrogates are excluded."}
+                "annotatedCharacters": sum(bool(detail_payload(record)) for record in records.values()),
+                "formalAliasRecords": sum(alias["kind"] in {"correction", "control", "alternate", "figment", "abbreviation"} for record in records.values() for alias in detail_payload(record).get("aliases", [])),
+                "notes": "Assigned names remain unchanged. Formal name alias types come only from NameAliases.txt. NamesList headings, aliases, notices, variations and cross references are informative prose, not normative properties or corrections. Heading/notice context is searchable, including Suzhou numerals whose immutable names contain HANGZHOU. Numeric values, historical Unicode 1 names and simple case mappings come from UnicodeData.txt. Age and Script retain official generated property values; new draft assignments missing upstream Age have no inferred Age label and use the draft edition only for ordering. Emoji introduction version is distinct from the maximum official Unicode Age of its component scalars. Algorithmic names use DerivedName and the normative Hangul naming algorithm. Surrogates are excluded."}
     suffix = "" if args.source == "draft" else "-latest"
     def json_bytes(value: object) -> bytes:
         return (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")

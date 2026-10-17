@@ -29,6 +29,35 @@ func unicodeVersionKey(_ version: String) -> Int {
     return major * 100 + (components.count > 1 ? Int(components[1]) ?? 0 : 0)
 }
 
+/// Formal kinds come from NameAliases.txt. Informative chart aliases never
+/// acquire correction status merely because a character's name is misleading.
+struct UnicodeNameAlias: Identifiable, Hashable, Sendable, Decodable {
+    let name: String
+    let kind: String
+    var id: String { kind + ":" + name }
+    var isFormal: Bool { kind != "informal" }
+    var source: String { kind == "informal" || kind == "namesListFormal" ? "NamesList.txt" : "NameAliases.txt" }
+    var kindLabel: String {
+        switch kind {
+        case "correction": return "Formal correction"
+        case "control": return "Control name"
+        case "alternate": return "Formal alternate"
+        case "figment": return "Formal figment"
+        case "abbreviation": return "Formal abbreviation"
+        case "namesListFormal": return "Names list formal alias"
+        default: return "Informative alias"
+        }
+    }
+}
+
+/// An informative related-character reference, not an equivalence mapping.
+struct UnicodeCrossReference: Identifiable, Hashable, Sendable, Decodable {
+    let codePoint: UInt32
+    let name: String
+    var id: UInt32 { codePoint }
+    var codePointLabel: String { String(format: "U+%04X", codePoint) }
+}
+
 /// One Unicode scalar. A displayed placeholder never changes the inserted text.
 struct UnicodeCharacter: Identifiable, Hashable, Sendable {
     let codePoint: UInt32
@@ -42,6 +71,17 @@ struct UnicodeCharacter: Identifiable, Hashable, Sendable {
     let bidirectionalClass: String?
     let script: String?
     let decomposition: String?
+    let nameAliases: [UnicodeNameAlias]
+    let annotations: [String]
+    let namesListSection: String?
+    let sectionAnnotations: [String]
+    let crossReferences: [UnicodeCrossReference]
+    let unicode1Name: String?
+    let numericValue: String?
+    let numericType: String?
+    let simpleUppercase: UInt32?
+    let simpleLowercase: UInt32?
+    let simpleTitlecase: UInt32?
     private let invisible: Bool
 
     var id: UInt32 { codePoint }
@@ -65,7 +105,12 @@ struct UnicodeCharacter: Identifiable, Hashable, Sendable {
     init(codePoint: UInt32, name: String, detail: String, blockName: String,
          category: String, isInvisible: Bool = false, age: String? = nil,
          versionSortKey: Int? = nil, combiningClass: Int? = nil,
-         bidirectionalClass: String? = nil, script: String? = nil, decomposition: String? = nil) {
+         bidirectionalClass: String? = nil, script: String? = nil, decomposition: String? = nil,
+         nameAliases: [UnicodeNameAlias] = [], annotations: [String] = [],
+         namesListSection: String? = nil, sectionAnnotations: [String] = [],
+         crossReferences: [UnicodeCrossReference] = [], unicode1Name: String? = nil,
+         numericValue: String? = nil, numericType: String? = nil,
+         simpleUppercase: UInt32? = nil, simpleLowercase: UInt32? = nil, simpleTitlecase: UInt32? = nil) {
         self.codePoint = codePoint
         self.name = name
         self.detail = detail
@@ -77,6 +122,17 @@ struct UnicodeCharacter: Identifiable, Hashable, Sendable {
         self.bidirectionalClass = bidirectionalClass
         self.script = script
         self.decomposition = decomposition
+        self.nameAliases = nameAliases
+        self.annotations = annotations
+        self.namesListSection = namesListSection
+        self.sectionAnnotations = sectionAnnotations
+        self.crossReferences = crossReferences
+        self.unicode1Name = unicode1Name
+        self.numericValue = numericValue
+        self.numericType = numericType
+        self.simpleUppercase = simpleUppercase
+        self.simpleLowercase = simpleLowercase
+        self.simpleTitlecase = simpleTitlecase
         self.invisible = isInvisible
     }
 }
@@ -127,7 +183,8 @@ final class UnicodeCatalog: @unchecked Sendable {
     private let rangeOffset: Int
     private let poolOffset: Int
     private let properties: UnicodePropertyData
-    private static let recordSize = 28
+    private let formatVersion: Int
+    private let recordSize: Int
     private static let rangeSize = 16
     private static let categories = "Lu Ll Lt Lm Lo Mn Mc Me Nd Nl No Pc Pd Ps Pe Pi Pf Po Sm Sc Sk So Zs Zl Zp Cc Cf Cs Co Cn".split(separator: " ").map(String.init)
     private static let bidiClasses = "L R AL EN ES ET AN CS NSM BN B S WS ON LRE LRO RLE RLO PDF LRI RLI FSI PDI".split(separator: " ").map(String.init)
@@ -180,6 +237,8 @@ final class UnicodeCatalog: @unchecked Sendable {
             rangeCount = Self.uint32(loaded, 16)
             rangeOffset = Self.uint32(loaded, 20)
             poolOffset = Self.uint32(loaded, 24)
+            formatVersion = Self.uint32(loaded, 44)
+            recordSize = formatVersion >= 3 ? 44 : 28
             let start = poolOffset + Self.uint32(loaded, 32)
             version = String(decoding: loaded[start..<(start + Self.uint32(loaded, 36))], as: UTF8.self)
             resourceError = blocks.isEmpty ? "Unicode block resources could not be loaded."
@@ -191,6 +250,8 @@ final class UnicodeCatalog: @unchecked Sendable {
             rangeCount = 0
             rangeOffset = 0
             poolOffset = 0
+            formatVersion = 0
+            recordSize = 28
             version = "Unavailable"
             resourceError = "The offline Unicode catalog could not be loaded."
         }
@@ -311,10 +372,13 @@ final class UnicodeCatalog: @unchecked Sendable {
         return data.withUnsafeBytes { bytes in
             var points: [UInt32] = []
             for index in 0..<recordCount {
-                let record = recordOffset + index * Self.recordSize
+                let record = recordOffset + index * recordSize
                 let start = poolOffset + Int(Self.u32(bytes, record + 16))
                 let length = Int(Self.u32(bytes, record + 20))
-                if tokens.allSatisfy({ Self.contains($0, bytes: bytes, start: start, length: length) }) {
+                let contextStart = formatVersion >= 3 ? poolOffset + Int(Self.u32(bytes, record + 36)) : start
+                let contextLength = formatVersion >= 3 ? Int(Self.u32(bytes, record + 40)) : 0
+                if tokens.allSatisfy({ Self.contains($0, bytes: bytes, start: start, length: length)
+                    || Self.contains($0, bytes: bytes, start: contextStart, length: contextLength) }) {
                     let cp = Self.u32(bytes, record)
                     points.append(cp)
                 }
@@ -363,7 +427,7 @@ final class UnicodeCatalog: @unchecked Sendable {
                 let block = block(containing: cp)
                 let name: String
                 if let index = recordIndex(cp, bytes: bytes) {
-                    let record = recordOffset + index * Self.recordSize
+                    let record = recordOffset + index * recordSize
                     name = string(offset: Int(Self.u32(bytes, record + 4)), length: Self.u16(bytes, record + 8), bytes: bytes)
                 } else if let range = algorithmicRange(cp, bytes: bytes) {
                     name = algorithmicName(cp, range: range, bytes: bytes)
@@ -396,20 +460,28 @@ final class UnicodeCatalog: @unchecked Sendable {
         var high = recordCount
         while low < high {
             let mid = (low + high) / 2
-            if Self.u32(bytes, recordOffset + mid * Self.recordSize) < cp { low = mid + 1 } else { high = mid }
+            if Self.u32(bytes, recordOffset + mid * recordSize) < cp { low = mid + 1 } else { high = mid }
         }
         return low
     }
 
     private func recordIndex(_ cp: UInt32, bytes: UnsafeRawBufferPointer) -> Int? {
         let index = lowerBound(cp, bytes: bytes)
-        return index < recordCount && Self.u32(bytes, recordOffset + index * Self.recordSize) == cp ? index : nil
+        return index < recordCount && Self.u32(bytes, recordOffset + index * recordSize) == cp ? index : nil
     }
 
     private func character(record index: Int, blockName: String, bytes: UnsafeRawBufferPointer) -> UnicodeCharacter {
-        let record = recordOffset + index * Self.recordSize
+        let record = recordOffset + index * recordSize
         let category = Self.categories[Int(bytes[record + 24])]
-        let detail = string(offset: Int(Self.u32(bytes, record + 12)), length: Self.u16(bytes, record + 10), bytes: bytes)
+        let storedDetail = string(offset: Int(Self.u32(bytes, record + 12)), length: Self.u16(bytes, record + 10), bytes: bytes)
+        // Version 3 keeps structured details in the existing mapped string pool.
+        // Only the requested character/page is decoded; no global alias dictionary.
+        let metadata = formatVersion >= 3 && !storedDetail.isEmpty
+            ? try? JSONDecoder().decode(UnicodeDetailData.self, from: Data(storedDetail.utf8)) : nil
+        let contextText = formatVersion >= 3 ? string(offset: Int(Self.u32(bytes, record + 28)), length: Int(Self.u32(bytes, record + 32)), bytes: bytes) : ""
+        let context = !contextText.isEmpty ? try? JSONDecoder().decode(UnicodeDetailData.self, from: Data(contextText.utf8)) : nil
+        let prose = ((metadata?.annotations ?? []) + (context?.sectionAnnotations ?? [])).joined(separator: "\n")
+        let detail = formatVersion >= 3 ? prose : storedDetail
         return UnicodeCharacter(codePoint: Self.u32(bytes, record),
                                 name: string(offset: Int(Self.u32(bytes, record + 4)), length: Self.u16(bytes, record + 8), bytes: bytes),
                                 detail: detail.isEmpty ? Self.categoryDescriptions[category] ?? category : detail,
@@ -418,7 +490,13 @@ final class UnicodeCatalog: @unchecked Sendable {
                                 combiningClass: Int(bytes[record + 26]),
                                 bidirectionalClass: Self.bidiClasses[Int(bytes[record + 27])],
                                 script: script(at: Self.u32(bytes, record)),
-                                decomposition: decomposition(at: Self.u32(bytes, record)))
+                                decomposition: decomposition(at: Self.u32(bytes, record)),
+                                nameAliases: metadata?.aliases ?? [], annotations: metadata?.annotations ?? [],
+                                namesListSection: context?.section, sectionAnnotations: context?.sectionAnnotations ?? [],
+                                crossReferences: metadata?.references ?? [], unicode1Name: metadata?.unicode1Name,
+                                numericValue: metadata?.numericValue, numericType: metadata?.numericType,
+                                simpleUppercase: metadata?.simpleUppercase, simpleLowercase: metadata?.simpleLowercase,
+                                simpleTitlecase: metadata?.simpleTitlecase)
     }
 
     private func age(at cp: UInt32) -> String? { property(at: cp, in: properties.ages) }
@@ -536,7 +614,9 @@ final class UnicodeCatalog: @unchecked Sendable {
             let records = Int(u32(bytes, 8)), recordStart = Int(u32(bytes, 12))
             let ranges = Int(u32(bytes, 16)), rangeStart = Int(u32(bytes, 20))
             let pool = Int(u32(bytes, 24)), poolLength = Int(u32(bytes, 28))
-            guard u32(bytes, 44) == 2, recordStart == 48,
+            let format = u32(bytes, 44)
+            let recordSize = format >= 3 ? 44 : 28
+            guard (2...3).contains(u32(bytes, 44)), recordStart == 48,
                   recordStart + records * recordSize == rangeStart,
                   rangeStart + ranges * rangeSize == pool,
                   pool + poolLength == bytes.count,
@@ -548,6 +628,10 @@ final class UnicodeCatalog: @unchecked Sendable {
                       Int(u32(bytes, record + 4)) + u16(bytes, record + 8) <= poolLength,
                       Int(u32(bytes, record + 12)) + u16(bytes, record + 10) <= poolLength,
                       Int(u32(bytes, record + 16)) + Int(u32(bytes, record + 20)) <= poolLength else { return false }
+                if format >= 3 {
+                    guard Int(u32(bytes, record + 28)) + Int(u32(bytes, record + 32)) <= poolLength,
+                          Int(u32(bytes, record + 36)) + Int(u32(bytes, record + 40)) <= poolLength else { return false }
+                }
             }
             for index in 0..<ranges {
                 let range = rangeStart + index * rangeSize
@@ -558,6 +642,20 @@ final class UnicodeCatalog: @unchecked Sendable {
             return true
         }
     }
+}
+
+private struct UnicodeDetailData: Decodable {
+    let aliases: [UnicodeNameAlias]?
+    let annotations: [String]?
+    let section: String?
+    let sectionAnnotations: [String]?
+    let references: [UnicodeCrossReference]?
+    let unicode1Name: String?
+    let numericValue: String?
+    let numericType: String?
+    let simpleUppercase: UInt32?
+    let simpleLowercase: UInt32?
+    let simpleTitlecase: UInt32?
 }
 
 private struct UnicodePropertyRange: Decodable {

@@ -4,14 +4,14 @@
   "isDraft": false,
   "source": "latest",
   "sourceLastModified": "2026-08-10, 15:32:05 GMT",
-  "refreshedAt": "2026-10-03T11:48:13Z",
+  "refreshedAt": "2026-10-17T06:33:32Z",
   "sourceKind": "unicode-release",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "blocks": 353,
-  "explicitRecords": 35416,
-  "algorithmicRanges": 26,
+  "explicitRecords": 41297,
+  "algorithmicRanges": 19,
   "assignedScalarsIncludingPrivateUse": 310341,
-  "catalogBytes": 3928105,
+  "catalogBytes": 6663323,
   "fullyQualifiedEmoji": 3963,
   "emojiVersion": "18.0",
   "assignedScalarsWithPendingDraftAge": 0,
@@ -72,5 +72,7 @@
       "sourceDate": "2026-04-30, 22:40:18 GMT"
     }
   },
-  "notes": "NamesList annotations are informative prose. Age and Script retain official generated property values; new draft assignments missing upstream Age have no inferred Age label and use the draft edition only for ordering. Emoji introduction version is distinct from the maximum official Unicode Age of its component scalars. Algorithmic names use DerivedName and the normative Hangul naming algorithm. Surrogates are excluded."
+  "annotatedCharacters": 41194,
+  "formalAliasRecords": 481,
+  "notes": "Assigned names remain unchanged. Formal name alias types come only from NameAliases.txt. NamesList headings, aliases, notices, variations and cross references are informative prose, not normative properties or corrections. Heading/notice context is searchable, including Suzhou numerals whose immutable names contain HANGZHOU. Numeric values, historical Unicode 1 names and simple case mappings come from UnicodeData.txt. Age and Script retain official generated property values; new draft assignments missing upstream Age have no inferred Age label and use the draft edition only for ordering. Emoji introduction version is distinct from the maximum official Unicode Age of its component scalars. Algorithmic names use DerivedName and the normative Hangul naming algorithm. Surrogates are excluded."
 }

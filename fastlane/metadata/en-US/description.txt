@@ -21,6 +21,8 @@ TYPE AND UNDERSTAND
 - Use the top-right backspace, including press-and-hold deletion, plus space, return and the globe menu.
 - Keep favorites and recent entries locally. The app and keyboard keep separate collections. Copy entries or combine text in the app's scratchpad.
 
+Search Unicode section names and informative notes as well as stable official names. For example, “Suzhou numerals” finds the characters officially named “Hangzhou numeral”; details retain the original name and explain the historical naming issue. Read typed aliases, related characters and numeric properties where Unicode supplies them.
+
 PRIVATE AND OFFLINE
 No account, ads, analytics SDK or keyboard Full Access. Uniboard does not send your typing or searches to a server.
 

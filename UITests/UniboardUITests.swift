@@ -52,6 +52,50 @@ final class UniboardUITests: XCTestCase {
         assertCharacterVisible("U+3041")
     }
 
+    func testSuzhouNumeralsSearchExposesNamesListAndNumericProperties() {
+        searchUnicode("suzhou numerals")
+        assertCharacterVisible("U+3021")
+        dismissAppSearchKeyboard()
+        for scalar in 0x3021...0x3029 {
+            revealResultCharacter(String(format: "U+%04X", scalar))
+        }
+        attachScreenshot("Suzhou numerals section search finds the nine Hangzhou-named characters")
+        revealResultCharacter("U+3021").tap()
+        assertCharacterProperty("name", equals: "Hangzhou Numeral One")
+        assertCharacterProperty("section", contains: "Suzhou numerals")
+        assertCharacterProperty("notes", contains: "misnomer")
+        assertCharacterProperty("notes", contains: "Hangzhou")
+        assertCharacterProperty("numericValue", equals: "1")
+        attachScreenshot("Official Hangzhou name retains Suzhou section, naming note and numeric value")
+        app.buttons["Done"].tap()
+
+        searchUnicode("hangzhou numerals")
+        assertCharacterVisible("U+3021")
+        dismissAppSearchKeyboard()
+        for scalar in 0x3021...0x3029 {
+            revealResultCharacter(String(format: "U+%04X", scalar))
+        }
+    }
+
+    @discardableResult
+    private func revealResultCharacter(_ codepoint: String) -> XCUIElement {
+        let results = app.scrollViews.containing(.textField, identifier: "unicodeSearch").firstMatch
+        XCTAssertTrue(results.waitForExistence(timeout: 5))
+        let result = character(codepoint)
+        for _ in 0..<8 {
+            if isInsideScrollViewport(result, in: results) { break }
+            if result.exists && result.frame.midY < results.frame.minY {
+                results.swipeDown()
+            } else {
+                results.swipeUp()
+            }
+        }
+        XCTAssertTrue(result.waitForExistence(timeout: 5), "Expected required search result \(codepoint)")
+        XCTAssertTrue(isInsideScrollViewport(result, in: results),
+                      "Required result \(codepoint) must be tappable after scrolling the actual results")
+        return result
+    }
+
     func testFavoriteCanBeFoundAndRemovedInSaved() {
         searchUnicode("snowman")
         assertCharacterVisible("U+2603").tap()
@@ -344,7 +388,7 @@ final class UniboardUITests: XCTestCase {
         }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [portrait], timeout: 5), .completed)
         selectKeyboardSection("emojis")
-        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitUntilLabelEquals("Search emoji sequences"))
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilLabelEquals("Search emoji sequences"))
         attachScreenshot("Portrait emoji section settles before querying native sequence")
         enterKeyboardQuery("head shaking horizontally")
         let emoji = app.buttons["keyboard.emoji.1F642-200D-2194-FE0F"].firstMatch
@@ -429,6 +473,200 @@ final class UniboardUITests: XCTestCase {
         closeKeyboardSearch()
     }
 
+    func testSystemKeyboardPortraitResizeAndFoldedSearchPreserveInput() throws {
+        try requireKeyboardIntegration()
+        let context = "Host context stays visible."
+        let input = openSystemKeyboardHost(initialText: context)
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+
+        let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        XCTAssertTrue(grip.waitForExistence(timeout: 5))
+        attachResizeFrameDiagnostics(input: input)
+        XCTAssertTrue(grip.isHittable)
+        assertResizeHeight(300)
+        assertCompactKeyboardGeometry("resizable.portrait.initial", input: input, searching: false,
+                                      expectedSurfaceHeight: 300)
+        grip.tap()
+        assertResizeHeight(420)
+        assertCompactKeyboardGeometry("resizable.portrait.expanded", input: input, searching: false,
+                                      expectedSurfaceHeight: 420)
+        grip.tap()
+        assertResizeHeight(220)
+        assertCompactKeyboardGeometry("resizable.portrait.collapsed", input: input, searching: false,
+                                      expectedSurfaceHeight: 220)
+
+        // Drag the actual top grip upwards from the compact surface. Read the
+        // resulting native value rather than assuming gesture interpolation.
+        let start = grip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: .zero).withOffset(
+            CGVector(dx: grip.frame.midX, dy: grip.frame.midY - 85))
+        start.press(forDuration: 0.2, thenDragTo: end)
+        let intermediate = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard let height = self.keyboardResizeHeight() else { return false }
+            return height > 240 && height < 335
+        }, object: grip)
+        XCTAssertEqual(XCTWaiter.wait(for: [intermediate], timeout: 5), .completed,
+                       "Dragging must choose an intermediate browse height within 220–420 points")
+        let manualHeight = keyboardResizeHeight() ?? 0
+        XCTAssertGreaterThan(manualHeight, 240)
+        XCTAssertLessThan(manualHeight, 335)
+        assertCompactKeyboardGeometry("resizable.portrait.manual", input: input, searching: false,
+                                      expectedSurfaceHeight: CGFloat(manualHeight))
+        XCTAssertEqual(input.value as? String, context)
+
+        enterKeyboardQuery("cat")
+        let queryField = app.descendants(matching: .any)["keyboard.search"].firstMatch
+        // The real native field's text viewport begins 34 points from its
+        // leading edge, after the search icon. Tap the start of its short,
+        // unscrolled text rather than assuming insertion always appends.
+        queryField.coordinate(withNormalizedOffset: .zero).withOffset(
+            CGVector(dx: 36, dy: queryField.frame.height / 2)).tap()
+        typeKeyboardQueryKeys("arrow ")
+        XCTAssertTrue(queryField.waitUntilValueEquals("arrow cat"),
+                      "Tapping at the beginning must move the caret before the existing query")
+        app.buttons["keyboard.delete"].tap()
+        XCTAssertTrue(queryField.waitUntilValueEquals("arrowcat"),
+                      "Backspace must delete before the moved caret while preserving its suffix")
+        XCTAssertEqual(input.value as? String, context, "Caret placement and local query editing must not enter host text")
+        attachScreenshot("Native query caret follows tapped text and preserves the suffix during insertion and deletion")
+
+        enterKeyboardQuery("suzhou numerals")
+        let numeral = app.buttons["keyboard.character.U+3021"].firstMatch
+        XCTAssertTrue(numeral.waitForExistence(timeout: 10))
+        numeral.press(forDuration: 1)
+        let numeralName = app.staticTexts["keyboard.properties.name"].firstMatch
+        XCTAssertTrue(numeralName.waitForExistence(timeout: 5))
+        XCTAssertTrue(accessibleText(numeralName).localizedCaseInsensitiveContains("Hangzhou numeral one"))
+        XCTAssertEqual(accessibleText(app.staticTexts["keyboard.properties.codepoints"].firstMatch), "U+3021")
+        XCTAssertEqual(input.value as? String, context, "Holding a Suzhou search result must inspect without inserting")
+        assertCompactKeyboardGeometry("resizable.portrait.suzhou.properties", input: input, searching: false,
+                                      inspecting: true, expectedSurfaceHeight: 340)
+        attachScreenshot("Native Suzhou numeral properties preserve the official Hangzhou name and visible host")
+        let section = app.staticTexts["keyboard.properties.section"].firstMatch
+        let notes = app.staticTexts["keyboard.properties.notes"].firstMatch
+        XCTAssertTrue(section.waitForExistence(timeout: 5))
+        XCTAssertTrue(notes.waitForExistence(timeout: 5))
+        XCTAssertTrue(accessibleText(section).localizedCaseInsensitiveContains("Suzhou numerals"))
+        XCTAssertTrue(accessibleText(notes).localizedCaseInsensitiveContains("Hangzhou"))
+        XCTAssertTrue(accessibleText(notes).localizedCaseInsensitiveContains("misnomer"))
+        let propertyScroll = app.scrollViews.containing(.staticText, identifier: "keyboard.properties.description").firstMatch
+        XCTAssertTrue(propertyScroll.waitForExistence(timeout: 5))
+        for _ in 0..<8 {
+            if isReadableInScrollViewport(notes, in: propertyScroll) { break }
+            let viewport = propertyScroll.frame
+            let direction: CGFloat = notes.frame.midY < viewport.midY ? 1 : -1
+            let start = propertyScroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            let end = start.withOffset(CGVector(dx: 0, dy: direction * min(40, viewport.height * 0.25)))
+            // A flick can pass a middle note between snapshots. Slow, short
+            // drags with an end hold stop at readable content without inertia.
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        XCTAssertTrue(isReadableInScrollViewport(notes, in: propertyScroll), "The section naming note must be reachable and readable inside the native inspector")
+        attachScreenshot("Suzhou section and Hangzhou misnomer note remain readable in the native inspector")
+        XCTAssertEqual(input.value as? String, context)
+        app.buttons["keyboard.properties.close"].tap()
+        enterKeyboardQuery("u+1f680")
+        assertResizeHeight(340)
+        assertCompactKeyboardGeometry("resizable.portrait.search", input: input, searching: true,
+                                      expectedSurfaceHeight: 340)
+        let rocket = app.buttons["keyboard.character.U+1F680"].firstMatch
+        XCTAssertTrue(rocket.waitForExistence(timeout: 10))
+        XCTAssertEqual(input.value as? String, context, "Query editing must not enter host text")
+        closeKeyboardSearch()
+        assertResizeHeight(manualHeight)
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("u+1f680"))
+        XCTAssertTrue(rocket.waitForExistence(timeout: 5), "Done must retain the filtered result after folding query keys")
+        XCTAssertTrue(rocket.isHittable)
+        XCTAssertTrue(app.buttons["keyboard.search.clear"].firstMatch.isHittable,
+                      "A folded query must still offer its clear action")
+        assertCompactKeyboardGeometry("resizable.portrait.folded.results", input: input, searching: false,
+                                      expectedSurfaceHeight: CGFloat(manualHeight))
+        XCTAssertEqual(input.value as? String, context, "Done folds search without changing the host")
+        rocket.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "🚀"))
+        XCTAssertEqual((input.value as? String)?.unicodeScalars.map(\.value),
+                       context.unicodeScalars.map(\.value) + [0x1F680])
+
+        // With query keys folded, these controls operate on the real host
+        // document even though the query and filtered catalog stay visible.
+        app.buttons["keyboard.space"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "🚀 "))
+        app.buttons["keyboard.return"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "🚀 \n"))
+        for expected in [context + "🚀 ", context + "🚀"] {
+            app.buttons["keyboard.delete"].tap()
+            XCTAssertTrue(input.waitUntilValueEquals(expected))
+        }
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("u+1f680"))
+        XCTAssertTrue(rocket.exists)
+
+        reopenKeyboardSearch(expectedQuery: "u+1f680")
+        assertResizeHeight(340)
+        XCTAssertEqual(input.value as? String, context + "🚀")
+        closeKeyboardSearch()
+        let clear = app.buttons["keyboard.search.clear"].firstMatch
+        XCTAssertTrue(clear.waitForExistence(timeout: 5))
+        XCTAssertTrue(clear.isHittable)
+        clear.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("No query"))
+        XCTAssertTrue(clear.waitUntilAbsent())
+        XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitUntilAbsent(),
+                      "Clearing a folded query must not reopen query editing")
+        assertResizeHeight(manualHeight)
+        reopenKeyboardSearch(expectedQuery: "No query")
+        closeKeyboardSearch()
+
+        settleKeyboardOrientation(.landscapeLeft)
+        assertCompactKeyboardGeometry("resizable.landscape", input: input, searching: false,
+                                      expectedSurfaceHeight: 220)
+        XCTAssertEqual(input.value as? String, context + "🚀")
+        settleKeyboardOrientation(.portrait)
+        assertResizeHeight(manualHeight)
+        assertCompactKeyboardGeometry("resizable.portrait.restored", input: input, searching: false,
+                                      expectedSurfaceHeight: CGFloat(manualHeight))
+        XCTAssertEqual(input.value as? String, context + "🚀", "Rotation must preserve host input and manual browse height")
+    }
+
+    private func keyboardResizeHeight() -> Int? {
+        let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        guard grip.exists else { return nil }
+        let value = grip.value as? String ?? ""
+        return value.split(whereSeparator: { !$0.isNumber }).first.flatMap { Int($0) }
+    }
+
+    private func attachResizeFrameDiagnostics(input: XCUIElement) {
+        func rect(_ frame: CGRect) -> [String: NSObject] {
+            let values: [String: CGFloat] = ["x": frame.minX, "y": frame.minY,
+                                             "width": frame.width, "height": frame.height]
+            return values.mapValues { value -> NSObject in
+                value.isFinite ? NSNumber(value: Double(value)) : NSString(string: String(describing: value))
+            }
+        }
+        let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
+        let ancestors = app.otherElements.containing(.any, identifier: "keyboard.search").allElementsBoundByIndex
+        let value: [String: Any] = ["app": rect(app.frame), "grip": rect(grip.frame),
+            "search": rect(search.frame), "hostEditor": rect(input.frame),
+            "gripValue": grip.value as? String ?? "Unavailable",
+            "keyboardAncestors": ancestors.map { rect($0.frame) }]
+        let data = try! JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "Native resize frames before querying hittability"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("UNIBOARD_RESIZE_INITIAL_FRAMES " + String(data: data, encoding: .utf8)!.replacingOccurrences(of: "\n", with: ""))
+        attachScreenshot("Native resize grip and complete host before querying hittability")
+    }
+
+    private func assertResizeHeight(_ expected: Int, file: StaticString = #filePath, line: UInt = #line) {
+        let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.keyboardResizeHeight() == expected
+        }, object: grip)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed,
+                       "Resize grip should report \(expected) points, got \(String(describing: grip.value))", file: file, line: line)
+    }
+
     func testSystemKeyboardCompactMenusAndInspectionPreserveContext() throws {
         try requireKeyboardIntegration()
         let context = "Host context stays visible."
@@ -455,7 +693,7 @@ final class UniboardUITests: XCTestCase {
         save.tap()
         selectKeyboardSection("blocks")
         XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitUntilAbsent(), "Blocks must exit query mode")
-        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitUntilValueEquals("u+2603"))
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("u+2603"))
         let basicLatin = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Basic Latin")).firstMatch
         XCTAssertTrue(basicLatin.waitForExistence(timeout: 5), "The actual block list must replace search results")
         XCTAssertTrue(basicLatin.isHittable)
@@ -465,7 +703,7 @@ final class UniboardUITests: XCTestCase {
         reopenKeyboardSearch(expectedQuery: "u+2603")
         selectKeyboardSection("saved")
         XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitUntilAbsent(), "Saved must exit query mode")
-        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitUntilValueEquals("u+2603"))
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("u+2603"))
         XCTAssertTrue(app.staticTexts["On this keyboard"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue(snowman.waitForExistence(timeout: 5), "The saved scalar must appear in actual Saved content")
         snowman.tap()
@@ -499,35 +737,43 @@ final class UniboardUITests: XCTestCase {
             return landscape ? frame.width > frame.height : frame.width < frame.height
         }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed)
-        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitForExistence(timeout: 5))
     }
 
     private func assertCompactKeyboardGeometry(_ mode: String, input: XCUIElement, searching: Bool,
-                                               inspecting: Bool = false, file: StaticString = #filePath, line: UInt = #line) {
+                                               inspecting: Bool = false, expectedSurfaceHeight: CGFloat? = nil,
+                                               file: StaticString = #filePath, line: UInt = #line) {
         func rect(_ frame: CGRect) -> [String: Double] {
             ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height]
         }
         assertDeleteIsOnlyAtTopRight(file: file, line: line)
         assertKeyboardControlsAreVisible(isSearching: searching, file: file, line: line)
         assertHostEditorIsVisibleAboveKeyboard(input, file: file, line: line)
-        let search = app.buttons["keyboard.search"].firstMatch.frame
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch.frame
         let footer = app.buttons["keyboard.return"].firstMatch.frame
-        let candidates = app.otherElements.containing(.button, identifier: "keyboard.search").allElementsBoundByIndex
+        let candidates = app.otherElements.containing(.any, identifier: "keyboard.search").allElementsBoundByIndex
             .map(\.frame).filter { $0.width > app.frame.width * 0.7 && $0.contains(search) && $0.contains(footer) }
             .sorted { $0.height < $1.height }
         let landscape = app.frame.width > app.frame.height
         let pad = UIDevice.current.userInterfaceIdiom == .pad
-        let maximum: CGFloat = pad ? (searching || inspecting ? 380 : 340)
-            : landscape ? 220 : (searching || inspecting ? 340 : 300)
+        let maximum: CGFloat = expectedSurfaceHeight ?? (pad ? (searching || inspecting ? 380 : 340)
+            : landscape ? 220 : (searching || inspecting ? 340 : 300))
         XCTAssertFalse(candidates.isEmpty, "Expected the actual keyboard surface ancestor", file: file, line: line)
         if let surface = candidates.first {
             XCTAssertLessThanOrEqual(surface.height, maximum + 1, "Keyboard must leave host space instead of reverting to tall chrome", file: file, line: line)
+            if let expectedSurfaceHeight {
+                XCTAssertEqual(surface.height, expectedSurfaceHeight, accuracy: 1,
+                               "The measured keyboard surface must match its reported resize height", file: file, line: line)
+            }
             XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(surface), "Keyboard surface must not extend above or outside the display", file: file, line: line)
         }
+        let resize = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        let resizeValue = resize.exists ? resize.value as? String ?? "Unavailable" : "Unavailable"
         let value: [String: Any] = ["mode": mode, "app": rect(app.frame), "hostEditor": rect(input.frame),
             "hostText": input.value as? String ?? "", "hostIsHittable": input.isHittable,
             "surfaceCandidates": candidates.map(rect), "search": rect(search), "footer": rect(footer),
-            "visibleControlSpan": footer.maxY - search.minY, "maximumSurfaceHeight": maximum]
+            "visibleControlSpan": footer.maxY - search.minY, "maximumSurfaceHeight": maximum,
+            "resizeValue": resizeValue]
         let data = try! JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
         let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
         attachment.name = "Compact native keyboard geometry \(mode)"
@@ -857,7 +1103,7 @@ final class UniboardUITests: XCTestCase {
             XCTAssertTrue(input.waitUntilValueEquals(initialText))
         }
         selectUniboardKeyboard()
-        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitForExistence(timeout: 10),
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitForExistence(timeout: 10),
             "Expected the real Uniboard keyboard extension: \(app.debugDescription)")
         XCTAssertEqual(input.value as? String, initialText)
         if app.buttons["keyboard.query.u"].firstMatch.exists { closeKeyboardSearch() }
@@ -866,7 +1112,7 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func enterKeyboardQuery(_ query: String) {
-        let search = app.buttons["keyboard.search"].firstMatch
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         attachScreenshot("System keyboard before search")
         search.tap()
@@ -875,19 +1121,28 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("System keyboard after opening search")
         XCTAssertTrue(didOpenSearch, "Search should show extension query keys: \(app.debugDescription)")
         if let oldQuery = search.value as? String, oldQuery != "No query" {
-            for _ in oldQuery { app.buttons["keyboard.delete"].tap() }
+            // The query now has a movable caret. Clear through the visible
+            // action instead of assuming backward deletion starts at its end.
+            let clear = app.buttons["keyboard.search.clear"].firstMatch
+            XCTAssertTrue(clear.waitForExistence(timeout: 5))
+            clear.tap()
+            XCTAssertTrue(search.waitUntilValueEquals("No query"))
         }
-        for key in query {
+        typeKeyboardQueryKeys(query)
+        XCTAssertTrue(search.waitUntilValueEquals(query), "The visible keyboard search query should match its keys")
+    }
+
+    private func typeKeyboardQueryKeys(_ text: String) {
+        for key in text {
             let id = key == " " ? "keyboard.space" : "keyboard.query.\(key)"
             let queryKey = app.buttons[id].firstMatch
             XCTAssertTrue(queryKey.waitForExistence(timeout: 5), "Expected query key \(key): \(app.debugDescription)")
             queryKey.tap()
         }
-        XCTAssertTrue(search.waitUntilValueEquals(query), "The visible keyboard search query should match its keys")
     }
 
     private func reopenKeyboardSearch(expectedQuery: String) {
-        let search = app.buttons["keyboard.search"].firstMatch
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
         XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitForExistence(timeout: 5))
@@ -918,7 +1173,7 @@ final class UniboardUITests: XCTestCase {
         let delete = deletes.firstMatch
         XCTAssertTrue(delete.waitForExistence(timeout: 5), file: file, line: line)
         XCTAssertTrue(delete.isHittable, file: file, line: line)
-        let search = app.buttons["keyboard.search"].firstMatch
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
         let space = app.buttons["keyboard.space"].firstMatch
         XCTAssertLessThanOrEqual(abs(delete.frame.midY - search.frame.midY), 18,
             "Delete should align with the top search header", file: file, line: line)
@@ -936,7 +1191,7 @@ final class UniboardUITests: XCTestCase {
         if isSearching { identifiers += ["keyboard.query.q", "keyboard.query.p", "keyboard.query.u"] }
         let screen = app.frame.insetBy(dx: -1, dy: -1)
         for identifier in identifiers {
-            let control = app.buttons[identifier].firstMatch
+            let control = app.descendants(matching: .any)[identifier].firstMatch
             XCTAssertTrue(control.waitForExistence(timeout: 5), "Expected keyboard control \(identifier)", file: file, line: line)
             XCTAssertTrue(control.isHittable, "Keyboard control \(identifier) must remain tappable", file: file, line: line)
             let frame = control.frame
@@ -949,7 +1204,7 @@ final class UniboardUITests: XCTestCase {
     private func assertHostEditorIsVisibleAboveKeyboard(_ input: XCUIElement,
                                                        file: StaticString = #filePath, line: UInt = #line) {
         let frame = input.frame
-        let search = app.buttons["keyboard.search"].firstMatch
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
         XCTAssertTrue(input.isHittable, "The native host editor must remain tappable", file: file, line: line)
         XCTAssertTrue(frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height >= 44,
                       "The host needs a visible editing area, not a collapsed frame: \(frame)", file: file, line: line)
@@ -1010,6 +1265,17 @@ final class UniboardUITests: XCTestCase {
               viewport.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
         // iOS 27 can throw an AX activation-point error for an offscreen
         // property. Establish viewport containment before asking hittability.
+        return element.isHittable
+    }
+
+    private func isReadableInScrollViewport(_ element: XCUIElement, in scrollView: XCUIElement) -> Bool {
+        guard element.exists && scrollView.exists else { return false }
+        let frame = element.frame
+        let viewport = scrollView.frame
+        guard frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0,
+              viewport.width > 0 && viewport.height > 0 else { return false }
+        let visible = frame.intersection(viewport)
+        guard !visible.isNull, visible.height >= min(frame.height, viewport.height) * 0.9 else { return false }
         return element.isHittable
     }
 
@@ -1175,7 +1441,7 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func selectUniboardKeyboard() {
-        if app.buttons["keyboard.search"].firstMatch.waitForExistence(timeout: 2) { return }
+        if app.descendants(matching: .any)["keyboard.search"].firstMatch.waitForExistence(timeout: 2) { return }
         let keyboard = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Uniboard")).firstMatch
         for _ in 0..<2 {
             let globe = app.buttons["Next keyboard"].firstMatch
@@ -1193,12 +1459,12 @@ final class UniboardUITests: XCTestCase {
         // required before any insertion or layout assertion can run.
         for _ in 0..<6 {
             dismissKeyboardSwitcherTipIfPresent()
-            if app.buttons["keyboard.search"].firstMatch.waitForExistence(timeout: 1) { return }
+            if app.descendants(matching: .any)["keyboard.search"].firstMatch.waitForExistence(timeout: 1) { return }
             let next = app.buttons["Next keyboard"].firstMatch
             XCTAssertTrue(next.waitForExistence(timeout: 3), "Expected the native input-mode switch key: \(app.debugDescription)")
             next.tap()
         }
-        XCTAssertTrue(app.buttons["keyboard.search"].firstMatch.waitForExistence(timeout: 5),
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitForExistence(timeout: 5),
                       "Expected the installed Uniboard extension after native keyboard switching: \(app.debugDescription)")
     }
 

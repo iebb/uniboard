@@ -51,6 +51,114 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertTrue(catalog.search("no_break space").contains { $0.codePoint == 0x00A0 })
     }
 
+    func testSuzhouNumeralsSearchUsesInformativeContextWithoutRenamingCharacters() throws {
+        let digits = Set(UInt32(0x3021)...UInt32(0x3029))
+        for edition in UnicodeEdition.allCases {
+            let catalog = edition.catalog
+            for query in ["suzhou numerals", "suzhou", "Suzhou numerals", "hangzhou numerals"] {
+                let results = Set(catalog.search(query, order: .codePoint).map(\.codePoint))
+                XCTAssertTrue(digits.isSubset(of: results), "\(edition): \(query)")
+                XCTAssertTrue(Set([UInt32(0x3038), 0x3039, 0x303A]).isSubset(of: results))
+                XCTAssertFalse(results.contains(0x302A))
+            }
+            let one = try XCTUnwrap(catalog.character(at: 0x3021))
+            XCTAssertEqual(one.name, "HANGZHOU NUMERAL ONE")
+            XCTAssertEqual(one.text, "〡")
+            XCTAssertEqual(one.namesListSection, "Suzhou numerals")
+            XCTAssertTrue(one.sectionAnnotations.contains { $0.contains("misnomer") })
+            XCTAssertFalse(one.nameAliases.contains { $0.kind == "correction" || $0.name.contains("SUZHOU") })
+            XCTAssertEqual(one.numericType, "Numeric")
+            XCTAssertEqual(one.numericValue, "1")
+            XCTAssertEqual(catalog.search("U+3021").map(\.codePoint), [0x3021])
+            XCTAssertEqual(catalog.search("additional suzhou numerals", order: .codePoint).map(\.codePoint), [0x3038, 0x3039, 0x303A])
+        }
+    }
+
+    func testTypedAliasesPreserveFormalCorrectionsAndInformativeNames() throws {
+        for edition in UnicodeEdition.allCases {
+            let catalog = edition.catalog
+            let bracket = try XCTUnwrap(catalog.character(at: 0xFE18))
+            XCTAssertTrue(bracket.name.hasSuffix("BRAKCET"))
+            let correction = try XCTUnwrap(bracket.nameAliases.first { $0.kind == "correction" })
+            XCTAssertTrue(correction.name.hasSuffix("BRACKET"))
+            XCTAssertTrue(correction.isFormal)
+            XCTAssertEqual(correction.source, "NameAliases.txt")
+            XCTAssertTrue(bracket.annotations.contains { $0.contains("misspelling") })
+            XCTAssertTrue(catalog.search(correction.name).contains { $0.codePoint == 0xFE18 })
+            let bom = try XCTUnwrap(catalog.character(at: 0xFEFF))
+            XCTAssertTrue(bom.nameAliases.contains { $0.name == "BOM" && $0.kind == "abbreviation" && $0.isFormal })
+            let six = try XCTUnwrap(catalog.character(at: 0x3026))
+            let alias = try XCTUnwrap(six.nameAliases.first { $0.name == "yangqin sign slow one half beat" })
+            XCTAssertFalse(alias.isFormal)
+            XCTAssertEqual(alias.source, "NamesList.txt")
+            XCTAssertTrue(six.crossReferences.contains { $0.codePoint == 0x16FF4 && $0.codePointLabel == "U+16FF4" })
+        }
+    }
+
+    func testAdditionalCharacterDetailsAreNormativeWhereAvailable() throws {
+        for edition in UnicodeEdition.allCases {
+            let catalog = edition.catalog
+            let fraction = try XCTUnwrap(catalog.character(at: 0x00BD))
+            XCTAssertEqual(fraction.numericValue, "1/2")
+            XCTAssertEqual(fraction.numericType, "Numeric")
+            XCTAssertEqual(catalog.character(at: 0x0031)?.numericType, "Decimal")
+            XCTAssertEqual(catalog.character(at: 0x00B2)?.numericType, "Digit")
+            XCTAssertEqual(catalog.character(at: 0x0041)?.simpleLowercase, 0x0061)
+            XCTAssertEqual(catalog.character(at: 0x0061)?.simpleUppercase, 0x0041)
+            XCTAssertEqual(catalog.character(at: 0x0061)?.simpleTitlecase, 0x0041)
+            XCTAssertEqual(catalog.character(at: 0x00A0)?.unicode1Name, "NON-BREAKING SPACE")
+            let wave = try XCTUnwrap(catalog.character(at: 0x301C))
+            XCTAssertTrue(wave.annotations.contains { $0.contains("JIS C 6226") })
+            XCTAssertTrue(wave.crossReferences.contains { $0.codePoint == 0x3030 && $0.name == "WAVY DASH" })
+            XCTAssertFalse(try XCTUnwrap(catalog.character(at: 0x301D)).annotations.contains { $0.contains("JIS C 6226") })
+            XCTAssertNil(catalog.character(at: 0x0378)?.numericValue)
+        }
+    }
+
+    func testLegacyVersionTwoCatalogStillLoadsPlainDescriptions() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var pool = Data()
+        func add(_ text: String) -> (UInt32, UInt32) {
+            let data = Data(text.utf8), offset = UInt32(pool.count)
+            pool.append(data)
+            return (offset, UInt32(data.count))
+        }
+        func append32(_ value: UInt32, to data: inout Data) {
+            var little = value.littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        func append16(_ value: UInt32, to data: inout Data) {
+            var little = UInt16(value).littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        let version = add("18.0.0"), name = add("LATIN CAPITAL LETTER A")
+        let detail = add("Legacy plain annotation"), search = add("latin capital letter a")
+        var data = Data("UBOARD17".utf8)
+        let header: [UInt32] = [1, 48, 0, 76, 76, UInt32(pool.count), version.0, version.1, 1, 2]
+        for value in header {
+            append32(value, to: &data)
+        }
+        append32(0x0041, to: &data)
+        append32(name.0, to: &data)
+        append16(name.1, to: &data)
+        append16(detail.1, to: &data)
+        append32(detail.0, to: &data)
+        append32(search.0, to: &data)
+        append32(search.1, to: &data)
+        data.append(contentsOf: [0, 0, 0, 0]) // Lu, visible, combining class 0, bidi L
+        data.append(pool)
+        try data.write(to: directory.appendingPathComponent("UnicodeCatalog.ucd"))
+        let legacy = UnicodeCatalog(resourceURL: directory)
+        let character = try XCTUnwrap(legacy.character(at: 0x0041))
+        XCTAssertEqual(character.name, "LATIN CAPITAL LETTER A")
+        XCTAssertEqual(character.detail, "Legacy plain annotation")
+        XCTAssertTrue(character.nameAliases.isEmpty)
+        XCTAssertNil(character.namesListSection)
+        XCTAssertEqual(legacy.search("capital letter").map(\.codePoint), [0x0041])
+    }
+
     func testBlockNameSearchIncludesCharactersAndRanksExactBlock() {
         let arrows = catalog.search("Arrows", order: .codePoint)
         XCTAssertEqual(arrows.first?.codePoint, 0x2190)

@@ -7,10 +7,12 @@ enum KeyboardLayoutPolicy {
     struct Metrics {
         let isCompactLayout: Bool
         let height: CGFloat
+        let portraitResizeRange: ClosedRange<CGFloat>?
     }
 
     static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
-                        compactVertical: Bool, isSearching: Bool, isInspecting: Bool) -> Metrics {
+                        compactVertical: Bool, isSearching: Bool, isInspecting: Bool,
+                        portraitBrowseHeight: CGFloat = 300, portraitExpandedHeight: CGFloat = 340) -> Metrics {
         let edges: (short: CGFloat, long: CGFloat)? = displaySize.flatMap { size in
             guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return nil }
             return (min(size.width, size.height), max(size.width, size.height))
@@ -23,16 +25,21 @@ enum KeyboardLayoutPolicy {
             compact = compactVertical
         }
         let expanded = isSearching || isInspecting
-        let target: CGFloat = isPad ? (expanded ? 380 : 340) : compact ? 220 : (expanded ? 340 : 300)
+        let browseHeight = portraitBrowseHeight.isFinite ? min(420, max(220, portraitBrowseHeight)) : 300
+        let expandedHeight = portraitExpandedHeight.isFinite ? min(420, max(340, portraitExpandedHeight)) : 340
+        let target: CGFloat = isPad ? (expanded ? 380 : 340) : compact ? 220 : (expanded ? expandedHeight : browseHeight)
         let effectiveHeight: CGFloat?
         if !isPad, let edges {
             effectiveHeight = compact ? edges.short : edges.long
         } else {
             effectiveHeight = sceneHeight
         }
-        let fraction: CGFloat = isPad ? 0.50 : compact ? 0.60 : isInspecting ? 0.50 : isSearching ? 0.55 : 0.47
-        let height = effectiveHeight.flatMap { $0.isFinite && $0 > 0 ? min(target, $0 * fraction) : nil } ?? target
-        return Metrics(isCompactLayout: compact, height: height)
+        let fraction: CGFloat = isPad ? 0.50 : compact ? 0.60 : 0.55
+        let cap = effectiveHeight.flatMap { $0.isFinite && $0 > 0 ? $0 * fraction : nil }
+        let height = min(target, cap ?? target)
+        let maximum = min(420, cap ?? 420)
+        let range = !isPad && !compact ? min(expanded ? 340 : 220, maximum)...maximum : nil
+        return Metrics(isCompactLayout: compact, height: height, portraitResizeRange: range)
     }
 }
 
@@ -91,7 +98,7 @@ final class KeyboardViewController: UIInputViewController {
         height.priority = .init(999)
         height.isActive = true
         keyboardHeight = height
-        model.presentationChanged = { [weak self] in self?.updateKeyboardHeight() }
+        model.presentationChanged = { [weak self] animated in self?.updateKeyboardHeight(animated: animated) }
         synchronizeHostTraits()
     }
 
@@ -122,18 +129,32 @@ final class KeyboardViewController: UIInputViewController {
         view.isOpaque = opaque
     }
 
-    private func updateKeyboardHeight() {
+    private func updateKeyboardHeight(animated: Bool = false) {
         let pad = traitCollection.userInterfaceIdiom == .pad
         let scene = view.window?.windowScene
         let metrics = KeyboardLayoutPolicy.metrics(
             viewWidth: view.bounds.width, displaySize: scene?.screen.bounds.size,
             sceneHeight: scene?.coordinateSpace.bounds.height, isPad: pad,
             compactVertical: traitCollection.verticalSizeClass == .compact,
-            isSearching: model.isSearching, isInspecting: model.inspection != nil
+            isSearching: model.isSearching, isInspecting: model.inspection != nil,
+            portraitBrowseHeight: model.portraitBrowseHeight,
+            portraitExpandedHeight: model.portraitExpandedHeight
         )
         if model.isCompactLayout != metrics.isCompactLayout { model.isCompactLayout = metrics.isCompactLayout }
         if model.isPadLayout != pad { model.isPadLayout = pad }
-        if keyboardHeight?.constant != metrics.height { keyboardHeight?.constant = metrics.height }
+        model.portraitResizeRange = metrics.portraitResizeRange
+        if model.presentationHeight != metrics.height { model.presentationHeight = metrics.height }
+        guard keyboardHeight?.constant != metrics.height else { return }
+        keyboardHeight?.constant = metrics.height
+        if animated && view.window != nil && !UIAccessibility.isReduceMotionEnabled {
+            UIView.animate(withDuration: 0.22, delay: 0,
+                           options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut]) {
+                self.view.superview?.layoutIfNeeded()
+                self.view.layoutIfNeeded()
+            }
+        } else {
+            view.setNeedsLayout()
+        }
     }
 
     private func deleteKey() {
@@ -232,10 +253,11 @@ private enum KeyboardItem {
 @MainActor
 private final class KeyboardModel: ObservableObject {
     @Published var section: KeyboardSection = .symbols {
-        didSet { if isSearching { scheduleSearch() } }
+        didSet { if isSearching || hasSearchQuery { scheduleSearch() } }
     }
     @Published var isSearching = false
-    @Published var query = "" { didSet { scheduleSearch() } }
+    @Published var query = "" { didSet { queryCursor = query.count; scheduleSearch() } }
+    @Published private(set) var queryCursor = 0
     @Published var edition: UnicodeEdition {
         didSet {
             defaults.set(edition == .latest ? "latest" : "draft", forKey: "keyboard.unicodeEdition")
@@ -267,13 +289,19 @@ private final class KeyboardModel: ObservableObject {
     @Published private(set) var hasMoreBlockCharacters = false
     @Published private(set) var blockLoading = false
     @Published var lastItem: KeyboardItem?
-    @Published var inspection: KeyboardItem? { didSet { presentationChanged?() } }
+    @Published var inspection: KeyboardItem? { didSet { if !batchingPresentation { presentationChanged?(true) } } }
     @Published var showFavorites = true
     @Published var needsInputModeSwitchKey = true
     @Published var returnTitle = "Return"
     @Published var isCompactLayout = false
     @Published var isPadLayout = false
-    var presentationChanged: (() -> Void)?
+    @Published var presentationHeight: CGFloat = 300
+    private(set) var portraitBrowseHeight: CGFloat
+    private(set) var portraitExpandedHeight: CGFloat = 340
+    var portraitResizeRange: ClosedRange<CGFloat>?
+    var presentationChanged: ((Bool) -> Void)?
+    private var batchingPresentation = false
+    private var resizeStartHeight: CGFloat?
     private let defaults = UserDefaults.standard
     private let pageSize = 160
     private var revision = 0
@@ -293,8 +321,14 @@ private final class KeyboardModel: ObservableObject {
         case .codePoint: return "codePoint"
         }
     }
+    var hasSearchQuery: Bool {
+        (section == .symbols || section == .emojis) && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    var queryCaretUTF16Offset: Int { query.prefix(queryCursor).utf16.count }
 
     init() {
+        let storedHeight = defaults.double(forKey: "keyboard.portraitBrowseHeight")
+        portraitBrowseHeight = storedHeight.isFinite && (220...420).contains(storedHeight) ? CGFloat(storedHeight) : 300
         edition = defaults.string(forKey: "keyboard.unicodeEdition") == "latest" ? .latest : .draft
         switch defaults.string(forKey: "keyboard.unicodeSortOrder") {
         case "oldestFirst": order = .oldestFirst
@@ -306,27 +340,83 @@ private final class KeyboardModel: ObservableObject {
     }
 
     func beginSearch() {
+        guard !isSearching || inspection != nil else { return }
+        batchingPresentation = true
         inspection = nil
+        if section == .blocks || section == .saved { section = .symbols }
+        portraitExpandedHeight = max(340, portraitBrowseHeight)
         isSearching = true
+        batchingPresentation = false
         scheduleSearch()
-        presentationChanged?()
+        presentationChanged?(true)
     }
     func endSearch() {
         isSearching = false
-        presentationChanged?()
+        presentationChanged?(true)
     }
     func inspect(_ item: KeyboardItem) {
         lastItem = item
+        portraitExpandedHeight = max(340, presentationHeight)
         inspection = item
     }
     func closeInspection() { inspection = nil }
     func appendQuery(_ text: String) {
         guard query.count < 100 else { return }
-        query += text
+        let insertion = query.index(query.startIndex, offsetBy: min(queryCursor, query.count))
+        let insertionEnd = query[..<insertion].utf16.count + text.utf16.count
+        query.insert(contentsOf: text, at: insertion)
+        moveQueryCaret(afterUTF16Offset: insertionEnd)
     }
     func deleteQueryCharacter() {
-        guard !query.isEmpty else { return }
-        query.removeLast()
+        guard queryCursor > 0 else { return }
+        let end = query.index(query.startIndex, offsetBy: min(queryCursor, query.count))
+        let start = query.index(before: end)
+        let deletionStart = query[..<start].utf16.count
+        query.removeSubrange(start..<end)
+        moveQueryCaret(afterUTF16Offset: deletionStart)
+    }
+    func moveQueryCaret(toUTF16Offset offset: Int) {
+        let boundaries = (0...query.count).map { query.prefix($0).utf16.count }
+        queryCursor = boundaries.indices.min(by: { abs(boundaries[$0] - offset) < abs(boundaries[$1] - offset) }) ?? 0
+    }
+    private func moveQueryCaret(afterUTF16Offset offset: Int) {
+        // Inserting a combining mark or joiner can merge adjacent Characters.
+        // Land after the resulting whole grapheme, never inside it or past
+        // the next unrelated character.
+        queryCursor = (0...query.count).first(where: { query.prefix($0).utf16.count >= offset }) ?? query.count
+    }
+
+    func beginResize(at height: CGFloat?) {
+        guard portraitResizeRange != nil else { return }
+        resizeStartHeight = height.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? presentationHeight
+    }
+    func resize(translationY: CGFloat) {
+        guard let start = resizeStartHeight, translationY.isFinite else { return }
+        setPortraitHeight(start - translationY, animated: false)
+    }
+    func endResize() {
+        resizeStartHeight = nil
+        persistBrowseHeight()
+    }
+    func togglePortraitHeight() {
+        guard portraitResizeRange != nil else { return }
+        if inspection != nil { closeInspection() }
+        else if isSearching { endSearch() }
+        else { setPortraitHeight(presentationHeight < 320 ? 420 : 220, animated: true); persistBrowseHeight() }
+    }
+    func stepPortraitHeight(_ delta: CGFloat) {
+        setPortraitHeight(presentationHeight + delta, animated: true)
+        persistBrowseHeight()
+    }
+    private func setPortraitHeight(_ value: CGFloat, animated: Bool) {
+        guard let range = portraitResizeRange, value.isFinite else { return }
+        let height = min(range.upperBound, max(range.lowerBound, value)).rounded()
+        if isSearching || inspection != nil { portraitExpandedHeight = height }
+        else { portraitBrowseHeight = height }
+        presentationChanged?(animated)
+    }
+    private func persistBrowseHeight() {
+        defaults.set(Double(portraitBrowseHeight), forKey: "keyboard.portraitBrowseHeight")
     }
 
     func openBlock(_ block: UnicodeBlock) {
@@ -477,7 +567,7 @@ private final class KeyboardModel: ObservableObject {
     }
 }
 
-private enum KeyboardPalette {
+enum KeyboardPalette {
     // Keycaps use iOS semantic surfaces; brand color is reserved for selection.
     static let accentUI = UIColor { traits in
         traits.userInterfaceStyle == .dark
@@ -579,6 +669,18 @@ private struct UnicodeKeyboardView: View {
 
     var body: some View {
         VStack(spacing: 6) {
+            if !model.isCompactLayout && !model.isPadLayout {
+                KeyboardResizeHandle(
+                    height: model.presentationHeight,
+                    isEditing: model.isSearching || model.inspection != nil,
+                    toggle: model.togglePortraitHeight,
+                    begin: { model.beginResize(at: controller?.view.bounds.height) },
+                    change: model.resize,
+                    end: model.endResize,
+                    step: model.stepPortraitHeight
+                )
+                .frame(maxWidth: .infinity).frame(height: 18)
+            }
             toolbar
             if let inspected = model.inspection {
                 inspectionPanel(inspected)
@@ -617,29 +719,16 @@ private struct UnicodeKeyboardView: View {
     private var header: some View {
         HStack(spacing: 6) {
             HStack(spacing: 0) {
-                Button { model.beginSearch() } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(model.isSearching ? KeyboardPalette.accent : KeyboardPalette.secondary)
-                        Text(model.query.isEmpty ? (model.section == .emojis ? "Search emoji" : "Search Unicode") : model.query)
-                            .font(.system(size: 14, weight: model.query.isEmpty ? .regular : .medium))
-                            .foregroundStyle(model.query.isEmpty ? KeyboardPalette.secondary : Color.primary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if model.isSearching {
-                            RoundedRectangle(cornerRadius: 1).fill(KeyboardPalette.accent).frame(width: 2, height: 16)
-                        }
-                    }
-                    .padding(.leading, 11).padding(.trailing, 8)
-                    .frame(maxWidth: .infinity).frame(height: headerHeight)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(KeyboardPressStyle())
-                .accessibilityLabel(model.section == .emojis ? "Search emoji sequences" : "Search Unicode characters")
-                .accessibilityValue(model.query.isEmpty ? "No query" : model.query)
-                .accessibilityIdentifier("keyboard.search")
-                if model.isSearching && !model.query.isEmpty {
+                KeyboardQueryField(
+                    query: model.query,
+                    caretUTF16Offset: model.queryCaretUTF16Offset,
+                    isEditing: model.isSearching,
+                    isEmojiScope: model.section == .emojis,
+                    onActivate: model.beginSearch,
+                    onMoveCaret: model.moveQueryCaret
+                )
+                .frame(maxWidth: .infinity).frame(height: headerHeight)
+                if !model.query.isEmpty {
                     Button { model.query = "" } label: {
                         Image(systemName: "xmark.circle.fill").font(.system(size: 16))
                             .foregroundStyle(KeyboardPalette.secondary)
@@ -767,7 +856,7 @@ private struct UnicodeKeyboardView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if model.isSearching { searchResults }
+        if model.isSearching || model.hasSearchQuery { searchResults }
         else {
             switch model.section {
             case .symbols:
@@ -1030,14 +1119,33 @@ private struct UnicodeKeyboardView: View {
                 property("Preview font", value: source, identifier: "fontSource")
             }
             property("Code point", value: character.codePointLabel, identifier: "codepoints", monospaced: true)
-            Text(character.detail.isEmpty ? "No additional annotation is listed. The official Unicode name and properties are shown below." : character.detail)
+            Text(!character.annotations.isEmpty || !character.sectionAnnotations.isEmpty
+                 ? character.categoryName
+                 : character.detail.isEmpty ? "No additional annotation is listed. The official Unicode name and properties are shown below." : character.detail)
                 .font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("keyboard.properties.description")
+            if !character.nameAliases.isEmpty {
+                property("Aliases", value: character.nameAliases.map { "\($0.kindLabel): \($0.name)" }.joined(separator: "\n"), identifier: "aliases")
+            }
+            if let section = character.namesListSection { property("Unicode section", value: section, identifier: "section") }
+            let notes = character.sectionAnnotations + character.annotations
+            if !notes.isEmpty {
+                property("Unicode notes", value: (Array(NSOrderedSet(array: notes)) as? [String] ?? notes).joined(separator: "\n"), identifier: "notes")
+            }
+            if let oldName = character.unicode1Name { property("Unicode 1.0 name", value: oldName, identifier: "unicode1Name") }
+            if !character.crossReferences.isEmpty {
+                property("Related characters", value: character.crossReferences.map { "\($0.codePointLabel) · \($0.name)" }.joined(separator: "\n"), identifier: "references")
+            }
             property("Unicode age", value: character.age.map { "Unicode \($0)" } ?? (character.category == "Cn" ? "Unassigned" : "Age pending"), identifier: "age")
             property("Block", value: character.blockName, identifier: "block")
             property("Category", value: "\(character.categoryName) (\(character.category))", identifier: "category")
             property("UTF-8", value: utf8(character.text), identifier: "utf8", monospaced: true)
             property("Decimal", value: String(character.codePoint), identifier: "decimal", monospaced: true)
+            if let value = character.numericValue { property("Numeric value", value: value, identifier: "numericValue", monospaced: true) }
+            if let type = character.numericType { property("Numeric type", value: type, identifier: "numericType") }
+            if let point = character.simpleUppercase { property("Uppercase", value: codePointText(point), identifier: "uppercase") }
+            if let point = character.simpleLowercase { property("Lowercase", value: codePointText(point), identifier: "lowercase") }
+            if let point = character.simpleTitlecase { property("Titlecase", value: codePointText(point), identifier: "titlecase") }
             property("Script", value: character.script ?? "Not listed", identifier: "script")
             property("Bidirectional class", value: character.bidirectionalClass ?? "Not listed", identifier: "bidi", monospaced: true)
             property("Combining class", value: character.combiningClass.map(String.init) ?? "Not listed", identifier: "combiningClass", monospaced: true)
@@ -1070,6 +1178,10 @@ private struct UnicodeKeyboardView: View {
                 .background(KeyboardPalette.background, in: RoundedRectangle(cornerRadius: 7))
             }
         }
+    }
+
+    private func codePointText(_ value: UInt32) -> String {
+        String(format: "U+%04X", value) + (UnicodeScalar(value).map { " · \(String($0))" } ?? "")
     }
 
     private func previewFont(_ item: KeyboardItem, size: CGFloat) -> Font {
@@ -1158,6 +1270,84 @@ private struct UnicodeKeyboardView: View {
             .buttonStyle(KeyboardPressStyle())
             .accessibilityLabel(model.inspection != nil ? "Close Unicode properties" : model.isSearching ? "Close search keys" : "\(model.returnTitle) key")
             .accessibilityIdentifier("keyboard.return")
+        }
+    }
+}
+
+private struct KeyboardResizeHandle: UIViewRepresentable {
+    let height: CGFloat
+    let isEditing: Bool
+    let toggle: () -> Void
+    let begin: () -> Void
+    let change: (CGFloat) -> Void
+    let end: () -> Void
+    let step: (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> ResizeHandleButton { ResizeHandleButton() }
+    func updateUIView(_ button: ResizeHandleButton, context: Context) {
+        button.toggle = toggle
+        button.begin = begin
+        button.change = change
+        button.end = end
+        button.step = step
+        button.accessibilityValue = "\(Int(height.rounded())) points"
+        button.accessibilityHint = isEditing
+            ? "Drag up to expand or down to shrink. Double tap to return to browsing."
+            : "Drag up to expand or down to shrink. Double tap to switch between compact and expanded."
+    }
+}
+
+private final class ResizeHandleButton: UIButton {
+    var toggle: (() -> Void)?
+    var begin: (() -> Void)?
+    var change: ((CGFloat) -> Void)?
+    var end: (() -> Void)?
+    var step: ((CGFloat) -> Void)?
+    private let grip = UIView()
+    private var initialScreenY: CGFloat?
+
+    init() {
+        super.init(frame: .zero)
+        grip.backgroundColor = .tertiaryLabel
+        grip.layer.cornerRadius = 2
+        grip.isUserInteractionEnabled = false
+        addSubview(grip)
+        accessibilityIdentifier = "keyboard.resize"
+        accessibilityLabel = "Keyboard height"
+        accessibilityTraits = [.button, .adjustable]
+        addTarget(self, action: #selector(tapped), for: .touchUpInside)
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(resized(_:)))
+        pan.maximumNumberOfTouches = 1
+        addGestureRecognizer(pan)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: 18)
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        grip.frame = CGRect(x: (bounds.width - 40) / 2, y: (bounds.height - 4) / 2, width: 40, height: 4)
+    }
+    override func accessibilityActivate() -> Bool { toggle?(); return true }
+    override func accessibilityIncrement() { step?(40) }
+    override func accessibilityDecrement() { step?(-40) }
+    @objc private func tapped() { toggle?() }
+    @objc private func resized(_ gesture: UIPanGestureRecognizer) {
+        guard let window else { return }
+        // The keyboard's top edge moves while resizing. Screen coordinates keep
+        // that movement out of the finger's translation and prevent feedback.
+        let screenY = window.convert(gesture.location(in: window), to: window.screen.coordinateSpace).y
+        switch gesture.state {
+        case .began:
+            initialScreenY = screenY
+            begin?()
+        case .changed:
+            if let start = initialScreenY { change?(screenY - start) }
+        case .ended, .cancelled, .failed:
+            if let start = initialScreenY { change?(screenY - start) }
+            initialScreenY = nil
+            end?()
+        default: break
         }
     }
 }

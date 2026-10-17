@@ -28,6 +28,7 @@
 		49BCB0A1EF11692A5439A673 /* UnicodeFontSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FCD917B7BA585375F02ACA /* UnicodeFontSupport.swift */; };
 		4F5823B90C266C49C2557168 /* EmojiCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B6F9FAEABD4F15AA4EDC7AD /* EmojiCatalogTests.swift */; };
 		53E92D441D2ED0FD013F2A49 /* Unicode-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 1DF11D2AB41C1DB3C4E98E84 /* Unicode-LICENSE.txt */; };
+		58262731BA177C6020154261 /* KeyboardQueryField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61ADFD811C92E63E5A047EE7 /* KeyboardQueryField.swift */; };
 		59F9E36BF5D5A1566884BDEE /* UnicodeCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */; };
 		5A2291389771B024DE549E33 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB8050F1485946A042EFCDF /* ContentView.swift */; };
 		69678374C9FD49FFA4DD3667 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = 5A2A0C60221406691228336E /* Fonts */; };
@@ -116,6 +117,7 @@
 		5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlocksView.swift; sourceTree = "<group>"; };
 		5E6909BB645FA5674134A126 /* Blocks.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Blocks.json; sourceTree = "<group>"; };
 		5E75C4427C3A099357E49BC6 /* Blocks-latest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Blocks-latest.json"; sourceTree = "<group>"; };
+		61ADFD811C92E63E5A047EE7 /* KeyboardQueryField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardQueryField.swift; sourceTree = "<group>"; };
 		66B0D93D77F880C230230AD1 /* UnicodeFontCoverageProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeFontCoverageProbeTests.swift; sourceTree = "<group>"; };
 		8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = UnicodeSources.json; sourceTree = "<group>"; };
 		91A791C3473CB60A05B20494 /* SavedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedView.swift; sourceTree = "<group>"; };
@@ -181,6 +183,7 @@
 			isa = PBXGroup;
 			children = (
 				F891B014BE9874D5FCA7CC66 /* Info.plist */,
+				61ADFD811C92E63E5A047EE7 /* KeyboardQueryField.swift */,
 				DC58D1BB17A9004D6E334302 /* KeyboardViewController.swift */,
 			);
 			path = Keyboard;
@@ -431,6 +434,7 @@
 			files = (
 				40048BDF4538EC75565F2215 /* CharacterStore.swift in Sources */,
 				44D6271BB541B1F1A9EC55F5 /* EmojiCatalog.swift in Sources */,
+				58262731BA177C6020154261 /* KeyboardQueryField.swift in Sources */,
 				18E0F035EBA7D7EE39166431 /* KeyboardViewController.swift in Sources */,
 				D946C028C1043F7CB96D15B4 /* UnicodeCatalog.swift in Sources */,
 				49BCB0A1EF11692A5439A673 /* UnicodeFontSupport.swift in Sources */,
@@ -553,7 +557,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -723,7 +727,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

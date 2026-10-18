@@ -18,6 +18,16 @@ struct KeyboardTypingLayoutPlan: Equatable {
     var contentHeight: CGFloat { CGFloat(rowCount) * keyHeight + CGFloat(rowCount - 1) * rowSpacing }
 }
 
+/// Twelve character-width units leave room for native-style iPad functions.
+/// Keep the compact layout for floating keyboards and narrow multitasking panes.
+struct KeyboardPadTypingLayoutPlan: Equatable {
+    let keySpacing: CGFloat
+    let characterWidth: CGFloat
+    let capsWidth: CGFloat
+    let returnWidth: CGFloat
+    let shiftWidth: CGFloat
+}
+
 enum KeyboardTypingLayoutPolicy {
     static let regularKeyHeight: CGFloat = 36
     static let compactKeyHeight: CGFloat = 36
@@ -41,17 +51,27 @@ enum KeyboardTypingLayoutPolicy {
 
     /// The expanded number page is entered from QWERTY's persistent digit
     /// row. Its own main rows supply symbols instead of repeating any digits.
-    static func rows(for layout: KeyboardTypingLayout, hasAuxiliaryRow: Bool) -> [[String]] {
+    static func rows(for layout: KeyboardTypingLayout, hasAuxiliaryRow: Bool, widePad: Bool = false) -> [[String]] {
+        if layout == .letters && widePad { return Array(layout.rows.prefix(2)) + [layout.rows[2] + [",", "."]] }
         guard layout == .numbers && hasAuxiliaryRow else { return layout.rows }
         return [secondarySymbols] + layout.rows.dropFirst()
     }
 
     /// Membership follows the rendered core rows. Auxiliary keys remain a
     /// separate route, and a stale three-row digit button cannot broaden it.
-    static func output(for key: String, state: KeyboardTypingState, hasAuxiliaryRow: Bool) -> String? {
-        guard rows(for: state.layout, hasAuxiliaryRow: hasAuxiliaryRow)
+    static func output(for key: String, state: KeyboardTypingState, hasAuxiliaryRow: Bool, widePad: Bool = false) -> String? {
+        guard rows(for: state.layout, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad)
             .contains(where: { row in row.contains { $0.utf16.elementsEqual(key.utf16) } }) else { return nil }
         return state.label(for: key)
+    }
+
+    static func padPlan(availableWidth: CGFloat, isPad: Bool, layout: KeyboardTypingLayout) -> KeyboardPadTypingLayoutPlan? {
+        guard isPad, layout == .letters, availableWidth.isFinite, availableWidth >= 650 else { return nil }
+        let gap: CGFloat = 7
+        let key = (availableWidth - gap * 11) / 12
+        return KeyboardPadTypingLayoutPlan(keySpacing: gap, characterWidth: key,
+            capsWidth: key * 1.35 + gap / 2, returnWidth: key * 1.65 + gap / 2,
+            shiftWidth: key * 1.5 + gap / 2)
     }
 
     /// The English page can skip a redundant numeric-only entry label when its

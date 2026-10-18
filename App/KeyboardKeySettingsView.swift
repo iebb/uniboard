@@ -15,7 +15,7 @@ struct KeyboardKeySettingsView: View {
     @State private var resetConfirmation = false
     @State private var selectedKeyID: String?
     private var groups: [(String, KeyboardKeySettings.Kind)] {
-        [("Letters", .letter), ("Numbers", .digit), ("Symbols", .character), ("Function keys", .utility)]
+        [("Letters", .letter), ("Numbers", .digit), ("Symbols", .character)]
     }
     private func matches(_ descriptor: KeyboardKeySettings.Descriptor) -> Bool {
         query.isEmpty || descriptor.title.localizedCaseInsensitiveContains(query)
@@ -27,7 +27,7 @@ struct KeyboardKeySettingsView: View {
                 Section { Text(error).foregroundStyle(.red).accessibilityIdentifier("keySettings.saveError") }
             }
             Section {
-                Text("Choose a key to change its long press, swipe up and swipe down choices. After swiping, slide left or right to select a choice, then lift to insert.")
+                Text("Choose a letter, number or symbol key to change its long press, swipe up and swipe down choices. After swiping, slide left or right to select a choice, then lift to insert.")
                 Text("Ordinary taps keep their usual behavior. Custom choices are inserted exactly as saved, regardless of Shift.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -35,28 +35,24 @@ struct KeyboardKeySettingsView: View {
                 let descriptors = KeyboardKeySettings.descriptors.filter { $0.kind == kind && matches($0) }
                 if !descriptors.isEmpty {
                     Section(title) {
-                        if kind == .utility {
-                            ForEach(descriptors) { descriptor in keyLink(descriptor) }
-                        } else {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 46), spacing: 8)], spacing: 8) {
-                                ForEach(descriptors) { descriptor in
-                                    Button { selectedKeyID = descriptor.id } label: {
-                                        VStack(spacing: 4) {
-                                            Text(descriptor.title).font(.title3)
-                                            Circle().fill(keys.snapshot.overrides[descriptor.id] == nil ? Color.clear : Palette.accent)
-                                                .frame(width: 4, height: 4)
-                                        }
-                                        .frame(maxWidth: .infinity, minHeight: 46)
-                                        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 7))
-                                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Palette.line, lineWidth: 0.5))
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 46), spacing: 8)], spacing: 8) {
+                            ForEach(descriptors) { descriptor in
+                                Button { selectedKeyID = descriptor.id } label: {
+                                    VStack(spacing: 4) {
+                                        Text(descriptor.title).font(.title3)
+                                        Circle().fill(keys.snapshot.overrides[descriptor.id] == nil ? Color.clear : Palette.accent)
+                                            .frame(width: 4, height: 4)
                                     }
-                                    .buttonStyle(.borderless)
-                                    .accessibilityLabel("Configure \(descriptor.title) key")
-                                    .accessibilityValue(keys.snapshot.overrides[descriptor.id] == nil ? "Default" : "Customized")
-                                    .accessibilityIdentifier("keySettings.key.\(descriptor.id)")
+                                    .frame(maxWidth: .infinity, minHeight: 46)
+                                    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 7))
+                                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Palette.line, lineWidth: 0.5))
                                 }
-                            }.listRowBackground(Palette.soft)
-                        }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Configure \(descriptor.title) key")
+                                .accessibilityValue(keys.snapshot.overrides[descriptor.id] == nil ? "Default" : "Customized")
+                                .accessibilityIdentifier("keySettings.key.\(descriptor.id)")
+                            }
+                        }.listRowBackground(Palette.soft)
                     }
                 }
             }
@@ -65,7 +61,7 @@ struct KeyboardKeySettingsView: View {
                     .disabled(keys.snapshot.overrides.isEmpty && keys.saveError == nil)
                     .accessibilityIdentifier("keySettings.resetAll")
             } footer: {
-                Text("These settings apply to the main typing keyboard. Search typing and the iOS globe key retain their usual behavior. Saved choices stay on this device; Full Access is not required.")
+                Text("Only letters, numbers and symbols are configurable. Space, Shift, Backspace, Return and other function keys retain their standard behavior, as do search typing and the iOS globe key. Saved choices stay on this device; Full Access is not required.")
             }
         }
         .navigationTitle("Keyboard keys").navigationBarTitleDisplayMode(.inline)
@@ -79,17 +75,6 @@ struct KeyboardKeySettingsView: View {
         .confirmationDialog("Restore every key’s default gestures?", isPresented: $resetConfirmation, titleVisibility: .visible) {
             Button("Restore all defaults", role: .destructive) { keys.resetAll() }
         } message: { Text("Your symbol boards and favorites are kept.") }
-    }
-
-    private func keyLink(_ descriptor: KeyboardKeySettings.Descriptor) -> some View {
-        Button { selectedKeyID = descriptor.id } label: {
-            HStack {
-                Text(descriptor.title)
-                Spacer()
-                if keys.snapshot.overrides[descriptor.id] != nil { Text("Customized").font(.caption).foregroundStyle(.secondary) }
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-            }
-        }.buttonStyle(.borderless).accessibilityIdentifier("keySettings.key.\(descriptor.id)")
     }
 }
 

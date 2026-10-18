@@ -42,6 +42,10 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         revealByScrolling(settings, in: app)
         settings.tap()
+        for id in ["space", "shift", "delete", "return", "layout", "favorites", "unicode", "collapse"] {
+            XCTAssertFalse(app.buttons["keySettings.key.utility.\(id)"].exists)
+        }
+        XCTAssertFalse(app.staticTexts["Function keys"].exists)
         let key = app.buttons["keySettings.key.letter.q"].firstMatch
         XCTAssertTrue(key.waitForExistence(timeout: 5))
         key.tap()
@@ -582,10 +586,69 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("Clear targets only the query and retains the query keyboard beside the English control")
     }
 
+    func testSystemKeyboardWidePadHasStockFunctionsAndExactTypingAcrossRotation() throws {
+        try requireKeyboardIntegration()
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "Wide iPad layout requires the owned iPad QA device")
+        let input = openSystemKeyboardHost(unicodeBrowse: false)
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        let caps = app.buttons["keyboard.typing.capsLock"].firstMatch
+        let tab = app.buttons["keyboard.typing.tab"].firstMatch
+        let rightShift = app.buttons["keyboard.typing.shift.right"].firstMatch
+        func geometry() {
+            for id in ["keyboard.typing.tab", "keyboard.typing.capsLock", "keyboard.typing.shift",
+                       "keyboard.typing.shift.right", "keyboard.typing.delete", "keyboard.return",
+                       "keyboard.typing.key.,", "keyboard.typing.key.."] {
+                let key = app.buttons[id].firstMatch
+                XCTAssertTrue(key.waitForExistence(timeout: 5), id)
+                XCTAssertTrue(key.isHittable, id)
+                XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(key.frame), id)
+                XCTAssertEqual(key.frame.height, 36, accuracy: 1, id)
+                XCTAssertGreaterThanOrEqual(key.frame.width, 44, id)
+            }
+            XCTAssertEqual(app.buttons.matching(identifier: "keyboard.return").count, 1)
+            XCTAssertEqual(tab.frame.midY, app.buttons["keyboard.typing.key.q"].firstMatch.frame.midY, accuracy: 1)
+            XCTAssertEqual(caps.frame.midY, app.buttons["keyboard.return"].firstMatch.frame.midY, accuracy: 1)
+            XCTAssertLessThan(app.buttons["keyboard.return"].firstMatch.frame.maxY, app.buttons["keyboard.space"].firstMatch.frame.minY)
+        }
+        geometry()
+        tab.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\t"))
+        caps.tap()
+        XCTAssertTrue(caps.waitUntilValueEquals("on"))
+        app.buttons["keyboard.typing.key.a"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\tA"))
+        flickMainKey(app.buttons["keyboard.typing.key.q"].firstMatch, up: true)
+        XCTAssertTrue(input.waitUntilValueEquals("\tAq"))
+        XCTAssertTrue(caps.waitUntilValueEquals("on"))
+        rightShift.tap()
+        XCTAssertTrue(caps.waitUntilValueEquals("off"))
+        app.buttons["keyboard.typing.key.q"].tap()
+        app.buttons["keyboard.typing.key.,"].tap()
+        app.buttons["keyboard.typing.key.."].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,."))
+        app.buttons["keyboard.return"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.\n"))
+        app.buttons["keyboard.typing.delete"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,."))
+        attachScreenshot("Wide iPad uses Tab Caps Lock top-right Delete inline Return dual Shift and punctuation")
+        app.buttons["keyboard.typing.numbers"].tap()
+        XCTAssertTrue(app.buttons["keyboard.typing.letters"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "keyboard.return").count, 1)
+        app.buttons["keyboard.typing.letters"].tap()
+        geometry()
+        settleKeyboardOrientation(.landscapeLeft, toolbarVisible: false)
+        geometry()
+        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,."))
+        attachScreenshot("Wide iPad landscape keeps every extra key visible without duplicate footer Return")
+        settleKeyboardOrientation(.portrait, toolbarVisible: false)
+        geometry()
+    }
+
     func testSystemKeyboardAppConfiguredFlicksPreserveLiteralTextAndShift() throws {
         try requireKeyboardIntegration()
-        configureAppKeyGesture(keyID: "letter.q", gesture: "swipeUp", choices: ["xy"])
-        configureAppKeyGesture(keyID: "utility.space", gesture: "swipeUp", choices: ["_"])
+        configureAppKeyGesture(keyID: "letter.q", gesture: "swipeUp", choices: ["xy", "cd"])
+        configureAppKeyGesture(keyID: "letter.q", gesture: "longPress", choices: ["h"])
+        configureAppKeyGesture(keyID: "digit.1", gesture: "swipeDown", choices: ["_"])
         configureAppKeyGesture(keyID: "digit.1", gesture: "swipeUp", choices: ["!"])
         let input = openSystemKeyboardHost(unicodeBrowse: false)
         defer { restoreEnglishKeyboard() }
@@ -605,9 +668,18 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(input.waitUntilValueEquals("q"), "A custom hold/flick must not replace ordinary tap output")
         flickMainKey(q, up: true)
         XCTAssertTrue(input.waitUntilValueEquals("qxy"), "Actual app-authored choices reach the keyboard with Full Access off")
+        flickMainKey(q, up: true, horizontal: 36)
+        XCTAssertTrue(input.waitUntilValueEquals("qxycd"), "After the up flick, sliding right selects the second literal choice")
+        app.buttons["keyboard.typing.delete"].tap()
+        app.buttons["keyboard.typing.delete"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("qxy"))
+        q.press(forDuration: 0.65)
+        XCTAssertTrue(input.waitUntilValueEquals("qxyh"), "A configured long press inserts its exact candidate without an ordinary q tap")
+        app.buttons["keyboard.typing.delete"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("qxy"))
         XCTAssertTrue(shift.waitUntilValueEquals("lowercase"), "A literal flick preserves visible Shift")
-        flickMainKey(app.buttons["keyboard.space"].firstMatch, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals("qxy_"), "A configured Space flick must not also insert a space")
+        flickMainKey(app.buttons["keyboard.typing.number.1"].firstMatch, up: false)
+        XCTAssertTrue(input.waitUntilValueEquals("qxy_"), "A configured digit downward flick inserts its literal choice without a digit tap")
         flickMainKey(app.buttons["keyboard.typing.number.1"].firstMatch, up: true)
         XCTAssertTrue(input.waitUntilValueEquals("qxy_!"), "The auxiliary number row reads the same physical-key override")
 
@@ -628,7 +700,6 @@ final class UniboardUITests: XCTestCase {
 
         restoreEnglishKeyboard()
         resetAppKey("letter.q")
-        resetAppKey("utility.space")
         resetAppKey("digit.1")
     }
 
@@ -647,13 +718,19 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
     }
 
-    private func flickMainKey(_ key: XCUIElement, up: Bool,
+    private func flickMainKey(_ key: XCUIElement, up: Bool, horizontal: CGFloat = 0,
                               file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(key.waitForExistence(timeout: 5), file: file, line: line)
         XCTAssertTrue(key.isHittable, file: file, line: line)
         let start = key.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let finish = start.withOffset(CGVector(dx: 0, dy: up ? -28 : 28))
-        start.press(forDuration: 0.05, thenDragTo: finish)
+        let distance = max(28, abs(horizontal) + 12)
+        let vertical = start.withOffset(CGVector(dx: 0, dy: up ? -distance : distance))
+        if horizontal == 0 {
+            start.press(forDuration: 0.05, thenDragTo: vertical)
+        } else {
+            let finish = vertical.withOffset(CGVector(dx: horizontal, dy: 0))
+            start.press(forDuration: 0.05, thenDragTo: finish, withVelocity: .slow, thenHoldForDuration: 0.1)
+        }
     }
 
     private func configureAppKeyGesture(keyID: String, gesture: String, choices: [String]) {
@@ -2663,7 +2740,7 @@ final class UniboardUITests: XCTestCase {
         assertCompactKeyboardGeometry("portrait.menus.closed", input: input, searching: false)
     }
 
-    private func settleKeyboardOrientation(_ orientation: UIDeviceOrientation) {
+    private func settleKeyboardOrientation(_ orientation: UIDeviceOrientation, toolbarVisible: Bool = true) {
         XCUIDevice.shared.orientation = orientation
         let landscape = orientation == .landscapeLeft || orientation == .landscapeRight
         let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -2671,7 +2748,8 @@ final class UniboardUITests: XCTestCase {
             return landscape ? frame.width > frame.height : frame.width < frame.height
         }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed)
-        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitForExistence(timeout: 5))
+        let anchor = toolbarVisible ? "keyboard.search" : "keyboard.toggleUnicodeToolbar"
+        XCTAssertTrue(app.descendants(matching: .any)[anchor].firstMatch.waitForExistence(timeout: 5))
     }
 
     private func assertCompactKeyboardGeometry(_ mode: String, input: XCUIElement, searching: Bool,

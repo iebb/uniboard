@@ -31,7 +31,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
         try action(url)
     }
 
-    func testDescriptorCatalogCoversActualKeysWithStableASCIIIdentifiersAndExcludesGlobe() {
+    func testDescriptorCatalogCoversCharacterKeysWithStableASCIIIdentifiersAndExcludesFunctions() {
         XCTAssertEqual(Set(Settings.descriptors.map(\.id)).count, Settings.descriptors.count)
         XCTAssertTrue(Settings.descriptors.allSatisfy { !$0.title.isEmpty && $0.id.utf8.allSatisfy { $0 < 128 } })
         XCTAssertEqual(Settings.descriptors.filter { $0.kind == .letter }.count, 26)
@@ -39,8 +39,10 @@ final class KeyboardKeySettingsTests: XCTestCase {
         XCTAssertEqual(Settings.descriptor(for: "letter.a")?.text, "a")
         XCTAssertEqual(Settings.descriptor(for: "digit.0")?.text, "0")
         XCTAssertEqual(Settings.descriptor(for: "symbol.005B")?.text, "[")
-        XCTAssertEqual(Settings.descriptor(for: "utility.delete")?.kind, .utility)
-        XCTAssertNil(Settings.descriptor(for: "utility.globe"))
+        for key in ["space", "return", "delete", "shift", "layout", "unicode", "favorites", "collapse", "globe"] {
+            XCTAssertNil(Settings.descriptor(for: "utility." + key))
+        }
+        XCTAssertTrue(Settings.descriptors.allSatisfy { $0.text != nil && !$0.id.hasPrefix("utility.") })
         for layout in KeyboardTypingLayout.allCases {
             let texts = layout.rows.flatMap { $0 } + KeyboardTypingLayoutPolicy.auxiliaryRow(for: layout)
                 + KeyboardTypingLayoutPolicy.rows(for: layout, hasAuxiliaryRow: true).flatMap { $0 }
@@ -51,6 +53,51 @@ final class KeyboardKeySettingsTests: XCTestCase {
             XCTAssertEqual(Settings.identifier(forCharacter: letter.uppercased()), "letter." + letter)
         }
         for text in ["", "ab", "é", "e\u{301}", "👩‍💻", " ", "\n"] { XCTAssertNil(Settings.identifier(forCharacter: text)) }
+    }
+
+    func testEveryRetiredFunctionOverrideIsIgnoredWithoutLosingExactCharacterChoicesOrWriting() throws {
+        let functions = ["space", "return", "delete", "shift", "layout", "unicode", "favorites", "collapse"]
+        var entries: [[String: Any]] = functions.map {
+            ["keyID": "utility." + $0, "longPress": ["old"], "swipeUp": ["_"], "swipeDown": []]
+        }
+        entries += [["keyID": "letter.e", "longPress": ["é", "e\u{301}"]],
+                    ["keyID": "digit.1", "swipeUp": ["!"]], ["keyID": "symbol.002E", "swipeDown": ["…"]]]
+        let bytes = try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "overrides": entries])
+        let result = load(bytes)
+        XCTAssertEqual(result.overrides.count, 3)
+        XCTAssertEqual(result.candidates(for: "letter.e", gesture: .longPress)?.map { Array($0.utf16) }, [Array("é".utf16), Array("e\u{301}".utf16)])
+        XCTAssertEqual(result.candidates(for: "digit.1", gesture: .swipeUp), ["!"])
+        XCTAssertEqual(result.candidates(for: "symbol.002E", gesture: .swipeDown), ["…"])
+        for key in functions.map({ "utility." + $0 }) {
+            XCTAssertNil(result.overrides[key])
+            for gesture in Settings.Gesture.allCases {
+                XCTAssertNil(result.candidates(for: key, gesture: gesture))
+                XCTAssertNil(result.updating(["x"], for: key, gesture: gesture))
+            }
+            let invalid = Settings.Snapshot(overrides: [key: .init(swipeUp: ["_"])])
+            XCTAssertNil(invalid.candidates(for: key, gesture: .swipeUp))
+            XCTAssertThrowsError(try data(invalid), "New app writes must not recreate retired settings")
+        }
+        let saved = try data(result)
+        XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("utility."))
+        XCTAssertEqual(load(saved), result)
+    }
+
+    func testLegacyOnlyAndMaximumMixedPayloadDecodeButExcessAndDuplicateFunctionIDsFail() throws {
+        let functions = ["space", "return", "delete", "shift", "layout", "unicode", "favorites", "collapse"]
+            .map { ["keyID": "utility." + $0, "swipeUp": ["_"]] as [String: Any] }
+        func decode(_ entries: [[String: Any]]) throws -> Settings.Snapshot {
+            try JSONDecoder().decode(Settings.Snapshot.self,
+                from: JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "overrides": entries]))
+        }
+        XCTAssertEqual(try decode(functions), .defaults)
+        let characters = Settings.descriptors.map { ["keyID": $0.id, "swipeDown": ["x"]] as [String: Any] }
+        XCTAssertEqual(try decode(characters + functions).overrides.count, Settings.descriptors.count)
+        XCTAssertThrowsError(try decode(characters + functions + [functions[0]]))
+        XCTAssertThrowsError(try decode([functions[0], functions[0]]))
+        XCTAssertThrowsError(try decode([["keyID": "utility.space", "swipeUp": [""]], characters[0]]))
+        XCTAssertThrowsError(try decode([["keyID": "utility.unknown", "swipeUp": ["_"]], characters[0]]))
+        XCTAssertThrowsError(try decode([["keyID": "utility.space", "tap": ["_"]], characters[0]]))
     }
 
     func testDefaultDisabledAndExplicitCandidatesRemainDistinct() throws {

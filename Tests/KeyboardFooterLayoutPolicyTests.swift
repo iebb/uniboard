@@ -7,6 +7,21 @@ import XCTest
 #endif
 
 final class KeyboardFooterLayoutPolicyTests: XCTestCase {
+    func testInlinePadReturnReleasesItsFooterWidthAndSpacingWithoutDuplicatingAnInvisibleKey() throws {
+        for width: CGFloat in [230, 234, 304, 650, 752, 1008] {
+            for globe in [false, true] { for collapse in [false, true] {
+                let value = try XCTUnwrap(KeyboardFooterLayoutPolicy.plan(availableWidth: width, hasGlobe: globe,
+                    showsCollapse: collapse, showsPage: true, isPad: true, showsReturn: false))
+                let count = 3 + (globe ? 1 : 0) + (collapse ? 1 : 0)
+                XCTAssertEqual(value.returnWidth, 0)
+                XCTAssertGreaterThanOrEqual(value.spaceWidth, 44)
+                XCTAssertEqual(CGFloat(count) * value.keyWidth + value.spaceWidth + CGFloat(count) * value.spacing, width, accuracy: 0.000001)
+            } }
+        }
+        XCTAssertNil(KeyboardFooterLayoutPolicy.plan(availableWidth: 100, hasGlobe: true,
+            showsCollapse: true, showsPage: true, isPad: true, showsReturn: false))
+    }
+
     func testAllPhoneAndPadCombinationsKeepSpaceAtLeast44AndFitExactAvailableWidth() throws {
         for screen: CGFloat in [320, 375, 390, 768] {
             for globe in [false, true] { for collapse in [false, true] { for page in [false, true] {

@@ -7,6 +7,40 @@ import XCTest
 #endif
 
 final class KeyboardTypingPolicyTests: XCTestCase {
+    func testDedicatedCapsLockTogglesEveryCaseAndRemainsLockedThroughTypingAndAutomaticCapitalization() {
+        var state = KeyboardTypingState()
+        state.toggleCapsLock()
+        XCTAssertEqual(state.shift, .capsLock)
+        state.didInsertKey("a"); state.synchronizeAutomaticCapitalization(false)
+        XCTAssertEqual(state.output(for: "q"), "Q")
+        XCTAssertEqual(state.shift, .capsLock)
+        state.toggleCapsLock()
+        XCTAssertEqual(state.shift, .lowercase)
+        state.synchronizeAutomaticCapitalization(true)
+        XCTAssertEqual(state.shift, .lowercase, "Explicitly unlocking is a manual case choice")
+        state.pressShift(at: 1)
+        XCTAssertEqual(state.shift, .uppercase)
+        state.toggleCapsLock()
+        XCTAssertEqual(state.shift, .capsLock)
+        state.pressShift(at: 1.1)
+        XCTAssertEqual(state.shift, .lowercase)
+        state.pressShift(at: 1.2)
+        XCTAssertEqual(state.shift, .uppercase, "Caps actions clear the previous double-tap sequence")
+    }
+
+    func testDedicatedCapsLockCannotChangeNumberOrSymbolPageState() {
+        for page in [KeyboardTypingLayout.numbers, .symbols] {
+            var state = KeyboardTypingState()
+            state.pressShift(at: 1)
+            state.selectLayout(page)
+            let before = state
+            state.toggleCapsLock()
+            XCTAssertEqual(state, before)
+            XCTAssertEqual(state.layout, page)
+            XCTAssertEqual(state.shift, .uppercase)
+        }
+    }
+
     func testLiteralGesturePreservesAutomaticUppercaseUntilAnOrdinaryLetterConsumesIt() {
         var state = KeyboardTypingState()
         state.synchronizeAutomaticCapitalization(true)

@@ -9,7 +9,7 @@ import Glibc
 /// host text, query text and transient typing state are never stored here.
 struct KeyboardKeySettings {
     enum Gesture: String, CaseIterable, Codable, Sendable { case longPress, swipeUp, swipeDown }
-    enum Kind: String, Sendable { case letter, digit, character, utility }
+    enum Kind: String, Sendable { case letter, digit, character }
     struct Descriptor: Identifiable, Equatable, Sendable {
         let id: String
         let title: String
@@ -68,7 +68,10 @@ struct KeyboardKeySettings {
         let overrides: [String: Overrides]
         static let defaults = Snapshot()
         init(overrides: [String: Overrides] = [:]) { self.overrides = overrides }
-        func candidates(for keyID: String, gesture: Gesture) -> [String]? { overrides[keyID]?.candidates(for: gesture) }
+        func candidates(for keyID: String, gesture: Gesture) -> [String]? {
+            guard KeyboardKeySettings.descriptor(for: keyID) != nil else { return nil }
+            return overrides[keyID]?.candidates(for: gesture)
+        }
         /// The editor prepares a value first, then publishes it only if save succeeds.
         func updating(_ candidates: [String]?, for keyID: String, gesture: Gesture) -> Snapshot? {
             guard KeyboardKeySettings.descriptor(for: keyID) != nil else { return nil }
@@ -89,10 +92,18 @@ struct KeyboardKeySettings {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             guard try c.decode(Int.self, forKey: .schemaVersion) == 1 else { throw Invalid.settings }
             let entries = try c.decode([Entry].self, forKey: .overrides)
-            guard entries.count <= KeyboardKeySettings.descriptors.count else { throw Invalid.settings }
+            guard entries.count <= KeyboardKeySettings.descriptors.count + KeyboardKeySettings.legacyFunctionKeyIDs.count else { throw Invalid.settings }
+            var seen = Set<String>()
             var result: [String: Overrides] = [:]
             for entry in entries {
-                guard result.updateValue(entry.values, forKey: entry.keyID) == nil else { throw Invalid.settings }
+                guard seen.insert(entry.keyID).inserted else { throw Invalid.settings }
+                // Earlier 1.1 betas offered function-key overrides. Retire only
+                // those exact IDs without discarding valid character settings.
+                // Reading never rewrites the shared file; the next app save
+                // persists just the supported keys. Malformed entries still fail.
+                if !KeyboardKeySettings.legacyFunctionKeyIDs.contains(entry.keyID) {
+                    result[entry.keyID] = entry.values
+                }
             }
             self.init(overrides: result)
             try KeyboardKeySettings.validate(self)
@@ -135,6 +146,10 @@ struct KeyboardKeySettings {
     static let filename = "keyboard-keys-v1.json"
     static let maximumPayloadBytes = 256 * 1024
     static let shared = KeyboardKeySettings()
+    private static let legacyFunctionKeyIDs: Set<String> = [
+        "utility.space", "utility.return", "utility.delete", "utility.shift",
+        "utility.layout", "utility.unicode", "utility.favorites", "utility.collapse"
+    ]
 
     static let descriptors: [Descriptor] = {
         let letters = Array("abcdefghijklmnopqrstuvwxyz").map { Descriptor(id: "letter.\($0)", title: String($0).uppercased(), text: String($0), kind: .letter) }
@@ -147,10 +162,7 @@ struct KeyboardKeySettings {
         let symbols = Set(texts.filter { $0.unicodeScalars.count == 1 && !$0.utf8.allSatisfy { (48...57).contains($0) || (97...122).contains($0) } })
             .sorted { $0.unicodeScalars.first!.value < $1.unicodeScalars.first!.value }
             .map { text in Descriptor(id: String(format: "symbol.%04X", text.unicodeScalars.first!.value), title: text, text: text, kind: .character) }
-        let utilities = [("space", "Space"), ("return", "Return"), ("delete", "Backspace"), ("shift", "Shift"),
-                         ("layout", "123 / #+="), ("unicode", "Unicode"), ("favorites", "Favorites"), ("collapse", "Collapse")]
-            .map { Descriptor(id: "utility." + $0.0, title: $0.1, text: nil, kind: .utility) }
-        return letters + digits + symbols + utilities
+        return letters + digits + symbols
     }()
     private static let descriptorsByID = Dictionary(uniqueKeysWithValues: descriptors.map { ($0.id, $0) })
     static func descriptor(for keyID: String) -> Descriptor? { descriptorsByID[keyID] }

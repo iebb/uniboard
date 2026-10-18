@@ -71,6 +71,14 @@ struct KeyboardTypingState: Equatable {
         }
     }
 
+    /// Dedicated iPad Caps Lock never depends on double-tap timing.
+    mutating func toggleCapsLock() {
+        resetTapSequence()
+        guard layout == .letters else { return }
+        manualShiftOverride = true
+        shift = shift == .capsLock ? .lowercase : .capsLock
+    }
+
     /// Call only after the guarded insertion succeeds. Merely rendering a key
     /// or rejecting an old button must not consume one-shot capitalization.
     mutating func didInsertKey(_ key: String) {

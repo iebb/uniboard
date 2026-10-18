@@ -6,7 +6,7 @@ Uniboard is an offline English and Unicode keyboard for iPhone/iPad. No account,
 
 3. The star beside Space opens Favorites by default; its back arrow returns to QWERTY. Hold to switch/manage boards or set a preferred target. Temporary selection leaves that preference unchanged; deleting its custom target falls back to Favorites. Symbols is included. Saving a character/emoji asks for its destination. Saved/Recent keys have rounded surfaces without code-point captions.
 
-4. App Settings > Customize keyboard keys changes each main key’s long press, swipe up/down and ordered choices. Default, Off and Custom are distinct. Swipe a letter up for its opposite case and accents; slide left/right before lifting. Default case flicks retain Shift. Custom text is literal, including combining sequences and whole emoji. Ordinary taps retain their function; query keys and the iOS globe remain standard.
+4. App Settings > Customize keyboard keys changes letter/number/symbol long press, swipe up/down and ordered choices. Default, Off and Custom are distinct. Swipe a letter up for its opposite case and accents; slide left/right before lifting. Default case flicks retain Shift. Custom text is literal, including combining sequences and whole emoji. Function keys, ordinary taps, query keys and the iOS globe remain standard. Wide iPad QWERTY adds Tab, dedicated Caps Lock, row-side Return/Delete, both Shift keys and comma/period. Narrow panes retain the compact layout.
 
 5. Hold a board key for variants, Inspect or Edit. The opaque editor stays within the keyboard. Add a variant from Unicode search; configuration must not type into the host. Browse-tile hold/hover inspects without insertion.
 

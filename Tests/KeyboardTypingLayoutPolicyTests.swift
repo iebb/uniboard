@@ -7,6 +7,56 @@ import XCTest
 #endif
 
 final class KeyboardTypingLayoutPolicyTests: XCTestCase {
+    func testWidePadRowsFitExactlyAtTheThresholdAndAcrossPortraitLandscapeAndHugeFiniteWidths() throws {
+        for width: CGFloat in [650, 724, 752, 1008, 1350] {
+            let pad = try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: width, isPad: true, layout: .letters))
+            XCTAssertGreaterThanOrEqual(pad.characterWidth, 44)
+            XCTAssertEqual(12 * pad.characterWidth + 11 * pad.keySpacing, width, accuracy: 0.000001)
+            XCTAssertEqual(9 * pad.characterWidth + pad.capsWidth + pad.returnWidth + 10 * pad.keySpacing, width, accuracy: 0.000001)
+            XCTAssertEqual(9 * pad.characterWidth + 2 * pad.shiftWidth + 10 * pad.keySpacing, width, accuracy: 0.000001)
+            XCTAssertGreaterThan(pad.returnWidth, pad.capsWidth)
+        }
+        let huge = try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: .greatestFiniteMagnitude, isPad: true, layout: .letters))
+        XCTAssertTrue([huge.characterWidth, huge.capsWidth, huge.returnWidth, huge.shiftWidth].allSatisfy { $0.isFinite && $0 > 0 })
+    }
+
+    func testPadFunctionsRequireActualPadLettersAndSufficientFiniteWindowWidth() {
+        for width: CGFloat in [.nan, .infinity, -.infinity, -1, 0, 320, 402, 649, CGFloat(650).nextDown] {
+            XCTAssertNil(KeyboardTypingLayoutPolicy.padPlan(availableWidth: width, isPad: true, layout: .letters))
+        }
+        for layout in KeyboardTypingLayout.allCases {
+            XCTAssertNil(KeyboardTypingLayoutPolicy.padPlan(availableWidth: 1008, isPad: false, layout: layout))
+        }
+        for layout in [KeyboardTypingLayout.numbers, .symbols] {
+            XCTAssertNil(KeyboardTypingLayoutPolicy.padPlan(availableWidth: 1008, isPad: true, layout: layout))
+            for auxiliary in [false, true] {
+                XCTAssertEqual(KeyboardTypingLayoutPolicy.rows(for: layout, hasAuxiliaryRow: auxiliary, widePad: true),
+                               KeyboardTypingLayoutPolicy.rows(for: layout, hasAuxiliaryRow: auxiliary))
+            }
+        }
+    }
+
+    func testPadPunctuationHasExplicitMembershipAndNeverBroadensCompactLettersOrAuxiliaryDigits() {
+        var state = KeyboardTypingState()
+        state.pressShift(at: 1)
+        for auxiliary in [false, true] {
+            let rows = KeyboardTypingLayoutPolicy.rows(for: .letters, hasAuxiliaryRow: auxiliary, widePad: true)
+            XCTAssertEqual(Array(rows.prefix(2)), Array(KeyboardTypingLayout.letters.rows.prefix(2)))
+            XCTAssertEqual(rows[2].joined(), "zxcvbnm,.")
+            XCTAssertEqual(Set(rows.flatMap { $0 }).count, 28)
+            for punctuation in [",", "."] {
+                XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: punctuation, state: state, hasAuxiliaryRow: auxiliary))
+                XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: punctuation, state: state, hasAuxiliaryRow: auxiliary, widePad: true), punctuation)
+                XCTAssertNotNil(KeyboardKeySettings.identifier(forCharacter: punctuation))
+            }
+            for invalid in ["1", "0", "..", "\t", "\n", "A", "é", ".\u{FE0F}"] {
+                XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: invalid, state: state, hasAuxiliaryRow: auxiliary, widePad: true))
+            }
+            XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "q", state: state, hasAuxiliaryRow: auxiliary, widePad: true), "Q")
+            XCTAssertEqual(state.shift, .uppercase)
+        }
+    }
+
     private func plan(_ height: CGFloat, width: CGFloat = 402, compact: Bool = false,
                       page: KeyboardTypingLayout = .letters, favorites: Int = 64,
                       isPad: Bool = false, threshold: Int = 5) throws -> KeyboardTypingLayoutPlan {

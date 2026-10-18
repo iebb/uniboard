@@ -11,7 +11,7 @@ generator checks. Tests do not contact App Store Connect or send typing data.
 
 | Area | Required boundaries | Evidence |
 | --- | --- | --- |
-| Shared app settings | Latest release default, four slots with exact historical version IDs, strict bounded v1/v2 schema, Boolean font/collapse preferences, no-follow read-only keyboard path, app-only atomic writer, unavailable/corrupt data fallback and failed-save preservation | `UnicodeEditionSettingsTests` plus app/keyboard selection UI cases |
+| Shared app settings | Latest release default, four slots with exact historical version IDs, strict bounded v1/v2/v3 schema, Boolean font/collapse preferences and validated iPad layout/mapping enums, no-follow read-only keyboard path, app-only atomic writer, unavailable/corrupt data fallback and failed-save preservation | `UnicodeEditionSettingsTests` plus app/keyboard selection UI cases |
 | Custom key settings | App-only atomic writes, bounded strict schema, stable physical key IDs, nil/default versus disabled/empty versus custom choices, exact UTF-16 identity, 16-choice/64-scalar limits, no-follow regular-file reads, failed-save preservation and optimistic editing conflicts | `KeyboardKeySettingsTests`, `KeyboardKeyPreferencesTests` plus real settings/keyboard cases |
 | Binary Unicode resources | Missing/truncated data, invalid scalar domains, reversed/overlapping/unsorted records, algorithmic ranges, edition mismatches | `UnicodeCatalogTests` |
 | Character search | Code-point syntax and bounds, 4 KiB UTF-8 limit, repeated AND terms, Unicode word boundaries, complete-word tier before substring tier, ascending defaults, preserved explicit sort, names/aliases/blocks, Suzhou/Hangzhou terminology, numeric age order, global pagination, cancellation | `UnicodeCatalogTests` |
@@ -100,7 +100,7 @@ explicit draft choice. All four character and emoji catalogs are offline. The
 keyboard reads the bounded App Group snapshot without Full Access and never
 writes it. Edition and Boolean font/collapse preferences use one bounded file;
 explicitly configured per-key gesture choices use a separate bounded file.
-Version-1 edition-only files migrate with both flags off; malformed snapshots
+Version-1 edition-only files default both flags off; v1/v2 files default to ANSI-with-numbers and standard symbol mapping. Version 3 validates all six keys and preserves every field when another preference changes; malformed snapshots
 fall back safely. Only app Settings changes these choices. The keyboard … menu
 contains Order and Open companion app; sort and collections remain separate. An unavailable or malformed setting falls back
 to the latest release; tests must distinguish that fallback from successful
@@ -133,7 +133,7 @@ The default toolbar is hidden; the bottom-left U control shows/hides it. Hiding
 it restores host typing while preserving the query and caret. A fresh portrait
 keyboard is 220 points high; saved heights remain in use. All ordinary keycaps
 are 36 points with 4-point vertical gaps. The 14-point grip has no top spacer.
-The optional collapse control is hidden by default. English keycaps retain
+The optional collapse control is hidden by default except beside Space on eligible landscape iPad. English keycaps retain
 their height as space grows. A number
 row appears when four character rows fit; saved-symbol rows appear at five.
 When the normal page has digits, the expanded number/symbol page contains no
@@ -148,3 +148,11 @@ lifecycle data. The release build contains no resize logging or metric-file writ
 Coverage and passing tests provide evidence for the checked cases. Physical
 devices, receiving apps, OS font coverage and remote UIKit behavior still need
 TestFlight validation before public release.
+
+## Flexible iPad layout acceptance
+
+On wide iPad, portrait stays at three letter rows; landscape offers stock three-row, compact ANSI three-row and ANSI four-row presets in app Settings. The four-row preset is default. Check actual window width rather than screen orientation alone: below 980 points of content width, ANSI is unavailable. All rendered rows and the footer have equal key height. Manual Shift changes ANSI punctuation; automatic capitalization and Caps Lock do not shift digits. Both symbol pages omit redundant digits in the four-row preset. Return is present exactly once on every page. Numbers/Symbols and Hide Keyboard appear after Space in all eligible landscape presets.
+
+App-only swipe-down mapping offers the standard symbol page, iPad hints and Off; per-key custom choices override all presets. Ordinary taps and function keys remain standard. Verify saved layout/mapping after relaunch and a real keyboard switch with Full Access off, then rotate back to portrait.
+
+The owned iPadOS 18.5 QA fixture may opt into `UNIBOARD_IPAD_LAST_KEYBOARD=ad.neko.uniboard.keyboard` only after recording its exact enabled order: English US, Emoji, Uniboard. This handles a native picker whose visible rows are absent from remote accessibility. The fixture selects the last row relative to the actual onscreen Globe frame, then still requires real, hittable U/Star/Space controls and unchanged host text. Normal CI and other devices do not opt in. Never change global keyboard preferences to manufacture a pass.

@@ -7,6 +7,46 @@ import XCTest
 #endif
 
 final class KeyboardTypingPolicyTests: XCTestCase {
+    func testAutomaticCapitalizationAndLiteralCaseFlickNeverShiftANSINumbers() {
+        var state = KeyboardTypingState()
+        state.synchronizeAutomaticCapitalization(true)
+        XCTAssertEqual(state.shift, .uppercase)
+        XCTAssertFalse(state.shiftsANSISymbols)
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "1", state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true), "1")
+        state.didInsertLiteralGesture()
+        XCTAssertFalse(state.shiftsANSISymbols)
+        state.pressShift(at: 1)
+        state.pressShift(at: 2)
+        XCTAssertTrue(state.shiftsANSISymbols)
+        state.didInsertLiteralGesture()
+        XCTAssertTrue(state.shiftsANSISymbols)
+        state.didEditText()
+        XCTAssertFalse(state.shiftsANSISymbols)
+        state.synchronizeAutomaticCapitalization(false)
+        state.pressShift(at: 3)
+        XCTAssertTrue(state.shiftsANSISymbols)
+        state.selectLayout(.numbers)
+        XCTAssertFalse(state.shiftsANSISymbols)
+    }
+    func testANSIOrdinaryDigitsAndPunctuationConsumeOneShotShiftButKeepCapsLock() {
+        for key in ["1", "`", "[", "\\", ";", "'", ",", ".", "/"] {
+            var state = KeyboardTypingState()
+            state.pressShift(at: 1)
+            state.didInsertKey(key)
+            XCTAssertEqual(state.shift, .uppercase)
+            state.didInsertKey(key, ansiPad: true)
+            XCTAssertEqual(state.shift, .lowercase)
+            state.toggleCapsLock()
+            state.didInsertKey(key, ansiPad: true)
+            XCTAssertEqual(state.shift, .capsLock)
+        }
+        var state = KeyboardTypingState()
+        state.pressShift(at: 1)
+        for invalid in ["", "11", "A", "é", "\t", "\n"] {
+            state.didInsertKey(invalid, ansiPad: true)
+            XCTAssertEqual(state.shift, .uppercase)
+        }
+    }
     func testDedicatedCapsLockTogglesEveryCaseAndRemainsLockedThroughTypingAndAutomaticCapitalization() {
         var state = KeyboardTypingState()
         state.toggleCapsLock()

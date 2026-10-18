@@ -163,7 +163,7 @@ private struct KeyboardGestureSettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     if gesture == .swipeDown {
-                        Text("On the full-width iPad letter layout, swipe down to type the small number or symbol printed above the letter. Narrow layouts have no default down gesture. Custom choices replace the hint; Off hides it.")
+                        Text("On a wide iPad keyboard, swipe down to type the small character printed above a key. Choose the default symbol mapping in iPad keyboard settings. Custom choices replace the hint; Off hides it.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } else if mode == .disabled {

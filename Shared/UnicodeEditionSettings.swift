@@ -10,9 +10,11 @@ import Glibc
 /// No query, typed text, favorites or other keyboard state enters this file.
 struct UnicodeEditionSettings {
     struct Snapshot: Equatable {
-        let edition: UnicodeEdition
+        var edition: UnicodeEdition
         var useUnicodeFonts = false
         var showsCollapseKey = false
+        var padLayout: KeyboardPadLayout = .ansiNumbers
+        var padSymbolMapping: KeyboardPadSymbolMapping = .standard
     }
     static let groupIdentifier = "group.ad.neko.uniboard"
     static let maximumPayloadBytes = 256
@@ -53,19 +55,27 @@ struct UnicodeEditionSettings {
         if schema == NSNumber(value: 1), Set(dictionary.keys) == ["schemaVersion", "selectionIdentifier"] {
             return Snapshot(edition: edition)
         }
-        guard schema == NSNumber(value: 2),
-              Set(dictionary.keys) == ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey"],
-              let fonts = Self.strictBoolean(dictionary["useUnicodeFonts"]),
+        guard let fonts = Self.strictBoolean(dictionary["useUnicodeFonts"]),
               let collapse = Self.strictBoolean(dictionary["showsCollapseKey"]) else { return Snapshot(edition: .latest) }
-        return Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse)
+        if schema == NSNumber(value: 2),
+           Set(dictionary.keys) == ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey"] {
+            return Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse)
+        }
+        guard schema == NSNumber(value: 3),
+              Set(dictionary.keys) == ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping"],
+              let layout = dictionary["padLayout"] as? String, let pad = KeyboardPadLayout(rawValue: layout),
+              let mapping = dictionary["padSymbolMapping"] as? String, let symbols = KeyboardPadSymbolMapping(rawValue: mapping) else { return Snapshot(edition: .latest) }
+        return Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse,
+            padLayout: pad, padSymbolMapping: symbols)
     }
 
     /// Only the containing app calls this method. A failure is reported to the
     /// caller rather than pretending an unsynchronized setting was saved.
     @discardableResult
     func save(_ edition: UnicodeEdition) -> Bool {
-        let current = loadSnapshot()
-        return save(Snapshot(edition: edition, useUnicodeFonts: current.useUnicodeFonts, showsCollapseKey: current.showsCollapseKey))
+        var current = loadSnapshot()
+        current.edition = edition
+        return save(current)
     }
     @discardableResult
     func save(_ snapshot: Snapshot) -> Bool {
@@ -73,8 +83,9 @@ struct UnicodeEditionSettings {
         guard UnicodeEdition.resolve(selectionIdentifier: identifier) == snapshot.edition,
               let container = containerURL(), container.isFileURL,
               let data = try? JSONSerialization.data(withJSONObject: [
-                "schemaVersion": 2, "selectionIdentifier": identifier,
-                "useUnicodeFonts": snapshot.useUnicodeFonts, "showsCollapseKey": snapshot.showsCollapseKey
+                "schemaVersion": 3, "selectionIdentifier": identifier,
+                "useUnicodeFonts": snapshot.useUnicodeFonts, "showsCollapseKey": snapshot.showsCollapseKey,
+                "padLayout": snapshot.padLayout.rawValue, "padSymbolMapping": snapshot.padSymbolMapping.rawValue
               ], options: [.sortedKeys]), data.count <= Self.maximumPayloadBytes else { return false }
         do {
             try writeAtomically(data, container.appendingPathComponent(Self.filename))

@@ -5,14 +5,14 @@ Keep your words as typed, without autocorrect or predictions. Use Shift, Caps Lo
 
 U toggles the initially hidden Unicode toolbar. On iPhone, four rows add digits; five add a saved-symbol strip. Swipe the portrait grip up/down to add/remove one row on release; ▲/▼ shows an available step.
 
-Wide iPad defaults to three letter rows, gray Tab/Caps/Shift/Delete and blue Return. Small digits and symbols show down-flick choices. Narrow windows use compact keys.
+iPad portrait keeps three letter rows. In app Settings, choose stock, compact ANSI or ANSI with digits for wide landscape. Gray modifiers, blue Return and two controls beside Space keep keys familiar. Choose standard/iPad down-flick symbols or Off; individual overrides win.
 
 SYMBOLS, YOUR WAY
 The star beside Space opens Favorites by default; its back arrow returns to QWERTY. Hold it to switch/manage boards or choose its default target. Symbols is included. Save characters or emoji to your chosen board.
 
-Saved and Recent symbols use rounded keycaps without code-point captions. Hold a key for variants, properties or editing. Keep punctuation, currencies, mathematics and phonetic marks close at hand. Original sequences are preserved.
+Saved and Recent symbols use rounded keycaps without code-point captions. Hold a key for variants, properties or editing. Keep punctuation, currencies, mathematics and phonetic marks close.
 
-In app Settings, set letter/number/symbol long-press and up/down-swipe choices. Function keys keep their usual actions. Letter up-swipes default to opposite case and accents; slide left/right before lifting. Save ordered literal choices, disable gestures or restore defaults. Exact case and Unicode sequences are preserved.
+In app Settings, set letter/number/symbol long-press and up/down-swipe choices. Function keys keep their usual actions. Letter up-swipes default to opposite case and accents; slide left/right before lifting. Save ordered literal choices, disable gestures or restore defaults. Choices preserve exact Unicode.
 
 FIND ANY CHARACTER
 - Search official names, aliases, descriptions and block names. Try "arrow", "heart" or "Greek". Whole-word matches come before mid-word matches.
@@ -31,8 +31,8 @@ Choose in app Settings: Unicode 18 release (default), previous releases 17/16, o
 PRIVATE AND OFFLINE
 No account, ads, analytics SDK or Full Access. Typing and searches are not sent to a server. Boards, favorites, recents and scratchpad stay on-device. Only app-authored preferences and key choices pass one-way locally to the keyboard.
 
-Optional fonts improve some missing previews and default off. Receiving apps choose their own fonts. App Settings includes a keyboard test and font licenses.
+Optional fonts improve some missing previews and default off. Receiving apps choose their own fonts. Settings includes a keyboard test and font licenses.
 
 Add Uniboard in iOS Settings > General > Keyboard > Keyboards > Add New Keyboard, then hold the globe while typing to select it.
 
-Draft assignments may change. Fonts may show boxes, but names/properties stay readable. Preview markers are never inserted. The interface and Unicode names/descriptions are English. iOS uses its own keyboard in secure/phone fields; some apps disable custom keyboards. Requires iOS 17 or later.
+Draft assignments may change. Missing glyphs retain readable names/properties. The interface and Unicode names/descriptions are English. iOS uses its own keyboard in secure/phone fields; some apps disable custom keyboards. Requires iOS 17 or later.

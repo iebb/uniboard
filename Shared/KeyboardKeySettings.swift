@@ -157,7 +157,8 @@ struct KeyboardKeySettings {
         // These are physical core/auxiliary keys, not the optional variants.
         let texts = KeyboardTypingLayout.allCases.flatMap { layout in
             layout.rows.flatMap { $0 } + KeyboardTypingLayoutPolicy.auxiliaryRow(for: layout)
-                + KeyboardTypingLayoutPolicy.rows(for: layout, hasAuxiliaryRow: true).flatMap { $0 }
+                + KeyboardTypingLayoutPolicy.auxiliaryRow(for: layout, ansiPad: true)
+                + KeyboardTypingLayoutPolicy.rows(for: layout, hasAuxiliaryRow: true, widePad: true, ansiPad: true).flatMap { $0 }
         }
         let symbols = Set(texts.filter { $0.unicodeScalars.count == 1 && !$0.utf8.allSatisfy { (48...57).contains($0) || (97...122).contains($0) } })
             .sorted { $0.unicodeScalars.first!.value < $1.unicodeScalars.first!.value }

@@ -32,6 +32,8 @@ struct KeyboardTypingState: Equatable {
     private(set) var shift: KeyboardShiftState = .lowercase
     private var lastShiftTap: TimeInterval?
     private var manualShiftOverride = false
+    private var physicalSymbolShift = false
+    var shiftsANSISymbols: Bool { layout == .letters && shift == .uppercase && physicalSymbolShift }
     static let capsLockTapInterval: TimeInterval = 0.35
 
     func label(for key: String) -> String {
@@ -54,6 +56,7 @@ struct KeyboardTypingState: Equatable {
         manualShiftOverride = true
         if shift == .capsLock {
             shift = .lowercase
+            physicalSymbolShift = false
             resetTapSequence()
             return
         }
@@ -64,9 +67,11 @@ struct KeyboardTypingState: Equatable {
         } == true
         if doubleTap {
             shift = .capsLock
+            physicalSymbolShift = false
             resetTapSequence()
         } else {
             shift = shift == .lowercase ? .uppercase : .lowercase
+            physicalSymbolShift = shift == .uppercase
             lastShiftTap = validTimestamp ? timestamp : nil
         }
     }
@@ -76,16 +81,19 @@ struct KeyboardTypingState: Equatable {
         resetTapSequence()
         guard layout == .letters else { return }
         manualShiftOverride = true
+        physicalSymbolShift = false
         shift = shift == .capsLock ? .lowercase : .capsLock
     }
 
     /// Call only after the guarded insertion succeeds. Merely rendering a key
     /// or rejecting an old button must not consume one-shot capitalization.
-    mutating func didInsertKey(_ key: String) {
-        guard output(for: key) != nil else { return }
+    mutating func didInsertKey(_ key: String, ansiPad: Bool = false, padLayout: KeyboardPadLayout = .ansiNumbers) {
+        guard KeyboardTypingLayoutPolicy.output(for: key, state: self, hasAuxiliaryRow: false,
+            widePad: ansiPad, ansiPad: ansiPad, padLayout: padLayout) != nil else { return }
         resetTapSequence()
         if layout == .letters {
             manualShiftOverride = false
+            physicalSymbolShift = false
             if shift == .uppercase { shift = .lowercase }
         }
     }
@@ -108,6 +116,7 @@ struct KeyboardTypingState: Equatable {
     /// decision. It never disables an explicitly locked Shift state.
     mutating func didEditText() {
         manualShiftOverride = false
+        physicalSymbolShift = false
         resetTapSequence()
     }
 }

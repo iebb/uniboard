@@ -8,6 +8,14 @@ enum KeyboardVariantPolicy {
     static let maximumScalars = 64
     static let swipeThreshold: CGFloat = 12
     static let horizontalChoiceStride: CGFloat = 36
+    private static let standardPadSymbols: [String: String] = {
+        let keys = KeyboardTypingLayout.letters.rows.flatMap { $0 }
+        let rows = KeyboardTypingLayout.numbers.rows
+        let top = rows[0]
+        let home = Array(rows[1].prefix(9))
+        let bottom = rows[2] + Array(rows[1].suffix(1)) + [KeyboardTypingLayout.symbols.rows[0][0]]
+        return Dictionary(uniqueKeysWithValues: zip(keys, top + home + bottom))
+    }()
 
     static func defaultSwipeUp(for key: String, state: KeyboardTypingState) -> [String] {
         guard state.layout == .letters, key.utf8.count == 1,
@@ -17,8 +25,15 @@ enum KeyboardVariantPolicy {
         return options(text: original, variants: englishVariants(for: key, uppercase: uppercase))
     }
 
-    static func defaultSwipeDown(for key: String, state: KeyboardTypingState, widePad: Bool) -> [String] {
-        guard widePad, state.layout == .letters else { return [] }
+    static func defaultSwipeDown(for key: String, state: KeyboardTypingState, widePad: Bool, ansiPad: Bool = false,
+                                 mapping: KeyboardPadSymbolMapping = .iPad) -> [String] {
+        guard widePad, state.layout == .letters, mapping != .none else { return [] }
+        if ansiPad, let text = KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: key, state: state) {
+            return options(text: text, variants: stockVariants(for: text))
+        }
+        if mapping == .standard, let text = standardPadSymbols[key] {
+            return options(text: text, variants: stockVariants(for: text))
+        }
         let keys = Array("qwertyuiopasdfghjklzxcvbnm,.").map(String.init)
         let values = Array("1234567890@#¥&*()'\"%-+=/;:!?").map(String.init)
         guard let index = keys.firstIndex(of: key) else { return [] }

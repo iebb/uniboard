@@ -7,6 +7,97 @@ import XCTest
 #endif
 
 final class KeyboardTypingLayoutPolicyTests: XCTestCase {
+    func testEveryLandscapePresetKeepsItsSelectedRowsAndCompactANSIHasATopRightDelete() throws {
+        for preset in KeyboardPadLayout.allCases {
+            let pad = try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: 1008, isPad: true, layout: .letters,
+                isLandscape: true, padLayout: preset))
+            XCTAssertEqual(pad.isANSI, preset != .stock)
+            XCTAssertEqual(pad.hasNumberRow, preset == .ansiNumbers)
+            for layout in KeyboardTypingLayout.allCases {
+                let value = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 300, availableWidth: 1008,
+                    compact: false, layout: layout, favoriteCount: Int.max, isPad: true, isLandscape: true, padLayout: preset))
+                XCTAssertEqual(value.rowCount, preset == .ansiNumbers ? 4 : 3)
+                XCTAssertEqual(value.keyHeight, 52)
+                XCTAssertEqual(value.favoriteRowsCount, 0)
+            }
+            let rows = KeyboardTypingLayoutPolicy.rows(for: .letters, hasAuxiliaryRow: false, widePad: true, ansiPad: true, padLayout: preset)
+            XCTAssertEqual(rows.count, preset == .ansiNumbers ? 4 : 3)
+        }
+        let compact = try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: 1008, isPad: true, layout: .letters, isLandscape: true, padLayout: .ansi))
+        let k = compact.characterWidth, g = compact.keySpacing
+        XCTAssertEqual(k * 12 + compact.tabWidth + compact.deleteWidth + g * 13, 1008, accuracy: 0.00001)
+        XCTAssertEqual(k * 11 + compact.shiftWidth + compact.rightShiftWidth + g * 12, 1008, accuracy: 0.00001)
+        var state = KeyboardTypingState()
+        state.pressShift(at: 1)
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: ",", state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true, padLayout: .stock), ",", "Inconsistent stale ANSI flags cannot shift the stock preset")
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "\\", state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true, padLayout: .ansi), "|")
+        XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: "1", state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true, padLayout: .ansi))
+        state.didInsertKey("1", ansiPad: true, padLayout: .ansi)
+        XCTAssertEqual(state.shift, .uppercase)
+        state.didInsertKey("\\", ansiPad: true, padLayout: .ansi)
+        XCTAssertEqual(state.shift, .lowercase)
+    }
+    func testLandscapeANSIHasCompleteStaggeredRowsAndNoDuplicatedSymbolPageDigits() throws {
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.ansiRows.map { $0.joined() }, ["`1234567890-=", "qwertyuiop[]\\", "asdfghjkl;'", "zxcvbnm,./"])
+        for width: CGFloat in [980, 1008, 1180, 1350] {
+            let pad = try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: width, isPad: true, layout: .letters, isLandscape: true))
+            XCTAssertTrue(pad.isANSI)
+            let key = pad.characterWidth, gap = pad.keySpacing
+            XCTAssertGreaterThanOrEqual(key, 44)
+            XCTAssertEqual(key * 13 + pad.deleteWidth + gap * 13, width, accuracy: 0.00001)
+            XCTAssertEqual(key * 12 + pad.tabWidth + pad.backslashWidth + gap * 13, width, accuracy: 0.00001)
+            XCTAssertEqual(key * 11 + pad.capsWidth + pad.returnWidth + gap * 12, width, accuracy: 0.00001)
+            XCTAssertEqual(key * 10 + pad.shiftWidth + pad.rightShiftWidth + gap * 11, width, accuracy: 0.00001)
+            for layout in KeyboardTypingLayout.allCases {
+                let plan = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 226, availableWidth: width,
+                    compact: false, layout: layout, favoriteCount: Int.max, isPad: true, isLandscape: true))
+                XCTAssertEqual(plan.rowCount, 4)
+                XCTAssertEqual(plan.keyHeight, 52)
+                XCTAssertEqual(plan.favoriteRowsCount, 0)
+                let main = KeyboardTypingLayoutPolicy.rows(for: layout, hasAuxiliaryRow: plan.numberRowCount > 0, widePad: layout == .letters, ansiPad: true)
+                XCTAssertEqual(main.count, plan.mainRowsCount)
+                let all = main.flatMap { $0 } + (plan.numberRowCount > 0 ? KeyboardTypingLayoutPolicy.auxiliaryRow(for: layout, ansiPad: true) : [])
+                XCTAssertEqual(all.count, Set(all).count)
+                for key in all { XCTAssertNotNil(KeyboardKeySettings.identifier(forCharacter: key)) }
+                if layout != .letters { XCTAssertTrue(all.allSatisfy { KeyboardTypingLayoutPolicy.numberRowOutput(for: $0) == nil }) }
+            }
+        }
+        for width: CGFloat in [.nan, .infinity, -.infinity, 0, 979] {
+            XCTAssertFalse(KeyboardTypingLayoutPolicy.usesANSI(availableWidth: width, isPad: true, isLandscape: true))
+        }
+        XCTAssertFalse(KeyboardTypingLayoutPolicy.usesANSI(availableWidth: 1200, isPad: false, isLandscape: true))
+        XCTAssertFalse(KeyboardTypingLayoutPolicy.usesANSI(availableWidth: 1200, isPad: true, isLandscape: false))
+        XCTAssertFalse(try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: 979, isPad: true, layout: .letters, isLandscape: true)).isANSI)
+        XCTAssertNil(KeyboardTypingLayoutPolicy.plan(availableHeight: 18, availableWidth: 1008, compact: false, layout: .letters, favoriteCount: 0, isPad: true, isLandscape: true))
+    }
+
+    func testANSIShiftSymbolsAreExactAndCapsLockDoesNotShiftNumbersOrPunctuation() {
+        let keys = Array("`1234567890-=[]\\;',./").map(String.init)
+        let shifted = Array("~!@#$%^&*()_+{}|:\"<>?").map(String.init)
+        XCTAssertEqual(keys.count, shifted.count)
+        var state = KeyboardTypingState()
+        for (key, expected) in zip(keys, shifted) {
+            XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: key, state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true), key)
+            XCTAssertEqual(KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: key, state: state), expected)
+        }
+        state.pressShift(at: 1)
+        for (key, expected) in zip(keys, shifted) {
+            XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: key, state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true), expected)
+            XCTAssertEqual(KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: key, state: state), key)
+        }
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "a", state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true), "A")
+        state.toggleCapsLock()
+        for key in keys { XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: key, state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true), key) }
+        for invalid in ["", "aa", "A", "é", "\t", "\n", "11"] {
+            XCTAssertNil(KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: invalid, state: state))
+            XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: invalid, state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true))
+        }
+        state.selectLayout(.numbers)
+        XCTAssertNil(KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: "1", state: state))
+        XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: "`", state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true))
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "§", layout: .symbols, ansiPad: true), "§")
+        XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "1", layout: .symbols, ansiPad: true))
+    }
     func testWidePadRowsFitExactlyAtTheThresholdAndAcrossPortraitLandscapeAndHugeFiniteWidths() throws {
         for width: CGFloat in [650, 724, 752, 1008, 1350] {
             let pad = try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: width, isPad: true, layout: .letters))

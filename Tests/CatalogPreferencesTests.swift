@@ -6,6 +6,35 @@ import XCTest
 
 @MainActor
 final class CatalogPreferencesTests: XCTestCase {
+    func testPadSettingsPreserveOtherFieldsAcrossSavesRefreshesAndFailedWrites() throws {
+        try withDefaults { defaults in
+            let storage = try SharedFile(.previous)
+            let preferences = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            preferences.selectPadLayout(.ansi)
+            preferences.selectPadSymbolMapping(.none)
+            preferences.selectUnicodeFonts(true)
+            preferences.selectCollapseKey(true)
+            preferences.selectEdition(.older)
+            let expected = UnicodeEditionSettings.Snapshot(edition: .older, useUnicodeFonts: true, showsCollapseKey: true,
+                padLayout: .ansi, padSymbolMapping: .none)
+            XCTAssertEqual(storage.settings.loadSnapshot(), expected)
+            preferences.reset(preservingEdition: true)
+            XCTAssertEqual(storage.settings.loadSnapshot(), expected)
+            storage.failWrites = true
+            preferences.selectPadLayout(.stock)
+            preferences.selectPadSymbolMapping(.standard)
+            XCTAssertEqual(preferences.padLayout, .ansi)
+            XCTAssertEqual(preferences.padSymbolMapping, .none)
+            XCTAssertNotNil(preferences.editionSaveError)
+            XCTAssertEqual(storage.settings.loadSnapshot(), expected)
+            storage.failWrites = false
+            XCTAssertTrue(storage.settings.save(.init(edition: .draft, padLayout: .stock, padSymbolMapping: .iPad)))
+            preferences.refreshEdition()
+            XCTAssertEqual(preferences.padLayout, .stock)
+            XCTAssertEqual(preferences.padSymbolMapping, .iPad)
+            XCTAssertEqual(preferences.edition, .draft)
+        }
+    }
     private enum Failure: Error { case unavailable }
     private final class SharedFile {
         var data: Data?

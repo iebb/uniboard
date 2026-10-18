@@ -27,6 +27,43 @@ final class UnicodeEditionSettingsTests: XCTestCase {
                                writeAtomically: { _, _ in XCTFail("Loading must never write") }).load()
     }
 
+    func testPadPresetsAndSymbolMappingsRoundTripAndEditionChangesPreserveEverything() throws {
+        for layout in KeyboardPadLayout.allCases { for mapping in KeyboardPadSymbolMapping.allCases {
+            XCTAssertFalse(layout.title.isEmpty)
+            XCTAssertFalse(mapping.title.isEmpty)
+            var bytes = try payload("draft")
+            let settings = UnicodeEditionSettings(containerURL: { self.injectedContainer },
+                readPrefix: { _, _ in bytes }, writeAtomically: { data, _ in bytes = data })
+            var value = UnicodeEditionSettings.Snapshot(edition: .older, useUnicodeFonts: true, showsCollapseKey: true,
+                padLayout: layout, padSymbolMapping: mapping)
+            XCTAssertTrue(settings.save(value))
+            XCTAssertEqual(settings.loadSnapshot(), value)
+            XCTAssertLessThanOrEqual(bytes.count, UnicodeEditionSettings.maximumPayloadBytes)
+            XCTAssertTrue(settings.save(.previous))
+            value.edition = .previous
+            XCTAssertEqual(settings.loadSnapshot(), value)
+        } }
+    }
+
+    func testPadFieldsRejectUnknownTypesMissingAndExtraKeysWithoutWriting() throws {
+        let valid: [String: Any] = ["schemaVersion": 3, "selectionIdentifier": "draft", "useUnicodeFonts": true,
+            "showsCollapseKey": true, "padLayout": "ansi", "padSymbolMapping": "standard"]
+        var cases = [[String: Any]]()
+        for field in ["padLayout", "padSymbolMapping"] {
+            for invalid: Any in ["", "unknown", true, 1, NSNull(), ["ansi"], ["value": "ansi"]] {
+                var object = valid; object[field] = invalid; cases.append(object)
+            }
+            var absent = valid; absent.removeValue(forKey: field); cases.append(absent)
+        }
+        var extra = valid; extra["query"] = "not allowed"; cases.append(extra)
+        for object in cases {
+            let bytes = try JSONSerialization.data(withJSONObject: object)
+            let settings = UnicodeEditionSettings(containerURL: { self.injectedContainer }, readPrefix: { _, _ in bytes },
+                writeAtomically: { _, _ in XCTFail("A keyboard never rewrites malformed settings") })
+            XCTAssertEqual(settings.loadSnapshot(), .init(edition: .latest))
+        }
+    }
+
     func testAllFourSelectionsRoundTripWithoutRollingHistoricalIdentifiers() throws {
         for edition in UnicodeEdition.allCases {
             var stored: Data?
@@ -54,8 +91,8 @@ final class UnicodeEditionSettingsTests: XCTestCase {
         let data = try XCTUnwrap(observedData)
         XCTAssertLessThanOrEqual(data.count, 256)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual(Set(object.keys), ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey"])
-        XCTAssertEqual(object["schemaVersion"] as? Int, 2)
+        XCTAssertEqual(Set(object.keys), ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping"])
+        XCTAssertEqual(object["schemaVersion"] as? Int, 3)
         XCTAssertEqual(object["selectionIdentifier"] as? String, "draft")
         XCTAssertEqual(object["useUnicodeFonts"] as? Bool, false)
         XCTAssertEqual(object["showsCollapseKey"] as? Bool, false)

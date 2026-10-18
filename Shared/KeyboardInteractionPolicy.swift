@@ -15,7 +15,8 @@ enum KeyboardLayoutPolicy {
     static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
                         compactVertical: Bool, isSearching: Bool, isInspecting: Bool,
                         portraitBrowseHeight: CGFloat = KeyboardLayoutPolicy.defaultPortraitBrowseHeight, portraitExpandedHeight: CGFloat = 340,
-                        isTyping: Bool = false, showsToolbar: Bool = false) -> Metrics {
+                        isTyping: Bool = false, showsToolbar: Bool = false,
+                        isLandscape: Bool = false, padLayout: KeyboardPadLayout = .ansiNumbers) -> Metrics {
         let edges: (short: CGFloat, long: CGFloat)?
         if let size = displaySize,
            size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 {
@@ -37,7 +38,10 @@ enum KeyboardLayoutPolicy {
         let browseHeight = portraitBrowseHeight.isFinite ? min(420, max(220, portraitBrowseHeight)) : defaultPortraitBrowseHeight
         let expandedHeight = portraitExpandedHeight.isFinite ? min(420, max(340, portraitExpandedHeight)) : 340
         let padKeyHeight = KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: viewWidth - 16, isPad: true)
-        let padTypingHeight = padKeyHeight * 4 + (padKeyHeight == 52 ? 12 : 8) + 18 + (showsToolbar ? 36 : 0)
+        let ansi = KeyboardTypingLayoutPolicy.usesANSI(availableWidth: viewWidth - 16, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout) && padLayout == .ansiNumbers
+        let mainRows: CGFloat = ansi ? 4 : 3
+        let padRowGaps = (mainRows - 1) * (padKeyHeight == 52 ? 6 : 4)
+        let padTypingHeight = padKeyHeight * (mainRows + 1) + padRowGaps + 18 + (showsToolbar ? 36 : 0)
         let target: CGFloat = isPad ? (isTyping && !expanded ? padTypingHeight : expanded ? 380 : 340) : compact ? 220 : (expanded ? expandedHeight : browseHeight)
         let effectiveHeight: CGFloat?
         if !isPad, let edges { effectiveHeight = compact ? edges.short : edges.long }
@@ -51,9 +55,8 @@ enum KeyboardLayoutPolicy {
         let height = min(target, cap ?? target)
         let maximum = min(420, cap ?? 420)
         let range = !isPad && !compact ? min(expanded ? 340 : 220, maximum)...maximum : nil
-        let padRowGaps: CGFloat = padKeyHeight == 52 ? 12 : 8
         let typingKeyHeight = isPad && isTyping && !expanded
-            ? min(padKeyHeight, max(1, (height - padRowGaps - 18 - (showsToolbar ? 36 : 0)) / 4)) : 36
+            ? min(padKeyHeight, max(1, (height - padRowGaps - 18 - (showsToolbar ? 36 : 0)) / (mainRows + 1))) : 36
         return Metrics(isCompactLayout: compact, height: height, portraitResizeRange: range, typingKeyHeight: typingKeyHeight)
     }
 }

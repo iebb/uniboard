@@ -32,6 +32,22 @@ struct SetupView: View {
                     }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
                 }.accessibilityIdentifier("keyboardKeySettings")
 
+                if UIDevice.current.userInterfaceIdiom == .pad {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("iPad keyboard").font(.headline).foregroundStyle(Palette.ink)
+                    Picker("Landscape layout", selection: Binding(get: { preferences.padLayout }, set: { preferences.selectPadLayout($0) })) {
+                        ForEach(KeyboardPadLayout.allCases, id: \.rawValue) { Text($0.title).tag($0).accessibilityIdentifier("padLayout.option.\($0.rawValue)") }
+                    }.pickerStyle(.menu).accessibilityIdentifier("padLayout").accessibilityValue(preferences.padLayout.rawValue)
+                    Text("Portrait keeps three letter rows. On a wide landscape iPad, choose the stock layout, compact ANSI punctuation, or ANSI with a number row. Symbol switching and Hide Keyboard sit to the right of Space.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                    Picker("Swipe-down symbols", selection: Binding(get: { preferences.padSymbolMapping }, set: { preferences.selectPadSymbolMapping($0) })) {
+                        ForEach(KeyboardPadSymbolMapping.allCases, id: \.rawValue) { Text($0.title).tag($0).accessibilityIdentifier("padSymbolMapping.option.\($0.rawValue)") }
+                    }.pickerStyle(.menu).accessibilityIdentifier("padSymbolMapping").accessibilityValue(preferences.padSymbolMapping.rawValue)
+                    Text("Use the standard symbol page or iPad-style hints. Customize individual long-press and swipe choices above. Reopen the keyboard to apply settings; Full Access is not required.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+                }
+
                 VStack(alignment: .leading, spacing: 15) {
                     Image(systemName: "keyboard").font(.system(size: 39, weight: .light)).foregroundStyle(Palette.accent)
                     Text("A keyboard with\na little more to say.")
@@ -88,7 +104,7 @@ struct SetupView: View {
                     Toggle("Show keyboard collapse key", isOn: Binding(get: { preferences.showsCollapseKey }, set: { preferences.selectCollapseKey($0) }))
                         .font(.headline).foregroundStyle(Palette.ink)
                         .accessibilityIdentifier("showKeyboardCollapseKey")
-                    Text("Off by default. Adds a key for dismissing Uniboard; iOS also provides its own keyboard controls.")
+                    Text("Off by default on phones and portrait iPad. Wide landscape iPad always includes Hide Keyboard beside Space.")
                         .font(.caption).foregroundStyle(Palette.muted)
                 }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
 

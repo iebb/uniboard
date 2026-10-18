@@ -7,6 +7,38 @@ import XCTest
 #endif
 
 final class KeyboardInteractionPolicyTests: XCTestCase {
+    func testAllPadPresetsReserveUniformCapsAndRightControlsOnlyAtEligibleLandscapeWidths() {
+        for preset in KeyboardPadLayout.allCases {
+            for landscape in [false, true] {
+                for toolbar in [false, true] {
+                    for width: CGFloat in [834, 995, 996, 1194] {
+                        let value = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1210,
+                            isPad: true, compactVertical: false, isSearching: false, isInspecting: false,
+                            isTyping: true, showsToolbar: toolbar, isLandscape: landscape, padLayout: preset)
+                        let full = landscape && width >= 996 && preset == .ansiNumbers
+                        XCTAssertEqual(value.height, (full ? 296 : 238) + (toolbar ? 36 : 0))
+                        XCTAssertEqual(value.typingKeyHeight, 52)
+                        XCTAssertNil(value.portraitResizeRange)
+                    }
+                }
+            }
+        }
+    }
+    func testLandscapePadANSIHeightFitsFourEqualRowsAndToolbarWithinSceneCap() {
+        for toolbar in [false, true] {
+            let result = KeyboardLayoutPolicy.metrics(viewWidth: 1024, displaySize: nil, sceneHeight: 834,
+                isPad: true, compactVertical: false, isSearching: false, isInspecting: false,
+                isTyping: true, showsToolbar: toolbar, isLandscape: true)
+            XCTAssertEqual(result.height, toolbar ? 332 : 296)
+            XCTAssertEqual(result.typingKeyHeight, 52)
+            XCTAssertNil(result.portraitResizeRange)
+        }
+        let capped = KeyboardLayoutPolicy.metrics(viewWidth: 1024, displaySize: nil, sceneHeight: 500,
+            isPad: true, compactVertical: false, isSearching: false, isInspecting: false,
+            isTyping: true, showsToolbar: true, isLandscape: true)
+        XCTAssertEqual(capped.height, 250)
+        XCTAssertEqual(capped.typingKeyHeight, 35.6, accuracy: 0.000001)
+    }
     private func metrics(width: CGFloat = 402, display: CGSize? = CGSize(width: 402, height: 874),
                          sceneHeight: CGFloat? = 874, pad: Bool = false, compact: Bool = false,
                          search: Bool = false, inspect: Bool = false, browse: CGFloat = 300,

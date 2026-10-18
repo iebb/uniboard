@@ -8,6 +8,30 @@ import XCTest
 #endif
 
 final class KeyboardVariantPolicyTests: XCTestCase {
+    func testStandardPageMappingAndOffPresetRemainOverrideable() {
+        let state = KeyboardTypingState()
+        for (key, expected) in [("q", "1"), ("p", "0"), ("a", "-"), ("l", "@"), ("z", "."), ("n", "\""), ("m", "[")] {
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state, widePad: true, mapping: .standard).first, expected)
+        }
+        for mapping in KeyboardPadSymbolMapping.allCases {
+            for key in ["q", "[", "1", "", "qq"] {
+                let values = KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state, widePad: true, ansiPad: true, mapping: mapping)
+                if mapping == .none { XCTAssertEqual(values, []) }
+                XCTAssertEqual(KeyboardVariantPolicy.candidates(override: ["custom"], defaults: values), ["custom"])
+                XCTAssertEqual(KeyboardVariantPolicy.candidates(override: [], defaults: values), [])
+            }
+        }
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: ",", state: state, widePad: true, mapping: .standard).first, "!")
+    }
+    func testANSIDownFlickUsesOppositeSymbolWhileLettersKeepStockDigits() {
+        var state = KeyboardTypingState()
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "1", state: state, widePad: true, ansiPad: true).first, "!")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "[", state: state, widePad: true, ansiPad: true).first, "{")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true, ansiPad: true).first, "1")
+        state.pressShift(at: 1)
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "1", state: state, widePad: true, ansiPad: true).first, "1")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "1", state: state, widePad: false, ansiPad: true), [])
+    }
     func testPadDownFlicksMatchAllPrintedHintsAndRespectDisabledAndCustomChoices() {
         let keys = Array("qwertyuiopasdfghjklzxcvbnm,.").map(String.init)
         let values = Array("1234567890@#¥&*()'\"%-+=/;:!?").map(String.init)

@@ -589,6 +589,7 @@ final class UniboardUITests: XCTestCase {
     func testSystemKeyboardWidePadHasStockFunctionsAndExactTypingAcrossRotation() throws {
         try requireKeyboardIntegration()
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "Wide iPad layout requires the owned iPad QA device")
+        configurePadSettings(layout: "ansiNumbers", mapping: "standard")
         let input = openSystemKeyboardHost(unicodeBrowse: false)
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
         let caps = app.buttons["keyboard.typing.capsLock"].firstMatch
@@ -640,9 +641,9 @@ final class UniboardUITests: XCTestCase {
         flickMainKey(app.buttons["keyboard.typing.key.q"].firstMatch, up: false)
         XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1"))
         flickMainKey(app.buttons["keyboard.typing.key.a"].firstMatch, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1@"))
+        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1-"))
         flickMainKey(app.buttons["keyboard.typing.key.."].firstMatch, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1@?"))
+        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1-?"))
         for _ in 0..<3 { app.buttons["keyboard.typing.delete"].tap() }
         XCTAssertTrue(input.waitUntilValueEquals("\tAqq,."))
         attachScreenshot("Stock iPad three letter rows secondary flick hints gray modifiers blue Return")
@@ -659,11 +660,124 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitForNonExistence(timeout: 5))
         geometry()
         settleKeyboardOrientation(.landscapeLeft, toolbarVisible: false)
-        geometry()
+        assertLandscapePadGeometry(numberRow: true, ansi: true)
         XCTAssertTrue(input.waitUntilValueEquals("\tAqq,."))
-        attachScreenshot("Wide iPad landscape keeps every extra key visible without duplicate footer Return")
+        let shift = app.buttons["keyboard.typing.shift"].firstMatch
+        if shift.value as? String != "lowercase" { shift.tap() }
+        app.buttons["keyboard.typing.key.1"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1"))
+        shift.tap()
+        app.buttons["keyboard.typing.key.1"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1!"))
+        shift.tap()
+        app.buttons["keyboard.typing.key.["].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1!{"))
+        caps.tap()
+        app.buttons["keyboard.typing.key.1"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1!{1"), "Caps Lock changes letters, not digits")
+        caps.tap()
+        app.buttons["keyboard.return"].tap()
+        app.buttons["keyboard.typing.key.1"].tap()
+        let expected = "\tAqq,.1!{1\n1"
+        XCTAssertTrue(input.waitUntilValueEquals(expected), "Sentence capitalization must not shift a digit into punctuation")
+        attachScreenshot("Landscape ANSI equal keycaps with number row tinted modifiers and two right Space controls")
+        app.buttons["keyboard.typing.numbers"].tap()
+        for digit in "1234567890" { XCTAssertFalse(app.buttons["keyboard.typing.key.\(digit)"].exists) }
+        XCTAssertEqual(app.buttons.matching(identifier: "keyboard.return").count, 1)
+        app.buttons["keyboard.typing.symbols"].tap()
+        for digit in "1234567890" { XCTAssertFalse(app.buttons["keyboard.typing.key.\(digit)"].exists) }
+        app.buttons["keyboard.typing.auxiliary.§"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals(expected + "§"))
+        app.buttons["keyboard.typing.letters"].tap()
+        assertLandscapePadGeometry(numberRow: true, ansi: true)
+        app.buttons["keyboard.collapse"].tap()
+        XCTAssertTrue(app.buttons["keyboard.space"].waitForNonExistence(timeout: 5))
+        XCTAssertEqual(input.value as? String, expected + "§")
+        input.tap()
+        XCTAssertTrue(app.buttons["keyboard.space"].waitForExistence(timeout: 5))
+        assertLandscapePadGeometry(numberRow: true, ansi: true)
         settleKeyboardOrientation(.portrait, toolbarVisible: false)
         geometry()
+    }
+
+    func testSystemKeyboardPadAppPresetsAndSymbolMappingsApplyWithoutFullAccess() throws {
+        try requireKeyboardIntegration()
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "iPad settings require the owned iPad QA device")
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        for (layout, mapping, down) in [("stock", "iPad", "@"), ("ansi", "none", ""), ("ansiNumbers", "standard", "-")] {
+            XCUIDevice.shared.orientation = .portrait
+            configurePadSettings(layout: layout, mapping: mapping)
+            let input = openSystemKeyboardHost(unicodeBrowse: false)
+            settleKeyboardOrientation(.landscapeLeft, toolbarVisible: false)
+            assertLandscapePadGeometry(numberRow: layout == "ansiNumbers", ansi: layout != "stock")
+            let a = app.buttons["keyboard.typing.key.a"].firstMatch
+            a.tap()
+            XCTAssertTrue(input.waitUntilValueEquals("A"), "Ordinary taps stay QWERTY for every symbol mapping")
+            flickMainKey(a, up: false)
+            XCTAssertTrue(input.waitUntilValueEquals("A" + down))
+            app.buttons["keyboard.typing.numbers"].tap()
+            XCTAssertEqual(app.buttons.matching(identifier: "keyboard.return").count, 1)
+            XCTAssertTrue(app.buttons["keyboard.return"].firstMatch.isHittable)
+            XCTAssertEqual(app.buttons["keyboard.typing.key.1"].exists, layout != "ansiNumbers")
+            app.buttons["keyboard.typing.letters"].tap()
+            assertLandscapePadGeometry(numberRow: layout == "ansiNumbers", ansi: layout != "stock")
+            attachScreenshot("App-only iPad preset \(layout) symbol mapping \(mapping) with Full Access off")
+            settleKeyboardOrientation(.portrait, toolbarVisible: false)
+            restoreEnglishKeyboard()
+        }
+        configurePadSettings(layout: "ansiNumbers", mapping: "standard")
+    }
+
+    private func configurePadSettings(layout: String, mapping: String) {
+        openAppSettings()
+        for (identifier, value) in [("padLayout", layout), ("padSymbolMapping", mapping)] {
+            let picker = app.descendants(matching: .any)[identifier].firstMatch
+            let scroll = app.scrollViews.containing(.any, identifier: "unicodeEdition").firstMatch
+            XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            for _ in 0..<8 {
+                let viewport = scroll.frame.intersection(app.frame)
+                let frame = picker.frame
+                if usableHeightFrame(frame), viewport.contains(frame), picker.isHittable { break }
+                if frame.minY < viewport.minY { scroll.swipeDown() }
+                else { scroll.swipeUp() }
+            }
+            XCTAssertTrue(scroll.frame.intersection(app.frame).contains(picker.frame), "The retained Settings scroll position must reveal the actual picker")
+            XCTAssertTrue(picker.isHittable)
+            picker.tap()
+            let option = app.descendants(matching: .any)["\(identifier).option.\(value)"].firstMatch
+            XCTAssertTrue(option.waitForExistence(timeout: 5))
+            option.tap()
+            XCTAssertTrue(picker.waitUntilValueEquals(value))
+            XCTAssertFalse(app.staticTexts["unicodeEdition.saveError"].exists)
+        }
+    }
+
+    private func assertLandscapePadGeometry(numberRow: Bool, ansi: Bool,
+                                             file: StaticString = #filePath, line: UInt = #line) {
+        let space = app.buttons["keyboard.space"].firstMatch
+        let page = app.buttons["keyboard.typing.numbers"].firstMatch
+        let hide = app.buttons["keyboard.collapse"].firstMatch
+        let top = app.buttons["keyboard.typing.key.\(numberRow ? "1" : "q")"].firstMatch
+        for id in ["keyboard.typing.tab", "keyboard.typing.capsLock", "keyboard.typing.shift", "keyboard.typing.shift.right",
+                   "keyboard.typing.delete", "keyboard.return", "keyboard.space", "keyboard.collapse", "keyboard.typing.numbers"] {
+            let key = app.buttons[id].firstMatch
+            XCTAssertTrue(key.waitForExistence(timeout: 5), id, file: file, line: line)
+            XCTAssertTrue(key.isHittable, id, file: file, line: line)
+            XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(key.frame), id, file: file, line: line)
+            XCTAssertEqual(key.frame.height, 52, accuracy: 1, id, file: file, line: line)
+            XCTAssertGreaterThanOrEqual(key.frame.width, 44, id, file: file, line: line)
+        }
+        XCTAssertEqual(app.buttons.matching(identifier: "keyboard.return").count, 1, file: file, line: line)
+        XCTAssertGreaterThan(page.frame.minX, space.frame.maxX, file: file, line: line)
+        XCTAssertGreaterThan(hide.frame.minX, page.frame.maxX, file: file, line: line)
+        XCTAssertEqual(page.frame.midY, space.frame.midY, accuracy: 1, file: file, line: line)
+        XCTAssertEqual(hide.frame.midY, space.frame.midY, accuracy: 1, file: file, line: line)
+        XCTAssertEqual(space.frame.maxY - top.frame.minY, numberRow ? 282 : 224, accuracy: 1, file: file, line: line)
+        XCTAssertEqual(app.buttons["keyboard.typing.key.["].exists, ansi, file: file, line: line)
+        XCTAssertEqual(app.buttons["keyboard.typing.key.1"].exists, numberRow, file: file, line: line)
+        XCTAssertFalse(app.buttons["keyboard.typing.number.1"].exists, file: file, line: line)
+        XCTAssertFalse(app.otherElements["keyboard.typing.favorites"].exists, file: file, line: line)
     }
 
     func testSystemKeyboardAppConfiguredFlicksPreserveLiteralTextAndShift() throws {
@@ -3933,10 +4047,31 @@ final class UniboardUITests: XCTestCase {
             XCTAssertTrue(globe.waitForExistence(timeout: 5), "Expected the system keyboard globe key: \(app.debugDescription)")
             XCTAssertTrue(systemKeyboardGlobeIsVisible(globe), "A remote AX keyboard below the display is not a usable software keyboard")
             XCTAssertEqual(input.value as? String, expectedHost)
+            let pickerAnchor = globe.frame
             globe.press(forDuration: 1)
             if dismissKeyboardSwitcherTipIfPresent() { continue }
             if keyboard.waitForExistence(timeout: 3) {
                 keyboard.tap()
+                waitForVisibleUniboardAfterSwitch(input: input, expectedHost: expectedHost)
+                return
+            }
+            if UIDevice.current.userInterfaceIdiom == .pad,
+               ProcessInfo.processInfo.environment["UNIBOARD_IPAD_LAST_KEYBOARD"] == "ad.neko.uniboard.keyboard" {
+                // Explicit QA fixture only: the harness verifies English,
+                // Emoji, Uniboard in that order before launch. iPadOS 18.5
+                // can show this native menu without exposing its rows in AX.
+                // Its last row is immediately above the actual globe anchor.
+                let point = CGPoint(x: pickerAnchor.midX, y: pickerAnchor.minY - pickerAnchor.height / 2)
+                guard usableHeightFrame(pickerAnchor), app.frame.contains(pickerAnchor), app.frame.contains(point),
+                      app.state == .runningForeground else {
+                    XCTFail("The verified iPad keyboard-picker fixture must remain fully onscreen")
+                    return
+                }
+                XCTAssertEqual(input.value as? String, expectedHost)
+                attachScreenshot("Verified three-keyboard iPad fixture before selecting its last native picker row")
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y)).tap()
+                // Selection never counts as success by itself: require the
+                // real U, Star and Space controls onscreen, and unchanged text.
                 waitForVisibleUniboardAfterSwitch(input: input, expectedHost: expectedHost)
                 return
             }

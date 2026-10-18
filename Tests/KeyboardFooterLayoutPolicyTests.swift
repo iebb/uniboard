@@ -7,6 +7,23 @@ import XCTest
 #endif
 
 final class KeyboardFooterLayoutPolicyTests: XCTestCase {
+    func testLandscapePadReservesComfortableTrailingKeysAndASmallerSpace() throws {
+        for width: CGFloat in [980, 1008, 1180, 1350] {
+            for globe in [false, true] {
+                let plan = try XCTUnwrap(KeyboardFooterLayoutPolicy.plan(availableWidth: width, hasGlobe: globe,
+                    showsCollapse: true, showsPage: true, isPad: true, showsReturn: false, landscapeTyping: true))
+                let count = CGFloat(4 + (globe ? 1 : 0))
+                XCTAssertEqual(plan.returnWidth, 0)
+                XCTAssertEqual(plan.keyWidth * count + plan.spaceWidth + plan.spacing * count, width, accuracy: 0.00001)
+                XCTAssertGreaterThan(plan.keyWidth, 80)
+                XCTAssertGreaterThan(plan.spaceWidth, 44)
+                XCTAssertLessThan(plan.spaceWidth, width * 0.65)
+            }
+        }
+        let fallback = try XCTUnwrap(KeyboardFooterLayoutPolicy.plan(availableWidth: 752, hasGlobe: true,
+            showsCollapse: true, showsPage: true, isPad: true, showsReturn: false, landscapeTyping: true))
+        XCTAssertEqual(fallback.keyWidth, 36)
+    }
     func testInlinePadReturnReleasesItsFooterWidthAndSpacingWithoutDuplicatingAnInvisibleKey() throws {
         for width: CGFloat in [230, 234, 304, 650, 752, 1008] {
             for globe in [false, true] { for collapse in [false, true] {

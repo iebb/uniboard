@@ -1289,10 +1289,10 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(option.waitForExistence(timeout: 5), "The actual options menu must open")
     }
 
-    private func closeKeyboardOptions() {
+    private func closeKeyboardOptions(_ nativePopup: XCUIElement? = nil) {
         defer { keyboardOptionsSnapshot = nil }
         let option = app.descendants(matching: .any)["keyboard.edition"].firstMatch
-        if option.exists {
+        if nativePopup?.exists == true || option.exists {
             // A host-app tap does not reliably dismiss a remote keyboard
             // popup. Use the actual source-button frame observed before it
             // opened; the native menu consumes this tap without an action.
@@ -1303,6 +1303,9 @@ final class UniboardUITests: XCTestCase {
             app.coordinate(withNormalizedOffset: .zero).withOffset(
                 CGVector(dx: snapshot.triggerFrame.midX - app.frame.minX,
                          dy: snapshot.triggerFrame.midY - app.frame.minY)).tap()
+        }
+        if let nativePopup {
+            XCTAssertTrue(nativePopup.waitUntilAbsent(), "The actual native popup must close after its items scroll offscreen")
         }
         XCTAssertTrue(option.waitUntilAbsent(), "The actual native options popup must close")
         let menu = app.descendants(matching: .any)["keyboard.options"].firstMatch
@@ -1333,16 +1336,15 @@ final class UniboardUITests: XCTestCase {
             // action while retaining its real, actionable button label.
             item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Inspect ")).firstMatch
         }
-        XCTAssertTrue(item.waitForExistence(timeout: 5), "Expected keyboard option \(identifier): \(app.debugDescription)")
         if identifier == "keyboard.inspectLast" {
-            let menu = app.collectionViews.containing(.button, identifier: "keyboard.edition").firstMatch
-            for _ in 0..<3 {
-                guard menu.exists else { break }
-                if isInsideScrollViewport(item, in: menu) { break }
-                menu.swipeUp()
+            guard let popup = nativeKeyboardOptionsPopup() else {
+                XCTFail("Expected the actual native options popup before revealing Inspect")
+                return item
             }
-            XCTAssertTrue(isInsideScrollViewport(item, in: menu), "The actual Inspect action must be reachable in its native menu")
+            XCTAssertTrue(revealNativeKeyboardOption(item, in: popup),
+                          "The actual Inspect action must be reachable in its native menu")
         }
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "Expected keyboard option \(identifier): \(app.debugDescription)")
         return item
     }
 
@@ -1389,19 +1391,109 @@ final class UniboardUITests: XCTestCase {
         assertControlValue("keyboard.unicodeFonts", equals: enabled ? "On" : "Off")
     }
 
+    private func nativeKeyboardOptionsPopup() -> XCUIElement? {
+        // Preserve the actual AX element after Edition scrolls out of view.
+        app.collectionViews.allElementsBoundByAccessibilityElement.first(where: {
+            $0.descendants(matching: .any)["keyboard.edition"].firstMatch.exists
+        })
+    }
+
+    private func revealNativeKeyboardOption(_ control: XCUIElement, in popup: XCUIElement) -> Bool {
+        func usable(_ frame: CGRect) -> Bool {
+            frame.minX.isFinite && frame.minY.isFinite && frame.maxX.isFinite && frame.maxY.isFinite
+                && frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0
+        }
+        func nearlyEqual(_ a: CGRect, _ b: CGRect) -> Bool {
+            abs(a.minX - b.minX) <= 0.5 && abs(a.minY - b.minY) <= 0.5
+                && abs(a.width - b.width) <= 0.5 && abs(a.height - b.height) <= 0.5
+        }
+        func settledAndVisible() -> Bool {
+            var previous: (CGRect, CGRect, CGRect)?
+            var stableSince: TimeInterval?
+            let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                guard popup.exists, control.exists else { previous = nil; stableSince = nil; return false }
+                let appFrame = self.app.frame
+                let popupFrame = popup.frame
+                let frame = control.frame
+                let viewport = popupFrame.intersection(appFrame)
+                guard usable(appFrame), usable(popupFrame), usable(viewport), usable(frame),
+                      popupFrame.insetBy(dx: -1, dy: -1).contains(frame),
+                      appFrame.insetBy(dx: -1, dy: -1).contains(frame),
+                      viewport.insetBy(dx: -1, dy: -1).contains(frame) else {
+                    previous = nil; stableSince = nil; return false
+                }
+                let now = ProcessInfo.processInfo.systemUptime
+                let same = previous.map { nearlyEqual($0.0, frame) && nearlyEqual($0.1, popupFrame)
+                    && nearlyEqual($0.2, appFrame) } ?? false
+                if !same { stableSince = now }
+                previous = (frame, popupFrame, appFrame)
+                // Do not accept a transient frame during native-menu momentum.
+                return now - (stableSince ?? now) >= 0.3 && control.isHittable
+            }, object: control)
+            return XCTWaiter.wait(for: [visible], timeout: 3) == .completed
+        }
+
+        // Four bounded gestures, with a final settled visibility check.
+        for attempt in 0...4 {
+            if settledAndVisible() { return true }
+            guard popup.exists else { return false }
+            let appFrame = app.frame
+            let popupFrame = popup.frame
+            let viewport = popupFrame.intersection(appFrame)
+            guard usable(appFrame), usable(popupFrame), usable(viewport) else { return false }
+            let frame = control.exists ? control.frame : .null
+            print("UNIBOARD_NATIVE_MENU_REVEAL attempt=\(attempt) popup=\(popupFrame) app=\(appFrame) visible=\(viewport) control=\(frame)")
+            guard attempt < 4 else { return false }
+            var downward = false
+            var distance = viewport.height * 0.3
+            if usable(frame) {
+                guard frame.height <= viewport.height + 2 else { return false }
+                if frame.minY < viewport.minY {
+                    downward = true
+                    distance = min(distance, max(24, viewport.minY - frame.minY + 6))
+                } else if frame.maxY > viewport.maxY {
+                    distance = min(distance, max(24, frame.maxY - viewport.maxY + 6))
+                } else {
+                    // A contained but masked/unstable control needs another
+                    // bounded observation, not a speculative scroll.
+                    continue
+                }
+            }
+            // Native scroll recognition consumes the first ~10 points. A
+            // tiny clipping correction must still cross that threshold; 24pt
+            // remains capped by the original 30%-viewport maximum.
+            let startY = viewport.minY + viewport.height * (downward ? 0.35 : 0.65)
+            let endY = startY + (downward ? distance : -distance)
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: viewport.midX - appFrame.minX,
+                                                  dy: startY - appFrame.minY))
+            let end = origin.withOffset(CGVector(dx: viewport.midX - appFrame.minX,
+                                                dy: endY - appFrame.minY))
+            // Slow motion plus a terminal hold suppresses a fling past a
+            // multiline row. Both points stay in popup intersect display.
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        return false
+    }
+
     private func assertLastItemFontToolbarIsVisible(file: StaticString = #filePath, line: UInt = #line) {
         let favorite = app.buttons.matching(NSPredicate(format: "label IN %@",
             ["Save to favorites", "Remove from favorites"])).firstMatch
         openKeyboardOptions()
-        defer { closeKeyboardOptions() }
+        guard let popup = nativeKeyboardOptionsPopup() else {
+            XCTFail("Expected the native options popup collection", file: file, line: line)
+            return
+        }
+        defer { closeKeyboardOptions(popup) }
         let controls = [app.descendants(matching: .any)["keyboard.unicodeFonts"].firstMatch,
                         app.descendants(matching: .any)["keyboard.inspectLast"].firstMatch, favorite]
         for control in controls {
-            XCTAssertTrue(control.waitForExistence(timeout: 5), "Expected Fonts, Inspect and Save after insertion", file: file, line: line)
-            XCTAssertTrue(control.isHittable, file: file, line: line)
+            XCTAssertTrue(revealNativeKeyboardOption(control, in: popup),
+                          "Each Fonts, Inspect and Save action must settle fully on screen and be hittable", file: file, line: line)
             let frame = control.frame
-            XCTAssertTrue(frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0,
-                          "Last-item toolbar control has an invalid frame", file: file, line: line)
+            XCTAssertTrue(popup.frame.insetBy(dx: -1, dy: -1).contains(frame),
+                          "Each native menu action must be fully revealed in its actual scroll viewport", file: file, line: line)
+            XCTAssertTrue(control.isHittable, file: file, line: line)
             XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(frame),
                           "Last-item toolbar control must not be clipped: \(frame)", file: file, line: line)
         }
@@ -1607,13 +1699,46 @@ final class UniboardUITests: XCTestCase {
         }
         XCTAssertTrue(isInsideScrollViewport(lastProperty, in: propertyScroll), "The full properties must remain reachable inside the keyboard's scroll area")
         attachScreenshot("Complete Unicode properties remain reachable in the keyboard")
+        func readableProperty(_ element: XCUIElement) -> Bool {
+            guard element.exists, propertyScroll.exists else { return false }
+            let frame = element.frame
+            let viewport = propertyScroll.frame.intersection(app.frame)
+            let valid: (CGRect) -> Bool = { rect in
+                rect.minX.isFinite && rect.minY.isFinite && rect.maxX.isFinite && rect.maxY.isFinite
+                    && rect.width.isFinite && rect.height.isFinite && rect.width > 0 && rect.height > 0
+            }
+            guard valid(frame), valid(viewport), viewport.insetBy(dx: -1, dy: -1).contains(frame) else { return false }
+            return isInsideScrollViewport(element, in: propertyScroll)
+                && isReadableInScrollViewport(element, in: propertyScroll)
+        }
         for _ in 0..<6 {
-            if isInsideScrollViewport(propertyName, in: propertyScroll)
-                && isInsideScrollViewport(points, in: propertyScroll) { break }
+            if readableProperty(propertyName) { break }
             propertyScroll.swipeDown()
         }
-        XCTAssertTrue(isInsideScrollViewport(propertyName, in: propertyScroll), "The inspector must return to its name after scrolling through all properties")
-        XCTAssertTrue(isInsideScrollViewport(points, in: propertyScroll))
+        XCTAssertTrue(readableProperty(propertyName), "The inspector must return to its readable name after scrolling through all properties")
+        // The compact landscape pane is 84pt tall. The glyph/name header and
+        // Preview font row put Code point below it; reveal each separately.
+        for _ in 0..<6 {
+            if readableProperty(points) { break }
+            guard points.exists, propertyScroll.exists else { break }
+            let frame = points.frame
+            let appFrame = app.frame
+            let viewport = propertyScroll.frame.intersection(appFrame)
+            guard frame.minX.isFinite && frame.minY.isFinite && frame.maxX.isFinite && frame.maxY.isFinite,
+                  frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0,
+                  viewport.minX.isFinite && viewport.minY.isFinite && viewport.maxX.isFinite && viewport.maxY.isFinite,
+                  viewport.width.isFinite && viewport.height.isFinite && viewport.width > 0 && viewport.height > 0 else { break }
+            let downward = frame.minY < viewport.minY
+            print("UNIBOARD_PROPERTY_REVEAL codepoints=\(frame) viewport=\(viewport)")
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: viewport.midX - appFrame.minX,
+                dy: viewport.minY + viewport.height * (downward ? 0.25 : 0.75) - appFrame.minY))
+            let end = origin.withOffset(CGVector(dx: viewport.midX - appFrame.minX,
+                dy: viewport.minY + viewport.height * (downward ? 0.75 : 0.25) - appFrame.minY))
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        XCTAssertTrue(readableProperty(points), "The exact code point must be separately reachable and readable in the native inspector")
+        attachScreenshot("Exact code point remains readable in the native inspector")
     }
 
     private func isInsideScrollViewport(_ element: XCUIElement, in scrollView: XCUIElement) -> Bool {

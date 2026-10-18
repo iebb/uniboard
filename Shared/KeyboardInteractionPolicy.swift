@@ -15,7 +15,9 @@ enum KeyboardLayoutPolicy {
         let edges: (short: CGFloat, long: CGFloat)?
         if let size = displaySize,
            size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 {
-            edges = (short: Swift.min(size.width, size.height), long: Swift.max(size.width, size.height))
+            let width: CGFloat = size.width
+            let height: CGFloat = size.height
+            edges = (short: Swift.min(width, height), long: Swift.max(width, height))
         } else {
             edges = nil
         }

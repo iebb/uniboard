@@ -12,7 +12,7 @@ enum KeyboardLayoutPolicy {
     static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
                         compactVertical: Bool, isSearching: Bool, isInspecting: Bool,
                         portraitBrowseHeight: CGFloat = 300, portraitExpandedHeight: CGFloat = 340) -> Metrics {
-        let edges: (short: CGFloat, long: CGFloat)? = displaySize.flatMap { size in
+        let edges: (short: CGFloat, long: CGFloat)? = displaySize.flatMap { (size) -> (short: CGFloat, long: CGFloat)? in
             guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return nil }
             return (min(size.width, size.height), max(size.width, size.height))
         }

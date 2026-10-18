@@ -4,6 +4,7 @@ import UIKit
 /// A press belongs to the scope shown when it began and to one host document.
 /// A delayed representable update must not reroute it into a different scope.
 struct KeyboardDeleteContext: Equatable {
+    let modeIdentifier: UUID
     let isQuery: Bool
     let documentIdentifier: UUID
 
@@ -36,6 +37,7 @@ final class RepeatingDeleteButton: UIButton {
         tintColor = .label
         backgroundColor = .clear
         isOpaque = false
+        isHidden = true
         layer.cornerRadius = 12
         layer.cornerCurve = .continuous
         accessibilityIdentifier = "keyboard.delete"
@@ -46,10 +48,15 @@ final class RepeatingDeleteButton: UIButton {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(isQuery: Bool, actionFactory: @escaping ActionFactory) {
-        if self.isQuery != isQuery { cancelRepeating(endingPress: false) }
+    func configure(isQuery: Bool, enabled: Bool = true, actionFactory: @escaping ActionFactory) {
+        if self.isQuery != isQuery || !enabled { cancelRepeating(endingPress: false) }
         self.isQuery = isQuery
         self.actionFactory = actionFactory
+        isEnabled = enabled
+        isUserInteractionEnabled = enabled
+        isAccessibilityElement = enabled
+        accessibilityElementsHidden = !enabled
+        isHidden = !enabled
         accessibilityLabel = isQuery ? "Delete search character" : "Delete backward"
     }
 
@@ -57,13 +64,22 @@ final class RepeatingDeleteButton: UIButton {
 
     override func accessibilityActivate() -> Bool {
         stopDeleting()
-        return actionFactory?()() ?? false
+        guard isEnabled, let actionFactory else { return false }
+        let token = UUID()
+        pressToken = token
+        let action = actionFactory()
+        // A factory can hide/reconfigure the control or start another press.
+        // Only the still-enabled activation that requested it may invoke it.
+        guard pressToken == token else { return false }
+        pressToken = nil
+        guard isEnabled else { return false }
+        return action()
     }
 
     @objc private func startDeleting() {
         // Duplicate downs cannot create parallel repeat streams or restart a
         // held press after its action has been bound to a document.
-        guard !isTrackingPress, let actionFactory else { return }
+        guard isEnabled, !isTrackingPress, let actionFactory else { return }
         isTrackingPress = true
         let token = UUID()
         pressToken = token

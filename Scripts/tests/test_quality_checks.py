@@ -35,7 +35,9 @@ class CoverageCheckTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def testLowCoverageCannotHideBehindFullyCoveredTests(self):
-        self.files[0]["summary"]["lines"]["covered"] = 89
+        catalog = next(item for item in self.files
+                       if pathlib.Path(item["filename"]).name == "UnicodeCatalog.swift")
+        catalog["summary"]["lines"]["covered"] = 89
         self.files.append({"filename": str(self.root / "Tests" / "ManyTests.swift"),
                            "summary": {"lines": {"covered": 100000, "count": 100000}}})
         self.assertEqual(self.evaluate(self.files)[1], ["UnicodeCatalog.swift"])

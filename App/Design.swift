@@ -113,18 +113,11 @@ struct SearchBar: View {
     @Binding var text: String
     let placeholder: String
     var identifier = "unicodeSearch"
-    @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "magnifyingglass").foregroundStyle(Palette.accent)
-            TextField(placeholder, text: $text)
-                .font(.subheadline)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .focused($focused)
-                .submitLabel(.search)
-                .accessibilityIdentifier(identifier)
+            AppSearchField(text: $text, placeholder: placeholder, identifier: identifier)
             if !text.isEmpty {
                 Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.muted) }
                     .accessibilityLabel("Clear search")
@@ -134,9 +127,6 @@ struct SearchBar: View {
         .frame(minHeight: 54)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Palette.line, lineWidth: 1))
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("Done") { focused = false } }
-        }
     }
 }
 

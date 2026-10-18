@@ -69,17 +69,21 @@ final class UnicodeFontSupportTests: XCTestCase {
         }
     }
 
-    func testFontPreferencesAreLocalDefaultOffAndPersistIndependently() {
+    func testFontPreferencesDefaultOffAndPersistInTheAppOwnedSharedSnapshot() {
         let suite = "Uniboard.Fonts.Test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let app = CatalogPreferences(defaults: defaults)
+        var sharedBytes = Data()
+        let settings = UnicodeEditionSettings(containerURL: { URL(fileURLWithPath: "/font-preference-fixture") },
+            readPrefix: { _, _ in sharedBytes }, writeAtomically: { data, _ in sharedBytes = data })
+        let app = CatalogPreferences(defaults: defaults, editionSettings: settings)
         XCTAssertFalse(app.useUnicodeFonts)
-        app.useUnicodeFonts = true
-        XCTAssertTrue(CatalogPreferences(defaults: defaults).useUnicodeFonts)
+        app.selectUnicodeFonts(true)
+        XCTAssertTrue(CatalogPreferences(defaults: defaults, editionSettings: settings).useUnicodeFonts)
+        XCTAssertTrue(settings.loadSnapshot().useUnicodeFonts)
         XCTAssertFalse(defaults.bool(forKey: "keyboardUnicodeFonts"))
         app.reset()
-        XCTAssertFalse(CatalogPreferences(defaults: defaults).useUnicodeFonts)
+        XCTAssertFalse(CatalogPreferences(defaults: defaults, editionSettings: settings).useUnicodeFonts)
     }
 
     func testInvalidAndExtremePointSizesHaveFiniteBoundedFallbacks() {
@@ -142,30 +146,38 @@ final class UnicodeFontSupportTests: XCTestCase {
         defaults.set("unknown edition", forKey: "appUnicodeEdition")
         defaults.set(123, forKey: "appUnicodeSort")
         defaults.set("YES", forKey: "appUnicodeFonts")
-        let preferences = CatalogPreferences(defaults: defaults)
-        XCTAssertEqual(preferences.edition, .draft)
-        XCTAssertEqual(preferences.order, .newestFirst)
+        let preferences = CatalogPreferences(defaults: defaults,
+            editionSettings: UnicodeEditionSettings(containerURL: { nil }))
+        XCTAssertEqual(preferences.edition, .latest)
+        XCTAssertEqual(preferences.order, .codePoint)
         XCTAssertFalse(preferences.useUnicodeFonts)
     }
 
-    func testAppEditionAndSortPersistWithoutChangingKeyboardPreferences() {
+    func testSharedEditionAndFontsPersistWhileLegacyKeyboardLocalOptionsAreIgnored() {
         let suite = "Uniboard.Preferences.Test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set("draft", forKey: "keyboardUnicodeEdition")
         defaults.set("oldestFirst", forKey: "keyboardUnicodeSort")
         defaults.set(true, forKey: "keyboardUnicodeFonts")
-        let preferences = CatalogPreferences(defaults: defaults)
-        preferences.edition = .latest
+        var sharedSelection: Data?
+        let editionSettings = UnicodeEditionSettings(
+            containerURL: { URL(fileURLWithPath: "/uniboard-preferences-fixture", isDirectory: true) },
+            readPrefix: { _, _ in sharedSelection ?? Data() },
+            writeAtomically: { bytes, _ in sharedSelection = bytes })
+        let preferences = CatalogPreferences(defaults: defaults, editionSettings: editionSettings)
+        preferences.selectEdition(.previous)
         preferences.order = .codePoint
-        preferences.useUnicodeFonts = true
-        let restored = CatalogPreferences(defaults: defaults)
-        XCTAssertEqual(restored.edition, .latest)
+        preferences.selectUnicodeFonts(true)
+        let restored = CatalogPreferences(defaults: defaults, editionSettings: editionSettings)
+        XCTAssertEqual(restored.edition, .previous)
+        XCTAssertEqual(editionSettings.load(), .previous)
         XCTAssertEqual(restored.order, .codePoint)
         XCTAssertTrue(restored.useUnicodeFonts)
+        XCTAssertTrue(editionSettings.loadSnapshot().useUnicodeFonts)
         restored.reset()
-        XCTAssertEqual(CatalogPreferences(defaults: defaults).edition, .draft)
-        XCTAssertEqual(CatalogPreferences(defaults: defaults).order, .newestFirst)
+        XCTAssertEqual(CatalogPreferences(defaults: defaults, editionSettings: editionSettings).edition, .latest)
+        XCTAssertEqual(CatalogPreferences(defaults: defaults, editionSettings: editionSettings).order, .codePoint)
         XCTAssertEqual(defaults.string(forKey: "keyboardUnicodeEdition"), "draft")
         XCTAssertEqual(defaults.string(forKey: "keyboardUnicodeSort"), "oldestFirst")
         XCTAssertTrue(defaults.bool(forKey: "keyboardUnicodeFonts"))

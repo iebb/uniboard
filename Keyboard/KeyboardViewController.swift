@@ -6,53 +6,202 @@ import os
 
 /// Query keys edit only the extension's local search. Insertion always sends the
 /// original scalar or complete emoji sequence to the host's document proxy.
-fileprivate final class KeyboardResizePreviewModel: ObservableObject {
-    @Published var height: CGFloat?
+fileprivate final class KeyboardResizeFeedback: ObservableObject {
+    @Published private(set) var value: KeyboardResizeStepPolicy.Feedback?
+    func update(_ value: KeyboardResizeStepPolicy.Feedback?) {
+        if self.value != value { self.value = value }
+    }
+}
+
+fileprivate final class KeyboardResizeActivity: ObservableObject {
+    @Published var isActive = false
+    let feedback = KeyboardResizeFeedback()
 }
 
 final class KeyboardViewController: UIInputViewController {
     private let model = KeyboardModel()
-    private var keyboardHeight: NSLayoutConstraint?
     private var hostingController: UIHostingController<UnicodeKeyboardView>?
     fileprivate let resizeHandle = ResizeHandleButton(backgroundColor: KeyboardPalette.backgroundUI.withAlphaComponent(0.02))
-    fileprivate let resizePreview = KeyboardResizePreviewModel()
-    private var resizeDisplayLink: CADisplayLink?
-    private var resizeDisplayTarget: ResizeDisplayTarget?
-    private var pendingResizeHeight: CGFloat?
+    fileprivate let resizeActivity = KeyboardResizeActivity()
+    private var resizeStepSession: KeyboardResizeStepSession?
+    private var resizeWindowBounds: CGRect?
+    private var resizeViewBounds: CGRect?
+    private var resizeEnvironment: ResizeEnvironment?
+    private var deleteInteractionID = UUID()
+    private var doubleSpaceState = KeyboardDoubleSpaceState()
+    private var hostSignature: HostSignature?
+    // These bounded suffixes exist only in this keyboard process. An expected
+    // edit acknowledges proxy callbacks without mistaking our own Space for
+    // an intervening external edit. No context is stored or logged.
+    private var expectedHostEdit: ExpectedHostEdit?
+    private var literalWriteTransaction = KeyboardLiteralWriteTransaction()
+    private var literalWriteToken: UUID?
+    private typealias HostSignature = KeyboardHostInputSignature
+    private struct ExpectedHostEdit {
+        let document: UUID
+        let before: [Unicode.Scalar]
+        let expires: TimeInterval
+    }
     private var isResizing = false
+    private struct ResizeEnvironment: Equatable {
+        let window: ObjectIdentifier
+        let scene: ObjectIdentifier?
+        let screenSize: CGSize?
+        let width: CGFloat
+        let range: ClosedRange<CGFloat>
+        let scope: String
+        let document: UUID
+        let hostTraits: HostSignature?
+    }
 #if DEBUG
     private var resizeDiagnostics: KeyboardResizeDiagnostics?
+    private var effectiveGeometryObservation: NSKeyValueObservation?
+    private weak var effectiveGeometryObservedScene: UIWindowScene?
+    private var effectiveGeometryObservationID = UUID()
+    private var effectiveGeometryObservationEnabled = false
+    private var effectiveGeometryObservationCount = 0
+
+    private func stopEffectiveGeometryObservation() {
+        // Invalidate ownership before KVO cleanup can deliver an old callback.
+        effectiveGeometryObservationID = UUID()
+        effectiveGeometryObservation?.invalidate()
+        effectiveGeometryObservation = nil
+        effectiveGeometryObservedScene = nil
+    }
+    private func updateEffectiveGeometryObservation() {
+        guard effectiveGeometryObservationEnabled else { return }
+        guard #available(iOS 26.0, *), let scene = viewIfLoaded?.window?.windowScene else {
+            stopEffectiveGeometryObservation()
+            return
+        }
+        guard effectiveGeometryObservedScene !== scene || effectiveGeometryObservation == nil else { return }
+        stopEffectiveGeometryObservation()
+        effectiveGeometryObservedScene = scene
+        let token = UUID()
+        effectiveGeometryObservationID = token
+        // Apple documents effectiveGeometry as KVO-compliant. Do not replace
+        // the scene delegate owned by the keyboard's remote host.
+        effectiveGeometryObservation = scene.observe(\.effectiveGeometry, options: [.old, .new]) { [weak self] observed, change in
+            guard let self, self.effectiveGeometryObservationEnabled,
+                  self.effectiveGeometryObservationID == token,
+                  self.effectiveGeometryObservedScene === observed else { return }
+            if self.effectiveGeometryObservationCount < Int.max { self.effectiveGeometryObservationCount += 1 }
+            var sample: [String: Double] = [
+                "deliveryTimestamp": CACurrentMediaTime(),
+                "deliveryEpoch": Date().timeIntervalSince1970,
+                "deliveredOnMainThread": Thread.isMainThread ? 1 : 0
+            ]
+            func appendGeometry(_ geometry: UIWindowScene.Geometry?, prefix: String) {
+                sample[prefix + "Present"] = geometry == nil ? 0 : 1
+                guard let geometry else { return }
+                let space = geometry.coordinateSpace
+                let bounds = space.bounds
+                let screenOrigin = space.convert(bounds.origin, to: observed.screen.coordinateSpace)
+                sample[prefix + "BoundsX"] = Double(bounds.origin.x)
+                sample[prefix + "BoundsY"] = Double(bounds.origin.y)
+                sample[prefix + "BoundsWidth"] = Double(bounds.width)
+                sample[prefix + "BoundsHeight"] = Double(bounds.height)
+                sample[prefix + "BoundsMaxY"] = Double(bounds.maxY)
+                sample[prefix + "OriginToScreenX"] = Double(screenOrigin.x)
+                sample[prefix + "OriginToScreenY"] = Double(screenOrigin.y)
+                sample[prefix + "IsInteractivelyResizing"] = geometry.isInteractivelyResizing ? 1 : 0
+            }
+            appendGeometry(change.oldValue, prefix: "old")
+            appendGeometry(change.newValue, prefix: "new")
+            sample["rootHeight"] = self.viewIfLoaded.map { Double($0.bounds.height) }
+            sample["windowHeight"] = self.viewIfLoaded?.window.map { Double($0.bounds.height) }
+            self.resizeDiagnostics?.recordEffectiveGeometryObservation(sample.filter { $0.value.isFinite })
+        }
+    }
+    private var keyboardWillFrameNotificationCount = 0
+    private var keyboardDidFrameNotificationCount = 0
+    @objc private func recordPublicKeyboardFrameNotification(_ notification: Notification) {
+        let kind: Double
+        if notification.name == UIResponder.keyboardWillChangeFrameNotification {
+            kind = 1
+            if keyboardWillFrameNotificationCount < Int.max { keyboardWillFrameNotificationCount += 1 }
+        } else if notification.name == UIResponder.keyboardDidChangeFrameNotification {
+            kind = 2
+            if keyboardDidFrameNotificationCount < Int.max { keyboardDidFrameNotificationCount += 1 }
+        } else { return }
+        // These are public system geometry notifications. Record only known
+        // numeric fields; never retain the notification object or other data.
+        var sample: [String: Double] = ["kind": kind, "deliveryTimestamp": CACurrentMediaTime(),
+            "deliveryEpoch": Date().timeIntervalSince1970]
+        func appendRect(_ key: String, _ name: String) {
+            guard let value = notification.userInfo?[key] as? NSValue,
+                  String(cString: value.objCType) == String(cString: NSValue(cgRect: .zero).objCType) else {
+                sample[name + "Valid"] = 0
+                return
+            }
+            let rect = value.cgRectValue
+            guard [rect.origin.x, rect.origin.y, rect.width, rect.height].allSatisfy({ $0.isFinite }),
+                  rect.width >= 0, rect.height >= 0 else { sample[name + "Valid"] = 0; return }
+            sample[name + "Valid"] = 1
+            sample[name + "X"] = Double(rect.origin.x)
+            sample[name + "Y"] = Double(rect.origin.y)
+            sample[name + "Width"] = Double(rect.width)
+            sample[name + "Height"] = Double(rect.height)
+        }
+        appendRect(UIResponder.keyboardFrameBeginUserInfoKey, "beginFrame")
+        appendRect(UIResponder.keyboardFrameEndUserInfoKey, "endFrame")
+        for (key, name) in [(UIResponder.keyboardAnimationDurationUserInfoKey, "animationDuration"),
+                            (UIResponder.keyboardAnimationCurveUserInfoKey, "animationCurve"),
+                            (UIResponder.keyboardIsLocalUserInfoKey, "isLocal")] {
+            if let number = notification.userInfo?[key] as? NSNumber { sample[name] = number.doubleValue }
+        }
+        sample["rootHeight"] = viewIfLoaded.map { Double($0.bounds.height) }
+        sample["windowHeight"] = viewIfLoaded?.window.map { Double($0.bounds.height) }
+        resizeDiagnostics?.recordKeyboardFrameNotification(sample.filter { $0.value.isFinite })
+    }
+    private var selfSizingCounterBaseline: [String: Double] = [:]
+    private func selfSizingSnapshot(phase: Double) -> [String: Double] {
+        guard let input = view as? KeyboardSelfSizingInputView else { return [:] }
+        var value = input.debugSizingSnapshot
+        for key in ["defaultFittingCalls", "priorityFittingCalls", "intrinsicQueries", "changedHeightRequests"] {
+            value[key + "Delta"] = (value[key] ?? 0) - (selfSizingCounterBaseline[key] ?? 0)
+        }
+        value["phase"] = phase // 0 begin, 1 apply, 2 layout, 3 input
+        value["rootHeight"] = Double(view.bounds.height)
+        value["windowHeight"] = view.window.map { Double($0.bounds.height) }
+        return value.filter { $0.value.isFinite }
+    }
 #endif
 
     override func loadView() {
         // Use the keyboard's system blur and tint instead of stacking another
         // full-size material behind the control glass.
-        view = UIInputView(frame: .zero, inputViewStyle: .keyboard)
+        view = KeyboardSelfSizingInputView(frame: .zero, inputViewStyle: .keyboard)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .clear
         view.isOpaque = false
+        view.clipsToBounds = true
         inputView?.backgroundColor = .clear
         inputView?.isOpaque = false
         NotificationCenter.default.addObserver(self, selector: #selector(updateBackdrop), name: UIAccessibility.reduceTransparencyStatusDidChangeNotification, object: nil)
+#if DEBUG
+        NotificationCenter.default.addObserver(self, selector: #selector(recordPublicKeyboardFrameNotification(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(recordPublicKeyboardFrameNotification(_:)),
+            name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
+#endif
         updateBackdrop()
         let root = UnicodeKeyboardView(
-            model: model, store: CharacterStore.shared, controller: self,
-            insert: { [weak self] character in
-                self?.textDocumentProxy.insertText(character.text)
-                CharacterStore.shared.recordUse(character.codePoint)
-                self?.model.lastItem = .character(character)
-            },
-            insertEmoji: { [weak self] emoji in
-                self?.textDocumentProxy.insertText(emoji.text)
-                CharacterStore.shared.recordEmojiUse(emoji)
-                self?.model.lastItem = .emoji(emoji)
-            },
-            delete: { [weak self] isQuery in self?.makeDeleteAction(isQuery: isQuery) ?? { false } },
-            space: { [weak self] in self?.spaceKey() },
-            returnKey: { [weak self] in self?.returnKey() }
+            model: model, store: CharacterStore.shared, resizeActivity: resizeActivity, controller: self,
+            delete: { [weak self] mode, isQuery in self?.makeDeleteAction(renderedMode: mode, isQuery: isQuery) ?? { false } },
+            action: { [weak self] mode, command in self?.makeInputAction(renderedMode: mode, command: command) ?? { false } },
+            keyActions: { [weak self] mode, item in self?.makeInspectableActions(renderedMode: mode, item: item) },
+            queryAction: { [weak self] mode, query in self?.makeQueryAction(renderedMode: mode, renderedQuery: query) },
+            typingVariantActions: { [weak self] mode, key, auxiliary, isAuxiliary in self?.makeTypingVariantActions(renderedMode: mode, key: key, hasAuxiliaryRow: auxiliary, isAuxiliaryKey: isAuxiliary) },
+            utilityVariantActions: { [weak self] mode, key, command in self?.makeUtilityVariantActions(renderedMode: mode, keyID: key, command: command) },
+            favoritesActions: { [weak self] mode in self?.makeFavoritesActions(renderedMode: mode) },
+            boardKeyActions: { [weak self] mode, board, key in self?.makeSymbolBoardActions(renderedMode: mode, boardID: board, key: key) },
+            boardConfigurationGuard: { [weak self] mode in self?.makeBoardConfigurationGuard(renderedMode: mode) },
+            boardConfigurationSessionGuard: { [weak self] mode in self?.makeBoardConfigurationSessionGuard(renderedMode: mode) },
+            boardPick: { [weak self] mode, target in self?.beginSymbolBoardPick(renderedMode: mode, target: target) ?? false }
         )
         let host = UIHostingController(rootView: root)
         // The input controller already owns its complete content bounds. The
@@ -63,73 +212,242 @@ final class KeyboardViewController: UIInputViewController {
         host.view.translatesAutoresizingMaskIntoConstraints = false
         addChild(host)
         view.addSubview(host.view)
+        let bottom = host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         NSLayoutConstraint.activate([
             host.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             host.view.topAnchor.constraint(equalTo: view.topAnchor),
-            host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            bottom
         ])
         host.didMove(toParent: self)
         hostingController = host
         resizeHandle.coordinateView = view
-        resizeHandle.toggle = { [weak self] in self?.model.togglePortraitHeight() }
         resizeHandle.begin = { [weak self] in self?.beginInteractiveResize() }
-        resizeHandle.change = { [weak self] delta in
-            guard let self, self.isResizing,
-                  let height = self.model.resizeTarget(translationY: delta) else { return }
-#if DEBUG
-            self.resizeDiagnostics?.recordGesture()
-#endif
-            self.pendingResizeHeight = height
-#if DEBUG
-            self.resizeDiagnostics?.recordRequest()
-#endif
-        }
+        resizeHandle.change = { [weak self] delta in self?.changeResizeStep(deltaY: delta) }
         resizeHandle.end = { [weak self] commit in self?.endInteractiveResize(flush: commit) }
-        resizeHandle.step = { [weak self] delta in self?.model.stepPortraitHeight(delta) }
+        resizeHandle.step = { [weak self] delta in
+            guard let self, !self.isResizing, self.currentDocumentIdentifier != nil else { return }
+            guard delta == 1 || delta == -1 else { return }
+            self.beginInteractiveResize()
+            self.changeResizeStep(deltaY: -delta * KeyboardResizeStepPolicy.minimumTranslation)
+            self.endInteractiveResize(flush: true)
+        }
 #if DEBUG
         resizeHandle.debugSample = { [weak self] sample in
-            self?.resizeDiagnostics?.recordSample(sample)
+            guard let self, let diagnostics = self.resizeDiagnostics else { return }
+            var enriched = sample
+            for (key, value) in self.selfSizingSnapshot(phase: 3) { enriched["selfSizing." + key] = value }
+            diagnostics.recordSample(enriched)
         }
 #endif
-        let height = view.heightAnchor.constraint(equalToConstant: 300)
-        height.priority = .init(999)
-        height.isActive = true
-        keyboardHeight = height
-        model.presentationChanged = { [weak self] animated in self?.updateKeyboardHeight(animated: animated) }
-        synchronizeHostTraits()
+        model.presentationChanged = { [weak self] in self?.updateKeyboardHeight() }
+        model.queryEdited = { [weak self] in
+            self?.doubleSpaceState.reset()
+            self?.expectedHostEdit = nil
+        }
+        model.typingActivated = { [weak self] in self?.synchronizeHostTraits() }
+        model.inputModeChanged = { [weak self] in
+            guard let self else { return }
+            KeyboardVariantButton.cancelInteractions(in: self.view)
+            self.doubleSpaceState.reset()
+            self.expectedHostEdit = nil
+            if self.isResizing { self.resizeHandle.cancelResize(); self.endInteractiveResize(flush: false) }
+        }
+        // The remote document may not exist during viewDidLoad. Read its
+        // optional identity only once UIKit begins presenting this input view.
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        model.refreshEditionFromAppSettings()
         synchronizeHostTraits()
         updateKeyboardHeight()
     }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        synchronizeHostTraits()
+#if DEBUG
+        effectiveGeometryObservationEnabled = true
+        updateEffectiveGeometryObservation()
+#endif
+    }
+
+#if DEBUG
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        let diagnostics = isResizing ? resizeDiagnostics : nil
+        let transition = diagnostics?.recordTransitionBegin(from: view.bounds.size, to: size,
+            animated: coordinator.isAnimated, duration: coordinator.transitionDuration)
+        super.viewWillTransition(to: size, with: coordinator)
+        guard let diagnostics, let transition else { return }
+        let registered = coordinator.animate(alongsideTransition: nil) { [weak self, weak diagnostics] context in
+            guard let self, self.isResizing, let diagnostics,
+                  self.resizeDiagnostics === diagnostics else { return }
+            diagnostics.recordTransitionCompletion(transition, cancelled: context.isCancelled)
+        }
+        diagnostics.recordTransitionRegistration(transition, accepted: registered)
+    }
+#endif
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updateKeyboardHeight()
 #if DEBUG
+        updateEffectiveGeometryObservation()
         resizeDiagnostics?.recordLayout(view.bounds.height)
+        resizeDiagnostics?.recordSizingSnapshot(selfSizingSnapshot(phase: 2))
 #endif
     }
 
     override func viewWillDisappear(_ animated: Bool) {
+#if DEBUG
+        effectiveGeometryObservationEnabled = false
+        stopEffectiveGeometryObservation()
+#endif
+        // A remote host may hide and reuse this same window without detaching
+        // individual keys. Invalidate every captured input/hover action first.
+        deleteInteractionID = UUID()
+        model.cancelSymbolBoardPick(returnToManager: false)
+        model.symbolBoardManagerPresented = false
+        model.closeSymbolBoardSave()
+        KeyboardVariantButton.cancelInteractions(in: view)
+        resizeHandle.cancelResize()
         endInteractiveResize(flush: false)
+        doubleSpaceState.reset()
+        expectedHostEdit = nil
         super.viewWillDisappear(animated)
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
+        acknowledgeHostChange()
         synchronizeHostTraits()
+    }
+
+    override func selectionDidChange(_ textInput: UITextInput?) {
+        super.selectionDidChange(textInput)
+        // A selection move can leave the same preceding suffix. Never infer
+        // permission for a destructive Space edit from that suffix alone.
+        doubleSpaceState.reset()
+        expectedHostEdit = nil
+        model.cancelSymbolBoardPick(returnToManager: false)
+        model.symbolBoardManagerPresented = false
+        model.closeSymbolBoardSave()
+        model.hostDidEdit(invalidateMode: true)
+        synchronizeHostTraits()
+    }
+
+    private var currentDocumentIdentifier: UUID? {
+        KeyboardDocumentIdentity.read(from: textDocumentProxy)
     }
 
     private func synchronizeHostTraits() {
         // UIKit can ask again during a remote resize. Do not invalidate every
         // character key when neither input trait has changed.
         if model.needsInputModeSwitchKey != needsInputModeSwitchKey { model.needsInputModeSwitchKey = needsInputModeSwitchKey }
+        guard let document = currentDocumentIdentifier else {
+            doubleSpaceState.reset()
+            expectedHostEdit = nil
+            if hostSignature != nil {
+                hostSignature = nil
+                model.hostDidEdit(invalidateMode: true)
+            }
+            return
+        }
         let title = Self.returnTitle(for: textDocumentProxy.returnKeyType)
         if model.returnTitle != title { model.returnTitle = title }
+        let proxy = textDocumentProxy
+        let signature = HostSignature(documentIdentifier: document, traits: KeyboardHostInputTraits(reading: proxy))
+        if signature != hostSignature {
+            hostSignature = signature
+            doubleSpaceState.reset()
+            expectedHostEdit = nil
+            model.hostDidEdit(invalidateMode: true)
+        }
+        guard !model.isSearching else { return }
+        let capitalization: KeyboardAutomaticCapitalization
+        if !permitsEnglishAssistance { capitalization = .none }
+        else {
+            switch proxy.autocapitalizationType ?? .sentences {
+            case .none: capitalization = .none
+            case .words: capitalization = .words
+            case .allCharacters: capitalization = .allCharacters
+            default: capitalization = .sentences
+            }
+        }
+        let literalScope = currentLiteralWriteScope()
+        guard !literalWriteTransaction.matches(scope: literalScope) else { return }
+        model.synchronizeCapitalization(KeyboardEnglishInputPolicy.shouldCapitalize(mode: capitalization, before: proxy.documentContextBeforeInput))
+    }
+
+    private var permitsEnglishAssistance: Bool {
+        KeyboardHostInputTraits(reading: textDocumentProxy).permitsEnglishAssistance
+    }
+
+    private static func contextSuffix(_ text: String) -> [Unicode.Scalar] {
+        Array(text.unicodeScalars.suffix(KeyboardEnglishInputPolicy.maximumContextScalars))
+    }
+
+    private func acknowledgeHostChange() {
+        let expected = expectedHostEdit
+        expectedHostEdit = nil
+        let literalScope = currentLiteralWriteScope()
+        if literalWriteTransaction.matches(scope: literalScope) {
+            doubleSpaceState.reset()
+            return
+        }
+        if let expected, expected.document == currentDocumentIdentifier,
+           ProcessInfo.processInfo.systemUptime <= expected.expires,
+           textDocumentProxy.selectedText?.isEmpty != false,
+           let context = textDocumentProxy.documentContextBeforeInput,
+           Self.contextSuffix(context) == expected.before { return }
+        doubleSpaceState.reset()
+        // Additional same-document text notifications can follow our own
+        // edits. Reset punctuation/case hints, but do not invalidate another
+        // finger's valid captured key. Document/traits are checked separately.
+        model.hostDidEdit()
+    }
+
+    @discardableResult
+    private func insertHostText(_ text: String, literalToken: UUID? = nil) -> Bool {
+        guard literalWriteToken == nil || literalWriteToken == literalToken,
+              !isResizing, let document = currentDocumentIdentifier else { return false }
+        let proxy = textDocumentProxy
+        if let before = proxy.documentContextBeforeInput {
+            expectedHostEdit = ExpectedHostEdit(document: document,
+                before: Self.contextSuffix(before + text), expires: ProcessInfo.processInfo.systemUptime + 1)
+        } else { expectedHostEdit = nil }
+        proxy.insertText(text)
+        return true
+    }
+
+    private func currentLiteralWriteScope() -> KeyboardLiteralWriteScope? {
+        guard !isResizing, !model.isSearching, !model.hasSymbolBoardOverlay,
+              let document = currentDocumentIdentifier else { return nil }
+        return KeyboardLiteralWriteScope(typingState: model.typingState, documentIdentifier: document,
+            modeIdentifier: model.inputModeID, interactionIdentifier: deleteInteractionID)
+    }
+
+    private func insertLiteralGestureText(_ text: String) -> Bool {
+        guard literalWriteToken == nil, let scope = currentLiteralWriteScope(),
+              let token = literalWriteTransaction.begin(scope: scope) else { return false }
+        literalWriteToken = token
+        defer {
+            literalWriteTransaction.invalidate(token: token)
+            if literalWriteToken == token { literalWriteToken = nil }
+        }
+        let accepted = insertHostText(text, literalToken: token)
+        let currentScope = currentLiteralWriteScope()
+        if literalWriteTransaction.finish(token: token, accepted: accepted, scope: currentScope) {
+            model.didInsertLiteralGesture(capturedState: scope.typingState)
+        }
+        return accepted
+    }
+
+    private func didEditHostText() {
+        doubleSpaceState.reset()
+        model.hostDidEdit()
+        synchronizeHostTraits()
     }
 
     @objc private func updateBackdrop() {
@@ -138,14 +456,14 @@ final class KeyboardViewController: UIInputViewController {
         view.isOpaque = opaque
     }
 
-    private func updateKeyboardHeight(animated: Bool = false) {
+    private func updateKeyboardHeight() {
         let pad = traitCollection.userInterfaceIdiom == .pad
         let scene = view.window?.windowScene
         let metrics = KeyboardLayoutPolicy.metrics(
             viewWidth: view.bounds.width, displaySize: scene?.screen.bounds.size,
             sceneHeight: scene?.coordinateSpace.bounds.height, isPad: pad,
             compactVertical: traitCollection.verticalSizeClass == .compact,
-            isSearching: model.isSearching, isInspecting: model.inspection != nil,
+            isSearching: model.isSearching, isInspecting: model.inspection != nil || model.symbolBoardInspectionText != nil,
             portraitBrowseHeight: model.portraitBrowseHeight,
             portraitExpandedHeight: model.portraitExpandedHeight
         )
@@ -154,106 +472,470 @@ final class KeyboardViewController: UIInputViewController {
         model.portraitResizeRange = metrics.portraitResizeRange
         let showsHandle = metrics.portraitResizeRange != nil
         resizeHandle.isHidden = !showsHandle
-        resizeHandle.accessibilityHint = model.isSearching || model.inspection != nil
-            ? "Drag to preview a height, then release to resize. Double tap to return to browsing."
-            : "Drag to preview a height, then release to resize. Double tap to switch between compact and expanded."
-        if isResizing && !showsHandle { endInteractiveResize(flush: false) }
-        // The remote window stays fixed for the entire drag. Resizing it here
-        // rebases incoming touches asynchronously and causes visible feedback.
-        if isResizing { return }
-        applyKeyboardHeight(metrics.height, animated: animated)
+        resizeHandle.accessibilityHint = "Swipe up to add one row or down to remove one row. Lift your finger to apply."
+        if isResizing {
+            if !showsHandle || !resizeScopeIsCurrent() { resizeHandle.cancelResize(); endInteractiveResize(flush: false) }
+            return
+        }
+        applyKeyboardHeight(metrics.height)
     }
 
-    private func applyKeyboardHeight(_ height: CGFloat, animated: Bool) {
+    private func currentResizeEnvironment() -> ResizeEnvironment? {
+        guard let window = view.window, let range = model.portraitResizeRange,
+              let document = currentDocumentIdentifier, view.bounds.width.isFinite, view.bounds.width > 0 else { return nil }
+        return ResizeEnvironment(window: ObjectIdentifier(window), scene: window.windowScene.map(ObjectIdentifier.init),
+            screenSize: window.windowScene?.screen.bounds.size, width: view.bounds.width, range: range,
+            scope: "\(model.inputModeID):\(model.modeValue):\(model.typingLayoutValue):\(model.section.rawValue)",
+            document: document, hostTraits: hostSignature)
+    }
+
+    private func applyKeyboardHeight(_ height: CGFloat) {
         guard height.isFinite, height > 0 else { return }
         model.presentationHeight = height
         resizeHandle.accessibilityValue = "\(Int(height.rounded())) points"
-        guard keyboardHeight?.constant != height else { return }
-        keyboardHeight?.constant = height
-        // The system must negotiate the input view's new size with its host.
-        // Forcing a local layout inside an animator can resize only our bounds
-        // without updating the remote keyboard frame.
-        view.setNeedsLayout()
-        view.superview?.setNeedsLayout()
+        guard let input = view as? KeyboardSelfSizingInputView else { return }
+        var changed = false
+#if DEBUG
+        resizeDiagnostics?.recordAnimationScope(phase: 0, enabled: UIView.areAnimationsEnabled)
+#endif
+        UIView.performWithoutAnimation {
+#if DEBUG
+            resizeDiagnostics?.recordAnimationScope(phase: 1, enabled: UIView.areAnimationsEnabled)
+#endif
+            changed = input.requestHeight(height)
+            if changed {
+                // Request remote negotiation; do not forge a local frame or
+                // force layout to masquerade as remote acknowledgement.
+                view.setNeedsLayout()
+                view.superview?.setNeedsLayout()
+            }
+#if DEBUG
+            resizeDiagnostics?.recordAnimationScope(phase: 2, enabled: UIView.areAnimationsEnabled)
+#endif
+        }
+#if DEBUG
+        resizeDiagnostics?.recordAnimationScope(phase: 3, enabled: UIView.areAnimationsEnabled)
+#endif
+        guard changed else { return }
+#if DEBUG
+        resizeDiagnostics?.recordAllocationRequest(height)
+#endif
     }
 
     private func beginInteractiveResize() {
-        guard !isResizing, model.portraitResizeRange != nil else { return }
-        let visibleHeight = view.bounds.height
+        guard !isResizing, let environment = currentResizeEnvironment(),
+              let session = KeyboardResizeStepSession(startHeight: view.bounds.height,
+                  range: environment.range, compact: model.isCompactLayout),
+              model.beginResize(at: session.initialHeight) != nil else { return }
         isResizing = true
-        pendingResizeHeight = nil
-        guard let startHeight = model.beginResize(at: visibleHeight) else {
-            isResizing = false
-            return
-        }
-        pendingResizeHeight = nil
-        resizePreview.height = startHeight
+        resizeEnvironment = environment
+        resizeWindowBounds = view.window?.bounds
+        resizeViewBounds = view.bounds
+        resizeStepSession = session
+        deleteInteractionID = UUID()
+        KeyboardVariantButton.cancelInteractions(in: view)
+        doubleSpaceState.reset()
+        expectedHostEdit = nil
+        // Preserve the mounted query/scroll identities beneath lightweight
+        // directional feedback. The window changes only after release.
+        resizeActivity.feedback.update(nil)
+        resizeActivity.isActive = true
 #if DEBUG
-        resizeDiagnostics = KeyboardResizeDiagnostics(height: startHeight)
+        resizeDiagnostics = KeyboardResizeDiagnostics(height: session.initialHeight,
+            initialWillFrameNotifications: keyboardWillFrameNotificationCount,
+            initialDidFrameNotifications: keyboardDidFrameNotificationCount,
+            initialEffectiveGeometryNotifications: effectiveGeometryObservationCount,
+            effectiveGeometryObservationActive: effectiveGeometryObservation != nil)
+        selfSizingCounterBaseline = (view as? KeyboardSelfSizingInputView)?.debugSizingSnapshot ?? [:]
+        resizeDiagnostics?.recordSizingSnapshot(selfSizingSnapshot(phase: 0))
+        resizeDiagnostics?.recordFeedback(direction: nil)
 #endif
-        let target = ResizeDisplayTarget(controller: self)
-        let link = CADisplayLink(target: target, selector: #selector(ResizeDisplayTarget.tick(_:)))
-        // Only the small preview observes these updates, never the key grid or
-        // remote height constraint. Commit the final target after release.
-        let fps = Float(min(60, view.window?.screen.maximumFramesPerSecond ?? 60))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: min(30, fps), maximum: fps, preferred: fps)
-        resizeDisplayTarget = target
-        resizeDisplayLink = link
-        link.add(to: .main, forMode: .common)
     }
 
-    fileprivate func displayResizeFrame() {
-        guard let height = pendingResizeHeight else { return }
-        pendingResizeHeight = nil
+    private func resizeScopeIsCurrent() -> Bool {
+        currentResizeEnvironment() == resizeEnvironment && view.window?.bounds == resizeWindowBounds
+            && view.bounds == resizeViewBounds
+    }
+
+    private func changeResizeStep(deltaY: CGFloat) {
+        guard isResizing, var session = resizeStepSession else { return }
+        guard resizeScopeIsCurrent(), session.update(deltaY: deltaY) else {
+            endInteractiveResize(flush: false)
+            return
+        }
+        resizeStepSession = session
+        let feedback = KeyboardResizeStepPolicy.feedback(
+            startHeight: session.initialHeight, deltaY: deltaY, range: session.range, compact: session.compact)
+        resizeActivity.feedback.update(feedback)
 #if DEBUG
-        let began = CACurrentMediaTime()
-#endif
-        if resizePreview.height != height { resizePreview.height = height }
-#if DEBUG
-        resizeDiagnostics?.recordApply(height, began: began)
+        resizeDiagnostics?.recordFeedback(direction: feedback)
+        resizeDiagnostics?.recordGesture()
 #endif
     }
 
     private func endInteractiveResize(flush: Bool = true) {
-        guard isResizing else { return }
-        if flush { displayResizeFrame() }
-        let target = flush ? resizePreview.height : nil
-        pendingResizeHeight = nil
-        resizeDisplayLink?.invalidate()
-        resizeDisplayLink = nil
-        resizeDisplayTarget = nil
+        guard isResizing, var session = resizeStepSession else { return }
+        let target = session.finish(commit: flush && resizeScopeIsCurrent())
+        // Invalidate ownership before recognizer cleanup can synchronously
+        // reenter. A late terminal callback cannot finish a replacement step.
         isResizing = false
-        resizePreview.height = nil
+        resizeStepSession = nil
+        resizeEnvironment = nil
+        resizeWindowBounds = nil
+        resizeViewBounds = nil
+        resizeHandle.cancelResize()
+        resizeActivity.feedback.update(nil)
+        resizeActivity.isActive = false
+        deleteInteractionID = UUID()
 #if DEBUG
         let diagnostics = resizeDiagnostics
         resizeDiagnostics = nil
+        diagnostics?.recordFeedback(direction: nil)
+        let previousRequest = (view as? KeyboardSelfSizingInputView)?.requestedHeight
+        if let target {
+            diagnostics?.recordRequest(target)
+            diagnostics?.recordSelection(target)
+        }
 #endif
         model.endResize(commitHeight: target)
+        // The sole allocation happens after release. Cancelled, horizontal,
+        // tiny and already-clamped swipes do not change the saved preference.
+        updateKeyboardHeight()
 #if DEBUG
+        if let request = (view as? KeyboardSelfSizingInputView)?.requestedHeight, request != previousRequest {
+            diagnostics?.recordAllocationRequest(request)
+        }
         diagnostics?.finish(height: model.presentationHeight, committed: target != nil)
 #endif
+        if UIAccessibility.isVoiceOverRunning, let target {
+            UIAccessibility.post(notification: .announcement,
+                argument: "Keyboard height \(Int(target.rounded())) points")
+        }
     }
 
-    private func makeDeleteAction(isQuery: Bool) -> RepeatingDeleteButton.DeleteAction {
-        let context = KeyboardDeleteContext(isQuery: isQuery, documentIdentifier: textDocumentProxy.documentIdentifier)
-        return context.guardedAction(currentContext: { [weak self] in
+    private func makeBoardConfigurationGuard(renderedMode: UUID) -> (() -> Bool)? {
+        guard renderedMode == model.inputModeID, !isResizing, let document = currentDocumentIdentifier else { return nil }
+        let interaction = deleteInteractionID
+        return { [weak self] in
+            guard let self else { return false }
+            return !self.isResizing && self.model.inputModeID == renderedMode
+                && self.currentDocumentIdentifier == document && self.deleteInteractionID == interaction
+        }
+    }
+
+    /// An editor may survive a height change; individual presses still use
+    /// the stricter interaction generation captured at their own touch-down.
+    private func makeBoardConfigurationSessionGuard(renderedMode: UUID) -> (() -> Bool)? {
+        guard renderedMode == model.inputModeID, !isResizing, let document = currentDocumentIdentifier else { return nil }
+        return { [weak self] in
+            guard let self else { return false }
+            return !self.isResizing && self.model.inputModeID == renderedMode
+                && self.currentDocumentIdentifier == document
+        }
+    }
+
+    private func beginSymbolBoardPick(renderedMode: UUID, target: SymbolBoardPickerTarget) -> Bool {
+        guard let current = makeBoardConfigurationGuard(renderedMode: renderedMode), current(),
+              let document = currentDocumentIdentifier else { return false }
+        return model.beginSymbolBoardPick(target, isCurrentDocument: { [weak self] in
+            guard let self else { return false }
+            return !self.isResizing && self.currentDocumentIdentifier == document
+        })
+    }
+
+    private func makeTypingVariantActions(renderedMode: UUID, key: String, hasAuxiliaryRow: Bool,
+                                          isAuxiliaryKey: Bool) -> KeyboardVariantActions? {
+        guard !model.showsUnicode, !model.hasSymbolBoardOverlay, let current = makeBoardConfigurationGuard(renderedMode: renderedMode),
+              model.typingAuxiliaryRowVisible.map({ $0 == hasAuxiliaryRow }) ?? true,
+              let keyID = KeyboardKeySettings.identifier(forCharacter: key) else { return nil }
+        let captured = model.typingState
+        let original = isAuxiliaryKey
+            ? (hasAuxiliaryRow ? KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: key, layout: captured.layout) : nil)
+            : KeyboardTypingLayoutPolicy.output(for: key, state: captured, hasAuxiliaryRow: hasAuxiliaryRow)
+        guard let original else { return nil }
+        let settings = model.keySettings
+        let choices = KeyboardVariantPolicy.options(text: original,
+            variants: KeyboardVariantPolicy.englishVariants(for: key, uppercase: captured.shift != .lowercase))
+        let longOverride = settings.candidates(for: keyID, gesture: .longPress)
+        let longChoices = KeyboardVariantPolicy.candidates(override: longOverride, defaults: choices)
+        let up = KeyboardVariantPolicy.candidates(override: settings.candidates(for: keyID, gesture: .swipeUp),
+            defaults: isAuxiliaryKey ? [] : KeyboardVariantPolicy.defaultSwipeUp(for: key, state: captured))
+        let down = KeyboardVariantPolicy.candidates(override: settings.candidates(for: keyID, gesture: .swipeDown), defaults: [])
+        let accepts: () -> Bool = { [weak self] in
+            current() && self?.model.showsUnicode == false && self?.model.hasSymbolBoardOverlay == false
+                && self?.model.keySettings == settings
+                && (self?.model.typingAuxiliaryRowVisible.map({ $0 == hasAuxiliaryRow }) ?? true)
+        }
+        return .init(isCurrent: accepts, insert: { [weak self] text in
+            guard let self, accepts(), KeyboardVariantPolicy.contains(text, in: choices) else { return false }
+            self.doubleSpaceState.reset()
+            guard self.insertHostText(text) else { return false }
+            if captured.layout == .letters && !isAuxiliaryKey { self.model.didInsertTypingKey(key, capturedState: captured) }
+            else { self.model.didInsertNumberRowKey(capturedState: captured) }
+            self.synchronizeHostTraits()
+            return true
+        }, options: choices, longPressOptions: longOverride, swipeUp: up, swipeDown: down,
+           insertGesture: { [weak self] text, gesture in
+            guard let self, accepts() else { return false }
+            let allowed = gesture == .longPress ? longChoices : gesture == .swipeUp ? up : down
+            guard KeyboardVariantPolicy.contains(text, in: allowed) else { return false }
+            self.doubleSpaceState.reset()
+            if gesture == .longPress, captured.layout == .letters, !isAuxiliaryKey {
+                guard self.insertHostText(text) else { return false }
+                self.model.didInsertTypingKey(key, capturedState: captured)
+                self.synchronizeHostTraits()
+            } else { return self.insertLiteralGestureText(text) }
+            return true
+        })
+    }
+
+    private func makeUtilityVariantActions(renderedMode: UUID, keyID: String,
+                                           command: KeyboardInputCommand) -> KeyboardVariantActions? {
+        guard !model.isSearching, !model.hasSymbolBoardOverlay,
+              KeyboardKeySettings.descriptor(for: keyID)?.kind == .utility,
+              let current = makeBoardConfigurationGuard(renderedMode: renderedMode) else { return nil }
+        let settings = model.keySettings
+        let long = settings.candidates(for: keyID, gesture: .longPress)
+        let up = KeyboardVariantPolicy.candidates(override: settings.candidates(for: keyID, gesture: .swipeUp), defaults: [])
+        let down = KeyboardVariantPolicy.candidates(override: settings.candidates(for: keyID, gesture: .swipeDown), defaults: [])
+        let accepts: () -> Bool = { [weak self] in
+            current() && self?.model.isSearching == false && self?.model.hasSymbolBoardOverlay == false && self?.model.keySettings == settings
+        }
+        let normal = makeInputAction(renderedMode: renderedMode, command: command)
+        let hold: (() -> Bool)? = keyID == "utility.favorites" ? { [weak self] in
+            guard let self, accepts() else { return false }
+            self.model.openSymbolBoardManager()
+            return true
+        } : nil
+        let repeating: (() -> Bool)? = keyID == "utility.delete" ? makeDeleteAction(renderedMode: renderedMode, isQuery: false) : nil
+        return .init(isCurrent: accepts, insert: { _ in false }, hold: hold,
+            longPressOptions: long, swipeUp: up, swipeDown: down, tap: { accepts() && normal() },
+            insertGesture: { [weak self] text, gesture in
+                guard let self, accepts() else { return false }
+                let allowed = gesture == .longPress ? KeyboardVariantPolicy.candidates(override: long, defaults: []) : gesture == .swipeUp ? up : down
+                guard KeyboardVariantPolicy.contains(text, in: allowed) else { return false }
+                self.doubleSpaceState.reset()
+                return self.insertLiteralGestureText(text)
+            }, repeatOnHold: repeating)
+    }
+
+    private func makeFavoritesActions(renderedMode: UUID) -> KeyboardVariantActions? {
+        guard !model.hasSymbolBoardOverlay, let guardCurrent = makeBoardConfigurationGuard(renderedMode: renderedMode) else { return nil }
+        let current: () -> Bool = { [weak self] in guardCurrent() && self?.model.hasSymbolBoardOverlay == false }
+        return .init(isCurrent: current, insert: { [weak self] _ in
+            guard let self, current() else { return false }
+            self.doubleSpaceState.reset(); self.expectedHostEdit = nil
+            return self.model.toggleFavorites()
+        }, hold: { [weak self] in
+            guard let self, current() else { return false }
+            self.doubleSpaceState.reset(); self.expectedHostEdit = nil
+            self.model.openSymbolBoardManager()
+            return true
+        })
+    }
+
+    private func makeSymbolBoardActions(renderedMode: UUID, boardID: String, key: SymbolBoardKey) -> KeyboardVariantActions? {
+        guard let current = makeBoardConfigurationGuard(renderedMode: renderedMode) else { return nil }
+        let choices = KeyboardVariantPolicy.options(text: key.text, variants: key.variants)
+        let accepts: () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return current() && !self.model.isSearching && !self.model.hasSymbolBoardOverlay && self.model.symbolBoardPickerTarget == nil
+                && self.model.inspection == nil && self.model.symbolBoardInspectionText == nil
+                && SymbolBoardStore.shared.activeBoardID == boardID
+                && SymbolBoardStore.shared.key(boardID: boardID, keyID: key.id) == key
+        }
+        guard accepts() else { return nil }
+        return .init(isCurrent: accepts, insert: { [weak self] text in
+            guard let self, accepts(), KeyboardVariantPolicy.contains(text, in: choices) else { return false }
+            self.doubleSpaceState.reset()
+            guard self.insertHostText(text) else { return false }
+            if text.unicodeScalars.count == 1, let scalar = text.unicodeScalars.first {
+                CharacterStore.shared.recordUse(scalar.value)
+            } else if let emoji = self.model.emojiCatalog.entries.first(where: { $0.text.utf16.elementsEqual(text.utf16) }) {
+                CharacterStore.shared.recordEmojiUse(emoji)
+            }
+            self.didEditHostText()
+            return true
+        }, inspect: { [weak self] text in
+            guard let self, accepts(), KeyboardVariantPolicy.contains(text, in: choices) else { return false }
+            self.model.inspectText(text)
+            return true
+        }, edit: { [weak self] in
+            guard let self, accepts() else { return false }
+            self.model.openSymbolBoardManager(editingKeyID: key.id)
+            return true
+        })
+    }
+
+    private func makeQueryAction(renderedMode: UUID, renderedQuery: String) -> KeyboardQueryActionSession? {
+        guard renderedMode == model.inputModeID, !isResizing, !model.hasSymbolBoardOverlay,
+              model.query.utf16.elementsEqual(renderedQuery.utf16),
+              let document = currentDocumentIdentifier else { return nil }
+        let originalQuery = Array(renderedQuery.utf16)
+        let context = KeyboardInputActionContext(modeIdentifier: renderedMode,
+            documentIdentifier: document, interactionIdentifier: deleteInteractionID)
+        return KeyboardQueryActionSession(context: context, currentContext: { [weak self] in
+            guard let self, !self.isResizing, !self.model.hasSymbolBoardOverlay, self.model.query.utf16.elementsEqual(originalQuery),
+                  let document = self.currentDocumentIdentifier else { return nil }
+            return KeyboardInputActionContext(modeIdentifier: self.model.inputModeID,
+                documentIdentifier: document, interactionIdentifier: self.deleteInteractionID)
+        }, activate: { [weak self] in
             guard let self else { return nil }
-            return KeyboardDeleteContext(isQuery: self.model.isSearching, documentIdentifier: self.textDocumentProxy.documentIdentifier)
+            self.model.beginSearch()
+            // The action session may adopt exactly this owned activation's
+            // final mode once, after rechecking document and resize generation.
+            return self.model.isSearching ? self.model.inputModeID : nil
+        }, moveCaret: { [weak self] offset in self?.model.moveQueryCaret(toUTF16Offset: offset) })
+    }
+
+    private func makeInspectableActions(renderedMode: UUID, item: KeyboardItem) -> KeyboardInspectableInteraction.Actions? {
+        let acceptsScope: () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return !self.model.hasSymbolBoardOverlay && self.model.showsUnicode
+        }
+        guard renderedMode == model.inputModeID, acceptsScope(), !isResizing,
+              let document = currentDocumentIdentifier else { return nil }
+        let context = KeyboardInputActionContext(modeIdentifier: renderedMode,
+            documentIdentifier: document, interactionIdentifier: deleteInteractionID)
+        let current: () -> KeyboardInputActionContext? = { [weak self] in
+            guard let self, acceptsScope(), !self.isResizing,
+                  let document = self.currentDocumentIdentifier else { return nil }
+            return KeyboardInputActionContext(modeIdentifier: self.model.inputModeID,
+                documentIdentifier: document, interactionIdentifier: self.deleteInteractionID)
+        }
+        return .init(insert: context.guardedAction(currentContext: current, perform: { [weak self] in
+            guard let self else { return false }
+            if self.model.symbolBoardPickerTarget != nil {
+                let text: String
+                switch item { case .character(let character): text = character.text; case .emoji(let emoji): text = emoji.text }
+                return self.model.completeSymbolBoardPick(text)
+            }
+            switch item {
+            case .character(let character):
+                guard self.insertHostText(character.text) else { return false }
+                CharacterStore.shared.recordUse(character.codePoint)
+            case .emoji(let emoji):
+                guard self.insertHostText(emoji.text) else { return false }
+                CharacterStore.shared.recordEmojiUse(emoji)
+            }
+            self.didEditHostText()
+            return true
+        }), inspect: context.guardedAction(currentContext: current, perform: { [weak self] in
+            guard let self else { return false }
+            self.model.inspect(item)
+            return true
+        }))
+    }
+
+    private func makeDeleteAction(renderedMode: UUID, isQuery: Bool) -> RepeatingDeleteButton.DeleteAction {
+        guard literalWriteToken == nil, renderedMode == model.inputModeID, !isResizing, !model.hasSymbolBoardOverlay,
+              let document = currentDocumentIdentifier else { return { false } }
+        let interactionID = deleteInteractionID
+        let context = KeyboardDeleteContext(modeIdentifier: renderedMode, isQuery: isQuery, documentIdentifier: document)
+        return context.guardedAction(currentContext: { [weak self] in
+            guard let self, self.literalWriteToken == nil, !self.isResizing, !self.model.hasSymbolBoardOverlay, self.deleteInteractionID == interactionID,
+                  let document = self.currentDocumentIdentifier else { return nil }
+            return KeyboardDeleteContext(modeIdentifier: self.model.inputModeID, isQuery: self.model.isSearching, documentIdentifier: document)
         }, delete: { [weak self] in
             if isQuery { self?.model.deleteQueryCharacter() }
-            else { self?.textDocumentProxy.deleteBackward() }
+            else {
+                self?.expectedHostEdit = nil
+                self?.textDocumentProxy.deleteBackward()
+                self?.didEditHostText()
+            }
+        })
+    }
+
+    /// Capture the rendered mode and document at touch-down. A scope change
+    /// between rendering, pressing and releasing rejects the old action.
+    private func makeInputAction(renderedMode: UUID, command: KeyboardInputCommand) -> () -> Bool {
+        guard renderedMode == model.inputModeID, !isResizing, !model.hasSymbolBoardOverlay,
+              let document = currentDocumentIdentifier else { return { false } }
+        let bound = KeyboardInputActionContext(modeIdentifier: renderedMode,
+            documentIdentifier: document, interactionIdentifier: deleteInteractionID)
+        return bound.guardedAction(currentContext: { [weak self] in
+            guard let self, !self.isResizing, !self.model.hasSymbolBoardOverlay, let document = self.currentDocumentIdentifier else { return nil }
+            return KeyboardInputActionContext(modeIdentifier: self.model.inputModeID,
+                documentIdentifier: document, interactionIdentifier: self.deleteInteractionID)
+        }, perform: { [weak self] in
+            guard let self else { return false }
+            switch command {
+            case .query(let key):
+                guard self.model.isSearching else { return false }
+                self.doubleSpaceState.reset()
+                self.model.appendQuery(key)
+            case .delete:
+                guard !self.model.isSearching, self.makeDeleteAction(renderedMode: renderedMode, isQuery: false)() else { return false }
+            case .collapse:
+                self.dismissKeyboard()
+            case .favorites:
+                self.doubleSpaceState.reset(); self.expectedHostEdit = nil
+                guard self.model.toggleFavorites() else { return false }
+            case .toolbar:
+                self.doubleSpaceState.reset()
+                self.expectedHostEdit = nil
+                self.model.toggleUnicodeToolbar()
+            case .space: self.spaceKey()
+            case .returnKey: self.returnKey()
+            case .shift:
+                guard !self.model.showsUnicode else { return false }
+                self.doubleSpaceState.reset()
+                self.expectedHostEdit = nil
+                self.model.pressShift()
+            case .layout(let layout):
+                guard !self.model.showsUnicode else { return false }
+                self.model.selectTypingLayout(layout)
+                self.synchronizeHostTraits()
+            }
+            return true
         })
     }
 
     private func spaceKey() {
-        if model.isSearching { model.appendQuery(" ") }
-        else { textDocumentProxy.insertText(" ") }
+        guard !isResizing else { return }
+        if model.isSearching {
+            doubleSpaceState.reset()
+            model.appendQuery(" ")
+            return
+        }
+        guard literalWriteToken == nil else { return }
+        let proxy = textDocumentProxy
+        guard let document = currentDocumentIdentifier else { doubleSpaceState.reset(); return }
+        let mode = model.inputModeID
+        let before = proxy.documentContextBeforeInput
+        let selectionIsEmpty = proxy.selectedText?.isEmpty != false
+        let decision = doubleSpaceState.spaceTap(before: before, at: ProcessInfo.processInfo.systemUptime,
+            scope: KeyboardEnglishInputScope(documentIdentifier: document, modeIdentifier: mode),
+            enabled: permitsEnglishAssistance && selectionIsEmpty && !model.showsUnicode)
+        if decision == .replacePreviousSpaceWithPeriod,
+           let before, before.unicodeScalars.last == " ",
+           currentDocumentIdentifier == document, model.inputModeID == mode,
+           proxy.selectedText?.isEmpty != false,
+           let current = proxy.documentContextBeforeInput,
+           Self.contextSuffix(current) == Self.contextSuffix(before) {
+            // Delete only the ASCII space whose exact context was authorized.
+            expectedHostEdit = nil
+            proxy.deleteBackward()
+            // A proxy mutation can synchronously change focus or input mode.
+            // Never send the second write into a replacement document, and
+            // never retry or undo an already-dispatched deletion there.
+            guard !isResizing, currentDocumentIdentifier == document,
+                  model.inputModeID == mode else {
+                doubleSpaceState.reset()
+                expectedHostEdit = nil
+                return
+            }
+            insertHostText(". ")
+            model.hostDidEdit()
+        } else { insertHostText(" "); model.hostDidEdit() }
+        synchronizeHostTraits()
     }
 
     private func returnKey() {
         if model.inspection != nil { model.closeInspection() }
+        else if model.symbolBoardInspectionText != nil { model.closeSymbolBoardInspection() }
         else if model.isSearching { model.endSearch() }
-        else { textDocumentProxy.insertText("\n") }
+        else { insertHostText("\n"); didEditHostText() }
     }
 
     static func returnTitle(for type: UIReturnKeyType?) -> String {
@@ -272,80 +954,173 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     deinit {
-        resizeDisplayLink?.invalidate()
+#if DEBUG
+        effectiveGeometryObservation?.invalidate()
+#endif
         NotificationCenter.default.removeObserver(self)
     }
 }
 
-/// CADisplayLink retains its target, so keep the input controller weak.
-private final class ResizeDisplayTarget: NSObject {
-    weak var controller: KeyboardViewController?
-    init(controller: KeyboardViewController) { self.controller = controller }
-    @objc func tick(_ link: CADisplayLink) { controller?.displayResizeFrame() }
+#if DEBUG
+private enum KeyboardNavigationDiagnostics {
+    static func record(event: Int, phase: Int, mode: Int, previousPanel: Int, catalogLoaded: Bool) {
+        let timestamp = CACurrentMediaTime(), epoch = Date().timeIntervalSince1970
+        Logger(subsystem: "ad.neko.uniboard.navigation", category: "action")
+            .notice("navigationTrace event=\(event, privacy: .public) phase=\(phase, privacy: .public) mode=\(mode, privacy: .public) previousPanel=\(previousPanel, privacy: .public) catalogLoaded=\(catalogLoaded ? 1 : 0, privacy: .public) timestamp=\(timestamp, privacy: .public) epoch=\(epoch, privacy: .public)")
+    }
 }
 
-#if DEBUG
 /// Local development-only timing evidence. No queries or host text are recorded,
 /// and the entire recorder is absent from distributed Release binaries.
 private final class KeyboardResizeDiagnostics {
     private static var bodyEvaluations = 0
+    private static var pickerEvaluations = 0
     static func recordBodyEvaluation() { bodyEvaluations += 1 }
+    static func recordPickerEvaluation() { pickerEvaluations += 1 }
     private let started = CACurrentMediaTime()
     private let startedEpoch = Date().timeIntervalSince1970
     private let initialHeight: CGFloat
     private let initialBodyCount = bodyEvaluations
+    private let initialPickerCount = pickerEvaluations
     private var gestureCount = 0
     private var requestCount = 0
-    private var pendingSince: CFTimeInterval?
-    private var applyTimes: [Double] = []
-    private var applyCosts: [Double] = []
-    private var latencies: [Double] = []
-    private var targets: [[Double]] = []
+    private var requests: [[Double]] = []
     private var layouts: [[Double]] = []
     private var inputSamples: [[String: Double]] = []
+    private var selectionSamples: [[Double]] = []
+    private var feedbackSamples: [[String: Double]] = []
+    private var allocationRequests: [[Double]] = []
+    private var sizingSamples: [[String: Double]] = []
+    private var transitionSamples: [[String: Double]] = []
+    private var frameNotificationSamples: [[String: Double]] = []
+    private var animationScopeSamples: [[String: Double]] = []
+    private var effectiveGeometrySamples: [[String: Double]] = []
+    private let initialEffectiveGeometryNotifications: Int
+    private let effectiveGeometryObservationActive: Bool
+    private var effectiveGeometryNotificationsDuringPan = 0
+    private let initialWillFrameNotifications: Int
+    private let initialDidFrameNotifications: Int
+    private var willFrameNotificationsDuringPan = 0
+    private var didFrameNotificationsDuringPan = 0
+    private var terminalEpoch: TimeInterval?
 
-    init(height: CGFloat) { initialHeight = height }
+    init(height: CGFloat, initialWillFrameNotifications: Int, initialDidFrameNotifications: Int,
+         initialEffectiveGeometryNotifications: Int, effectiveGeometryObservationActive: Bool) {
+        initialHeight = height
+        self.initialWillFrameNotifications = initialWillFrameNotifications
+        self.initialDidFrameNotifications = initialDidFrameNotifications
+        self.initialEffectiveGeometryNotifications = initialEffectiveGeometryNotifications
+        self.effectiveGeometryObservationActive = effectiveGeometryObservationActive
+    }
+    func recordEffectiveGeometryObservation(_ sample: [String: Double]) {
+        if effectiveGeometryNotificationsDuringPan < Int.max { effectiveGeometryNotificationsDuringPan += 1 }
+        guard effectiveGeometrySamples.count < 256 else { return }
+        var value = sample
+        value["deliveryElapsed"] = CACurrentMediaTime() - started
+        effectiveGeometrySamples.append(value.filter { $0.value.isFinite })
+    }
+    func recordKeyboardFrameNotification(_ sample: [String: Double]) {
+        if sample["kind"] == 1, willFrameNotificationsDuringPan < Int.max { willFrameNotificationsDuringPan += 1 }
+        if sample["kind"] == 2, didFrameNotificationsDuringPan < Int.max { didFrameNotificationsDuringPan += 1 }
+        guard frameNotificationSamples.count < 256 else { return }
+        var value = sample
+        value["deliveryElapsed"] = CACurrentMediaTime() - started
+        frameNotificationSamples.append(value.filter { $0.value.isFinite })
+    }
+    func recordAnimationScope(phase: Double, enabled: Bool) {
+        guard animationScopeSamples.count < 4_096 else { return }
+        animationScopeSamples.append(["elapsed": CACurrentMediaTime() - started,
+            "phase": phase, "animationsEnabled": enabled ? 1 : 0])
+    }
+    func recordSelection(_ height: CGFloat) {
+        if height.isFinite, selectionSamples.count < 2_048 { selectionSamples.append([CACurrentMediaTime() - started, Double(height)]) }
+    }
+    func recordFeedback(direction: KeyboardResizeStepPolicy.Feedback?) {
+        guard feedbackSamples.count < 2_048 else { return }
+        let timestamp = CACurrentMediaTime(), epoch = Date().timeIntervalSince1970
+        guard timestamp.isFinite, epoch.isFinite else { return }
+        let value: Double
+        switch direction?.direction { case .up: value = 1; case .down: value = -1; case nil: value = 0 }
+        feedbackSamples.append(["elapsed": timestamp - started, "timestamp": timestamp,
+            "epoch": epoch, "direction": value])
+    }
+    func recordAllocationRequest(_ height: CGFloat) {
+        if height.isFinite, allocationRequests.count < 16 { allocationRequests.append([CACurrentMediaTime() - started, Double(height)]) }
+    }
     func recordGesture() { gestureCount += 1 }
     func recordSample(_ sample: [String: Double]) {
         if inputSamples.count < 2_048 { inputSamples.append(sample) }
+        if let state = sample["state"], [3.0, 4.0, 5.0].contains(state) { terminalEpoch = Date().timeIntervalSince1970 }
     }
-    func recordRequest() {
+    func recordTransitionBegin(from: CGSize, to: CGSize, animated: Bool, duration: TimeInterval) -> Int? {
+        guard transitionSamples.count < 256 else { return nil }
+        let index = transitionSamples.count
+        let value: [String: Double] = ["beginElapsed": CACurrentMediaTime() - started,
+            "beginEpoch": Date().timeIntervalSince1970, "fromWidth": Double(from.width),
+            "fromHeight": Double(from.height), "toWidth": Double(to.width), "toHeight": Double(to.height),
+            "isAnimated": animated ? 1 : 0, "duration": duration, "completionRegistered": -1]
+        transitionSamples.append(value.filter { $0.value.isFinite })
+        return index
+    }
+    func recordTransitionRegistration(_ index: Int, accepted: Bool) {
+        guard transitionSamples.indices.contains(index) else { return }
+        transitionSamples[index]["completionRegistered"] = accepted ? 1 : 0
+    }
+    func recordTransitionCompletion(_ index: Int, cancelled: Bool) {
+        guard transitionSamples.indices.contains(index) else { return }
+        transitionSamples[index]["completionElapsed"] = CACurrentMediaTime() - started
+        transitionSamples[index]["completionEpoch"] = Date().timeIntervalSince1970
+        transitionSamples[index]["cancelled"] = cancelled ? 1 : 0
+    }
+    func recordSizingSnapshot(_ snapshot: [String: Double]) {
+        guard sizingSamples.count < 2_048 else { return }
+        var value = snapshot
+        value["elapsed"] = CACurrentMediaTime() - started
+        sizingSamples.append(value.filter { $0.value.isFinite })
+    }
+    func recordRequest(_ height: CGFloat) {
         requestCount += 1
-        if pendingSince == nil { pendingSince = CACurrentMediaTime() }
-    }
-    func recordApply(_ height: CGFloat, began: CFTimeInterval) {
-        let now = CACurrentMediaTime()
-        applyTimes.append(began)
-        applyCosts.append((now - began) * 1_000)
-        if let pendingSince { latencies.append((began - pendingSince) * 1_000) }
-        pendingSince = nil
-        if targets.count < 1_024 { targets.append([began - started, Double(height)]) }
+        if requests.count < 2_048 { requests.append([CACurrentMediaTime() - started, Double(height)]) }
     }
     func recordLayout(_ height: CGFloat) {
         guard height.isFinite, layouts.last?.last != Double(height), layouts.count < 1_024 else { return }
         layouts.append([CACurrentMediaTime() - started, Double(height)])
     }
     func finish(height: CGFloat, committed: Bool) {
-        let gaps = zip(applyTimes.dropFirst(), applyTimes).map { ($0 - $1) * 1_000 }
-        func percentile(_ values: [Double], fraction: Double) -> Double {
-            let sorted = values.sorted()
-            return sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * fraction))]
-        }
         let value: [String: Any] = [
+            "mode": "one-row-on-release",
             "duration": CACurrentMediaTime() - started,
             "startedEpoch": startedEpoch,
+            "startedTimestamp": started,
             "commitEpoch": Date().timeIntervalSince1970,
+            "panEndedEpoch": terminalEpoch ?? Date().timeIntervalSince1970,
             "initialHeight": Double(initialHeight), "finalHeight": Double(height),
             "gestureSamples": gestureCount, "queuedRequests": requestCount,
-            "previewUpdates": applyTimes.count,
-            "heightCommits": committed && height != initialHeight ? 1 : 0,
+            "windowHeightRequests": allocationRequests.count,
+            "allocationRequests": allocationRequests,
+            "selectedHeights": selectionSamples,
+            "feedbackSamples": feedbackSamples,
+            "heightCommits": committed ? 1 : 0,
+            "persistenceCommits": committed ? 1 : 0,
+            "cancelled": !committed,
             "commitTimestamp": CACurrentMediaTime(),
-            "maxApplyGapMs": gaps.max() ?? 0, "p95ApplyGapMs": percentile(gaps, fraction: 0.95),
-            "maxRequestToApplyMs": latencies.max() ?? 0,
-            "maxConstraintCostMs": applyCosts.max() ?? 0,
             "bodyEvaluations": Self.bodyEvaluations - initialBodyCount,
-            "previewHeights": targets, "layoutHeightsDuringDrag": layouts,
-            "inputSamples": inputSamples
+            "pickerEvaluations": Self.pickerEvaluations - initialPickerCount,
+            "selectedHeightRequests": requests, "layoutHeightsDuringDrag": layouts,
+            "inputSamples": inputSamples, "selfSizingSamples": sizingSamples,
+            "keyboardWillFrameNotificationsBeforePan": initialWillFrameNotifications,
+            "keyboardDidFrameNotificationsBeforePan": initialDidFrameNotifications,
+            "keyboardWillFrameNotificationsDuringPan": willFrameNotificationsDuringPan,
+            "keyboardDidFrameNotificationsDuringPan": didFrameNotificationsDuringPan,
+            "keyboardFrameNotificationSamples": frameNotificationSamples,
+            "animationSuppressionSamples": animationScopeSamples,
+            "effectiveGeometryObservationActiveAtBegin": effectiveGeometryObservationActive,
+            "effectiveGeometryNotificationsBeforePan": initialEffectiveGeometryNotifications,
+            "effectiveGeometryNotificationsDuringPan": effectiveGeometryNotificationsDuringPan,
+            "effectiveGeometryNotificationSamples": effectiveGeometrySamples,
+            "transitionCallbacks": transitionSamples.count, "transitionSamples": transitionSamples,
+            "transitionCompletionsDuringDrag": transitionSamples.filter { $0["completionElapsed"] != nil }.count,
+            "transitionPendingAtFinish": transitionSamples.filter { $0["completionElapsed"] == nil }.count
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
               let json = String(data: data, encoding: .utf8) else { return }
@@ -421,31 +1196,80 @@ private enum KeyboardItem {
     }
 }
 
+private enum KeyboardInputCommand {
+    case query(String), space, returnKey, shift, layout(KeyboardTypingLayout), toolbar, delete, collapse, favorites
+}
+
+private enum KeyboardPanel { case typing, unicode }
+
+@MainActor
+private final class KeyboardTypingModel: ObservableObject {
+    @Published private(set) var state = KeyboardTypingState()
+    func update(_ change: (inout KeyboardTypingState) -> Void) {
+        var next = state
+        change(&next)
+        if next != state { state = next }
+    }
+}
+
 @MainActor
 private final class KeyboardModel: ObservableObject {
-    @Published var section: KeyboardSection = .symbols {
-        didSet { if isSearching || hasSearchQuery { scheduleSearch() } }
-    }
-    @Published var isSearching = false
-    @Published var query = "" { didSet { queryCursor = query.count; scheduleSearch() } }
-    @Published private(set) var queryCursor = 0
-    @Published var edition: UnicodeEdition {
+    @Published private(set) var panel: KeyboardPanel = .typing {
         didSet {
-            defaults.set(edition == .latest ? "latest" : "draft", forKey: "keyboard.unicodeEdition")
+#if DEBUG
+            recordNavigation(event: 4, phase: 0, previousPanel: oldValue == .typing ? 0 : 1)
+#endif
+            if panel != oldValue { invalidateInputMode() }
+        }
+    }
+    let typing = KeyboardTypingModel()
+    @Published private(set) var keySettings: KeyboardKeySettings.Snapshot
+    var typingState: KeyboardTypingState { typing.state }
+    // The view acknowledges its current row budget without publishing a
+    // second typing state or changing Shift for a geometry-only update.
+    var typingAuxiliaryRowVisible: Bool?
+    @Published private(set) var inputModeID = UUID()
+    var inputModeChanged: (() -> Void)?
+    var typingActivated: (() -> Void)?
+    @Published var section: KeyboardSection = .symbols {
+        didSet {
+            if section != oldValue { invalidateInputMode() }
+            if isSearching || hasSearchQuery { scheduleSearch() }
+        }
+    }
+    @Published var isSearching = false {
+        didSet { if isSearching != oldValue { invalidateInputMode() } }
+    }
+    @Published var query = "" {
+        didSet {
+            queryCursor = query.count
+            if query != oldValue { queryEdited?() }
+            scheduleSearch()
+        }
+    }
+    var queryEdited: (() -> Void)?
+    @Published private(set) var queryCursor = 0
+    @Published private(set) var edition: UnicodeEdition {
+        didSet {
+            if edition != oldValue { invalidateInputMode() }
             refreshCatalog()
         }
     }
     @Published var order: UnicodeSortOrder {
         didSet {
             defaults.set(orderValue, forKey: "keyboard.unicodeSortOrder")
+            if order != oldValue { invalidateInputMode() }
             refreshCatalog()
         }
     }
-    @Published var useUnicodeFonts: Bool {
+    @Published private(set) var useUnicodeFonts: Bool {
         didSet {
-            defaults.set(useUnicodeFonts, forKey: "keyboardUnicodeFonts")
-            if !useUnicodeFonts { UnicodeFontSupport.clearCache() }
+            if oldValue && !useUnicodeFonts { UnicodeFontSupport.clearCache() }
         }
+    }
+    @Published private(set) var showsCollapseKey: Bool
+    @Published var showsUnicodeToolbar = false {
+        didSet { if showsUnicodeToolbar != oldValue { invalidateInputMode() } }
     }
     @Published private(set) var results: [UnicodeCharacter] = []
     @Published private(set) var emojiResults: [UnicodeEmojiEntry] = []
@@ -459,20 +1283,56 @@ private final class KeyboardModel: ObservableObject {
     @Published private(set) var blockCharacters: [UnicodeCharacter] = []
     @Published private(set) var hasMoreBlockCharacters = false
     @Published private(set) var blockLoading = false
-    @Published var lastItem: KeyboardItem?
-    @Published var inspection: KeyboardItem? { didSet { if !batchingPresentation { presentationChanged?(true) } } }
-    @Published var showFavorites = true
+    @Published var inspection: KeyboardItem? {
+        didSet {
+            if inspection?.keyIdentifier != oldValue?.keyIdentifier { invalidateInputMode() }
+            if !batchingPresentation { presentationChanged?() }
+        }
+    }
+    @Published var symbolBoardManagerPresented = false {
+        didSet { if symbolBoardManagerPresented != oldValue { invalidateInputMode() } }
+    }
+    @Published var symbolBoardActionError: String?
+    @Published var symbolBoardEditingKeyID: String?
+    @Published var symbolBoardSaveText: String? {
+        didSet {
+            if symbolBoardSaveText.map({ Array($0.utf16) }) != oldValue.map({ Array($0.utf16) }) { invalidateInputMode() }
+        }
+    }
+    @Published var symbolBoardInspectionText: String? {
+        didSet {
+            if symbolBoardInspectionText.map({ Array($0.utf16) }) != oldValue.map({ Array($0.utf16) }) { invalidateInputMode() }
+            if !batchingPresentation { presentationChanged?() }
+        }
+    }
+    @Published private(set) var symbolBoardPickerTarget: SymbolBoardPickerTarget?
+    private struct SymbolBoardPickerSnapshot {
+        let query: String
+        let caret: Int
+        let section: KeyboardSection
+        let panel: KeyboardPanel
+        let searching: Bool
+        let inspection: KeyboardItem?
+        let boardInspection: String?
+        let editingKeyID: String?
+    }
+    private var symbolBoardPickerSnapshot: SymbolBoardPickerSnapshot?
+    private var symbolBoardPickerSessionID: UUID?
+    private var symbolBoardPickerDocumentIsCurrent: (() -> Bool)?
+    @Published var showFavorites = true {
+        didSet { if showFavorites != oldValue { invalidateInputMode() } }
+    }
     @Published var needsInputModeSwitchKey = true
     @Published var returnTitle = "Return"
     @Published var isCompactLayout = false
     @Published var isPadLayout = false
     // Native resize layout owns this value. Publishing it would rebuild the
     // entire SwiftUI character grid for every finger movement.
-    var presentationHeight: CGFloat = 300
+    var presentationHeight: CGFloat = KeyboardLayoutPolicy.defaultPortraitBrowseHeight
     private(set) var portraitBrowseHeight: CGFloat
     private(set) var portraitExpandedHeight: CGFloat = 340
     var portraitResizeRange: ClosedRange<CGFloat>?
-    var presentationChanged: ((Bool) -> Void)?
+    var presentationChanged: (() -> Void)?
     private var batchingPresentation = false
     private var resizeSession: KeyboardResizeSession?
     private let defaults = UserDefaults.standard
@@ -485,10 +1345,216 @@ private final class KeyboardModel: ObservableObject {
     private var emojiPageTask: Task<Void, Never>?
     private var loadingSymbolPage = false
     private var loadingEmojiPage = false
+    private var catalogLoaded = false
+
+    var showsUnicode: Bool { panel == .unicode || isSearching || inspection != nil || symbolBoardInspectionText != nil || symbolBoardManagerPresented }
+    var hasSymbolBoardOverlay: Bool { symbolBoardManagerPresented || symbolBoardSaveText != nil }
+    var isShowingFavorites: Bool { panel == .unicode && section == .saved && showFavorites && !isSearching }
+    var modeValue: String { inspection != nil || symbolBoardInspectionText != nil ? "inspection" : isSearching ? "query" : panel == .typing ? "typing" : "unicode" }
+#if DEBUG
+    func recordNavigation(event: Int, phase: Int, previousPanel: Int = -1) {
+        let mode = inspection != nil || symbolBoardInspectionText != nil ? 3 : isSearching ? 2 : panel == .typing ? 0 : 1
+        KeyboardNavigationDiagnostics.record(event: event, phase: phase, mode: mode,
+            previousPanel: previousPanel, catalogLoaded: catalogLoaded)
+    }
+#endif
+    var typingLayoutValue: String {
+        switch typingState.layout { case .letters: return "letters"; case .numbers: return "numbers"; case .symbols: return "symbols" }
+    }
+    private func invalidateInputMode() { inputModeID = UUID(); inputModeChanged?() }
+    func pressShift() { typing.update { $0.pressShift(at: ProcessInfo.processInfo.systemUptime) } }
+    func selectTypingLayout(_ layout: KeyboardTypingLayout) {
+        guard layout != typingState.layout else { return }
+        typing.update { $0.selectLayout(layout) }
+        invalidateInputMode()
+    }
+    func didInsertTypingKey(_ key: String, capturedState: KeyboardTypingState) {
+        // Another finger may have changed Shift since this key went down.
+        // The captured character still inserts, without consuming that newer
+        // explicit Shift choice or dropping a valid chorded key release.
+        guard typingState == capturedState else { return }
+        typing.update { $0.didInsertKey(key) }
+    }
+    func didInsertNumberRowKey(capturedState: KeyboardTypingState) {
+        guard typingState == capturedState else { return }
+        typing.update { $0.resetTapSequence() }
+    }
+    func didInsertLiteralGesture(capturedState: KeyboardTypingState) {
+        guard typingState == capturedState else { return }
+        typing.update { $0.didInsertLiteralGesture() }
+    }
+    func synchronizeCapitalization(_ uppercase: Bool) { typing.update { $0.synchronizeAutomaticCapitalization(uppercase) } }
+    func hostDidEdit(invalidateMode: Bool = false) {
+        typing.update { $0.didEditText() }
+        if invalidateMode { invalidateInputMode() }
+    }
+    private func ensureCatalogLoaded() {
+        guard !catalogLoaded else { return }
+        catalogLoaded = true
+        refreshCatalog()
+    }
+    func openUnicode() {
+#if DEBUG
+        recordNavigation(event: 2, phase: 1)
+#endif
+        ensureCatalogLoaded()
+#if DEBUG
+        recordNavigation(event: 2, phase: 2)
+#endif
+        showsUnicodeToolbar = true
+#if DEBUG
+        recordNavigation(event: 2, phase: 3)
+#endif
+        panel = .unicode
+#if DEBUG
+        recordNavigation(event: 2, phase: 4)
+#endif
+        presentationChanged?()
+#if DEBUG
+        recordNavigation(event: 2, phase: 5)
+#endif
+    }
+    @discardableResult
+    func toggleFavorites() -> Bool {
+        symbolBoardActionError = nil
+        if isShowingFavorites { openTyping(); return true }
+        let boards = SymbolBoardStore.shared
+        guard boards.selectPreferredStarBoard() else {
+            symbolBoardActionError = "Unable to open your preferred symbol board. Hold the star to review symbol boards."
+            return false
+        }
+        openFavorites()
+        return true
+    }
+    func toggleUnicodeToolbar() {
+#if DEBUG
+        recordNavigation(event: 3, phase: 0)
+        defer { recordNavigation(event: 3, phase: 1) }
+#endif
+        if showsUnicodeToolbar {
+            openTyping()
+            showsUnicodeToolbar = false
+        } else { showsUnicodeToolbar = true }
+    }
+    func openFavorites() {
+        cancelSymbolBoardPick(returnToManager: false)
+        ensureCatalogLoaded()
+        showFavorites = true
+        selectSection(.saved)
+    }
+    func openSymbolBoardManager(editingKeyID: String? = nil) {
+        symbolBoardActionError = nil
+        openFavorites()
+        symbolBoardEditingKeyID = editingKeyID
+        symbolBoardManagerPresented = true
+    }
+    func beginSymbolBoardSave(_ text: String) {
+        guard KeyboardVariantPolicy.validText(text) else { return }
+        symbolBoardSaveText = text
+    }
+    func closeSymbolBoardSave() { symbolBoardSaveText = nil }
+    @discardableResult
+    func beginSymbolBoardPick(_ target: SymbolBoardPickerTarget, isCurrentDocument: @escaping () -> Bool) -> Bool {
+        guard symbolBoardPickerTarget == nil, isCurrentDocument(), SymbolBoardStore.shared.canEdit,
+              SymbolBoardStore.shared.boards.contains(where: { $0.id == target.boardID }),
+              target.keyID.map({ SymbolBoardStore.shared.key(boardID: target.boardID, keyID: $0) != nil }) ?? true else { return false }
+        symbolBoardPickerSnapshot = .init(query: query, caret: queryCursor, section: section, panel: panel,
+            searching: isSearching, inspection: inspection, boardInspection: symbolBoardInspectionText,
+            editingKeyID: target.keyID ?? symbolBoardEditingKeyID)
+        let pickerSession = UUID()
+        symbolBoardPickerSessionID = pickerSession
+        symbolBoardPickerDocumentIsCurrent = { [weak self] in
+            guard let self, self.symbolBoardPickerSessionID == pickerSession, isCurrentDocument() else { return false }
+            return self.symbolBoardPickerSessionID == pickerSession
+        }
+        batchingPresentation = true
+        symbolBoardManagerPresented = false
+        symbolBoardSaveText = nil
+        inspection = nil; symbolBoardInspectionText = nil
+        showsUnicodeToolbar = true
+        panel = .unicode; section = .symbols; isSearching = true
+        symbolBoardPickerTarget = target
+        invalidateInputMode()
+        batchingPresentation = false
+        presentationChanged?()
+        return true
+    }
+    @discardableResult
+    func completeSymbolBoardPick(_ text: String) -> Bool {
+        guard let pickerSession = symbolBoardPickerSessionID, let target = symbolBoardPickerTarget else { return false }
+        let documentIsCurrent = symbolBoardPickerDocumentIsCurrent?() == true
+        // A callback may replace this picker. Never cancel or complete the
+        // replacement on behalf of the old session.
+        guard symbolBoardPickerSessionID == pickerSession else { return false }
+        guard documentIsCurrent, symbolBoardPickerTarget == target else {
+            cancelSymbolBoardPick(returnToManager: false); return false
+        }
+        let saved: Bool
+        if let keyID = target.keyID {
+            guard let key = SymbolBoardStore.shared.key(boardID: target.boardID, keyID: keyID) else { cancelSymbolBoardPick(); return false }
+            saved = SymbolBoardStore.shared.setVariants(boardID: target.boardID, keyID: keyID, variants: key.variants + [text])
+        } else { saved = SymbolBoardStore.shared.add(text: text, to: target.boardID) != nil }
+        if saved, symbolBoardPickerSessionID == pickerSession { cancelSymbolBoardPick() }
+        return saved
+    }
+    func cancelSymbolBoardPick(returnToManager: Bool = true) {
+        guard let snapshot = symbolBoardPickerSnapshot else { return }
+        batchingPresentation = true
+        symbolBoardPickerTarget = nil; symbolBoardPickerSnapshot = nil; symbolBoardPickerDocumentIsCurrent = nil
+        symbolBoardPickerSessionID = nil
+        query = snapshot.query
+        queryCursor = min(max(0, snapshot.caret), query.count)
+        section = snapshot.section; panel = snapshot.panel; isSearching = snapshot.searching
+        inspection = snapshot.inspection; symbolBoardInspectionText = snapshot.boardInspection
+        symbolBoardEditingKeyID = snapshot.editingKeyID
+        symbolBoardManagerPresented = returnToManager
+        invalidateInputMode()
+        batchingPresentation = false
+        presentationChanged?()
+    }
+    func inspectText(_ text: String) {
+        guard KeyboardVariantPolicy.validText(text) else { return }
+        batchingPresentation = true
+        inspection = nil
+        panel = .unicode
+        isSearching = false
+        portraitExpandedHeight = max(340, presentationHeight)
+        symbolBoardInspectionText = text
+        batchingPresentation = false
+        presentationChanged?()
+    }
+    func closeSymbolBoardInspection() { symbolBoardInspectionText = nil }
+    func openTyping() {
+        cancelSymbolBoardPick(returnToManager: false)
+        batchingPresentation = true
+        inspection = nil
+        symbolBoardInspectionText = nil
+        symbolBoardManagerPresented = false
+        symbolBoardSaveText = nil
+        isSearching = false
+        selectTypingLayout(.letters)
+        panel = .typing
+        batchingPresentation = false
+        // Query edits never change host Shift. On returning, recompute only
+        // its automatic hint against the actual receiving document; manual
+        // Shift/caps remain authoritative in the typing policy.
+        typingActivated?()
+        presentationChanged?()
+    }
+    func selectSection(_ section: KeyboardSection) {
+        batchingPresentation = true
+        inspection = nil
+        symbolBoardInspectionText = nil
+        panel = .unicode
+        if section == .blocks || section == .saved { isSearching = false }
+        self.section = section
+        batchingPresentation = false
+        presentationChanged?()
+    }
 
     var catalog: UnicodeCatalog { edition.catalog }
     var emojiCatalog: EmojiCatalog { edition.emojiCatalog }
-    var editionValue: String { edition == .latest ? "latest" : "draft" }
+    var editionValue: String { edition.rawValue }
     var orderValue: String {
         switch order {
         case .newestFirst: return "newestFirst"
@@ -503,15 +1569,26 @@ private final class KeyboardModel: ObservableObject {
 
     init() {
         let storedHeight = defaults.double(forKey: "keyboard.portraitBrowseHeight")
-        portraitBrowseHeight = storedHeight.isFinite && (220...420).contains(storedHeight) ? CGFloat(storedHeight) : 300
-        edition = defaults.string(forKey: "keyboard.unicodeEdition") == "latest" ? .latest : .draft
+        portraitBrowseHeight = storedHeight.isFinite && (220...420).contains(storedHeight) ? CGFloat(storedHeight) : KeyboardLayoutPolicy.defaultPortraitBrowseHeight
+        let appSettings = UnicodeEditionSettings.shared.loadSnapshot()
+        keySettings = KeyboardKeySettings.shared.loadSnapshot()
+        edition = appSettings.edition
         switch defaults.string(forKey: "keyboard.unicodeSortOrder") {
+        case "newestFirst": order = .newestFirst
         case "oldestFirst": order = .oldestFirst
-        case "codePoint": order = .codePoint
-        default: order = .newestFirst
+        default: order = .codePoint
         }
-        useUnicodeFonts = LocalPreferencePolicy.boolean(forKey: "keyboardUnicodeFonts", in: defaults)
-        refreshCatalog()
+        useUnicodeFonts = appSettings.useUnicodeFonts
+        showsCollapseKey = appSettings.showsCollapseKey
+    }
+
+    func refreshEditionFromAppSettings() {
+        let selected = UnicodeEditionSettings.shared.loadSnapshot()
+        if edition != selected.edition { edition = selected.edition }
+        if useUnicodeFonts != selected.useUnicodeFonts { useUnicodeFonts = selected.useUnicodeFonts }
+        if showsCollapseKey != selected.showsCollapseKey { showsCollapseKey = selected.showsCollapseKey }
+        let keys = KeyboardKeySettings.shared.loadSnapshot()
+        if keySettings != keys { keySettings = keys; invalidateInputMode() }
     }
 
     deinit {
@@ -523,22 +1600,23 @@ private final class KeyboardModel: ObservableObject {
     }
 
     func beginSearch() {
+        ensureCatalogLoaded()
+        showsUnicodeToolbar = true
         guard !isSearching || inspection != nil else { return }
         batchingPresentation = true
+        panel = .unicode
         inspection = nil
+        symbolBoardInspectionText = nil
         if section == .blocks || section == .saved { section = .symbols }
         portraitExpandedHeight = max(340, portraitBrowseHeight)
         isSearching = true
         batchingPresentation = false
         scheduleSearch()
-        presentationChanged?(true)
+        presentationChanged?()
     }
-    func endSearch() {
-        isSearching = false
-        presentationChanged?(true)
-    }
+    func endSearch() { openTyping() }
     func inspect(_ item: KeyboardItem) {
-        lastItem = item
+        symbolBoardInspectionText = nil
         portraitExpandedHeight = max(340, presentationHeight)
         inspection = item
     }
@@ -560,47 +1638,28 @@ private final class KeyboardModel: ObservableObject {
     @discardableResult
     func beginResize(at height: CGFloat?) -> CGFloat? {
         guard let range = portraitResizeRange else { return nil }
-        let preference = isSearching || inspection != nil ? portraitExpandedHeight : portraitBrowseHeight
+        let preference = isSearching || inspection != nil || symbolBoardInspectionText != nil ? portraitExpandedHeight : portraitBrowseHeight
         guard let session = KeyboardResizeSession(preferredHeight: preference, visibleHeight: height,
             fallbackHeight: presentationHeight, range: range) else { return nil }
         resizeSession = session
         presentationHeight = session.startHeight
         return session.startHeight
     }
-    func resizeTarget(translationY: CGFloat) -> CGFloat? {
-        guard let session = resizeSession, let range = portraitResizeRange else { return nil }
-        return session.target(translationY: translationY, range: range)
-    }
     func endResize(commitHeight: CGFloat?) {
         var session = resizeSession
         resizeSession = nil
-        guard let range = portraitResizeRange, let height = session?.finish(commitHeight: commitHeight, range: range) else { return }
-        setPortraitHeight(height, animated: true)
+        guard let range = portraitResizeRange, let height = session?.finish(commitHeight: commitHeight, range: range, rounded: false) else { return }
+        setPortraitHeight(height)
         persistBrowseHeight()
     }
-    func togglePortraitHeight() {
-        guard let range = portraitResizeRange else { return }
-        if inspection != nil { closeInspection() }
-        else if isSearching { endSearch() }
-        else if let height = KeyboardResizePolicy.toggledHeight(current: presentationHeight, range: range) {
-            setPortraitHeight(height, animated: true)
-            persistBrowseHeight()
-        }
-    }
-    func stepPortraitHeight(_ delta: CGFloat) {
+    private func setPortraitHeight(_ value: CGFloat) {
         guard let range = portraitResizeRange,
-              let height = KeyboardResizePolicy.target(startHeight: presentationHeight, translationY: -delta, in: range) else { return }
-        setPortraitHeight(height, animated: true)
-        persistBrowseHeight()
-    }
-    private func setPortraitHeight(_ value: CGFloat, animated: Bool) {
-        guard let range = portraitResizeRange,
-              let height = KeyboardResizePolicy.clampedHeight(value, in: range) else { return }
-        let previous = isSearching || inspection != nil ? portraitExpandedHeight : portraitBrowseHeight
+              let height = KeyboardResizePolicy.clampedHeight(value, in: range, rounded: false) else { return }
+        let previous = isSearching || inspection != nil || symbolBoardInspectionText != nil ? portraitExpandedHeight : portraitBrowseHeight
         guard height != previous else { return }
-        if isSearching || inspection != nil { portraitExpandedHeight = height }
+        if isSearching || inspection != nil || symbolBoardInspectionText != nil { portraitExpandedHeight = height }
         else { portraitBrowseHeight = height }
-        presentationChanged?(animated)
+        presentationChanged?()
     }
     private func persistBrowseHeight() {
         defaults.set(Double(portraitBrowseHeight), forKey: "keyboard.portraitBrowseHeight")
@@ -694,9 +1753,9 @@ private final class KeyboardModel: ObservableObject {
     }
 
     private func refreshCatalog() {
+        guard catalogLoaded else { return }
         revision += 1
         inspection = nil
-        lastItem = nil
         searchTask?.cancel()
         discoveryTask?.cancel()
         blockTask?.cancel()
@@ -837,25 +1896,64 @@ private struct KeyboardTray: View {
 
 private struct KeyboardPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.opacity(configuration.isPressed ? 0.65 : 1)
+        configuration.label
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.65 : 1)
     }
 }
 
+private struct KeyboardResizeDirectionView: View {
+    @ObservedObject var feedback: KeyboardResizeFeedback
+
+    var body: some View {
+        ZStack {
+            Color.clear
+            if let value = feedback.value {
+                Text(value.direction == .up ? "▲" : "▼")
+                    .font(.system(size: 64, weight: .regular))
+                    .foregroundStyle(KeyboardPalette.secondary)
+                    .accessibilityIdentifier("keyboard.resize.direction")
+                    .accessibilityLabel(value.direction == .up ? "Increase keyboard height" : "Decrease keyboard height")
+                    .accessibilityValue(value.direction.rawValue)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
+    }
+}
+
+private struct KeyboardTypingAuxiliaryRowVisible: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
 private struct UnicodeKeyboardView: View {
+    @Environment(\.openURL) private var openURL
     @ObservedObject var model: KeyboardModel
     @ObservedObject var store: CharacterStore
+    @ObservedObject var resizeActivity: KeyboardResizeActivity
+    @State private var typingAuxiliaryRowVisible = false
+    @State private var companionOpenRequest: UUID?
+    @State private var companionOpenFailed = false
+    @ObservedObject var symbolBoards = SymbolBoardStore.shared
     weak var controller: KeyboardViewController?
-    let insert: (UnicodeCharacter) -> Void
-    let insertEmoji: (UnicodeEmojiEntry) -> Void
-    let delete: (Bool) -> RepeatingDeleteButton.DeleteAction
-    let space: () -> Void
-    let returnKey: () -> Void
+    let delete: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
+    let action: (UUID, KeyboardInputCommand) -> () -> Bool
+    let keyActions: (UUID, KeyboardItem) -> KeyboardInspectableInteraction.Actions?
+    let queryAction: (UUID, String) -> KeyboardQueryActionSession?
+    let typingVariantActions: (UUID, String, Bool, Bool) -> KeyboardVariantActions?
+    let utilityVariantActions: (UUID, String, KeyboardInputCommand) -> KeyboardVariantActions?
+    let favoritesActions: (UUID) -> KeyboardVariantActions?
+    let boardKeyActions: (UUID, String, SymbolBoardKey) -> KeyboardVariantActions?
+    let boardConfigurationGuard: (UUID) -> (() -> Bool)?
+    let boardConfigurationSessionGuard: (UUID) -> (() -> Bool)?
+    let boardPick: (UUID, SymbolBoardPickerTarget) -> Bool
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: model.isPadLayout ? 70 : 58, maximum: 92), spacing: 6)]
     }
     private var keyHeight: CGFloat { model.isCompactLayout ? 50 : model.isPadLayout ? 60 : 56 }
-    private var headerHeight: CGFloat { model.isCompactLayout ? 36 : 40 }
-    private var controlHeight: CGFloat { model.isCompactLayout ? 34 : 38 }
+    private var headerHeight: CGFloat { 36 }
+    private var controlHeight: CGFloat { 36 }
 
     var body: some View {
 #if DEBUG
@@ -866,42 +1964,91 @@ private struct UnicodeKeyboardView: View {
                 // Keep the control in the hosted remote input hierarchy so
                 // iOS forwards continuous touches as well as button actions.
                 KeyboardResizeHandle(button: controller.resizeHandle)
-                    .frame(height: 18)
+                    .frame(height: KeyboardLayoutPolicy.resizeHandleHeight)
                     .contentShape(Rectangle())
             }
-            VStack(spacing: 6) {
-                toolbar
-                if let inspected = model.inspection {
-                    inspectionPanel(inspected)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .layoutPriority(1)
-                } else {
-                    if model.isSearching {
-                        searchContent
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .layoutPriority(1)
-                    } else {
-                        content
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .layoutPriority(1)
+            VStack(spacing: 0) {
+                // Hidden native controls must leave the remote AX hierarchy.
+                // The model restores the exact query and caret when shown.
+                if model.showsUnicodeToolbar {
+                    toolbar.frame(height: headerHeight)
+                }
+                // Preserve the same row budget with the toolbar unmounted:
+                // four points before the content and before the footer.
+                Color.clear.frame(height: 4).accessibilityHidden(true)
+                ZStack {
+                    // Keep the browser and its scroll state
+                    // mounted when daily typing covers it.
+                    unicodeContent
+                        .opacity(model.showsUnicode ? 1 : 0)
+                        .allowsHitTesting(model.showsUnicode)
+                        .accessibilityHidden(!model.showsUnicode)
+                    if !model.showsUnicode {
+                        typingContent
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
+                Color.clear.frame(height: 4).accessibilityHidden(true)
                 controls
             }
             .padding(.horizontal, 8)
             .padding(.top, model.isCompactLayout || model.isPadLayout ? 4 : 0)
             .padding(.bottom, 6)
+            .opacity(resizeActivity.isActive ? 0 : 1)
+            .allowsHitTesting(!resizeActivity.isActive && !model.hasSymbolBoardOverlay)
+            .accessibilityHidden(resizeActivity.isActive || model.hasSymbolBoardOverlay)
+            .overlay {
+                Group {
+                    if model.symbolBoardManagerPresented {
+                        SymbolBoardManagerPanel(store: symbolBoards,
+                            guardFactory: { [mode = model.inputModeID] in boardConfigurationGuard(mode) },
+                            sessionGuardFactory: { [mode = model.inputModeID] in boardConfigurationSessionGuard(mode) },
+                            pick: { target in _ = boardPick(model.inputModeID, target) },
+                            close: { model.symbolBoardManagerPresented = false },
+                            initialKeyID: model.symbolBoardEditingKeyID)
+                            .padding(8).background(KeyboardPalette.background)
+                            .id(model.inputModeID)
+                    } else if let text = model.symbolBoardSaveText {
+                        SymbolBoardSaveTargetPanel(store: symbolBoards, text: text,
+                            guardFactory: { [mode = model.inputModeID] in boardConfigurationGuard(mode) },
+                            sessionGuardFactory: { [mode = model.inputModeID] in boardConfigurationSessionGuard(mode) },
+                            close: { model.closeSymbolBoardSave() })
+                            .padding(8).background(KeyboardPalette.background).id(model.inputModeID)
+                    }
+                }
+                .opacity(resizeActivity.isActive ? 0 : 1)
+                .allowsHitTesting(!resizeActivity.isActive)
+                .accessibilityHidden(resizeActivity.isActive)
+            }
+            .overlay {
+                if resizeActivity.isActive {
+                    KeyboardResizeDirectionView(feedback: resizeActivity.feedback)
+                }
+            }
         }
         .background(KeyboardTray().ignoresSafeArea())
         .overlay(alignment: .top) {
-            if let controller {
-                KeyboardResizePreview(model: controller.resizePreview)
-                    .padding(.top, 72)
+            if companionOpenFailed || model.symbolBoardActionError != nil {
+                HStack(spacing: 8) {
+                    Text(companionOpenFailed ? "Open Uniboard from the Home Screen to change settings." : model.symbolBoardActionError ?? "")
+                        .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Button { companionOpenFailed = false; model.symbolBoardActionError = nil } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Dismiss guidance")
+                }
+                .padding(8).keyboardKeySurface(radius: 7).padding(8)
+                .accessibilityIdentifier(companionOpenFailed ? "keyboard.openCompanionApp.guidance" : "keyboard.boards.actionError")
             }
         }
         .tint(KeyboardPalette.accent)
         .environment(\.layoutDirection, .leftToRight)
         .dynamicTypeSize(.xSmall ... .xxxLarge)
+        .onPreferenceChange(KeyboardTypingAuxiliaryRowVisible.self) {
+            typingAuxiliaryRowVisible = $0
+            model.typingAuxiliaryRowVisible = $0
+        }
+        .onChange(of: model.inputModeID) { _, _ in companionOpenRequest = nil; companionOpenFailed = false }
+        .onDisappear { companionOpenRequest = nil; companionOpenFailed = false }
     }
 
     @ViewBuilder private var toolbar: some View {
@@ -920,10 +2067,12 @@ private struct UnicodeKeyboardView: View {
                     caretUTF16Offset: model.queryCaretUTF16Offset,
                     isEditing: model.isSearching,
                     isEmojiScope: model.section == .emojis,
-                    onActivate: model.beginSearch,
-                    onMoveCaret: model.moveQueryCaret
+                    contextIdentifier: model.inputModeID,
+                    enabled: model.showsUnicodeToolbar && !resizeActivity.isActive && !model.hasSymbolBoardOverlay,
+                    actionFactory: { [mode = model.inputModeID, query = model.query] in queryAction(mode, query) }
                 )
                 .frame(maxWidth: .infinity).frame(height: headerHeight)
+                .accessibilityHidden(!model.showsUnicodeToolbar || resizeActivity.isActive || model.hasSymbolBoardOverlay)
                 if !model.query.isEmpty {
                     Button { model.query = "" } label: {
                         Image(systemName: "xmark.circle.fill").font(.system(size: 16))
@@ -941,23 +2090,86 @@ private struct UnicodeKeyboardView: View {
             .keyboardKeySurface(radius: 12)
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(model.isSearching ? KeyboardPalette.accent.opacity(0.55) : Color.clear, lineWidth: 1))
 
-            sectionMenu
+            panelButton
+            if model.showsUnicode { sectionMenu }
             optionsMenu
             // A single fixed trailing key in search, browsing and inspection.
-            RepeatingDeleteKey(action: delete, isQuery: model.isSearching)
+            Group {
+                if !model.isSearching, model.keySettings.overrides["utility.delete"] != nil {
+                    KeyboardUtilityKey(text: "⌫", symbol: "delete.left", identifier: "keyboard.delete",
+                        label: "Delete backward", route: model.inputModeID,
+                        enabled: model.showsUnicodeToolbar && !resizeActivity.isActive && !model.hasSymbolBoardOverlay,
+                        keyID: "utility.delete", settings: model.keySettings, command: .delete,
+                        factory: utilityVariantActions)
+                } else {
+                    RepeatingDeleteKey(action: delete, isQuery: model.isSearching, route: model.inputModeID,
+                        enabled: model.showsUnicodeToolbar && !resizeActivity.isActive && !model.hasSymbolBoardOverlay)
+                }
+            }
                 .frame(width: 42, height: headerHeight)
                 .keyboardControlSurface()
+                .accessibilityHidden(!model.showsUnicodeToolbar || resizeActivity.isActive || model.hasSymbolBoardOverlay)
         }
         .frame(height: headerHeight)
+    }
+
+    private var panelButton: some View {
+        Button {
+#if DEBUG
+            model.recordNavigation(event: 1, phase: 0)
+#endif
+            if model.showsUnicode { model.openTyping() }
+            else { model.openUnicode() }
+        } label: {
+            HStack(spacing: 4) {
+                if model.showsUnicode { Text("ABC").font(.system(size: 12, weight: .semibold)) }
+                else {
+                    Image(systemName: "character.book.closed").font(.system(size: 14))
+                    Text("Unicode").font(.system(size: 11, weight: .medium))
+                }
+            }
+            .foregroundStyle(KeyboardPalette.accent)
+            .frame(width: model.showsUnicode ? 42 : 76, height: headerHeight)
+            .keyboardControlSurface()
+        }
+        .buttonStyle(KeyboardPressStyle())
+        .accessibilityLabel(model.showsUnicode ? "English keyboard" : "Browse Unicode")
+        .accessibilityValue(model.modeValue)
+        .accessibilityIdentifier(model.showsUnicode ? "keyboard.openTyping" : "keyboard.openUnicode")
+    }
+
+    @ViewBuilder private var unicodeContent: some View {
+        VStack(spacing: 4) {
+            if let target = model.symbolBoardPickerTarget {
+                HStack {
+                    Text(target.keyID == nil ? "Choose a key for this board" : "Choose a variant for this key")
+                        .font(.system(size: 11)).lineLimit(1)
+                    Spacer(minLength: 2)
+                    Button("Cancel") { model.cancelSymbolBoardPick() }
+                        .font(.system(size: 11)).accessibilityIdentifier("keyboard.boards.picker.cancel")
+                }.frame(height: 24).accessibilityIdentifier("keyboard.boards.picker")
+            }
+            if let text = model.symbolBoardInspectionText { boardTextInspection(text) }
+            else if let inspected = model.inspection { inspectionPanel(inspected) }
+            else if model.isSearching { searchContent }
+            else { content }
+        }
+    }
+
+    private var typingContent: some View {
+        return KeyboardTypingView(typing: model.typing, mode: model.inputModeID,
+            isPad: model.isPadLayout, compact: model.isCompactLayout,
+            favoriteBoard: symbolBoards.activeBoard, useUnicodeFonts: model.useUnicodeFonts,
+            enabled: !model.showsUnicode && !resizeActivity.isActive,
+            delete: delete, keyActions: boardKeyActions, variants: typingVariantActions,
+            keySettings: model.keySettings, utilityVariants: utilityVariantActions)
     }
 
     private var sectionMenu: some View {
         Menu {
             ForEach(KeyboardSection.allCases, id: \.self) { section in
                 Button {
-                    model.closeInspection()
-                    if section == .blocks || section == .saved { model.endSearch() }
-                    model.section = section
+                    model.selectSection(section)
                 } label: {
                     Label(section.rawValue, systemImage: model.section == section ? "checkmark" : section.icon)
                 }
@@ -967,13 +2179,10 @@ private struct UnicodeKeyboardView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: model.section.icon).font(.system(size: 14, weight: .medium))
-                if !model.isSearching && !model.isCompactLayout {
-                    Text(model.section.rawValue).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                }
                 Image(systemName: "chevron.down").font(.system(size: 7, weight: .semibold))
             }
             .foregroundStyle(KeyboardPalette.accent)
-            .frame(width: model.isSearching || model.isCompactLayout ? 40 : 86, height: headerHeight)
+            .frame(width: 36, height: headerHeight)
             .keyboardControlSurface()
         }
         .buttonStyle(KeyboardPressStyle())
@@ -985,17 +2194,6 @@ private struct UnicodeKeyboardView: View {
     private var optionsMenu: some View {
         Menu {
             Menu {
-                Button { model.edition = .latest } label: { Label("Unicode \(UnicodeEdition.latest.catalog.version) · latest", systemImage: model.edition == .latest ? "checkmark" : "circle") }
-                    .accessibilityIdentifier("keyboard.edition.latest")
-                Button { model.edition = .draft } label: { Label("Unicode \(UnicodeEdition.draft.catalog.version)", systemImage: model.edition == .draft ? "checkmark" : "circle") }
-                    .accessibilityIdentifier("keyboard.edition.draft")
-            } label: {
-                Label("Unicode \(model.catalog.version)", systemImage: "books.vertical")
-            }
-            .accessibilityLabel("Unicode edition")
-            .accessibilityValue(model.editionValue)
-            .accessibilityIdentifier("keyboard.edition")
-            Menu {
                 sortOption(.newestFirst, identifier: "newest")
                 sortOption(.oldestFirst, identifier: "oldest")
                 sortOption(.codePoint, identifier: "codepoint")
@@ -1005,35 +2203,10 @@ private struct UnicodeKeyboardView: View {
             .accessibilityLabel("Character order")
             .accessibilityValue(model.orderValue)
             .accessibilityIdentifier("keyboard.order")
-            Menu {
-                Button { model.useUnicodeFonts = false } label: {
-                    Label("Extra Unicode fonts: Off", systemImage: model.useUnicodeFonts ? "circle" : "checkmark")
-                }
-                .accessibilityIdentifier("keyboard.unicodeFonts.off")
-                Button { model.useUnicodeFonts = true } label: {
-                    Label("Extra Unicode fonts: On", systemImage: model.useUnicodeFonts ? "checkmark" : "circle")
-                }
-                .accessibilityIdentifier("keyboard.unicodeFonts.on")
-                Text("Character previews only. Emoji and host-app fonts stay unchanged. Draft coverage is limited.")
-            } label: {
-                Label("Extra Unicode fonts: \(model.useUnicodeFonts ? "On" : "Off")", systemImage: "textformat")
+            Button { [mode = model.inputModeID] in openCompanionApp(renderedMode: mode) } label: {
+                Label("Open companion app", systemImage: "arrow.up.forward.app")
             }
-            .accessibilityLabel("Fonts: Extra Unicode fonts")
-            .accessibilityValue(model.useUnicodeFonts ? "On" : "Off")
-            .accessibilityIdentifier("keyboard.unicodeFonts")
-            if let item = model.lastItem {
-                Section("Last inserted or inspected") {
-                    Button { model.inspect(item) } label: {
-                        Label("Inspect \(item.name)", systemImage: "info.circle")
-                    }
-                    .accessibilityIdentifier("keyboard.inspectLast")
-                    Button { toggleFavorite(item) } label: {
-                        Label(isFavorite(item) ? "Remove from favorites" : "Save to favorites", systemImage: isFavorite(item) ? "star.fill" : "star")
-                    }
-                    .disabled(!canToggleFavorite(item))
-                }
-            }
-            Text("Hold a key for Unicode properties.")
+            .accessibilityIdentifier("keyboard.openCompanionApp")
         } label: {
             Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color.primary)
@@ -1042,8 +2215,21 @@ private struct UnicodeKeyboardView: View {
         }
         .buttonStyle(KeyboardPressStyle())
         .accessibilityLabel("Keyboard options")
-        .accessibilityValue("\(model.editionValue), \(model.orderValue), extra fonts \(model.useUnicodeFonts ? "on" : "off")")
+        .accessibilityValue(model.orderValue)
         .accessibilityIdentifier("keyboard.options")
+    }
+
+    private func openCompanionApp(renderedMode: UUID) {
+        guard let current = boardConfigurationGuard(renderedMode), current(),
+              let url = CompanionAppRoute.settingsURL else { return }
+        let request = UUID()
+        companionOpenRequest = request
+        companionOpenFailed = false
+        openURL(url) { accepted in
+            guard companionOpenRequest == request, current() else { return }
+            companionOpenRequest = nil
+            companionOpenFailed = !accepted
+        }
     }
 
     private func sortOption(_ order: UnicodeSortOrder, identifier: String) -> some View {
@@ -1182,31 +2368,66 @@ private struct UnicodeKeyboardView: View {
     private var savedContent: some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
-                savedTab("Favorites", icon: "star", selected: model.showFavorites) { model.showFavorites = true }
+                savedTab(symbolBoards.activeBoard.name, icon: "star", selected: model.showFavorites) { model.showFavorites = true }
                 savedTab("Recent", icon: "clock", selected: !model.showFavorites) { model.showFavorites = false }
                 Spacer(minLength: 0)
-                Text("On this keyboard").font(.system(size: 9)).foregroundStyle(KeyboardPalette.secondary)
+                Button { model.openSymbolBoardManager() } label: { Image(systemName: "slider.horizontal.3") }
+                    .accessibilityLabel("Manage symbol boards").accessibilityIdentifier("keyboard.boards.open")
             }
-            let characters = model.sorted(model.showFavorites ? store.favoriteCharacters(in: model.catalog) : store.recentCharacters(in: model.catalog))
-            let emojis = model.sorted(model.showFavorites ? store.favoriteEmojiEntries(in: model.emojiCatalog) : store.recentEmojiEntries(in: model.emojiCatalog))
-            if characters.isEmpty && emojis.isEmpty {
-                emptyState(icon: model.showFavorites ? "star" : "clock", title: model.showFavorites ? "Keep your go-to characters" : "Your recent entries appear here", detail: model.showFavorites ? "Hold a character or emoji, then tap Save." : "Insert a character or complete emoji to keep it close.")
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 7) {
-                        if !characters.isEmpty {
-                            Text("Characters").font(.system(size: 11, weight: .semibold)).foregroundStyle(KeyboardPalette.secondary)
-                            characterTiles(characters)
-                        }
-                        if !emojis.isEmpty {
-                            Text("Emoji sequences").font(.system(size: 11, weight: .semibold)).foregroundStyle(KeyboardPalette.secondary)
-                            emojiTiles(emojis)
-                        }
-                    }
+            if model.showFavorites {
+                if let issue = symbolBoards.loadIssue {
+                    Text(issue.rawValue).font(.system(size: 11)).foregroundStyle(KeyboardPalette.secondary)
+                        .accessibilityIdentifier("keyboard.boards.storageIssue")
                 }
-                .scrollIndicators(.hidden)
-            }
+                if symbolBoards.hasLegacyFallback { savedRecentKeys(legacy: true) }
+                else if symbolBoards.activeBoard.keys.isEmpty {
+                    emptyState(icon: "star", title: "This board is empty", detail: "Hold a Unicode key and choose Save to select a board.")
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: savedBoardColumns, spacing: 4) {
+                            ForEach(symbolBoards.activeBoard.keys) { key in
+                                KeyboardVariantKey(text: key.text, variants: key.variants,
+                                    identifier: "keyboard.board.\(symbolBoards.activeBoard.id).key.\(key.id)",
+                                    label: symbolBoardKeyLabel(key.text), route: model.inputModeID,
+                                    enabled: model.showsUnicode && !resizeActivity.isActive, fontSize: 23,
+                                    useUnicodeFonts: model.useUnicodeFonts, showsInspection: true, showsEditing: true,
+                                    factory: { [mode = model.inputModeID, boardID = symbolBoards.activeBoard.id] in boardKeyActions(mode, boardID, key) })
+                                    .frame(height: savedKeyHeight)
+                                    .keyboardKeySurface(radius: 7)
+                            }
+                        }.padding(.bottom, 2)
+                    }.scrollIndicators(.hidden).accessibilityIdentifier("keyboard.boards.keys")
+                }
+            } else { savedRecentKeys(legacy: false) }
         }
+    }
+    private var savedKeyHeight: CGFloat { 36 }
+    private var savedBoardColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(minimum: 0), spacing: model.isPadLayout ? 7 : 5), count: 10)
+    }
+    private func savedRecentKeys(legacy: Bool) -> some View {
+        let characters = model.sorted(legacy ? store.favoriteCharacters(in: model.catalog) : store.recentCharacters(in: model.catalog))
+        let emojis = model.sorted(legacy ? store.favoriteEmojiEntries(in: model.emojiCatalog) : store.recentEmojiEntries(in: model.emojiCatalog))
+        return ScrollView {
+            LazyVGrid(columns: savedBoardColumns, spacing: 4) {
+                ForEach(characters) { character in
+                    InspectableCharacterKey(item: .character(character), favorite: false, compact: true,
+                        useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID,
+                        enabled: model.showsUnicode && !resizeActivity.isActive, glyphOnly: true,
+                        actionFactory: { [mode = model.inputModeID] in keyActions(mode, .character(character)) })
+                        .frame(maxWidth: .infinity).frame(height: savedKeyHeight)
+                        .keyboardKeySurface(radius: 7)
+                }
+                ForEach(emojis) { emoji in
+                    InspectableCharacterKey(item: .emoji(emoji), favorite: false, compact: true,
+                        useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID,
+                        enabled: model.showsUnicode && !resizeActivity.isActive, glyphOnly: true,
+                        actionFactory: { [mode = model.inputModeID] in keyActions(mode, .emoji(emoji)) })
+                        .frame(maxWidth: .infinity).frame(height: savedKeyHeight)
+                        .keyboardKeySurface(radius: 7)
+                }
+            }
+        }.scrollIndicators(.hidden)
     }
 
     private func savedTab(_ title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -1229,18 +2450,26 @@ private struct UnicodeKeyboardView: View {
             .scrollIndicators(.hidden)
     }
     private func characterTiles(_ characters: [UnicodeCharacter], pagination: (() -> Void)? = nil) -> some View {
-        LazyVGrid(columns: columns, spacing: 6) {
+#if DEBUG
+        let _ = KeyboardResizeDiagnostics.recordPickerEvaluation()
+#endif
+        return LazyVGrid(columns: columns, spacing: 6) {
             ForEach(characters) { character in
-                InspectableCharacterKey(item: .character(character), favorite: store.isFavorite(character.codePoint), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, insert: { insert(character) }, inspect: { model.inspect(.character(character)) })
+                InspectableCharacterKey(item: .character(character), favorite: store.isFavorite(character.codePoint), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.showsUnicode && !resizeActivity.isActive,
+                    actionFactory: { [mode = model.inputModeID] in keyActions(mode, .character(character)) })
                     .frame(height: keyHeight)
                     .onAppear { if character.id == characters.last?.id { pagination?() } }
             }
         }
     }
     private func emojiTiles(_ emojis: [UnicodeEmojiEntry], pagination: (() -> Void)? = nil) -> some View {
-        LazyVGrid(columns: columns, spacing: 6) {
+#if DEBUG
+        let _ = KeyboardResizeDiagnostics.recordPickerEvaluation()
+#endif
+        return LazyVGrid(columns: columns, spacing: 6) {
             ForEach(emojis) { emoji in
-                InspectableCharacterKey(item: .emoji(emoji), favorite: store.isFavoriteEmoji(emoji.id), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, insert: { insertEmoji(emoji) }, inspect: { model.inspect(.emoji(emoji)) })
+                InspectableCharacterKey(item: .emoji(emoji), favorite: store.isFavoriteEmoji(emoji.id), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.showsUnicode && !resizeActivity.isActive,
+                    actionFactory: { [mode = model.inputModeID] in keyActions(mode, .emoji(emoji)) })
                     .frame(height: keyHeight)
                     .onAppear { if emoji.id == emojis.last?.id { pagination?() } }
             }
@@ -1248,28 +2477,53 @@ private struct UnicodeKeyboardView: View {
     }
 
     private func isFavorite(_ item: KeyboardItem) -> Bool {
-        switch item {
-        case .character(let character): return store.isFavorite(character.codePoint)
-        case .emoji(let emoji): return store.isFavoriteEmoji(emoji.id)
-        }
+        symbolBoards.contains(originalText(item))
     }
     private func toggleFavorite(_ item: KeyboardItem) {
-        switch item {
-        case .character(let character): store.toggleFavorite(character.codePoint)
-        case .emoji(let emoji): store.toggleFavoriteEmoji(emoji)
-        }
+        model.beginSymbolBoardSave(originalText(item))
     }
     private func canToggleFavorite(_ item: KeyboardItem) -> Bool {
-        if case .character(let character) = item {
-            return character.category != "Cn" || isFavorite(item)
+        symbolBoards.canEdit
+    }
+    private func originalText(_ item: KeyboardItem) -> String {
+        switch item {
+        case .character(let character): return character.text
+        case .emoji(let emoji): return emoji.text
         }
-        return true
+    }
+    @ViewBuilder private func boardTextInspection(_ text: String) -> some View {
+        if text.unicodeScalars.count == 1, let point = text.unicodeScalars.first?.value,
+           let character = model.catalog.character(at: point) { inspectionPanel(.character(character)) }
+        else if let emoji = model.emojiCatalog.entries.first(where: { SymbolBoardKey.exact($0.text, text) }) { inspectionPanel(.emoji(emoji)) }
+        else {
+            VStack(spacing: 6) {
+                HStack {
+                    Button("Back") { model.closeSymbolBoardInspection() }.accessibilityIdentifier("keyboard.properties.close")
+                    Spacer(); Text("Unicode sequence").font(.system(size: 13, weight: .semibold)); Spacer()
+                    Button("Save") { model.beginSymbolBoardSave(text) }.accessibilityIdentifier("keyboard.properties.favorite")
+                }.frame(height: 30)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(symbolBoardPreview(text)).font(.system(size: 32)).frame(maxWidth: .infinity)
+                        property("Code points", value: text.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " "), identifier: "codepoints", monospaced: true)
+                        property("UTF-8", value: utf8(text), identifier: "utf8", monospaced: true)
+                        ForEach(Array(text.unicodeScalars.enumerated()), id: \.offset) { index, scalar in
+                            Text("\(index + 1). \(String(format: "U+%04X", scalar.value)) · \(model.catalog.character(at: scalar.value)?.name ?? "Unicode scalar")")
+                                .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }.padding(10)
+                }
+            }
+        }
     }
 
     private func inspectionPanel(_ item: KeyboardItem) -> some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
-                Button { model.closeInspection() } label: { Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .semibold)) }
+                Button {
+                    if model.symbolBoardInspectionText != nil { model.closeSymbolBoardInspection() }
+                    else { model.closeInspection() }
+                } label: { Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .semibold)) }
                     .accessibilityLabel("Close Unicode properties")
                     .accessibilityIdentifier("keyboard.properties.close")
                 Spacer(minLength: 0)
@@ -1278,10 +2532,10 @@ private struct UnicodeKeyboardView: View {
                     .accessibilityIdentifier("keyboard.properties")
                 Spacer(minLength: 0)
                 Button { toggleFavorite(item) } label: {
-                    Label(isFavorite(item) ? "Saved" : "Save", systemImage: isFavorite(item) ? "star.fill" : "star")
+                    Label("Save", systemImage: isFavorite(item) ? "star.fill" : "star")
                         .font(.system(size: 12, weight: .medium))
                 }
-                .accessibilityLabel(isFavorite(item) ? "Remove from favorites" : "Save to favorites")
+                .accessibilityLabel("Save to symbol board")
                 .accessibilityIdentifier("keyboard.properties.favorite")
                 .disabled(!canToggleFavorite(item))
             }
@@ -1418,87 +2672,353 @@ private struct UnicodeKeyboardView: View {
             searchKeyRow(Array("1234567890").map(String.init), rowHeight: rowHeight)
             searchKeyRow(Array("qwertyuiop").map(String.init), rowHeight: rowHeight)
             searchKeyRow(Array("asdfghjkl").map(String.init), rowHeight: rowHeight, inset: 10)
-            searchKeyRow(["+", "z", "x", "c", "v", "b", "n", "m", ":", "-"], rowHeight: rowHeight)
+            searchKeyRow(["+", "z", "x", "c", "v", "b", "n", "m", ":", "-"], rowHeight: rowHeight, includeDelete: true)
         }
     }
-    private func searchKeyRow(_ keys: [String], rowHeight: CGFloat, inset: CGFloat = 0) -> some View {
+    private func searchKeyRow(_ keys: [String], rowHeight: CGFloat, inset: CGFloat = 0, includeDelete: Bool = false) -> some View {
         HStack(spacing: 4) {
             ForEach(keys, id: \.self) { key in
-                Button { model.appendQuery(key) } label: {
-                    Text(key).font(.system(size: model.isCompactLayout ? 16 : 18)).foregroundStyle(Color.primary)
-                        .frame(maxWidth: .infinity).frame(height: rowHeight)
-                        .keyboardKeySurface(radius: 7)
-                }
-                .buttonStyle(KeyboardPressStyle())
-                .accessibilityLabel(key == "+" ? "Plus" : key == ":" ? "Colon" : key == "-" ? "Hyphen" : key)
-                .accessibilityIdentifier("keyboard.query.\(key)")
+                KeyboardTouchKey(title: key, identifier: "keyboard.query.\(key)",
+                    label: key == "+" ? "Plus" : key == ":" ? "Colon" : key == "-" ? "Hyphen" : key,
+                    fontSize: model.isCompactLayout ? 16 : 18,
+                    route: model.inputModeID,
+                    factory: { [mode = model.inputModeID] in action(mode, .query(key)) })
+                    .frame(maxWidth: .infinity).frame(height: rowHeight)
+                    .keyboardKeySurface(radius: 7)
+            }
+            if includeDelete {
+                RepeatingDeleteKey(action: delete, isQuery: true, route: model.inputModeID, identifier: "keyboard.query.delete")
+                    .frame(maxWidth: .infinity).frame(height: rowHeight)
+                    .keyboardKeySurface(radius: 7)
             }
         }
         .padding(.horizontal, inset)
     }
 
     private var controls: some View {
-        HStack(spacing: 7) {
-            if model.needsInputModeSwitchKey {
-                InputModeSwitchKey(controller: controller).frame(width: 46, height: controlHeight)
-            } else {
-                Button { controller?.dismissKeyboard() } label: {
-                    Image(systemName: "keyboard.chevron.compact.down").font(.system(size: 17))
-                        .frame(width: 46, height: controlHeight)
-                        .keyboardKeySurface()
-                }
-                .buttonStyle(KeyboardPressStyle())
-                .accessibilityLabel("Dismiss keyboard")
+        GeometryReader { geometry in
+            if let plan = KeyboardFooterLayoutPolicy.plan(availableWidth: geometry.size.width,
+                hasGlobe: model.needsInputModeSwitchKey, showsCollapse: model.showsCollapseKey,
+                showsPage: !model.showsUnicode, isPad: model.isPadLayout) {
+                footerControls(plan)
             }
-            Button(action: space) {
-                Text(model.isSearching ? "Search space" : "space").font(.system(size: 14, weight: .medium)).foregroundStyle(KeyboardPalette.secondary)
-                    .frame(maxWidth: .infinity).frame(height: controlHeight)
+        }
+        .frame(height: controlHeight)
+    }
+
+    private func footerControls(_ plan: KeyboardFooterLayoutPolicy.Plan) -> some View {
+        HStack(spacing: plan.spacing) {
+            Group {
+                if model.isSearching {
+                    KeyboardTouchKey(title: "U", identifier: "keyboard.toggleUnicodeToolbar",
+                        label: model.showsUnicodeToolbar ? "Hide Unicode toolbar" : "Show Unicode toolbar",
+                        value: model.showsUnicodeToolbar ? "on" : "off", fontSize: 18,
+                        route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .toolbar) })
+                } else {
+                    KeyboardUtilityKey(text: "U", identifier: "keyboard.toggleUnicodeToolbar",
+                        label: model.showsUnicodeToolbar ? "Hide Unicode toolbar" : "Show Unicode toolbar",
+                        value: model.showsUnicodeToolbar ? "on" : "off", fontSize: 18,
+                        route: model.inputModeID, enabled: !resizeActivity.isActive,
+                        keyID: "utility.unicode", settings: model.keySettings, command: .toolbar,
+                        factory: utilityVariantActions)
+                }
+            }.frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface()
+            if model.needsInputModeSwitchKey {
+                InputModeSwitchKey(controller: controller).frame(width: plan.keyWidth, height: controlHeight)
+            }
+            if model.showsCollapseKey {
+                Group {
+                    if model.isSearching {
+                        KeyboardTouchKey(title: nil, symbol: "keyboard.chevron.compact.down",
+                            identifier: "keyboard.collapse", label: "Dismiss keyboard", fontSize: 17,
+                            route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .collapse) })
+                    } else {
+                        KeyboardUtilityKey(text: "⌄", symbol: "keyboard.chevron.compact.down",
+                            identifier: "keyboard.collapse", label: "Dismiss keyboard", fontSize: 17,
+                            route: model.inputModeID, enabled: !resizeActivity.isActive,
+                            keyID: "utility.collapse", settings: model.keySettings, command: .collapse,
+                            factory: utilityVariantActions)
+                    }
+                }.frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface()
+            }
+            if !model.showsUnicode {
+                let letters = model.typingState.layout != .letters
+                KeyboardUtilityKey(text: letters ? "ABC" : KeyboardTypingLayoutPolicy.entryTitle(auxiliaryRowVisible: typingAuxiliaryRowVisible),
+                    identifier: letters ? "keyboard.typing.letters" : "keyboard.typing.numbers",
+                    label: letters ? "Letters" : typingAuxiliaryRowVisible ? "Symbols" : "Numbers", value: model.typingLayoutValue, fontSize: 13,
+                    route: model.inputModeID, enabled: !resizeActivity.isActive,
+                    keyID: "utility.layout", settings: model.keySettings, command: .layout(letters ? .letters : .numbers),
+                    factory: utilityVariantActions)
+                    .frame(width: plan.keyWidth, height: controlHeight)
                     .keyboardKeySurface()
             }
-            .buttonStyle(KeyboardPressStyle())
-            .accessibilityLabel(model.isSearching ? "Add space to search" : "Insert space")
-            .accessibilityIdentifier("keyboard.space")
-            Button(action: returnKey) {
-                Text(model.inspection != nil ? "Back" : model.isSearching ? "Done" : model.returnTitle)
-                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(KeyboardPalette.actionText)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .frame(width: model.isPadLayout ? 112 : 84, height: controlHeight)
-                    .background(KeyboardPalette.action, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            .buttonStyle(KeyboardPressStyle())
-            .accessibilityLabel(model.inspection != nil ? "Close Unicode properties" : model.isSearching ? "Close search keys" : "\(model.returnTitle) key")
-            .accessibilityIdentifier("keyboard.return")
+            Group {
+                if model.isSearching {
+                    KeyboardVariantKey(text: "★", variants: [], identifier: "keyboard.openFavorites",
+                        label: model.isShowingFavorites ? "Back to English keyboard" : "Symbol keyboard",
+                        value: model.isShowingFavorites ? "favorites" : model.modeValue,
+                        symbol: model.isShowingFavorites ? "arrow.left" : "star", route: model.inputModeID,
+                        fontSize: 20, holdLabel: "Manage symbol keyboards",
+                        factory: { [mode = model.inputModeID] in favoritesActions(mode) })
+                } else {
+                    KeyboardUtilityKey(text: "★", symbol: model.isShowingFavorites ? "arrow.left" : "star",
+                        identifier: "keyboard.openFavorites",
+                        label: model.isShowingFavorites ? "Back to English keyboard" : "Symbol keyboard",
+                        value: model.isShowingFavorites ? "favorites" : model.modeValue, fontSize: 20,
+                        route: model.inputModeID, enabled: !resizeActivity.isActive,
+                        keyID: "utility.favorites", settings: model.keySettings, command: .favorites,
+                        holdLabel: "Manage symbol keyboards", factory: utilityVariantActions)
+                }
+            }.frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface()
+            Group {
+                if model.isSearching {
+                    KeyboardTouchKey(title: "Search space", identifier: "keyboard.space", label: "Add space to search",
+                        fontSize: 14, secondary: true, route: model.inputModeID,
+                        factory: { [mode = model.inputModeID] in action(mode, .space) })
+                } else {
+                    KeyboardUtilityKey(text: "space", identifier: "keyboard.space", label: "Insert space", fontSize: 14,
+                        foreground: .secondaryLabel, route: model.inputModeID, enabled: !resizeActivity.isActive,
+                        keyID: "utility.space", settings: model.keySettings, command: .space,
+                        factory: utilityVariantActions)
+                }
+            }.frame(width: plan.spaceWidth, height: controlHeight).keyboardKeySurface()
+            Group {
+                if model.isSearching {
+                    KeyboardTouchKey(title: "Done", identifier: "keyboard.return", label: "Close search keys",
+                        fontSize: 14, isAction: true, route: model.inputModeID,
+                        factory: { [mode = model.inputModeID] in action(mode, .returnKey) })
+                } else {
+                    let inspecting = model.inspection != nil || model.symbolBoardInspectionText != nil
+                    KeyboardUtilityKey(text: inspecting ? "Back" : model.returnTitle, identifier: "keyboard.return",
+                        label: inspecting ? "Close Unicode properties" : "\(model.returnTitle) key", fontSize: 14,
+                        foreground: .white, route: model.inputModeID, enabled: !resizeActivity.isActive,
+                        keyID: "utility.return", settings: model.keySettings, command: .returnKey,
+                        factory: utilityVariantActions)
+                }
+            }.frame(width: plan.returnWidth, height: controlHeight)
+                .background(KeyboardPalette.action, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
 }
 
-private struct KeyboardResizePreview: View {
-    @ObservedObject var model: KeyboardResizePreviewModel
+/// App-authored utility choices augment the ordinary captured command. Query
+/// editing deliberately uses its separate literal search controls instead.
+private struct KeyboardUtilityKey: View {
+    let text: String
+    var symbol: String? = nil
+    let identifier: String
+    var label: String? = nil
+    var value: String? = nil
+    var fontSize: CGFloat = 20
+    var foreground: UIColor = .label
+    let route: UUID
+    let enabled: Bool
+    let keyID: String
+    let settings: KeyboardKeySettings.Snapshot
+    let command: KeyboardInputCommand
+    var holdLabel: String? = nil
+    let factory: (UUID, String, KeyboardInputCommand) -> KeyboardVariantActions?
 
     var body: some View {
-        if let height = model.height {
-            HStack(spacing: 9) {
-                Image(systemName: "arrow.up.and.down")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(KeyboardPalette.accent)
-                VStack(spacing: 2) {
-                    Text("\(Int(height)) pt")
-                        .font(.system(size: 17, weight: .semibold).monospacedDigit())
-                    Text("Release to resize")
-                        .font(.system(size: 11))
-                        .foregroundStyle(KeyboardPalette.secondary)
+        KeyboardVariantKey(text: text, variants: [], identifier: identifier, label: label, value: value,
+            symbol: symbol, route: route, enabled: enabled, fontSize: fontSize, foreground: foreground,
+            hint: "Tap for the key’s normal action. Hold or swipe for configured choices.",
+            longPressOptions: settings.candidates(for: keyID, gesture: .longPress),
+            swipeUp: settings.candidates(for: keyID, gesture: .swipeUp),
+            swipeDown: settings.candidates(for: keyID, gesture: .swipeDown), holdLabel: holdLabel,
+            factory: { [route = route] in factory(route, keyID, command) })
+    }
+}
+
+/// Only this small subtree observes transient Shift/capitalization changes.
+/// The mounted Unicode browser is not rebuilt for each English character.
+private struct KeyboardTypingView: View {
+    @ObservedObject var typing: KeyboardTypingModel
+    let mode: UUID
+    let isPad: Bool
+    let compact: Bool
+    let favoriteBoard: SymbolBoard
+    let useUnicodeFonts: Bool
+    let enabled: Bool
+    let delete: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
+    let keyActions: (UUID, String, SymbolBoardKey) -> KeyboardVariantActions?
+    let variants: (UUID, String, Bool, Bool) -> KeyboardVariantActions?
+    let keySettings: KeyboardKeySettings.Snapshot
+    let utilityVariants: (UUID, String, KeyboardInputCommand) -> KeyboardVariantActions?
+    private var layoutValue: String {
+        switch typing.state.layout { case .letters: return "letters"; case .numbers: return "numbers"; case .symbols: return "symbols" }
+    }
+    private var shiftValue: String {
+        switch typing.state.shift { case .lowercase: return "lowercase"; case .uppercase: return "uppercase"; case .capsLock: return "capsLock" }
+    }
+    var body: some View {
+        GeometryReader { geometry in
+            if let plan = KeyboardTypingLayoutPolicy.plan(availableHeight: geometry.size.height,
+                availableWidth: geometry.size.width, compact: compact, layout: typing.state.layout,
+                favoriteCount: favoriteBoard.keys.count, isPad: isPad) {
+                VStack(spacing: plan.rowSpacing) {
+                    if plan.favoriteRowsCount > 0 {
+                        KeyboardTypingFavoriteRows(board: favoriteBoard, route: mode,
+                            rowCount: plan.favoriteRowsCount, keyHeight: plan.keyHeight,
+                            keyWidth: plan.favoriteKeyWidth, spacing: plan.rowSpacing, columnSpacing: plan.keySpacing,
+                            useUnicodeFonts: useUnicodeFonts, enabled: enabled,
+                            actionFactory: keyActions)
+                            .equatable()
+                    }
+                    if plan.numberRowCount > 0 { numberRow(height: plan.keyHeight) }
+                    ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: typing.state.layout, hasAuxiliaryRow: plan.numberRowCount > 0).enumerated()), id: \.offset) { index, keys in
+                        HStack(spacing: isPad ? 7 : 5) {
+                            if index == 2 { typingLeadingKey(height: plan.keyHeight) }
+                            ForEach(keys, id: \.self) { key in
+                                typingCharacterKey(key, hasAuxiliaryRow: plan.numberRowCount > 0,
+                                    isAuxiliaryKey: false, identifier: "keyboard.typing.key.\(key)", fontSize: compact ? 20 : 23)
+                                    .frame(maxWidth: .infinity).frame(height: plan.keyHeight)
+                                    .keyboardKeySurface(radius: 7)
+                            }
+                            if index == 2 {
+                                Group {
+                                    if keySettings.overrides["utility.delete"] == nil {
+                                        RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete")
+                                    } else {
+                                        KeyboardUtilityKey(text: "⌫", symbol: "delete.left", identifier: "keyboard.typing.delete",
+                                            label: "Delete previous character", route: mode, enabled: enabled,
+                                            keyID: "utility.delete", settings: keySettings, command: .delete,
+                                            factory: utilityVariants)
+                                    }
+                                }.frame(width: isPad ? 64 : 42, height: plan.keyHeight)
+                                    .keyboardKeySurface(radius: 7)
+                            }
+                        }
+                        .padding(.horizontal, index == 1 && typing.state.layout == .letters ? (isPad ? 24 : 12) : 0)
+                    }
+                }
+                .frame(height: plan.contentHeight)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .preference(key: KeyboardTypingAuxiliaryRowVisible.self, value: plan.numberRowCount > 0)
+            }
+        }
+    }
+
+    private func numberRow(height: CGFloat) -> some View {
+        HStack(spacing: isPad ? 7 : 5) {
+            ForEach(KeyboardTypingLayoutPolicy.auxiliaryRow(for: typing.state.layout), id: \.self) { key in
+                typingCharacterKey(key, hasAuxiliaryRow: true, isAuxiliaryKey: true,
+                    identifier: KeyboardTypingLayoutPolicy.numberRowOutput(for: key) != nil ? "keyboard.typing.number.\(key)" : "keyboard.typing.auxiliary.\(key)",
+                    fontSize: compact ? 18 : 20)
+                    .frame(maxWidth: .infinity).frame(height: height)
+                    .keyboardKeySurface(radius: 7)
+            }
+        }
+    }
+
+    private func typingCharacterKey(_ key: String, hasAuxiliaryRow: Bool, isAuxiliaryKey: Bool,
+                                    identifier: String, fontSize: CGFloat) -> some View {
+        let keyID = KeyboardKeySettings.identifier(forCharacter: key) ?? ""
+        let text = isAuxiliaryKey ? key : typing.state.label(for: key)
+        return KeyboardVariantKey(text: text,
+            variants: KeyboardVariantPolicy.englishVariants(for: key, uppercase: typing.state.shift != .lowercase),
+            identifier: identifier, value: layoutValue, route: mode, enabled: enabled, fontSize: fontSize,
+            preservesPressAcrossTextChanges: true,
+            longPressOptions: keySettings.candidates(for: keyID, gesture: .longPress),
+            swipeUp: keySettings.candidates(for: keyID, gesture: .swipeUp)
+                ?? (isAuxiliaryKey ? [] : KeyboardVariantPolicy.defaultSwipeUp(for: key, state: typing.state)),
+            swipeDown: keySettings.candidates(for: keyID, gesture: .swipeDown),
+            factory: { [mode = mode] in variants(mode, key, hasAuxiliaryRow, isAuxiliaryKey) })
+    }
+
+    @ViewBuilder private func typingLeadingKey(height: CGFloat) -> some View {
+        if typing.state.layout == .letters {
+            KeyboardUtilityKey(text: "⇧",
+                symbol: typing.state.shift == .capsLock ? "capslock.fill" : typing.state.shift == .uppercase ? "shift.fill" : "shift",
+                identifier: "keyboard.typing.shift", label: "Shift", value: shiftValue,
+                route: mode, enabled: enabled, keyID: "utility.shift", settings: keySettings,
+                command: .shift, factory: utilityVariants)
+                .frame(width: isPad ? 64 : 42, height: height)
+                .keyboardKeySurface(radius: 7)
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(typing.state.shift == .lowercase ? Color.clear : KeyboardPalette.accent.opacity(0.65), lineWidth: 1))
+        } else {
+            let symbols = typing.state.layout == .numbers
+            KeyboardUtilityKey(text: symbols ? "#+=" : "123",
+                identifier: symbols ? "keyboard.typing.symbols" : "keyboard.typing.numbers",
+                label: symbols ? "More symbols" : "Numbers", value: layoutValue, fontSize: 13,
+                route: mode, enabled: enabled, keyID: "utility.layout", settings: keySettings,
+                command: .layout(symbols ? .symbols : .numbers), factory: utilityVariants)
+                .frame(width: isPad ? 64 : 42, height: height)
+                .keyboardKeySurface(radius: 7)
+        }
+    }
+
+}
+
+/// Shift only redraws letter labels. The saved previews keep their native
+/// controls, scroll position and resolved preview fonts while their inputs match.
+private struct KeyboardTypingFavoriteRows: View, Equatable {
+    let board: SymbolBoard
+    let route: UUID
+    let rowCount: Int
+    let keyHeight: CGFloat
+    let keyWidth: CGFloat
+    let spacing: CGFloat
+    let columnSpacing: CGFloat
+    let useUnicodeFonts: Bool
+    let enabled: Bool
+    let actionFactory: (UUID, String, SymbolBoardKey) -> KeyboardVariantActions?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.route == rhs.route && lhs.rowCount == rhs.rowCount && lhs.keyHeight == rhs.keyHeight
+            && lhs.keyWidth == rhs.keyWidth && lhs.spacing == rhs.spacing && lhs.columnSpacing == rhs.columnSpacing
+            && lhs.useUnicodeFonts == rhs.useUnicodeFonts && lhs.enabled == rhs.enabled
+            && lhs.board == rhs.board
+    }
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            LazyHGrid(rows: (0..<rowCount).map { _ in GridItem(.fixed(keyHeight), spacing: spacing) }, spacing: columnSpacing) {
+                ForEach(board.keys) { key in
+                    KeyboardVariantKey(text: key.text, variants: key.variants,
+                        identifier: "keyboard.typing.favorite.\(board.id).\(key.id)",
+                        label: symbolBoardKeyLabel(key.text), route: route, enabled: enabled,
+                        fontSize: 23, useUnicodeFonts: useUnicodeFonts, showsInspection: true, showsEditing: true,
+                        factory: { [route = route] in actionFactory(route, board.id, key) })
+                        .frame(width: keyWidth, height: keyHeight)
+                        .keyboardKeySurface(radius: 7)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
-            .allowsHitTesting(false)
-            .accessibilityElement(children: .ignore)
-            .accessibilityIdentifier("keyboard.resize.preview")
-            .accessibilityLabel("Keyboard height preview")
-            .accessibilityValue("\(Int(height)) points. Release to resize.")
         }
+        .scrollIndicators(.hidden)
+        .frame(height: CGFloat(rowCount) * keyHeight + CGFloat(rowCount - 1) * spacing)
+        .accessibilityIdentifier("keyboard.typing.favorites")
+    }
+}
+
+/// Single host actions bind their route when the finger goes down. SwiftUI
+/// can update labels while a finger is held; that must not retarget the press.
+private struct KeyboardTouchKey: UIViewRepresentable {
+    let title: String?
+    var symbol: String? = nil
+    let identifier: String
+    var label: String? = nil
+    var value: String? = nil
+    var fontSize: CGFloat = 20
+    var secondary = false
+    var isAction = false
+    let route: UUID
+    let factory: () -> (() -> Bool)
+
+    func makeUIView(context: Context) -> KeyboardTouchActionButton { KeyboardTouchActionButton() }
+    func updateUIView(_ view: KeyboardTouchActionButton, context: Context) {
+        view.configure(contextIdentifier: route, actionFactory: factory)
+        view.setTitle(title, for: .normal)
+        view.setImage(symbol.flatMap { UIImage(systemName: $0) }, for: .normal)
+        view.titleLabel?.font = .systemFont(ofSize: fontSize, weight: isAction ? .semibold : .regular)
+        view.titleLabel?.adjustsFontSizeToFitWidth = true
+        view.titleLabel?.minimumScaleFactor = 0.7
+        let foreground = isAction ? KeyboardPalette.actionTextUI : secondary ? UIColor.secondaryLabel : UIColor.label
+        view.setTitleColor(foreground, for: .normal)
+        view.tintColor = foreground
+        view.accessibilityIdentifier = identifier
+        view.accessibilityLabel = label ?? title
+        view.accessibilityValue = value
     }
 }
 
@@ -1515,12 +3035,17 @@ private struct InspectableCharacterKey: UIViewRepresentable {
     let favorite: Bool
     let compact: Bool
     let useUnicodeFonts: Bool
-    let insert: () -> Void
-    let inspect: () -> Void
+    let route: UUID
+    let enabled: Bool
+    var glyphOnly = false
+    var identifier: String? = nil
+    let actionFactory: KeyboardInspectableInteraction.ActionFactory
 
     func makeUIView(context: Context) -> InspectableKeyButton { InspectableKeyButton() }
     func updateUIView(_ uiView: InspectableKeyButton, context: Context) {
-        uiView.configure(item: item, favorite: favorite, compact: compact, useUnicodeFonts: useUnicodeFonts, insert: insert, inspect: inspect)
+        uiView.configure(item: item, favorite: favorite, compact: compact, useUnicodeFonts: useUnicodeFonts, glyphOnly: glyphOnly,
+            route: route, enabled: enabled, actionFactory: actionFactory)
+        uiView.accessibilityIdentifier = identifier ?? item.keyIdentifier
     }
 }
 
@@ -1529,10 +3054,9 @@ private final class InspectableKeyButton: UIControl {
     private let code = UILabel()
     private let star = UIImageView(image: UIImage(systemName: "star.fill"))
     private var glyphHeight: NSLayoutConstraint!
-    private var insertAction: (() -> Void)?
-    private var inspectAction: (() -> Void)?
-    private var hoverTimer: Timer?
-    private var suppressTap = false
+    private var codeHeight: NSLayoutConstraint!
+    private var usesExternalKeySurface = false
+    private let interaction = KeyboardInspectableInteraction()
     private lazy var hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
 
     init() {
@@ -1567,12 +3091,13 @@ private final class InspectableKeyButton: UIControl {
         star.translatesAutoresizingMaskIntoConstraints = false
         star.tintColor = KeyboardPalette.accentUI
         glyphHeight = glyph.heightAnchor.constraint(equalToConstant: 34)
+        codeHeight = code.heightAnchor.constraint(equalToConstant: 11)
         addSubview(star)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor), glyphHeight,
-            code.heightAnchor.constraint(equalToConstant: 11),
+            codeHeight,
             star.widthAnchor.constraint(equalToConstant: 9),
             star.heightAnchor.constraint(equalToConstant: 9),
             star.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
@@ -1585,14 +3110,32 @@ private final class InspectableKeyButton: UIControl {
         addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:))))
         addTarget(self, action: #selector(touchBegan), for: .touchDown)
         addTarget(self, action: #selector(tapped), for: .touchUpInside)
+        addTarget(self, action: #selector(cancelledTouch), for: .touchCancel)
+        addTarget(self, action: #selector(cancelledPress), for: [.touchUpOutside, .touchDragExit])
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (key: InspectableKeyButton, _: UITraitCollection) in
             key.layer.borderColor = KeyboardPalette.borderUI.resolvedColor(with: key.traitCollection).cgColor
         }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    override var intrinsicContentSize: CGSize { CGSize(width: 58, height: 56) }
-    override var isHighlighted: Bool { didSet { backgroundColor = isHighlighted ? KeyboardPalette.pressedUI : KeyboardPalette.keyUI } }
-    func configure(item: KeyboardItem, favorite: Bool, compact: Bool, useUnicodeFonts: Bool, insert: @escaping () -> Void, inspect: @escaping () -> Void) {
+    override var intrinsicContentSize: CGSize {
+        usesExternalKeySurface ? CGSize(width: UIView.noIntrinsicMetric, height: 36) : CGSize(width: 58, height: 56)
+    }
+    override var isHighlighted: Bool {
+        didSet { backgroundColor = isHighlighted ? KeyboardPalette.pressedUI : usesExternalKeySurface ? .clear : KeyboardPalette.keyUI }
+    }
+    func configure(item: KeyboardItem, favorite: Bool, compact: Bool, useUnicodeFonts: Bool, glyphOnly: Bool,
+                   route: UUID, enabled: Bool, actionFactory: @escaping KeyboardInspectableInteraction.ActionFactory) {
+        if usesExternalKeySurface != glyphOnly {
+            usesExternalKeySurface = glyphOnly
+            invalidateIntrinsicContentSize()
+        }
+        backgroundColor = isHighlighted ? KeyboardPalette.pressedUI : glyphOnly ? .clear : KeyboardPalette.keyUI
+        layer.borderWidth = glyphOnly ? 0 : 0.4
+        interaction.configure(contextIdentifier: route, itemIdentifier: item.keyIdentifier,
+            enabled: enabled, actionFactory: actionFactory)
+        isUserInteractionEnabled = enabled
+        isAccessibilityElement = enabled
+        accessibilityElementsHidden = !enabled
         glyph.text = item.displayText
         glyphHeight.constant = compact ? 26 : 34
         if case .character(let character) = item {
@@ -1604,60 +3147,42 @@ private final class InspectableKeyButton: UIControl {
             accessibilityValue = nil
         }
         code.text = item.footer
-        star.isHidden = !favorite
-        insertAction = insert
-        inspectAction = inspect
+        codeHeight.isActive = !glyphOnly
+        code.isHidden = glyphOnly
+        star.isHidden = glyphOnly || !favorite
+        layer.cornerRadius = glyphOnly ? 7 : 9
         accessibilityLabel = "\(item.name), \(item.codePointLabel), \(item.ageLabel)"
         accessibilityHint = "Tap to insert. Hold or keep the pointer here to inspect Unicode properties and description."
         accessibilityIdentifier = item.keyIdentifier
         accessibilityCustomActions = [UIAccessibilityCustomAction(name: "Inspect Unicode properties") { [weak self] _ in
-            self?.inspectAction?()
-            return self != nil
+            self?.interaction.activateInspect() ?? false
         }]
     }
-    override func accessibilityActivate() -> Bool {
-        insertAction?()
-        return true
-    }
-    @objc private func touchBegan() {
-        suppressTap = false
-        hoverTimer?.invalidate()
-        hoverTimer = nil
-    }
-    @objc private func tapped() {
-        hoverTimer?.invalidate()
-        hoverTimer = nil
-        guard !suppressTap, hold.state != .began, hold.state != .changed else { return }
-        insertAction?()
+    override func accessibilityActivate() -> Bool { interaction.activateInsert() }
+    @objc private func touchBegan() { interaction.beginPress() }
+    @objc private func tapped() { _ = interaction.endPress() }
+    @objc private func cancelledPress() { interaction.cancelPress() }
+    @objc private func cancelledTouch() {
+        interaction.cancelPress(preserveInspection: hold.state == .began || hold.state == .changed)
     }
     @objc private func held(_ gesture: UILongPressGestureRecognizer) {
-        if gesture.state == .began {
-            suppressTap = true
-            hoverTimer?.invalidate()
-            hoverTimer = nil
-            inspectAction?()
+        switch gesture.state {
+        case .began: _ = interaction.inspectHeldPress()
+        case .ended, .cancelled, .failed: interaction.cancelPress()
+        default: break
         }
     }
     @objc private func hovered(_ gesture: UIHoverGestureRecognizer) {
         switch gesture.state {
-        case .began:
-            hoverTimer?.invalidate()
-            hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.65, repeats: false) { [weak self] _ in
-                guard let self, self.window != nil else { return }
-                self.suppressTap = true
-                self.inspectAction?()
-            }
-        case .ended, .cancelled, .failed:
-            hoverTimer?.invalidate()
-            hoverTimer = nil
+        case .began: interaction.beginHover()
+        case .ended, .cancelled, .failed: interaction.endHover()
         default: break
         }
     }
     override func willMove(toWindow newWindow: UIWindow?) {
-        if newWindow == nil { hoverTimer?.invalidate(); hoverTimer = nil }
+        if newWindow !== window { interaction.cancelAll() }
         super.willMove(toWindow: newWindow)
     }
-    deinit { hoverTimer?.invalidate() }
 }
 
 /// Preserve Apple's standard press-and-hold input-mode menu.
@@ -1687,12 +3212,16 @@ private struct InputModeSwitchKey: UIViewRepresentable {
 }
 
 private struct RepeatingDeleteKey: UIViewRepresentable {
-    let action: (Bool) -> RepeatingDeleteButton.DeleteAction
+    let action: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
     let isQuery: Bool
+    let route: UUID
+    var identifier = "keyboard.delete"
+    var enabled = true
     func makeUIView(context: Context) -> RepeatingDeleteButton { RepeatingDeleteButton() }
     func updateUIView(_ uiView: RepeatingDeleteButton, context: Context) {
         // Capture the scope this key currently displays, even before a model
         // transition has reached updateUIView. Each press gets one action.
-        uiView.configure(isQuery: isQuery, actionFactory: { [isQuery] in action(isQuery) })
+        uiView.configure(isQuery: isQuery, enabled: enabled, actionFactory: { [route, isQuery] in action(route, isQuery) })
+        uiView.accessibilityIdentifier = identifier
     }
 }

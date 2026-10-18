@@ -22,20 +22,27 @@ final class KeyboardRepeatingDeleteControlTests: XCTestCase {
         }
         // Deliver even invalidated jobs to model callbacks already queued when
         // cancellation happened. Our token guard, not Timer itself, must stop them.
-        func deliver(_ index: Int) { jobs[index].action(jobs[index].timer) }
+        func deliver(_ index: Int) {
+            let job = jobs[index]
+            job.action(job.timer)
+            // A real run-loop expiry invalidates a one-shot timer after its
+            // callback. Still deliver explicitly queued jobs above validity.
+            if !job.repeats { job.timer.invalidate() }
+        }
     }
 
     private final class Route {
         var isQuery: Bool
+        var modeIdentifier = UUID()
         var documentIdentifier = UUID()
         var queryDeletes = 0
         var hostDeletes = 0
         var factories = 0
         init(isQuery: Bool) { self.isQuery = isQuery }
-        var context: KeyboardDeleteContext { .init(isQuery: isQuery, documentIdentifier: documentIdentifier) }
-        func action(renderedIsQuery: Bool) -> RepeatingDeleteButton.DeleteAction {
+        var context: KeyboardDeleteContext { .init(modeIdentifier: modeIdentifier, isQuery: isQuery, documentIdentifier: documentIdentifier) }
+        func action(renderedMode: UUID, renderedIsQuery: Bool) -> RepeatingDeleteButton.DeleteAction {
             factories += 1
-            let bound = KeyboardDeleteContext(isQuery: renderedIsQuery, documentIdentifier: documentIdentifier)
+            let bound = KeyboardDeleteContext(modeIdentifier: renderedMode, isQuery: renderedIsQuery, documentIdentifier: documentIdentifier)
             return bound.guardedAction(currentContext: { [weak self] in self?.context }, delete: { [weak self] in
                 if renderedIsQuery { self?.queryDeletes += 1 }
                 else { self?.hostDeletes += 1 }
@@ -44,7 +51,8 @@ final class KeyboardRepeatingDeleteControlTests: XCTestCase {
     }
 
     private func configure(_ button: RepeatingDeleteButton, route: Route, renderedIsQuery: Bool) {
-        button.configure(isQuery: renderedIsQuery) { route.action(renderedIsQuery: renderedIsQuery) }
+        let renderedMode = route.modeIdentifier
+        button.configure(isQuery: renderedIsQuery) { route.action(renderedMode: renderedMode, renderedIsQuery: renderedIsQuery) }
     }
 
     func testNormalHoldUsesOneFactoryAndKeepsRepeatCadence() {
@@ -67,6 +75,38 @@ final class KeyboardRepeatingDeleteControlTests: XCTestCase {
         XCTAssertEqual(route.factories, 1)
         button.sendActions(for: .touchUpInside)
         XCTAssertFalse(clock.jobs[1].timer.isValid)
+    }
+
+    func testHiddenHeaderDeleteIsAbsentFromAccessibilityAndCannotResumeItsHeldStream() {
+        let clock = Clock(), route = Route(isQuery: false)
+        let button = RepeatingDeleteButton(scheduleTimer: clock.schedule)
+        let mode = route.modeIdentifier
+        let factory = { route.action(renderedMode: mode, renderedIsQuery: false) }
+        button.configure(isQuery: false, actionFactory: factory)
+        button.sendActions(for: .touchDown)
+        clock.deliver(0)
+        XCTAssertEqual(route.hostDeletes, 2)
+        button.configure(isQuery: false, enabled: false, actionFactory: factory)
+        XCTAssertFalse(button.isEnabled)
+        XCTAssertFalse(button.isUserInteractionEnabled)
+        XCTAssertFalse(button.isAccessibilityElement)
+        XCTAssertTrue(button.accessibilityElementsHidden)
+        XCTAssertTrue(button.isHidden)
+        clock.deliver(1)
+        button.sendActions(for: .touchDown)
+        XCTAssertFalse(button.accessibilityActivate())
+        XCTAssertEqual(route.hostDeletes, 2)
+        button.configure(isQuery: false, enabled: true, actionFactory: factory)
+        XCTAssertTrue(button.isEnabled)
+        XCTAssertTrue(button.isAccessibilityElement)
+        XCTAssertFalse(button.accessibilityElementsHidden)
+        XCTAssertFalse(button.isHidden)
+        clock.deliver(0); clock.deliver(1)
+        XCTAssertEqual(route.hostDeletes, 2)
+        button.sendActions(for: .touchUpInside)
+        button.sendActions(for: .touchDown)
+        XCTAssertEqual(route.hostDeletes, 3)
+        button.sendActions(for: .touchUpInside)
     }
 
     func testConfiguredScopeTransitionsStopBothDirectionsAndQueuedCallbacks() {
@@ -156,8 +196,69 @@ final class KeyboardRepeatingDeleteControlTests: XCTestCase {
         }
     }
 
+    func testModeChangesStopDelayAndRepeatsAndCannotReviveWhenReturning() {
+        for scope in [true, false] {
+            for alreadyRepeating in [false, true] {
+                let clock = Clock(), route = Route(isQuery: scope)
+                let button = RepeatingDeleteButton(scheduleTimer: clock.schedule)
+                let originalMode = route.modeIdentifier, originalDocument = route.documentIdentifier
+                configure(button, route: route, renderedIsQuery: scope)
+                button.sendActions(for: .touchDown)
+                if alreadyRepeating { clock.deliver(0) }
+                let pending = alreadyRepeating ? 1 : 0
+                let before = (route.queryDeletes, route.hostDeletes)
+                let jobCount = clock.jobs.count
+                route.modeIdentifier = UUID() // Panel/page/section changed, not document or query scope.
+                XCTAssertEqual(route.documentIdentifier, originalDocument)
+                XCTAssertEqual(route.isQuery, scope)
+                clock.deliver(pending)
+                XCTAssertFalse(clock.jobs[pending].timer.isValid)
+                XCTAssertEqual(clock.jobs.count, jobCount)
+                route.modeIdentifier = originalMode // Even exact old identity must not revive this held press.
+                configure(button, route: route, renderedIsQuery: scope)
+                for index in clock.jobs.indices { clock.deliver(index) }
+                button.sendActions(for: .touchDown)
+                XCTAssertEqual(route.queryDeletes, before.0)
+                XCTAssertEqual(route.hostDeletes, before.1)
+                XCTAssertEqual(route.factories, 1)
+                XCTAssertEqual(clock.jobs.count, jobCount)
+                button.sendActions(for: .touchUpInside)
+                button.sendActions(for: .touchDown)
+                XCTAssertEqual(route.queryDeletes, before.0 + (scope ? 1 : 0))
+                XCTAssertEqual(route.hostDeletes, before.1 + (scope ? 0 : 1))
+                XCTAssertEqual(route.factories, 2)
+                button.sendActions(for: .touchCancel)
+            }
+        }
+    }
+
+    func testStaleRenderedModeRejectsTheFirstDeleteWithoutScheduling() {
+        for scope in [true, false] {
+            let clock = Clock(), route = Route(isQuery: scope)
+            let button = RepeatingDeleteButton(scheduleTimer: clock.schedule)
+            configure(button, route: route, renderedIsQuery: scope)
+            route.modeIdentifier = UUID() // Model changed before the rendered factory updated.
+            button.sendActions(for: .touchDown)
+            XCTAssertEqual(route.queryDeletes, 0)
+            XCTAssertEqual(route.hostDeletes, 0)
+            XCTAssertEqual(route.factories, 1)
+            XCTAssertTrue(clock.jobs.isEmpty)
+            configure(button, route: route, renderedIsQuery: scope)
+            button.sendActions(for: .touchDown) // Updating the future factory cannot restart a rejected hold.
+            XCTAssertEqual(route.factories, 1)
+            XCTAssertTrue(clock.jobs.isEmpty)
+            button.sendActions(for: .touchUpInside)
+            button.sendActions(for: .touchDown)
+            XCTAssertEqual(route.queryDeletes, scope ? 1 : 0)
+            XCTAssertEqual(route.hostDeletes, scope ? 0 : 1)
+            XCTAssertEqual(route.factories, 2)
+            XCTAssertEqual(clock.jobs.count, 1)
+            button.sendActions(for: .touchCancel)
+        }
+    }
+
     func testMissingCurrentDocumentRejectsTheAction() {
-        let context = KeyboardDeleteContext(isQuery: false, documentIdentifier: UUID())
+        let context = KeyboardDeleteContext(modeIdentifier: UUID(), isQuery: false, documentIdentifier: UUID())
         var deletes = 0
         let action = context.guardedAction(currentContext: { nil }, delete: { deletes += 1 })
         XCTAssertFalse(action())
@@ -301,10 +402,53 @@ final class KeyboardRepeatingDeleteControlTests: XCTestCase {
         XCTAssertEqual(route.hostDeletes, 2)
     }
 
+    func testAccessibilityFactoryCannotDeleteAfterHidingEvenIfShownAgainBeforeReturning() {
+        for showAgain in [false, true] {
+            let clock = Clock()
+            let button = RepeatingDeleteButton(scheduleTimer: clock.schedule)
+            var oldDeletes = 0, newDeletes = 0
+            let replacement: RepeatingDeleteButton.ActionFactory = { { newDeletes += 1; return true } }
+            button.configure(isQuery: false) { [weak button] in
+                button?.configure(isQuery: false, enabled: false, actionFactory: replacement)
+                if showAgain { button?.configure(isQuery: false, enabled: true, actionFactory: replacement) }
+                return { oldDeletes += 1; return true }
+            }
+            XCTAssertFalse(button.accessibilityActivate())
+            XCTAssertEqual(oldDeletes, 0)
+            XCTAssertEqual(newDeletes, 0)
+            XCTAssertTrue(clock.jobs.isEmpty)
+            button.configure(isQuery: false, enabled: true, actionFactory: replacement)
+            XCTAssertTrue(button.accessibilityActivate())
+            XCTAssertEqual(newDeletes, 1)
+            XCTAssertTrue(clock.jobs.isEmpty)
+        }
+    }
+
+    func testOldAccessibilityFactoryCannotExecuteOrCancelAReplacementPhysicalPress() {
+        let clock = Clock()
+        let button = RepeatingDeleteButton(scheduleTimer: clock.schedule)
+        var oldDeletes = 0, newDeletes = 0
+        button.configure(isQuery: false) { [weak button] in
+            button?.configure(isQuery: false) { { newDeletes += 1; return true } }
+            button?.sendActions(for: .touchDown)
+            return { oldDeletes += 1; return true }
+        }
+        XCTAssertFalse(button.accessibilityActivate())
+        XCTAssertEqual(oldDeletes, 0)
+        XCTAssertEqual(newDeletes, 1)
+        XCTAssertEqual(clock.jobs.count, 1)
+        clock.deliver(0)
+        clock.deliver(1)
+        XCTAssertEqual(newDeletes, 3)
+        XCTAssertEqual(oldDeletes, 0)
+        button.sendActions(for: .touchCancel)
+    }
+
     func testDeinitializationInvalidatesTimersAndQueuedJobsAreHarmless() {
         let clock = Clock()
         var button: RepeatingDeleteButton? = RepeatingDeleteButton(scheduleTimer: clock.schedule)
-        weak var weakButton = button
+        weak var weakButton: RepeatingDeleteButton?
+        weakButton = button
         button?.configure(isQuery: false) { { true } }
         button?.sendActions(for: .touchDown)
         button = nil

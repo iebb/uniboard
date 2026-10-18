@@ -5,6 +5,33 @@ struct SetupView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 27) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Unicode version").font(.headline).foregroundStyle(Palette.ink)
+                    CatalogEditionPicker()
+                    Text("The latest release is selected by default. Choose either of the two previous releases, or opt in to the development draft. Your choice applies to the app and keyboard.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                    if let message = preferences.editionSaveError {
+                        Text(message).font(.caption).foregroundStyle(Palette.accent)
+                            .accessibilityIdentifier("unicodeEdition.saveError")
+                    }
+                }
+                .padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+
+                NavigationLink {
+                    KeyboardKeySettingsView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "keyboard").font(.title2)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Customize keyboard keys").font(.headline)
+                            Text("Long press and swipe choices for each key.")
+                                .font(.caption).foregroundStyle(Palette.muted)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption)
+                    }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+                }.accessibilityIdentifier("keyboardKeySettings")
+
                 VStack(alignment: .leading, spacing: 15) {
                     Image(systemName: "keyboard").font(.system(size: 39, weight: .light)).foregroundStyle(Palette.accent)
                     Text("A keyboard with\na little more to say.")
@@ -40,12 +67,12 @@ struct SetupView: View {
                 }.accessibilityIdentifier("tryKeyboard")
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Extra Unicode fonts", isOn: $preferences.useUnicodeFonts)
+                    Toggle("Extra Unicode fonts", isOn: Binding(get: { preferences.useUnicodeFonts }, set: { preferences.selectUnicodeFonts($0) }))
                         .font(.headline).foregroundStyle(Palette.ink)
                         .accessibilityIdentifier("extraUnicodeFonts")
                     Text("Off by default. Use bundled fonts for some missing character previews. Emoji and interface text keep iOS fonts; other apps use their own fonts. New draft coverage is limited.")
                         .font(.caption).foregroundStyle(Palette.muted)
-                    Text("The app and keyboard remember this setting separately. In the keyboard, open Options → Extra Unicode fonts to change its previews.")
+                    Text("This setting applies to both the app and keyboard. It does not require Full Access.")
                         .font(.caption).foregroundStyle(Palette.muted)
                     NavigationLink {
                         FontLicenseView()
@@ -56,6 +83,14 @@ struct SetupView: View {
                     .accessibilityIdentifier("fontLicenses")
                 }
                 .padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Show keyboard collapse key", isOn: Binding(get: { preferences.showsCollapseKey }, set: { preferences.selectCollapseKey($0) }))
+                        .font(.headline).foregroundStyle(Palette.ink)
+                        .accessibilityIdentifier("showKeyboardCollapseKey")
+                    Text("Off by default. Adds a key for dismissing Uniboard; iOS also provides its own keyboard controls.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
 
                 VStack(alignment: .leading, spacing: 14) {
                     Label("Private, by design", systemImage: "lock.shield")
@@ -71,17 +106,16 @@ struct SetupView: View {
                 }
                 Divider()
                 VStack(alignment: .leading, spacing: 8) {
-                    CatalogControls(showSort: false)
                     Text("UNICODE \(preferences.catalog.version)")
                         .font(.caption.monospaced().weight(.semibold)).foregroundStyle(Palette.accent)
-                    Text("Switch between the latest Unicode release and the development draft, both bundled offline. The app and keyboard remember their own choices. Draft assignments may change, and your iOS fonts may not display every new character. Hold or hover over any character for its name, description and properties.")
+                    Text("All four versions are bundled offline. Draft assignments may change, and iOS fonts may not display every new character. Hold or hover over any character for its name, description and properties.")
                         .font(.caption).foregroundStyle(Palette.muted)
                     NavigationLink("Unicode data & license") { UnicodeLicenseView() }.font(.caption)
                 }
             }.padding(24).frame(maxWidth: 680).frame(maxWidth: .infinity)
         }
         .background(Palette.background)
-        .navigationTitle("Set up Uniboard").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
     }
 
     private func step(_ number: Int, title: String, detail: String) -> some View {
@@ -108,12 +142,14 @@ struct KeyboardTestView: View {
                         .font(.subheadline).foregroundStyle(Palette.muted)
                 }
                 TextEditor(text: $text)
+                    .keyboardType(.default)
+                    .textInputAutocapitalization(.sentences)
                     .font(compact ? .body : .title2)
                     .padding(compact ? 4 : 12).scrollContentBackground(.hidden)
                     .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
                     .accessibilityIdentifier("keyboardTestInput")
                 if !compact {
-                    Text("Search by name, description, block, or code point. Tap any character to insert it at the cursor.")
+                    Text("Type English normally, or tap Unicode to search and browse every character.")
                         .font(.caption).foregroundStyle(Palette.muted)
                 }
             }

@@ -14,6 +14,8 @@ final class UnicodeCatalogTests: XCTestCase {
     private func fixture(records: [UInt32] = [0x41, 0x42],
                          ranges: [(UInt32, UInt32, UInt8)] = [],
                          details: [UInt32: String] = [:], names: [UInt32: String] = [:],
+                         searches: [UInt32: String] = [:], contexts: [UInt32: String] = [:],
+                         contextDetails: [UInt32: String] = [:],
                          versionLabel: String = "18.0.0") throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -37,12 +39,14 @@ final class UnicodeCatalogTests: XCTestCase {
         for cp in records {
             let label = names[cp] ?? String(format: "FIXTURE LETTER %04X", cp)
             let name = string(label)
-            let detail = string(details[cp] ?? ""), search = string(label.lowercased())
+            let detail = string(details[cp] ?? ""), search = string(searches[cp] ?? label.lowercased())
+            let contextSearch = string(contexts[cp] ?? "")
+            let context = string(contextDetails[cp] ?? "")
             append(cp, to: &rows); append(name.0, to: &rows)
             short(name.1, to: &rows); short(detail.1, to: &rows)
             append(detail.0, to: &rows); append(search.0, to: &rows); append(search.1, to: &rows)
             rows.append(contentsOf: [0, 0, 0, 0])
-            for _ in 0..<4 { append(0, to: &rows) }
+            for value: UInt32 in [context.0, context.1, contextSearch.0, contextSearch.1] { append(value, to: &rows) }
         }
         for (start, end, kind) in ranges {
             let prefix = string(kind == 1 ? "HANGUL SYLLABLE " : "FIXTURE IDEOGRAPH-")
@@ -66,11 +70,196 @@ final class UnicodeCatalogTests: XCTestCase {
         return directory
     }
 
+    /// Fixed NamesList-style data exercises prose and alias semantics without
+    /// requiring the rolling upstream draft to keep any informative wording.
+    private func pinnedNamesListCatalog(includeYangqin: Bool = true) throws -> UnicodeCatalog {
+        func json(_ object: [String: Any]) throws -> String {
+            String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        }
+        var names: [UInt32: String] = [
+            0x212E: "ESTIMATED SYMBOL", 0x2603: "SNOWMAN", 0x301C: "WAVE DASH",
+            0x301D: "REVERSED DOUBLE PRIME QUOTATION MARK", 0x302A: "IDEOGRAPHIC LEVEL TONE MARK",
+            0x3038: "HANGZHOU NUMERAL TEN", 0x3039: "HANGZHOU NUMERAL TWENTY", 0x303A: "HANGZHOU NUMERAL THIRTY",
+            0xFE18: "PRESENTATION FORM FOR VERTICAL RIGHT WHITE LENTICULAR BRAKCET",
+            0xFEFF: "ZERO WIDTH NO-BREAK SPACE"]
+        var details: [UInt32: String] = [
+            0x212E: try json(["annotations": ["European packaging"]]),
+            0x2603: try json(["aliases": [["name": "snowy weather", "kind": "informal"]]]),
+            0x301C: try json(["annotations": ["This character matches JIS C 6226."],
+                             "references": [["codePoint": 0x3030, "name": "WAVY DASH"]]]),
+            0xFE18: try json(["aliases": [["name": "PRESENTATION FORM FOR VERTICAL RIGHT WHITE LENTICULAR BRACKET", "kind": "correction"]],
+                             "annotations": ["The name contains a misspelling."]]),
+            0xFEFF: try json(["aliases": [["name": "BOM", "kind": "abbreviation"]]])]
+        var searches: [UInt32: String] = [
+            0x212E: "estimated symbol european packaging", 0x2603: "snowman snowy weather",
+            0xFE18: "presentation form for vertical right white lenticular brakcet presentation form for vertical right white lenticular bracket",
+            0xFEFF: "zero width no break space bom"]
+        var contexts: [UInt32: String] = [:], contextDetails: [UInt32: String] = [:]
+        let numeralNames = ["ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE"]
+        for (index, name) in numeralNames.enumerated() {
+            let cp = UInt32(0x3021 + index)
+            names[cp] = "HANGZHOU NUMERAL " + name
+            var metadata: [String: Any] = ["numericType": "Numeric", "numericValue": String(index + 1)]
+            if cp == 0x3026 && includeYangqin {
+                metadata["aliases"] = [["name": "yangqin sign slow one half beat", "kind": "informal"]]
+                metadata["references"] = [["codePoint": 0x16FF4, "name": "YANGQIN SIGN SLOW ONE HALF BEAT"]]
+                searches[cp] = "hangzhou numeral six yangqin sign slow one half beat"
+            }
+            details[cp] = try json(metadata)
+            contexts[cp] = "suzhou numerals the use of hangzhou in the names is a misnomer"
+            contextDetails[cp] = try json(["section": "Suzhou numerals",
+                "sectionAnnotations": ["The use of HANGZHOU in the names is a misnomer."]])
+        }
+        for cp: UInt32 in [0x3038, 0x3039, 0x303A] {
+            contexts[cp] = "additional suzhou numerals"
+            contextDetails[cp] = try json(["section": "Additional Suzhou numerals"])
+        }
+        return UnicodeCatalog(resourceURL: try fixture(records: names.keys.sorted(), details: details, names: names,
+            searches: searches, contexts: contexts, contextDetails: contextDetails,
+            versionLabel: includeYangqin ? "17.0.0" : "16.0.0"))
+    }
+
     private func changeProperties(at directory: URL, _ change: (inout [String: Any]) -> Void) throws {
         let url = directory.appendingPathComponent("UnicodeProperties.json")
         var properties = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         change(&properties)
         try JSONSerialization.data(withJSONObject: properties).write(to: url)
+    }
+
+    func testEditionAndOrderingLabelsRetainStableIdentifiers() {
+        XCTAssertEqual(UnicodeEdition.versionLabel(for: .latest, metadata: [:]), "Unavailable")
+        XCTAssertEqual(UnicodeEdition.versionLabel(for: .older, metadata: [.latest: "18.0.0"]), "Unavailable")
+        XCTAssertEqual(UnicodeEdition.versionLabel(for: .previous, metadata: [.previous: "17.0.0"]), "17.0.0")
+        for edition in UnicodeEdition.allCases {
+            XCTAssertEqual(edition.id, edition.rawValue)
+            XCTAssertTrue(edition.title.hasPrefix("Unicode "))
+            XCTAssertTrue(edition.title.contains(edition.versionLabel.split(separator: ".").first.map(String.init) ?? ""))
+            if edition == .draft { XCTAssertTrue(edition.title.hasSuffix("DRAFT")) }
+            else if edition == .latest { XCTAssertTrue(edition.title.hasSuffix("latest release")) }
+            else { XCTAssertTrue(edition.title.hasSuffix("release")) }
+        }
+        for (order, title): (UnicodeSortOrder, String) in [
+            (.newestFirst, "Newest first"), (.oldestFirst, "Oldest first"), (.codePoint, "Code point")
+        ] {
+            XCTAssertEqual(order.id, order.rawValue)
+            XCTAssertEqual(order.title, title)
+        }
+    }
+
+    func testAliasAndRelatedCharacterLabelsKeepTheirSourceAndFormalStatus() {
+        for (kind, label, source, formal): (String, String, String, Bool) in [
+            ("correction", "Formal correction", "NameAliases.txt", true),
+            ("control", "Control name", "NameAliases.txt", true),
+            ("alternate", "Formal alternate", "NameAliases.txt", true),
+            ("figment", "Formal figment", "NameAliases.txt", true),
+            ("abbreviation", "Formal abbreviation", "NameAliases.txt", true),
+            ("namesListFormal", "Names list formal alias", "NamesList.txt", true),
+            ("informal", "Informative alias", "NamesList.txt", false),
+            ("future-kind", "Informative alias", "Unknown", false)
+        ] {
+            let alias = UnicodeNameAlias(name: "Fixture alias", kind: kind)
+            XCTAssertEqual(alias.id, kind + ":Fixture alias")
+            XCTAssertEqual(alias.kindLabel, label)
+            XCTAssertEqual(alias.source, source)
+            XCTAssertEqual(alias.isFormal, formal)
+        }
+        let reference = UnicodeCrossReference(codePoint: 0x1F680, name: "ROCKET")
+        XCTAssertEqual(reference.id, 0x1F680)
+        XCTAssertEqual(reference.codePointLabel, "U+1F680")
+    }
+
+    func testPresentationPlaceholdersNeverReplaceTheUnderlyingScalar() {
+        let cases: [(UInt32, String, Bool, String)] = [
+            (0x20, "Zs", true, "␣"), (0x09, "Cc", true, "⇥"),
+            (0x0A, "Cc", true, "↵"), (0x0D, "Cc", true, "↵"),
+            (0x2028, "Zl", true, "↵"), (0x2029, "Zp", true, "↵"),
+            (0, "Cc", true, "◌"), (0x0301, "Mn", false, "◌\u{301}"),
+            (0x0378, "Cn", false, "◇"), (0x41, "Lu", false, "A")
+        ]
+        for (point, category, invisible, display) in cases {
+            let character = UnicodeCharacter(codePoint: point, name: "Fixture", detail: "", blockName: "Fixture",
+                                             category: category, isInvisible: invisible)
+            XCTAssertEqual(character.id, point)
+            XCTAssertEqual(character.displayText, display)
+            XCTAssertEqual(character.text.unicodeScalars.map(\.value), [point])
+            XCTAssertEqual(character.isInvisible, invisible)
+        }
+        let letter = UnicodeCharacter(codePoint: 0x41, name: "A", detail: "", blockName: "Fixture", category: "Lu")
+        XCTAssertEqual(letter.categoryName, "Uppercase letter")
+        let invalid = UnicodeCharacter(codePoint: 0xD800, name: "Invalid", detail: "", blockName: "Fixture", category: "Future")
+        XCTAssertEqual(invalid.text, "")
+        XCTAssertEqual(invalid.categoryName, "Future")
+    }
+
+    func testBlockCardsHandleBasicSupplementarySurrogateAndInvalidRanges() {
+        let basic = UnicodeBlock(name: "Basic Latin", start: 0, end: 0x7F)
+        XCTAssertEqual(basic.id, 0)
+        XCTAssertEqual(basic.rangeLabel, "U+0000–U+007F")
+        XCTAssertEqual(basic.subtitle, "128 code points · Basic plane")
+        XCTAssertEqual(basic.symbol, "A")
+        let combining = UnicodeBlock(name: "Combining Diacritical Marks", start: 0x300, end: 0x36F)
+        XCTAssertEqual(combining.symbol, "◌\u{301}")
+        let supplementary = UnicodeBlock(name: "Fixture", start: 0x10000, end: 0x10001)
+        XCTAssertEqual(supplementary.subtitle, "2 code points · Plane 1")
+        XCTAssertEqual(supplementary.symbol.unicodeScalars.map(\.value), [0x10000])
+        XCTAssertEqual(UnicodeBlock(name: "Transport", start: 0x1F680, end: 0x1F6FF).symbol, "🚀")
+        let surrogate = UnicodeBlock(name: "High Surrogates", start: 0xD800, end: 0xDB7F)
+        XCTAssertEqual(surrogate.subtitle, "UTF-16 surrogate code units")
+        XCTAssertEqual(surrogate.symbol, "◇")
+        XCTAssertEqual(UnicodeBlock(name: "Private Use Area", start: 0xE000, end: 0xF8FF).symbol, "◇")
+        let invalid = UnicodeBlock(name: "Invalid", start: UInt32.max, end: UInt32.max)
+        XCTAssertEqual(invalid.subtitle, "Invalid code-point range")
+        XCTAssertEqual(invalid.symbol, "◇")
+    }
+
+    func testCustomCatalogFileURLRetainsLookup() throws {
+        let directory = try fixture()
+        let byFile = UnicodeCatalog(resourceURL: directory.appendingPathComponent("UnicodeCatalog.ucd"))
+        XCTAssertNil(byFile.resourceError)
+        XCTAssertEqual(byFile.character(at: 0x41)?.text, "A")
+        XCTAssertEqual(byFile.search("0042").map(\.codePoint), [0x42])
+    }
+
+    func testRecognizedWireCategoryWithoutHumanDescriptionKeepsItsCodeAndExactText() throws {
+        // Custom catalogs can contain the recognized Cs wire-category value
+        // without a human-readable category description. Neither record nor
+        // range lookup may lose its fallback detail or alter its scalar text.
+        let directory = try fixture(ranges: [(0x80, 0x81, 0)])
+        let url = directory.appendingPathComponent("UnicodeCatalog.ucd")
+        var bytes = try Data(contentsOf: url)
+        bytes[48 + 24] = 27 // First record's category: Cs.
+        bytes[48 + 2 * 44 + 14] = 27 // First algorithmic range's category: Cs.
+        try bytes.write(to: url)
+        let custom = UnicodeCatalog(resourceURL: directory)
+        XCTAssertNil(custom.resourceError)
+        for point: UInt32 in [0x41, 0x80] {
+            let character = try XCTUnwrap(custom.character(at: point))
+            XCTAssertEqual(character.category, "Cs")
+            XCTAssertEqual(character.categoryName, "Cs")
+            XCTAssertEqual(character.detail, "Cs")
+            XCTAssertEqual(character.text.unicodeScalars.map(\.value), [point])
+        }
+    }
+
+    func testDraftAdditionCoverageMarkerRequiresDraftProvenance() throws {
+        for version in ["18.0.0", "19.0.0 draft"] {
+            let directory = try fixture(versionLabel: version)
+            try changeProperties(at: directory) { properties in
+                properties["assignedSpans"] = [
+                    ["start": 0x41, "end": 0x42, "sortKey": 101, "draftAddition": true]
+                ]
+            }
+            let custom = UnicodeCatalog(resourceURL: directory)
+            if version.hasSuffix(" draft") {
+                XCTAssertNil(custom.resourceError)
+                XCTAssertEqual(custom.orderedCharacters().map(\.codePoint), [0x41, 0x42])
+                XCTAssertEqual(custom.character(at: 0x41)?.age, "1.1")
+            } else {
+                XCTAssertNotNil(custom.resourceError)
+                XCTAssertTrue(custom.orderedCharacters().isEmpty)
+                XCTAssertNil(custom.character(at: 0x41)?.age)
+            }
+        }
     }
 
     func testBundledCatalogAndCompleteBlockRanges() {
@@ -103,12 +292,13 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertEqual(catalog.search("0xFACE").map(\.codePoint), [0xFACE])
     }
 
-    func testNamesAliasesAndInformativeDescriptions() {
-        XCTAssertEqual(catalog.search("rocket").first?.codePoint, 0x1F680)
+    func testNamesAliasesAndInformativeDescriptions() throws {
+        XCTAssertTrue(catalog.search("rocket").contains { $0.codePoint == 0x1F680 })
         XCTAssertTrue(catalog.search("face").contains { $0.codePoint == 0x1F600 })
         XCTAssertTrue(catalog.search("BOM").contains { $0.codePoint == 0xFEFF })
-        XCTAssertTrue(catalog.search("snowy weather").contains { $0.codePoint == 0x2603 })
-        XCTAssertTrue(catalog.search("European packaging").contains { $0.codePoint == 0x212E })
+        let pinned = try pinnedNamesListCatalog()
+        XCTAssertTrue(pinned.search("snowy weather").contains { $0.codePoint == 0x2603 })
+        XCTAssertTrue(pinned.search("European packaging").contains { $0.codePoint == 0x212E })
         let greek = catalog.search("greek omega")
         XCTAssertTrue(greek.contains { $0.codePoint == 0x03A9 })
         XCTAssertTrue(greek.contains { $0.codePoint == 0x03C9 })
@@ -117,30 +307,51 @@ final class UnicodeCatalogTests: XCTestCase {
 
     func testSuzhouNumeralsSearchUsesInformativeContextWithoutRenamingCharacters() throws {
         let digits = Set(UInt32(0x3021)...UInt32(0x3029))
+        let catalog = try pinnedNamesListCatalog()
+        for query in ["suzhou numerals", "suzhou", "Suzhou numerals", "hangzhou numerals"] {
+            let results = Set(catalog.search(query, order: .codePoint).map(\.codePoint))
+            XCTAssertTrue(digits.isSubset(of: results), query)
+            XCTAssertTrue(Set([UInt32(0x3038), 0x3039, 0x303A]).isSubset(of: results))
+            XCTAssertFalse(results.contains(0x302A))
+        }
+        let one = try XCTUnwrap(catalog.character(at: 0x3021))
+        XCTAssertEqual(one.name, "HANGZHOU NUMERAL ONE")
+        XCTAssertEqual(one.text, "〡")
+        XCTAssertEqual(one.namesListSection, "Suzhou numerals")
+        XCTAssertTrue(one.sectionAnnotations.contains { $0.contains("misnomer") })
+        XCTAssertFalse(one.nameAliases.contains { $0.kind == "correction" || $0.name.contains("SUZHOU") })
+        XCTAssertEqual(one.numericType, "Numeric")
+        XCTAssertEqual(one.numericValue, "1")
+        XCTAssertEqual(catalog.search("U+3021").map(\.codePoint), [0x3021])
+        XCTAssertEqual(catalog.search("additional suzhou numerals", order: .codePoint).map(\.codePoint), [0x3038, 0x3039, 0x303A])
+    }
+
+    func testBundledSuzhouCommonNameFindsEveryImmutableHangzhouNumeral() throws {
+        let names = ["ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE"]
+        let digits = Set(UInt32(0x3021)...UInt32(0x3029))
         for edition in UnicodeEdition.allCases {
             let catalog = edition.catalog
+            // This is the user-facing naming contract, independent of mutable
+            // wording or future additional matches in official informative data.
             for query in ["suzhou numerals", "suzhou", "Suzhou numerals", "hangzhou numerals"] {
-                let results = Set(catalog.search(query, order: .codePoint).map(\.codePoint))
+                let results = Set(catalog.search(query, limit: Int.max, order: .codePoint).map(\.codePoint))
                 XCTAssertTrue(digits.isSubset(of: results), "\(edition): \(query)")
-                XCTAssertTrue(Set([UInt32(0x3038), 0x3039, 0x303A]).isSubset(of: results))
-                XCTAssertFalse(results.contains(0x302A))
             }
-            let one = try XCTUnwrap(catalog.character(at: 0x3021))
-            XCTAssertEqual(one.name, "HANGZHOU NUMERAL ONE")
-            XCTAssertEqual(one.text, "〡")
-            XCTAssertEqual(one.namesListSection, "Suzhou numerals")
-            XCTAssertTrue(one.sectionAnnotations.contains { $0.contains("misnomer") })
-            XCTAssertFalse(one.nameAliases.contains { $0.kind == "correction" || $0.name.contains("SUZHOU") })
-            XCTAssertEqual(one.numericType, "Numeric")
-            XCTAssertEqual(one.numericValue, "1")
-            XCTAssertEqual(catalog.search("U+3021").map(\.codePoint), [0x3021])
-            XCTAssertEqual(catalog.search("additional suzhou numerals", order: .codePoint).map(\.codePoint), [0x3038, 0x3039, 0x303A])
+            for (index, name) in names.enumerated() {
+                let cp = UInt32(0x3021 + index)
+                let character = try XCTUnwrap(catalog.character(at: cp))
+                XCTAssertEqual(character.name, "HANGZHOU NUMERAL " + name)
+                XCTAssertEqual(character.text.unicodeScalars.map(\.value), [cp])
+                XCTAssertEqual(character.numericType, "Numeric")
+                XCTAssertEqual(character.numericValue, String(index + 1))
+                XCTAssertEqual(catalog.search(character.codePointLabel).map(\.codePoint), [cp])
+            }
         }
     }
 
     func testTypedAliasesPreserveFormalCorrectionsAndInformativeNames() throws {
-        for edition in UnicodeEdition.allCases {
-            let catalog = edition.catalog
+        for includeYangqin in [false, true] {
+            let catalog = try pinnedNamesListCatalog(includeYangqin: includeYangqin)
             let bracket = try XCTUnwrap(catalog.character(at: 0xFE18))
             XCTAssertTrue(bracket.name.hasSuffix("BRAKCET"))
             let correction = try XCTUnwrap(bracket.nameAliases.first { $0.kind == "correction" })
@@ -152,10 +363,17 @@ final class UnicodeCatalogTests: XCTestCase {
             let bom = try XCTUnwrap(catalog.character(at: 0xFEFF))
             XCTAssertTrue(bom.nameAliases.contains { $0.name == "BOM" && $0.kind == "abbreviation" && $0.isFormal })
             let six = try XCTUnwrap(catalog.character(at: 0x3026))
-            let alias = try XCTUnwrap(six.nameAliases.first { $0.name == "yangqin sign slow one half beat" })
-            XCTAssertFalse(alias.isFormal)
-            XCTAssertEqual(alias.source, "NamesList.txt")
-            XCTAssertTrue(six.crossReferences.contains { $0.codePoint == 0x16FF4 && $0.codePointLabel == "U+16FF4" })
+            if includeYangqin {
+                let alias = try XCTUnwrap(six.nameAliases.first { $0.name == "yangqin sign slow one half beat" })
+                XCTAssertFalse(alias.isFormal)
+                XCTAssertEqual(alias.source, "NamesList.txt")
+                XCTAssertTrue(six.crossReferences.contains { $0.codePoint == 0x16FF4 && $0.codePointLabel == "U+16FF4" })
+            } else {
+                // The older fixture has no such annotation. Neither references
+                // nor aliases may leak from the separately loaded newer fixture.
+                XCTAssertFalse(six.nameAliases.contains { $0.name == "yangqin sign slow one half beat" })
+                XCTAssertFalse(six.crossReferences.contains { $0.codePoint == 0x16FF4 })
+            }
         }
     }
 
@@ -171,12 +389,13 @@ final class UnicodeCatalogTests: XCTestCase {
             XCTAssertEqual(catalog.character(at: 0x0061)?.simpleUppercase, 0x0041)
             XCTAssertEqual(catalog.character(at: 0x0061)?.simpleTitlecase, 0x0041)
             XCTAssertEqual(catalog.character(at: 0x00A0)?.unicode1Name, "NON-BREAKING SPACE")
-            let wave = try XCTUnwrap(catalog.character(at: 0x301C))
-            XCTAssertTrue(wave.annotations.contains { $0.contains("JIS C 6226") })
-            XCTAssertTrue(wave.crossReferences.contains { $0.codePoint == 0x3030 && $0.name == "WAVY DASH" })
-            XCTAssertFalse(try XCTUnwrap(catalog.character(at: 0x301D)).annotations.contains { $0.contains("JIS C 6226") })
-            XCTAssertNil(catalog.character(at: 0x0378)?.numericValue)
+            XCTAssertNil(catalog.character(at: 0x10FFFF)?.numericValue)
         }
+        let pinned = try pinnedNamesListCatalog()
+        let wave = try XCTUnwrap(pinned.character(at: 0x301C))
+        XCTAssertTrue(wave.annotations.contains { $0.contains("JIS C 6226") })
+        XCTAssertTrue(wave.crossReferences.contains { $0.codePoint == 0x3030 && $0.name == "WAVY DASH" })
+        XCTAssertFalse(try XCTUnwrap(pinned.character(at: 0x301D)).annotations.contains { $0.contains("JIS C 6226") })
     }
 
     func testLegacyVersionTwoCatalogStillLoadsPlainDescriptions() throws {
@@ -223,14 +442,19 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertEqual(legacy.search("capital letter").map(\.codePoint), [0x0041])
     }
 
-    func testBlockNameSearchIncludesCharactersAndRanksExactBlock() {
+    func testBlockNameSearchIncludesAllAssignedMembersAndUsesRankedPrefix() throws {
         let arrows = catalog.search("Arrows", order: .codePoint)
         XCTAssertEqual(arrows.first?.codePoint, 0x2190)
         XCTAssertTrue(arrows.contains { $0.codePoint == 0x2192 })
         XCTAssertTrue(arrows.prefix(112).allSatisfy { $0.blockName == "Arrows" })
         let operators = catalog.search("Mathematical Operators", limit: 50)
         XCTAssertEqual(operators.count, 50)
-        XCTAssertTrue(operators.allSatisfy { $0.blockName == "Mathematical Operators" })
+        let allOperators = catalog.search("Mathematical Operators", limit: Int.max)
+        XCTAssertEqual(operators, Array(allOperators.prefix(50)))
+        let block = try XCTUnwrap(catalog.blocks.first { $0.name == "Mathematical Operators" })
+        let assigned = Set(catalog.characters(in: block, limit: 1000).map(\.codePoint))
+        XCTAssertTrue(assigned.isSubset(of: Set(allOperators.map(\.codePoint))))
+        XCTAssertEqual(allOperators.map(\.codePoint), allOperators.map(\.codePoint).sorted())
         XCTAssertEqual(catalog.search("CJK Unified Ideographs Extension B", limit: 3, order: .codePoint).map(\.codePoint),
                        [0x20000, 0x20001, 0x20002])
         XCTAssertTrue(catalog.search("Greek", order: .codePoint).contains { $0.codePoint == 0x03A9 })
@@ -267,7 +491,7 @@ final class UnicodeCatalogTests: XCTestCase {
     func testAssignedPaginationSkipsReservedSlots() throws {
         let greek = try XCTUnwrap(catalog.blocks.first { $0.name == "Greek and Coptic" })
         let all = catalog.characters(in: greek, limit: 500)
-        XCTAssertFalse(all.contains { $0.codePoint == 0x03A2 })
+        XCTAssertTrue(all.allSatisfy { $0.category != "Cn" })
         var pages: [UnicodeCharacter] = []
         while true {
             let next = catalog.characters(in: greek, offset: pages.count, limit: 17)
@@ -292,14 +516,35 @@ final class UnicodeCatalogTests: XCTestCase {
     func testScalarBoundariesReservedValuesAndInvalidQueries() {
         XCTAssertEqual(catalog.character(at: 0x10FFFF)?.name, "NONCHARACTER")
         XCTAssertEqual(catalog.character(at: 0x10FFFF)?.text.unicodeScalars.first?.value, 0x10FFFF)
-        XCTAssertEqual(catalog.character(at: 0x03A2)?.name, "UNASSIGNED")
+        XCTAssertEqual(catalog.character(at: 0x10FFFF)?.category, "Cn")
         XCTAssertNil(catalog.character(at: 0xD800))
         XCTAssertNil(catalog.character(at: 0x110000))
         for query in ["U+D800", "U+110000", "0xZZZZ", "decimal:-1", "decimal:1114112", "110000"] {
             XCTAssertTrue(catalog.search(query).isEmpty, query)
         }
         XCTAssertTrue(catalog.search("rocket", limit: 0).isEmpty)
-        XCTAssertEqual(catalog.search("", limit: 3), catalog.newestCharacters(limit: 3))
+        XCTAssertEqual(catalog.search("", limit: 3), catalog.orderedCharacters(limit: 3, order: .codePoint))
+    }
+
+    func testFixedUnassignedFixtureHasNoInventedPropertiesOrAssignedBrowseEntries() throws {
+        let directory = try fixture()
+        try changeProperties(at: directory) { properties in
+            properties["ages"] = [["start": 0x41, "end": 0x42, "value": "1.1"]]
+            properties["scripts"] = [["start": 0x41, "end": 0x42, "value": "Latin"]]
+        }
+        let fixed = UnicodeCatalog(resourceURL: directory)
+        XCTAssertNil(fixed.resourceError)
+        for cp: UInt32 in [0x0378, 0x03A2] {
+            let character = try XCTUnwrap(fixed.character(at: cp))
+            XCTAssertEqual(character.name, "UNASSIGNED")
+            XCTAssertEqual(character.category, "Cn")
+            XCTAssertNil(character.age)
+            XCTAssertNil(character.numericValue)
+            XCTAssertNil(character.combiningClass)
+            XCTAssertEqual(character.text.unicodeScalars.map(\.value), [cp])
+            XCTAssertEqual(fixed.search(character.codePointLabel).map(\.codePoint), [cp])
+            XCTAssertFalse(fixed.orderedCharacters().contains { $0.codePoint == cp })
+        }
     }
 
     func testCorruptOrAbsentResourceDoesNotCrash() throws {
@@ -325,12 +570,49 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertEqual(UnicodeEdition.draft.rawValue, "draft")
         for edition in UnicodeEdition.allCases {
             let major = edition.catalog.version.split(separator: ".").first.map(String.init) ?? ""
-            XCTAssertEqual(edition.title, "Unicode \(major) · \(edition.rawValue)")
-            XCTAssertEqual(edition.catalog.character(at: 0x1FAEB)?.name, "CRACKING FACE")
-            XCTAssertEqual(edition.catalog.character(at: 0x1FAEB)?.age, "18.0")
+            let status = edition == .draft ? "DRAFT" : edition == .latest ? "latest release" : "release"
+            XCTAssertEqual(edition.title, "Unicode \(major) · \(status)")
+            XCTAssertEqual(edition.versionLabel, edition.catalog.version)
+            if unicodeVersionKey(edition.catalog.version) >= unicodeVersionKey("18.0") {
+                XCTAssertEqual(edition.catalog.character(at: 0x1FAEB)?.name, "CRACKING FACE")
+                XCTAssertEqual(edition.catalog.character(at: 0x1FAEB)?.age, "18.0")
+            } else {
+                XCTAssertEqual(edition.catalog.character(at: 0x1FAEB)?.category, "Cn")
+                XCTAssertNil(edition.catalog.character(at: 0x1FAEB)?.age)
+            }
             XCTAssertEqual(edition.catalog.character(at: 0x41)?.age, "1.1")
-            XCTAssertNil(edition.catalog.character(at: 0x0378)?.age)
-            XCTAssertEqual(edition.catalog.character(at: 0x0378)?.category, "Cn")
+            XCTAssertEqual(edition.catalog.character(at: 0x10FFFF)?.name, "NONCHARACTER")
+            XCTAssertEqual(edition.catalog.character(at: 0x10FFFF)?.category, "Cn")
+        }
+    }
+
+    func testHistoricalReleaseSelectionAndAssignmentBoundaries() {
+        XCTAssertEqual(UnicodeEdition.allCases, [.latest, .previous, .older, .draft])
+        let latestMajor = unicodeVersionKey(UnicodeEdition.latest.versionLabel) / 100
+        XCTAssertEqual(UnicodeEdition.previous.versionLabel, "\(latestMajor - 1).0.0")
+        XCTAssertEqual(UnicodeEdition.older.versionLabel, "\(latestMajor - 2).0.0")
+        XCTAssertEqual(UnicodeEdition.latest.selectionIdentifier, "latest")
+        XCTAssertEqual(UnicodeEdition.draft.selectionIdentifier, "draft")
+        XCTAssertEqual(UnicodeEdition.previous.selectionIdentifier, UnicodeEdition.previous.versionLabel)
+        XCTAssertEqual(UnicodeEdition.older.selectionIdentifier, UnicodeEdition.older.versionLabel)
+        for edition in UnicodeEdition.allCases {
+            XCTAssertEqual(UnicodeEdition.resolve(selectionIdentifier: edition.selectionIdentifier), edition)
+        }
+        for missing in [nil, "", "13.0.0", "999999.0.0", "previous", "older", "Unavailable"] {
+            XCTAssertEqual(UnicodeEdition.resolve(selectionIdentifier: missing), .latest)
+        }
+        for edition in [UnicodeEdition.older, .previous, .latest] {
+            XCTAssertNil(edition.catalog.resourceError)
+            for (point, age): (UInt32, String) in [(0x10940, "17.0"), (0x0558, "18.0")] {
+                if unicodeVersionKey(edition.versionLabel) < unicodeVersionKey(age) {
+                    XCTAssertEqual(edition.catalog.character(at: point)?.category, "Cn")
+                    XCTAssertNil(edition.catalog.character(at: point)?.age)
+                } else {
+                    XCTAssertEqual(edition.catalog.character(at: point)?.age, age)
+                }
+            }
+            XCTAssertEqual(edition.catalog.character(at: 0x0041)?.age, "1.1")
+            XCTAssertEqual(edition.catalog.character(at: 0x10FFFF)?.category, "Cn")
         }
     }
 
@@ -350,19 +632,19 @@ final class UnicodeCatalogTests: XCTestCase {
             XCTAssertEqual(edition.catalog.character(at: 0xF900)?.decomposition, "8C48")
             XCTAssertEqual(edition.catalog.character(at: 0x2F800)?.decomposition, "4E3D")
         }
-        XCTAssertNil(catalog.character(at: 0x0378)?.combiningClass)
+        XCTAssertNil(catalog.character(at: 0x10FFFF)?.combiningClass)
     }
 
     func testNumericVersionOrderingAndGlobalPagination() {
         XCTAssertGreaterThan(unicodeVersionKey("10.0"), unicodeVersionKey("9.0"))
         XCTAssertGreaterThan(unicodeVersionKey("15.1"), unicodeVersionKey("15.0"))
-        let newest = catalog.orderedCharacters(limit: 300)
+        let newest = catalog.orderedCharacters(limit: 300, order: .newestFirst)
         XCTAssertGreaterThanOrEqual(newest.first?.versionSortKey ?? 0, unicodeVersionKey("18.0"))
         XCTAssertTrue(newest.allSatisfy { $0.category != "Cn" })
         for pair in zip(newest, newest.dropFirst()) {
             XCTAssertGreaterThanOrEqual(pair.0.versionSortKey, pair.1.versionSortKey)
         }
-        XCTAssertEqual(catalog.newestCharacters(offset: 120, limit: 45), Array(newest[120..<165]))
+        XCTAssertEqual(catalog.orderedCharacters(offset: 120, limit: 45, order: .newestFirst), Array(newest[120..<165]))
         let oldest = catalog.orderedCharacters(limit: 300, order: .oldestFirst)
         XCTAssertEqual(oldest.first?.codePoint, 0)
         XCTAssertEqual(oldest.first?.age, "1.1")
@@ -373,22 +655,33 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertTrue(catalog.orderedCharacters(offset: -1).isEmpty)
     }
 
-    func testSearchSortsEntireMatchSetBeforeLimiting() {
+    func testSearchSortsEntireMatchSetBeforeLimiting() async {
+        let catalog = self.catalog
         for order in UnicodeSortOrder.allCases {
-            let complete = catalog.search("letter", limit: 100_000, order: order)
+            let (complete, limited) = await CatalogWorker.run {
+                let complete = catalog.search("letter", limit: 100_000, order: order)
+                let limited = catalog.search("letter", limit: 7, order: order)
+                return (complete, limited)
+            }
             XCTAssertGreaterThan(complete.count, 10_000)
-            XCTAssertEqual(catalog.search("letter", limit: 7, order: order), Array(complete.prefix(7)))
+            XCTAssertEqual(limited, Array(complete.prefix(7)))
             if order == .newestFirst { XCTAssertGreaterThanOrEqual(complete.first?.versionSortKey ?? 0, unicodeVersionKey("18.0")) }
         }
-        XCTAssertEqual(catalog.search("rocket", limit: 1).first?.codePoint, 0x1F680)
+        let (rockets, firstRocket, exactRocket) = await CatalogWorker.run {
+            (catalog.search("rocket", limit: Int.max), catalog.search("rocket", limit: 1), catalog.search("U+1F680", limit: 1))
+        }
+        XCTAssertTrue(rockets.contains { $0.codePoint == 0x1F680 })
+        XCTAssertEqual(firstRocket, Array(rockets.prefix(1)))
+        XCTAssertEqual(firstRocket.first?.codePoint, 0x1CC56, "A smaller complete-word ROCKET SHIP precedes ROCKET")
+        XCTAssertEqual(exactRocket.first?.codePoint, 0x1F680)
     }
 
     func testBlockPaginationOrdersEntireBlockBeforeLimiting() throws {
         let arrows = try XCTUnwrap(catalog.blocks.first { $0.name == "Arrows" })
-        let all = catalog.characters(in: arrows, limit: 1000)
+        let all = catalog.characters(in: arrows, limit: 1000, order: .newestFirst)
         XCTAssertNotEqual(all.first?.codePoint, arrows.start)
-        XCTAssertEqual(catalog.characters(in: arrows, limit: 5), Array(all.prefix(5)))
-        XCTAssertEqual(catalog.characters(in: arrows, offset: 10, limit: 5), Array(all[10..<15]))
+        XCTAssertEqual(catalog.characters(in: arrows, limit: 5, order: .newestFirst), Array(all.prefix(5)))
+        XCTAssertEqual(catalog.characters(in: arrows, offset: 10, limit: 5, order: .newestFirst), Array(all[10..<15]))
         let oldest = catalog.characters(in: arrows, limit: 1000, order: .oldestFirst)
         XCTAssertEqual(oldest.first?.age, "1.1")
         XCTAssertEqual(catalog.characters(in: arrows, offset: 10, limit: 5, order: .oldestFirst), Array(oldest[10..<15]))
@@ -541,8 +834,8 @@ final class UnicodeCatalogTests: XCTestCase {
         let directory = try fixture(names: [0x41: "ROCKET", 0x42: "ROCKET ROCKET"])
         let fixture = UnicodeCatalog(resourceURL: directory)
         XCTAssertEqual(CatalogSearchQueryPolicy.terms(in: "rocket arrow rocket letter arrow"), ["rocket", "arrow", "letter"])
-        XCTAssertTrue(CatalogSearchQueryPolicy.hasExactTerms(in: "rocket rocket arrow", terms: ["rocket", "arrow"]))
-        XCTAssertFalse(CatalogSearchQueryPolicy.hasExactTerms(in: "arrow rocket", terms: ["rocket", "arrow"]))
+        XCTAssertTrue(CatalogSearchQueryPolicy.containsWholeTerm("rocket", in: "rocket rocket arrow"))
+        XCTAssertTrue(CatalogSearchQueryPolicy.containsWholeTerm("arrow", in: "arrow rocket"))
         for order in UnicodeSortOrder.allCases {
             XCTAssertEqual(fixture.search("rocket rocket rocket", order: order), fixture.search("rocket", order: order))
             XCTAssertEqual(fixture.search(String(repeating: "rocket ", count: 585), order: order), fixture.search("rocket", order: order))
@@ -580,5 +873,91 @@ final class UnicodeCatalogTests: XCTestCase {
             .write(to: validDraft.appendingPathComponent("UnicodeSources.json"))
         XCTAssertNil(UnicodeCatalog(resourceURL: validDraft).resourceError)
         XCTAssertEqual(UnicodeCatalog(resourceURL: validDraft).version, "19.0.0 draft")
+    }
+
+    func testWholeWordTierUsesSelectedOrderBeforeSubstringMatchesAndLimit() throws {
+        let directory = try fixture(records: Array(0x41...0x47), names: [
+            0x41: "ART WORD", 0x42: "ART", 0x43: "CART WORD", 0x44: "HEART WORD",
+            0x45: "ARTWORK", 0x46: "LETTER", 0x47: "LETTER"],
+            searches: [0x46: "letter informative art"], contexts: [0x47: "art word"])
+        try changeProperties(at: directory) { properties in
+            properties["assignedSpans"] = [101, 1000, 1800, 101, 1800, 600, 1800].enumerated().map {
+                ["start": 0x41 + $0.offset, "end": 0x41 + $0.offset, "sortKey": $0.element, "draftAddition": false] as [String: Any]
+            }
+        }
+        let fixture = UnicodeCatalog(resourceURL: directory)
+        XCTAssertNil(fixture.resourceError)
+        let expected: [UnicodeSortOrder: [UInt32]] = [
+            .codePoint: [0x41, 0x42, 0x46, 0x47, 0x43, 0x44, 0x45],
+            .newestFirst: [0x47, 0x42, 0x46, 0x41, 0x43, 0x45, 0x44],
+            .oldestFirst: [0x41, 0x46, 0x42, 0x47, 0x44, 0x43, 0x45]]
+        for order in UnicodeSortOrder.allCases {
+            let points = try XCTUnwrap(expected[order])
+            XCTAssertEqual(fixture.search("art", limit: Int.max, order: order).map(\.codePoint), points)
+            XCTAssertEqual(fixture.search("art", limit: 3, order: order).map(\.codePoint), Array(points.prefix(3)))
+            XCTAssertEqual(fixture.search("art art", order: order), fixture.search("art", order: order))
+        }
+        XCTAssertEqual(fixture.search("art word").map(\.codePoint), [0x41, 0x47, 0x43, 0x44])
+        XCTAssertEqual(fixture.search("WORD_art").map(\.codePoint), [0x41, 0x47, 0x43, 0x44])
+        XCTAssertEqual(fixture.search("U+0043").map(\.codePoint), [0x43])
+        XCTAssertEqual(fixture.search("A").map(\.codePoint), [0x41])
+        let algorithmicDirectory = try self.fixture(records: [0x41], ranges: [(0x20000, 0x20002, 0)],
+                                                    names: [0x41: "PREFIXTURE"])
+        let algorithmic = UnicodeCatalog(resourceURL: algorithmicDirectory)
+        XCTAssertNil(algorithmic.resourceError)
+        XCTAssertEqual(algorithmic.search("fixture").map(\.codePoint), [0x20000, 0x20001, 0x20002, 0x41])
+        XCTAssertEqual(algorithmic.search("fix").map(\.codePoint), [0x41, 0x20000, 0x20001, 0x20002])
+    }
+
+    func testNormalizedUnicodeWordsHaveRealBoundariesAndStableTies() throws {
+        let directory = try fixture(records: Array(0x41...0x46), names: [
+            0x41: "MÉLANGE", 0x42: "ÉLAN", 0x43: "中漢字", 0x44: "漢字", 0x45: "PREΩΜΕΓΑ", 0x46: "ΩΜΕΓΑ"],
+            searches: [0x41: "melange", 0x42: "elan", 0x43: "中漢字", 0x44: "漢字", 0x45: "preωμεγα", 0x46: "ωμεγα"])
+        let fixture = UnicodeCatalog(resourceURL: directory)
+        XCTAssertNil(fixture.resourceError)
+        for query in ["élan", "ÉLAN", "ｅｌａｎ", "(elan)"] {
+            XCTAssertEqual(fixture.search(query).map(\.codePoint), [0x42, 0x41], query)
+        }
+        XCTAssertEqual(fixture.search("漢字").map(\.codePoint), [0x44, 0x43])
+        XCTAssertEqual(fixture.search("ωμεγα").map(\.codePoint), [0x46, 0x45])
+        XCTAssertFalse(CatalogSearchQueryPolicy.containsWholeTerm("", in: "elan"))
+        XCTAssertTrue(CatalogSearchQueryPolicy.containsWholeTerm("art", in: "cart art"))
+        XCTAssertFalse(CatalogSearchQueryPolicy.containsWholeTerm("art", in: "cart artist"))
+    }
+
+    func testDefaultScalarBrowsingAndEmptySearchUseAscendingCodePoints() throws {
+        let directory = try fixture(records: [0x41, 0x1F680], ranges: [(0xAC00, 0xAC02, 1)])
+        try changeProperties(at: directory) { properties in
+            properties["assignedSpans"] = [
+                ["start": 0x41, "end": 0x41, "sortKey": 1800, "draftAddition": false],
+                ["start": 0xAC00, "end": 0xAC02, "sortKey": 101, "draftAddition": false],
+                ["start": 0x1F680, "end": 0x1F680, "sortKey": 1000, "draftAddition": false]]
+        }
+        let fixture = UnicodeCatalog(resourceURL: directory)
+        let expected: [UInt32] = [0x41, 0xAC00, 0xAC01, 0xAC02, 0x1F680]
+        XCTAssertNil(fixture.resourceError)
+        XCTAssertEqual(fixture.orderedCharacters(limit: 99).map(\.codePoint), expected)
+        XCTAssertEqual(fixture.search(" \n", limit: 99).map(\.codePoint), expected)
+        let block = try XCTUnwrap(fixture.blocks.first)
+        XCTAssertEqual(fixture.characters(in: block, offset: 1, limit: 2).map(\.codePoint), [0xAC00, 0xAC01])
+        XCTAssertEqual(fixture.search("hangul syllable ga").first?.codePoint, 0xAC00)
+        XCTAssertEqual(fixture.orderedCharacters(limit: 2, order: .newestFirst).map(\.codePoint), [0x41, 0x1F680])
+    }
+
+    func testHistoricalCatalogManifestCannotBeSwappedBetweenFinalSlots() throws {
+        let directory = try fixture()
+        for name in ["UnicodeCatalog.ucd", "Blocks.json", "UnicodeProperties.json"] {
+            let original = directory.appendingPathComponent(name)
+            let suffix = original.pathExtension
+            let historical = original.deletingPathExtension().lastPathComponent + "-previous." + suffix
+            try FileManager.default.copyItem(at: original, to: directory.appendingPathComponent(historical))
+        }
+        let manifest = directory.appendingPathComponent("UnicodeSources-previous.json")
+        try JSONSerialization.data(withJSONObject: ["versionLabel": "18.0.0", "isDraft": false, "edition": "older"])
+            .write(to: manifest)
+        XCTAssertEqual(UnicodeCatalog(edition: .previous, resourceURL: directory).version, "Unavailable")
+        try JSONSerialization.data(withJSONObject: ["versionLabel": "18.0.0", "isDraft": false, "edition": "previous"])
+            .write(to: manifest)
+        XCTAssertNil(UnicodeCatalog(edition: .previous, resourceURL: directory).resourceError)
     }
 }

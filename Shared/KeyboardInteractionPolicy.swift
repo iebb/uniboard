@@ -3,6 +3,8 @@ import Foundation
 /// Remote keyboard scenes can retain a stale interfaceOrientation after the
 /// host rotates. Phone layout follows the actual view width, never its height.
 enum KeyboardLayoutPolicy {
+    static let defaultPortraitBrowseHeight: CGFloat = 220
+    static let resizeHandleHeight: CGFloat = 14
     struct Metrics {
         let isCompactLayout: Bool
         let height: CGFloat
@@ -11,7 +13,7 @@ enum KeyboardLayoutPolicy {
 
     static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
                         compactVertical: Bool, isSearching: Bool, isInspecting: Bool,
-                        portraitBrowseHeight: CGFloat = 300, portraitExpandedHeight: CGFloat = 340) -> Metrics {
+                        portraitBrowseHeight: CGFloat = KeyboardLayoutPolicy.defaultPortraitBrowseHeight, portraitExpandedHeight: CGFloat = 340) -> Metrics {
         let edges: (short: CGFloat, long: CGFloat)?
         if let size = displaySize,
            size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 {
@@ -30,7 +32,7 @@ enum KeyboardLayoutPolicy {
             compact = compactVertical
         }
         let expanded = isSearching || isInspecting
-        let browseHeight = portraitBrowseHeight.isFinite ? min(420, max(220, portraitBrowseHeight)) : 300
+        let browseHeight = portraitBrowseHeight.isFinite ? min(420, max(220, portraitBrowseHeight)) : defaultPortraitBrowseHeight
         let expandedHeight = portraitExpandedHeight.isFinite ? min(420, max(340, portraitExpandedHeight)) : 340
         let target: CGFloat = isPad ? (expanded ? 380 : 340) : compact ? 220 : (expanded ? expandedHeight : browseHeight)
         let effectiveHeight: CGFloat?
@@ -50,41 +52,61 @@ enum KeyboardLayoutPolicy {
 }
 
 enum KeyboardResizePolicy {
-    static func toggledHeight(current: CGFloat, range: ClosedRange<CGFloat>) -> CGFloat? {
-        guard let height = clampedHeight(current, in: range, rounded: false) else { return nil }
-        let midpoint = range.lowerBound + (range.upperBound - range.lowerBound) / 2
-        return height < midpoint ? range.upperBound : range.lowerBound
-    }
-
     static func clampedHeight(_ value: CGFloat, in range: ClosedRange<CGFloat>, rounded: Bool = true) -> CGFloat? {
         guard value.isFinite, range.lowerBound.isFinite, range.upperBound.isFinite,
               range.lowerBound > 0 else { return nil }
+        // A selected endpoint is exact even when the scene cap is fractional.
+        // Rounding a clamped maximum downward would leave a visible gap.
+        if value <= range.lowerBound { return range.lowerBound }
+        if value >= range.upperBound { return range.upperBound }
         let bounded = min(range.upperBound, max(range.lowerBound, value))
         // Round first, then clamp again: a fractional scene cap is still a
         // strict bound even when it is narrower than one point.
         return min(range.upperBound, max(range.lowerBound, rounded ? bounded.rounded() : bounded))
     }
 
-    static func target(startHeight: CGFloat, translationY: CGFloat, in range: ClosedRange<CGFloat>) -> CGFloat? {
-        guard let start = clampedHeight(startHeight, in: range, rounded: false), translationY.isFinite else { return nil }
-        let value = start - translationY
-        if value == .infinity { return range.upperBound }
-        if value == -.infinity { return range.lowerBound }
-        return clampedHeight(value, in: range)
+
+}
+
+/// Validate the input stream independently of any coordinate compensation.
+/// Exact duplicates are harmless, but a different sample at the same time or
+/// a backward/nonfinite timestamp cannot authorize a live update or commit.
+struct KeyboardResizeSampleSequence {
+    enum Acceptance: Int {
+        case accepted, duplicate, invalid
+    }
+    private struct Sample: Equatable {
+        let point: CGPoint
+        let bounds: CGRect
+        let timestamp: TimeInterval
+
+        static func == (lhs: Sample, rhs: Sample) -> Bool {
+            lhs.point.x == rhs.point.x && lhs.point.y == rhs.point.y
+                && lhs.bounds.origin.x == rhs.bounds.origin.x && lhs.bounds.origin.y == rhs.bounds.origin.y
+                && lhs.bounds.size.width == rhs.bounds.size.width && lhs.bounds.size.height == rhs.bounds.size.height
+                && lhs.timestamp == rhs.timestamp
+        }
+    }
+    private var last: Sample?
+
+    static func isValid(point: CGPoint, bounds: CGRect, timestamp: TimeInterval) -> Bool {
+        point.x.isFinite && point.y.isFinite && timestamp.isFinite && timestamp >= 0
+            && bounds.origin.x.isFinite && bounds.origin.y.isFinite
+            && bounds.size.width.isFinite && bounds.size.height.isFinite
+            && bounds.size.width > 0 && bounds.size.height > 0
+            && (bounds.origin.x+bounds.size.width).isFinite
+            && (bounds.origin.y+bounds.size.height).isFinite
     }
 
-    static func initialPanCorrection(currentY: CGFloat, touchDownY: CGFloat?, translationY: CGFloat) -> CGFloat? {
-        guard currentY.isFinite, translationY.isFinite else { return nil }
-        guard let touchDownY else { return 0 }
-        guard touchDownY.isFinite else { return nil }
-        let value = currentY - touchDownY - translationY
-        return value.isFinite ? value : nil
-    }
-
-    static func panDelta(translationY: CGFloat, initialCorrection: CGFloat) -> CGFloat? {
-        guard translationY.isFinite, initialCorrection.isFinite else { return nil }
-        let value = translationY + initialCorrection
-        return value.isFinite ? value : nil
+    mutating func accept(point: CGPoint, bounds: CGRect, timestamp: TimeInterval) -> Acceptance {
+        guard Self.isValid(point: point, bounds: bounds, timestamp: timestamp) else { return .invalid }
+        let sample = Sample(point: point, bounds: bounds, timestamp: timestamp)
+        if let last {
+            guard timestamp >= last.timestamp else { return .invalid }
+            if timestamp == last.timestamp { return sample == last ? .duplicate : .invalid }
+        }
+        last = sample
+        return .accepted
     }
 }
 
@@ -104,15 +126,10 @@ struct KeyboardResizeSession {
         self.preferredHeight = preferredHeight
     }
 
-    func target(translationY: CGFloat, range: ClosedRange<CGFloat>) -> CGFloat? {
-        guard !finished else { return nil }
-        return KeyboardResizePolicy.target(startHeight: startHeight, translationY: translationY, in: range)
-    }
-
-    mutating func finish(commitHeight: CGFloat?, range: ClosedRange<CGFloat>) -> CGFloat? {
+    mutating func finish(commitHeight: CGFloat?, range: ClosedRange<CGFloat>, rounded: Bool = true) -> CGFloat? {
         guard !finished else { return nil }
         finished = true
-        guard let commitHeight, let height = KeyboardResizePolicy.clampedHeight(commitHeight, in: range) else { return nil }
+        guard let commitHeight, let height = KeyboardResizePolicy.clampedHeight(commitHeight, in: range, rounded: rounded) else { return nil }
         preferredHeight = height
         return height
     }
@@ -206,7 +223,13 @@ enum KeyboardQueryPolicy {
     private static func edit(text: String, followingUTF16Offset offset: Int) -> Edit {
         let boundaries = utf16Boundaries(in: text)
         let bounded = min(max(0, offset), text.utf16.count)
-        let cursor = boundaries.firstIndex(where: { $0 >= bounded }) ?? boundaries.count - 1
+        // Boundaries always includes zero and the exact UTF-16 end. Select
+        // the first following boundary directly, including an empty result.
+        var cursor = 0
+        for (index, boundary) in boundaries.enumerated() {
+            cursor = index
+            if boundary >= bounded { break }
+        }
         return Edit(text: text, caretUTF16Offset: boundaries[cursor], caretCharacterOffset: cursor)
     }
 }

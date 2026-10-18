@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [.library(name: "UniboardCore", targets: ["UniboardCore"])],
     targets: [
-        .target(name: "UniboardCore", path: "Shared", exclude: ["UnicodeFontSupport.swift", "KeyboardResizeHandleControl.swift", "KeyboardRepeatingDeleteControl.swift", "PrivacyInfo.xcprivacy"], sources: ["UnicodeCatalog.swift", "EmojiCatalog.swift", "CharacterStore.swift", "KeyboardInteractionPolicy.swift", "LocalPreferencePolicy.swift", "CatalogWorker.swift"], resources: [.process("Resources")]),
+        .target(name: "UniboardCore", path: "Shared", exclude: ["UnicodeFontSupport.swift", "KeyboardResizeHandleControl.swift", "KeyboardRepeatingDeleteControl.swift", "KeyboardTouchActionControl.swift", "KeyboardDocumentIdentity.swift", "KeyboardSelfSizingInputView.swift", "KeyboardVariantControl.swift", "KeyboardQueryControl.swift", "KeyboardInspectableInteraction.swift", "KeyboardHostInputTraits.swift", "KeyboardQueryInteraction.swift", "PrivacyInfo.xcprivacy"], sources: ["CompanionAppRoute.swift", "UnicodeCatalog.swift", "UnicodeEditionSettings.swift", "KeyboardKeySettings.swift", "EmojiCatalog.swift", "SymbolBoardStore.swift", "KeyboardVariantPolicy.swift", "CharacterStore.swift", "KeyboardInteractionPolicy.swift", "KeyboardResizeStepPolicy.swift", "KeyboardTypingPolicy.swift", "KeyboardTypingLayoutPolicy.swift", "KeyboardFooterLayoutPolicy.swift", "KeyboardEnglishInputPolicy.swift", "LocalPreferencePolicy.swift", "CatalogWorker.swift"], resources: [.process("Resources")]),
         .testTarget(name: "UniboardCoreTests", dependencies: ["UniboardCore"], path: "Tests")
     ]
 )

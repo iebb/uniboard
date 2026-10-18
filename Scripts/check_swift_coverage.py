@@ -7,10 +7,20 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MINIMUMS = {
-    "UnicodeCatalog.swift": 0.90,
-    "EmojiCatalog.swift": 0.90,
-    "CharacterStore.swift": 0.95,
-    "KeyboardInteractionPolicy.swift": 0.95,
+    "CompanionAppRoute.swift": 1.0,
+    "UnicodeCatalog.swift": 1.0,
+    "UnicodeEditionSettings.swift": 1.0,
+    "KeyboardKeySettings.swift": 1.0,
+    "EmojiCatalog.swift": 1.0,
+    "CharacterStore.swift": 1.0,
+    "SymbolBoardStore.swift": 1.0,
+    "KeyboardVariantPolicy.swift": 1.0,
+    "KeyboardFooterLayoutPolicy.swift": 1.0,
+    "KeyboardInteractionPolicy.swift": 1.0,
+    "KeyboardResizeStepPolicy.swift": 1.0,
+    "KeyboardTypingPolicy.swift": 1.0,
+    "KeyboardTypingLayoutPolicy.swift": 1.0,
+    "KeyboardEnglishInputPolicy.swift": 1.0,
     "LocalPreferencePolicy.swift": 1.0,
     "CatalogWorker.swift": 1.0,
 }

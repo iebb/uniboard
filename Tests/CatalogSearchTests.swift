@@ -49,7 +49,8 @@ final class CatalogSearchTests: XCTestCase {
 
     func testPendingSearchDoesNotRetainItsViewModel() {
         var search: CatalogSearch? = CatalogSearch()
-        weak var reference = search
+        weak var reference: CatalogSearch?
+        reference = search
         search?.update("letter", catalog: .latest, order: .newestFirst)
         search = nil
         XCTAssertNil(reference)

@@ -19,11 +19,11 @@ final class KeyboardResizeHandleControlTests: XCTestCase {
         override func location(in view: UIView?) -> CGPoint { position }
     }
 
-    private func fixture() -> (UIWindow, ResizeHandleButton) {
+    private func fixture(fallbackTimestamp: @escaping () -> TimeInterval = { CACurrentMediaTime() }) -> (UIWindow, ResizeHandleButton) {
         // Attaching to a real window exercises willMove(toWindow:) and window
         // lookup without making it key or taking the host's first responder.
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        let handle = ResizeHandleButton(backgroundColor: UIColor.systemBackground.withAlphaComponent(0.02))
+        let handle = ResizeHandleButton(backgroundColor: UIColor.systemBackground.withAlphaComponent(0.02), fallbackTimestamp: fallbackTimestamp)
         handle.frame = CGRect(x: 0, y: 0, width: 402, height: 18)
         window.addSubview(handle)
         XCTAssertTrue(handle.window === window)
@@ -42,9 +42,11 @@ final class KeyboardResizeHandleControlTests: XCTestCase {
         let pan = Pan()
         pan.phase = .began
         pan.vector.y = -10
+        pan.position.y = -1
         handle.handlePan(pan)
         pan.phase = .changed
         pan.vector.y = -120
+        pan.position.y = -111
         handle.handlePan(pan)
         XCTAssertEqual(ends, [])
         XCTAssertEqual(window.frame, originalFrame)
@@ -94,6 +96,7 @@ final class KeyboardResizeHandleControlTests: XCTestCase {
         pan.phase = .began
         handle.handlePan(pan)
         pan.phase = .ended
+        pan.position.y = -11
         handle.handlePan(pan)
         XCTAssertEqual(ends, [false, true])
     }
@@ -115,7 +118,7 @@ final class KeyboardResizeHandleControlTests: XCTestCase {
         XCTAssertEqual(ends, [false])
     }
 
-    func testNoWindowOrNoBeginCannotProducePreviewOrCommitCallbacks() {
+    func testNoWindowOrNoBeginCannotProduceChangeOrCommitCallbacks() {
         let handle = ResizeHandleButton(backgroundColor: .clear)
         var callbacks = 0
         handle.begin = { callbacks += 1 }
@@ -151,7 +154,7 @@ final class KeyboardResizeHandleControlTests: XCTestCase {
         XCTAssertEqual(callbacks, 0)
     }
 
-    func testInvalidChangedAndTerminalVectorsNeverEscapeToPreview() {
+    func testInvalidChangedCoordinatesCancelRatherThanCommitAnOlderTarget() {
         let (window, handle) = fixture()
         defer { withExtendedLifetime(window) {} }
         var changes: [CGFloat] = []
@@ -162,34 +165,240 @@ final class KeyboardResizeHandleControlTests: XCTestCase {
         pan.phase = .began
         handle.handlePan(pan)
         pan.phase = .changed
-        pan.vector.y = -40
+        pan.position.y = -31
         handle.handlePan(pan)
         for invalid: CGFloat in [.nan, .infinity, -.infinity] {
-            pan.vector.y = invalid
+            pan.position.y = invalid
             handle.handlePan(pan)
         }
         pan.phase = .ended
         handle.handlePan(pan)
         XCTAssertEqual(changes, [0, -40])
-        XCTAssertEqual(ends, [true]) // Release keeps the last valid preview.
+        XCTAssertEqual(ends, [false])
     }
 
-    func testButtonAndAccessibilityActionsKeepTheSameCallbacks() {
+    func testInvalidTerminalCoordinatesAlwaysDiscardTheSession() {
+        for invalid: CGFloat in [.nan, .infinity, -.infinity] {
+            let (window, handle) = fixture()
+            defer { withExtendedLifetime(window) {} }
+            var ends: [Bool] = []
+            handle.end = { ends.append($0) }
+            let pan = Pan(); pan.phase = .began
+            handle.handlePan(pan)
+            pan.phase = .changed; pan.position.y = -31
+            handle.handlePan(pan)
+            pan.phase = .ended; pan.position.y = invalid
+            handle.handlePan(pan)
+            pan.position.y = -31; handle.handlePan(pan)
+            XCTAssertEqual(ends, [false])
+        }
+    }
+
+    func testInvalidAndRegressedTerminalTimestampsCannotCommit() {
+        for invalid: TimeInterval in [.nan, .infinity, -.infinity, -1, 0.5] {
+            var time: TimeInterval = 1
+            let (window, handle) = fixture(fallbackTimestamp: { time })
+            defer { withExtendedLifetime(window) {} }
+            var ends: [Bool] = []
+            handle.end = { ends.append($0) }
+            let pan = Pan(); pan.phase = .began
+            handle.handlePan(pan)
+            time = invalid; pan.phase = .ended
+            handle.handlePan(pan)
+            XCTAssertEqual(ends, [false])
+        }
+    }
+
+    func testExactDuplicateEventsAreIgnoredButConflictingDuplicatesCancel() {
+        var time: TimeInterval = 1
+        let (window, handle) = fixture(fallbackTimestamp: { time })
+        defer { withExtendedLifetime(window) {} }
+        var changes: [CGFloat] = [], ends: [Bool] = []
+        handle.change = { changes.append($0) }
+        handle.end = { ends.append($0) }
+        let pan = Pan(); pan.phase = .began
+        handle.handlePan(pan)
+        pan.phase = .changed; handle.handlePan(pan)
+        XCTAssertEqual(changes, [0])
+        time = 2; pan.position.y = -31
+        handle.handlePan(pan)
+        handle.handlePan(pan)
+        XCTAssertEqual(changes, [0, -40])
+        pan.position.y = -21
+        handle.handlePan(pan)
+        pan.phase = .ended; handle.handlePan(pan)
+        XCTAssertEqual(changes, [0, -40])
+        XCTAssertEqual(ends, [false])
+    }
+
+    func testExactDuplicateReleaseCanCommitAVerifiedVerticalSwipe() {
+        let (window, handle) = fixture(fallbackTimestamp: { 1 })
+        defer { withExtendedLifetime(window) {} }
+        var ends: [Bool] = []
+        handle.end = { ends.append($0) }
+        let pan = Pan(); pan.phase = .began; pan.position.y = -3; pan.vector.y = -12
+        handle.handlePan(pan)
+        pan.phase = .ended; handle.handlePan(pan)
+        XCTAssertEqual(ends, [true])
+    }
+
+    func testLateCallbacksFromAnOldRecognizerCannotEndANewRecognizerSession() {
+        let (window, handle) = fixture()
+        defer { withExtendedLifetime(window) {} }
+        let old = Pan(), replacement = Pan()
+        var ends: [Bool] = []
+        handle.end = { ends.append($0) }
+        old.phase = .began; handle.handlePan(old)
+        handle.cancelResize()
+        replacement.phase = .began; handle.handlePan(replacement)
+        old.phase = .changed; old.position.y = -100; handle.handlePan(old)
+        old.phase = .ended; handle.handlePan(old)
+        old.phase = .cancelled; handle.handlePan(old)
+        XCTAssertEqual(ends, [false])
+        replacement.phase = .ended; replacement.position.y = -11; handle.handlePan(replacement)
+        XCTAssertEqual(ends, [false, true])
+    }
+
+    func testWindowBoundsChangeDiscardsInsteadOfCompensatingTheTouchBasis() {
+        let (window, handle) = fixture()
+        defer { withExtendedLifetime(window) {} }
+        window.bounds = CGRect(x: 0, y: 0, width: 402, height: 300)
+        let localRoot = UIView(frame: window.bounds)
+        handle.coordinateView = localRoot
+        var changes: [CGFloat] = [], ends: [Bool] = []
+        handle.change = { changes.append($0) }
+        handle.end = { ends.append($0) }
+        let pan = Pan(); pan.phase = .began
+        handle.handlePan(pan)
+        pan.phase = .changed; pan.position.y = -31
+        localRoot.bounds.size.height = 340 // Local unrelated bounds do not enter the fixed-window math.
+        handle.handlePan(pan)
+        window.bounds.size.height = 340
+        pan.position.y = 9
+        handle.handlePan(pan)
+        pan.phase = .ended; handle.handlePan(pan)
+        XCTAssertEqual(changes, [0, -40])
+        XCTAssertEqual(ends, [false])
+    }
+
+    func testWindowBoundsChangeOnReleaseCannotCommitAnEarlierSelection() {
+        let (window, handle) = fixture()
+        defer { withExtendedLifetime(window) {} }
+        var ends: [Bool] = []
+        handle.end = { ends.append($0) }
+        let pan = Pan(); pan.phase = .began; handle.handlePan(pan)
+        window.bounds.origin.y += 1
+        pan.phase = .ended; handle.handlePan(pan)
+        handle.handlePan(pan)
+        XCTAssertEqual(ends, [false])
+    }
+
+    func testDuplicateBeginAndExplicitCancellationAreIdempotent() {
+        let (window, handle) = fixture()
+        defer { withExtendedLifetime(window) {} }
+        var begins = 0, changes = 0
+        var ends: [Bool] = []
+        handle.begin = { begins += 1 }
+        handle.change = { _ in changes += 1 }
+        handle.end = { ends.append($0) }
+        let pan = Pan(); pan.phase = .began
+        handle.handlePan(pan)
+        handle.handlePan(pan)
+        handle.cancelResize()
+        handle.cancelResize()
+        pan.phase = .changed; handle.handlePan(pan)
+        pan.phase = .ended; handle.handlePan(pan)
+        XCTAssertEqual(begins, 1)
+        XCTAssertEqual(changes, 1)
+        XCTAssertEqual(ends, [false])
+    }
+
+    func testCancellationInsideBeginDoesNotEmitAStaleChange() {
+        let (window, handle) = fixture()
+        defer { withExtendedLifetime(window) {} }
+        var changes = 0
+        var ends: [Bool] = []
+        handle.begin = { [weak handle] in handle?.cancelResize() }
+        handle.change = { _ in changes += 1 }
+        handle.end = { ends.append($0) }
+        let pan = Pan(); pan.phase = .began
+        handle.handlePan(pan)
+        pan.phase = .ended; handle.handlePan(pan)
+        XCTAssertEqual(changes, 0)
+        XCTAssertEqual(ends, [false])
+    }
+
+    func testOldTerminalCannotEndAReentrantNewSession() {
+        let (window, handle) = fixture()
+        defer { withExtendedLifetime(window) {} }
+        let old = Pan(), replacement = Pan()
+        var ends: [Bool] = []
+        var replaced = false
+        handle.end = { ends.append($0) }
+        handle.change = { [weak handle] _ in
+            guard old.phase == .ended, !replaced else { return }
+            replaced = true
+            handle?.cancelResize()
+            replacement.phase = .began
+            handle?.handlePan(replacement)
+        }
+        old.phase = .began; handle.handlePan(old)
+        old.phase = .ended; old.position.y = -11; handle.handlePan(old)
+        XCTAssertEqual(ends, [false])
+        replacement.phase = .ended; replacement.position.y = -11; handle.handlePan(replacement)
+        XCTAssertEqual(ends, [false, true])
+    }
+
+    func testTapDoesNothingAndAccessibilityStepsUseSemanticRows() {
         let handle = ResizeHandleButton(backgroundColor: .clear)
-        var toggles = 0
         var steps: [CGFloat] = []
-        handle.toggle = { toggles += 1 }
         handle.step = { steps.append($0) }
         handle.sendActions(for: .touchUpInside)
-        XCTAssertTrue(handle.accessibilityActivate())
+        XCTAssertFalse(handle.accessibilityActivate())
+        XCTAssertTrue(steps.isEmpty)
+        XCTAssertNil(handle.actions(forTarget: handle, forControlEvent: .touchUpInside))
         handle.accessibilityIncrement()
         handle.accessibilityDecrement()
-        XCTAssertEqual(toggles, 2)
-        XCTAssertEqual(steps, [40, -40])
+        XCTAssertEqual(steps, [1, -1])
         XCTAssertEqual(handle.accessibilityIdentifier, "keyboard.resize")
-        XCTAssertTrue(handle.accessibilityTraits.contains(.button))
+        XCTAssertFalse(handle.accessibilityTraits.contains(.button))
         XCTAssertTrue(handle.accessibilityTraits.contains(.adjustable))
-        XCTAssertEqual(handle.intrinsicContentSize.height, 18)
+        XCTAssertEqual(handle.intrinsicContentSize.height, 14)
+        XCTAssertEqual(handle.intrinsicContentSize.height, KeyboardLayoutPolicy.resizeHandleHeight)
+    }
+
+    func testTinyHorizontalAndDiagonalReleasesCancelWithoutAFinalChange() {
+        for (x, y): (CGFloat, CGFloat) in [(0, 0), (0, 11.99), (40, 20), (12, 12), (-30, -12)] {
+            let (window, handle) = fixture()
+            defer { withExtendedLifetime(window) {} }
+            var ends: [Bool] = [], changes: [CGFloat] = []
+            handle.end = { ends.append($0) }
+            handle.change = { changes.append($0) }
+            let pan = Pan(); pan.phase = .began
+            handle.handlePan(pan)
+            pan.phase = .ended; pan.position = CGPoint(x: 20 + x, y: 9 + y)
+            handle.handlePan(pan)
+            handle.handlePan(pan)
+            XCTAssertEqual(ends, [false])
+            XCTAssertEqual(changes, [0], "Rejected release must not submit one more selection")
+        }
+    }
+
+    func testBothDirectionsRequireThresholdAndPredominantVerticalMotion() {
+        for (x, y): (CGFloat, CGFloat) in [(0, -12), (0, 12), (11, -12), (-11, 12), (12, 13)] {
+            let (window, handle) = fixture()
+            defer { withExtendedLifetime(window) {} }
+            var ends: [Bool] = [], changes: [CGFloat] = []
+            handle.end = { ends.append($0) }
+            handle.change = { changes.append($0) }
+            let pan = Pan(); pan.phase = .began
+            handle.handlePan(pan)
+            pan.phase = .ended; pan.position = CGPoint(x: 20 + x, y: 9 + y)
+            handle.handlePan(pan)
+            handle.handlePan(pan)
+            XCTAssertEqual(ends, [true])
+            XCTAssertEqual(changes, [0, y])
+        }
     }
 
     func testEntireGrabAreaRemainsInteractiveAroundTheDecorativePill() {

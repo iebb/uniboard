@@ -1,30 +1,46 @@
 import SwiftUI
 
 struct ContentView: View {
+    private enum AppTab: Hashable { case explore, emojis, blocks, saved, settings }
+    @State private var selectedTab: AppTab = .explore
+    @State private var settingsPresentationID = UUID()
     @AppStorage("scratchpad") private var scratchpad = ""
     @State private var selectedCharacter: UnicodeCharacter?
     @State private var selectedEmoji: UnicodeEmojiEntry?
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             NavigationStack {
                 ExploreView(scratchpad: $scratchpad, select: select)
             }
             .tabItem { Label("Explore", systemImage: "square.grid.2x2") }
+            .tag(AppTab.explore)
 
             NavigationStack {
                 EmojisView(scratchpad: $scratchpad, select: selectEmoji)
             }
             .tabItem { Label("Emojis", systemImage: "face.smiling") }
+            .tag(AppTab.emojis)
 
             NavigationStack { BlocksView(select: select) }
                 .tabItem { Label("Blocks", systemImage: "rectangle.stack") }
+                .tag(AppTab.blocks)
 
             NavigationStack { SavedView(select: select, scratchpad: $scratchpad) }
                 .tabItem { Label("Saved", systemImage: "star") }
+                .tag(AppTab.saved)
 
             NavigationStack { SetupView() }
-                .tabItem { Label("Setup", systemImage: "keyboard") }
+                .id(settingsPresentationID)
+                .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(AppTab.settings)
+        }
+        .onOpenURL { url in
+            guard CompanionAppRoute.isSettings(url) else { return }
+            selectedCharacter = nil
+            selectedEmoji = nil
+            settingsPresentationID = UUID()
+            selectedTab = .settings
         }
         .sheet(item: $selectedCharacter) { character in
             CharacterDetailView(character: character, scratchpad: $scratchpad)
@@ -261,7 +277,7 @@ enum DiscoveryCollection: String, CaseIterable, Identifiable {
     func characters(in catalog: UnicodeCatalog) -> [UnicodeCharacter] {
         let points: [UInt32]
         switch self {
-        case .all: return catalog.newestCharacters(limit: 160)
+        case .all: return catalog.orderedCharacters(limit: 160)
         case .essentials: points = [0x2661, 0x2606, 0x2726, 0x2192, 0x221E, 0x00B0, 0x00D7, 0x2713, 0x00A9, 0x00AE, 0x2122, 0x2022, 0x2014, 0x2026, 0x00B7, 0x266A, 0x00B1, 0x2260, 0x00A7, 0x00B6]
         case .arrows: points = Array(0x2190...0x21A3) + [0x21AA, 0x21BA, 0x21C4, 0x21D2, 0x21D4, 0x27F6, 0x27F5, 0x27F7]
         case .math: points = [0x221E, 0x2211, 0x220F, 0x221A, 0x222B, 0x222C, 0x2202, 0x2206, 0x2207, 0x2260, 0x2248, 0x2264, 0x2265, 0x00B1, 0x00D7, 0x00F7, 0x2208, 0x2209, 0x222A, 0x2229, 0x2205, 0x2200, 0x2203, 0x03C0]

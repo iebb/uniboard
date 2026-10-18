@@ -9,16 +9,30 @@ struct UniboardApp: App {
         if ProcessInfo.processInfo.arguments.contains("--uitesting") {
             CharacterStore.shared.reset()
             UserDefaults.standard.removeObject(forKey: "scratchpad")
-            CatalogPreferences.shared.reset()
+            CatalogPreferences.shared.reset(preservingEdition: true)
         }
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(store)
-                .environmentObject(preferences)
-                .tint(Palette.accent)
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--unit-testing") {
+                // Unit tests render their own UIKit fixtures. Keep unrelated
+                // app navigation and keyboard restoration out of that host.
+                Color.clear
+            } else {
+                content
+            }
+#else
+            content
+#endif
         }
+    }
+
+    private var content: some View {
+        ContentView()
+            .environmentObject(store)
+            .environmentObject(preferences)
+            .tint(Palette.accent)
     }
 }

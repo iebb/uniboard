@@ -1,1 +1,11 @@
-Sharper search text with Liquid Glass, a clear height preview while dragging and resizing on release. The grip sits at the top edge. Fold search while keeping its query and results, and edit anywhere with the movable cursor. Stronger validation also protects Unicode data, saved collections and query editing. Held delete stops when search mode or the receiving document changes.
+A daily English keyboard with full Unicode close at hand.
+
+- Literal QWERTY with Shift/Caps Lock, accented-letter long presses, number/symbol pages and repeating Backspace.
+- Custom symbol boards, a stock Symbols board, glyph-only keycaps, configurable long-press variants and a board chooser when saving.
+- Favorites-first Star/back-arrow switching, with a configurable preferred board. Compact, equal key heights without blank space; U shows/hides the toolbar. A number row at four rows and a horizontally scrolling symbol strip at five.
+- Clearer search text and cursor editing anywhere. Ascending code points by default, with whole-word matches before mid-word matches; saved sort choices persist.
+- Portrait swipes add/remove one row on release, with simple ▲/▼ feedback and corrected height negotiation.
+- Unicode 18 latest release by default, previous releases 17/16 and optional 19 DRAFT, selected only in app Settings. All four work offline in the keyboard without Full Access.
+- Edition, optional preview fonts and the optional collapse key are controlled only in app Settings. The keyboard menu offers order and Open companion app.
+- Matching rounded symbol keycaps; expanded symbol pages replace redundant digits with common symbols.
+- App-only per-key settings for long press, swipe up/down and ordered literal candidates. Opposite-case letter flicks retain Shift and support horizontal choice selection.

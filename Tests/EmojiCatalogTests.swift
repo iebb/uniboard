@@ -21,15 +21,30 @@ final class EmojiCatalogTests: XCTestCase {
         return url
     }
 
-    func testBothOfficialEditionsAndUniqueFullyQualifiedEntries() {
+    func testBareHexadecimalScalarAndSequenceQueriesPreserveExactQualifiedText() throws {
+        let catalog = EmojiCatalog.latest
+        let rocket = try XCTUnwrap(catalog.search("1F680").first)
+        XCTAssertEqual(rocket.codePoints, [0x1F680])
+        XCTAssertEqual(rocket.text, "🚀")
+        XCTAssertEqual(catalog.search("1f680"), catalog.search("U+1F680"))
+        let horizontal = try XCTUnwrap(catalog.search("1F642 200D 2194 FE0F").first)
+        XCTAssertEqual(horizontal.codePoints, [0x1F642, 0x200D, 0x2194, 0xFE0F])
+        XCTAssertEqual(horizontal.text, "🙂‍↔️")
+        XCTAssertEqual(catalog.search("1F642-200D-2194-FE0F").first, horizontal)
+        XCTAssertTrue(catalog.search("face").contains { $0.codePoints == [0x1F600] },
+                      "A hex-looking ordinary word must still be searched as text")
+    }
+
+    func testAllOfficialEditionsAndUniqueFullyQualifiedEntries() {
         for edition in UnicodeEdition.allCases {
             let catalog = edition.emojiCatalog
             XCTAssertNil(catalog.resourceError)
-            XCTAssertGreaterThan(catalog.entries.count, 3900)
+            XCTAssertGreaterThan(catalog.entries.count, 3700)
             XCTAssertEqual(Set(catalog.entries.map(\.id)).count, catalog.entries.count)
             XCTAssertTrue(catalog.entries.allSatisfy { !$0.name.isEmpty && !$0.group.isEmpty && !$0.subgroup.isEmpty })
-            XCTAssertGreaterThanOrEqual(catalog.entries.first?.versionSortKey ?? 0, unicodeVersionKey("18.0"))
-            XCTAssertLessThanOrEqual(catalog.entries.first?.versionSortKey ?? 0, unicodeVersionKey(catalog.unicodeVersion))
+            let newest = catalog.orderedEntries(order: .newestFirst).first
+            XCTAssertGreaterThanOrEqual(newest?.versionSortKey ?? 0, unicodeVersionKey("16.0"))
+            XCTAssertLessThanOrEqual(newest?.versionSortKey ?? 0, unicodeVersionKey(catalog.unicodeVersion))
             XCTAssertEqual(catalog.unicodeVersion, edition.catalog.version)
         }
         XCTAssertFalse(UnicodeEdition.latest.emojiCatalog.version.contains("draft"))
@@ -37,30 +52,38 @@ final class EmojiCatalogTests: XCTestCase {
     }
 
     func testEditionFilesDoNotMixTheirEntries() throws {
-        // Distinct tiny fixture sets exercise edition isolation independently of
-        // today's upstream draft, whose assigned set still equals the final set.
+        // Distinct tiny fixture sets exercise all four slots independently of
+        // today's upstream draft, whose assigned set can equal the final set.
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        for edition in UnicodeEdition.allCases {
-            let cp: UInt32 = edition == .latest ? 0x1F680 : 0x1F600
-            let name = edition == .latest ? "rocket" : "grinning face"
+        let fixtures: [(UnicodeEdition, UInt32, String, String)] = [
+            (.latest, 0x1F680, "rocket", "18.0"), (.previous, 0x1F600, "grinning face", "17.0"),
+            (.older, 0x2603, "snowman", "16.0"), (.draft, 0x1F6F0, "satellite", "19.0")]
+        for (edition, cp, name, number) in fixtures {
             let entry: [String: Any] = ["id": String(format: "%04X", cp), "codePoints": [cp],
                 "name": name, "emojiVersion": "1.0", "unicodeVersion": "6.0",
                 "group": "Fixture", "subgroup": "Fixture"]
-            let document: [String: Any] = ["version": edition == .latest ? "18.0" : "19.0 draft",
-                "unicodeVersion": edition == .latest ? "18.0.0" : "19.0.0 draft", "entries": [entry]]
+            let suffix = edition == .draft ? " draft" : ""
+            let document: [String: Any] = ["version": number + suffix, "edition": edition.rawValue,
+                "unicodeVersion": number + ".0" + suffix, "entries": [entry]]
             try JSONSerialization.data(withJSONObject: document)
                 .write(to: directory.appendingPathComponent("EmojiCatalog-\(edition.rawValue).json"))
         }
-        let latest = EmojiCatalog(edition: .latest, resourceURL: directory)
-        let draft = EmojiCatalog(edition: .draft, resourceURL: directory)
-        XCTAssertNil(latest.resourceError)
-        XCTAssertNil(draft.resourceError)
-        XCTAssertEqual(latest.search("rocket").first?.text, "🚀")
-        XCTAssertTrue(latest.search("grinning face").isEmpty)
-        XCTAssertEqual(draft.search("grinning face").first?.text, "😀")
-        XCTAssertTrue(draft.search("rocket").isEmpty)
+        for (edition, cp, name, _) in fixtures {
+            let catalog = EmojiCatalog(edition: edition, resourceURL: directory)
+            XCTAssertNil(catalog.resourceError)
+            XCTAssertEqual(catalog.search(name).first?.codePoints, [cp])
+            for (_, other, otherName, _) in fixtures where other != cp {
+                XCTAssertTrue(catalog.search(otherName).isEmpty)
+            }
+        }
+        // A complete but swapped historical document must fail closed, even
+        // though both editions are final and all scalar sequences are valid.
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("EmojiCatalog-previous.json"))
+        try FileManager.default.copyItem(at: directory.appendingPathComponent("EmojiCatalog-older.json"),
+                                        to: directory.appendingPathComponent("EmojiCatalog-previous.json"))
+        XCTAssertNotNil(EmojiCatalog(edition: .previous, resourceURL: directory).resourceError)
     }
 
     func testExactZWJAndVariationSelectorInsertion() throws {
@@ -76,6 +99,25 @@ final class EmojiCatalogTests: XCTestCase {
         XCTAssertEqual(EmojiCatalog.shared.search(emoji.text).first, emoji)
         XCTAssertEqual(EmojiCatalog.shared.search(emoji.codePointLabel).first, emoji)
         XCTAssertEqual(EmojiCatalog.shared.search(emoji.id).first, emoji)
+    }
+
+    func testHistoricalEmojiSetsExcludeNewerIntroductionsWithoutChangingSequences() throws {
+        for edition in [UnicodeEdition.older, .previous, .latest] {
+            let catalog = edition.emojiCatalog
+            let key = unicodeVersionKey(edition.versionLabel)
+            for (point, version): (UInt32, String) in [(0x1FAE9, "16.0"), (0x1FAEA, "17.0"), (0x1FAEB, "18.0")] {
+                let entry = catalog.entries.first { $0.codePoints == [point] }
+                if key >= unicodeVersionKey(version) {
+                    XCTAssertEqual(try XCTUnwrap(entry).emojiVersion, version)
+                } else {
+                    XCTAssertNil(entry)
+                    XCTAssertTrue(catalog.search(String(format: "U+%04X", point)).isEmpty)
+                }
+            }
+            let sequence = try XCTUnwrap(catalog.search("head shaking horizontally", limit: 1).first)
+            XCTAssertEqual(sequence.codePoints, [0x1F642, 0x200D, 0x2194, 0xFE0F])
+            XCTAssertEqual(sequence.text.unicodeScalars.map(\.value), sequence.codePoints)
+        }
     }
 
     func testCompleteKeycapsFlagsAndSkinToneSequences() throws {
@@ -226,6 +268,50 @@ final class EmojiCatalogTests: XCTestCase {
         for order in UnicodeSortOrder.allCases {
             XCTAssertEqual(fixture.search("rocket rocket rocket", order: order), fixture.search("rocket", order: order))
             XCTAssertEqual(fixture.search(String(repeating: "rocket ", count: 585), order: order), fixture.search("rocket", order: order))
+        }
+    }
+
+    func testEmojiWholeWordTierIncludesGroupAndSubgroupAndPrecedesSubstringTier() throws {
+        var group = entry([0x1F604], name: "other", version: "6.0")
+        group["group"] = "art"
+        var subgroup = entry([0x1F605], name: "other", version: "18.0")
+        subgroup["subgroup"] = "art word"
+        let url = try fixture([entry([0x1F600], name: "cart", version: "18.0"),
+            entry([0x1F601], name: "art", version: "1.0"), entry([0x1F602], name: "art word", version: "10.0"),
+            entry([0x1F603], name: "earth word", version: "9.0"), group, subgroup])
+        let fixture = EmojiCatalog(edition: .latest, resourceURL: url)
+        XCTAssertNil(fixture.resourceError)
+        let expected: [UnicodeSortOrder: [UInt32]] = [
+            .codePoint: [0x1F601, 0x1F602, 0x1F604, 0x1F605, 0x1F600, 0x1F603],
+            .newestFirst: [0x1F605, 0x1F602, 0x1F604, 0x1F601, 0x1F600, 0x1F603],
+            .oldestFirst: [0x1F601, 0x1F604, 0x1F602, 0x1F605, 0x1F603, 0x1F600]]
+        for order in UnicodeSortOrder.allCases {
+            let points = try XCTUnwrap(expected[order])
+            XCTAssertEqual(fixture.search("art", limit: Int.max, order: order).map { $0.codePoints[0] }, points)
+            XCTAssertEqual(fixture.search("art", limit: 3, order: order).map { $0.codePoints[0] }, Array(points.prefix(3)))
+            XCTAssertEqual(fixture.search("art art", order: order), fixture.search("art", order: order))
+        }
+        XCTAssertEqual(fixture.search("art word").map { $0.codePoints[0] }, [0x1F602, 0x1F605, 0x1F603])
+        XCTAssertEqual(fixture.search("word-art").map { $0.codePoints[0] }, [0x1F602, 0x1F605, 0x1F603])
+    }
+
+    func testEmojiUnicodeBoundariesAndDefaultAscendingBrowsePreserveExactSequences() throws {
+        let sequence: [UInt32] = [0x1F469, 0x200D, 0x1F4BB]
+        let url = try fixture([entry([0x1F600], name: "mélange", version: "18.0"),
+            entry([0x1F601], name: "élan", version: "1.0"),
+            entry(sequence, name: "woman technologist", version: "4.0")])
+        let fixture = EmojiCatalog(edition: .latest, resourceURL: url)
+        XCTAssertNil(fixture.resourceError)
+        for query in ["élan", "ÉLAN", "ｅｌａｎ", "(elan)"] {
+            XCTAssertEqual(fixture.search(query).map { $0.codePoints[0] }, [0x1F601, 0x1F600], query)
+        }
+        XCTAssertEqual(fixture.entries.map(\.codePoints), [sequence, [0x1F600], [0x1F601]])
+        XCTAssertEqual(fixture.orderedEntries(), fixture.entries)
+        XCTAssertEqual(fixture.entries(offset: 1, limit: 2), Array(fixture.entries.dropFirst()))
+        XCTAssertEqual(fixture.search(" \n"), fixture.entries)
+        for query in ["👩‍💻", "1F469-200D-1F4BB", "U+1F469 U+200D U+1F4BB"] {
+            XCTAssertEqual(fixture.search(query).map(\.codePoints), [sequence])
+            XCTAssertEqual(fixture.search(query).first?.text.unicodeScalars.map(\.value), sequence)
         }
     }
 }

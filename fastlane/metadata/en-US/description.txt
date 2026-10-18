@@ -1,35 +1,36 @@
-Find the right symbol, special letter or complete emoji, then type it with a tap. Uniboard is an offline Unicode character explorer and custom keyboard for iPhone and iPad.
+Type English, accented letters, special symbols and complete emoji from one keyboard. Uniboard pairs literal QWERTY with custom symbol boards and offline Unicode search for iPhone and iPad.
 
-FIND IT YOUR WAY
-- Search official character names, aliases, descriptive annotations or block names. Try "arrow", "heart" or "Greek".
-- Look up hex code points such as U+1F680, 0x1F680 or 1F680, or use decimal:128640. Paste a character into the app's search to identify it.
-- Browse the complete Unicode block list and scroll through assigned characters, from math symbols and punctuation to scripts and phonetic marks.
+YOUR EVERYDAY KEYBOARD
+Keep your words as typed, without autocorrect or predictions. Use Shift, Caps Lock, number/symbol pages and long-press accented letters. Capitalization follows the receiving field; double Space after a word adds a period and space. URL/email fields retain literal input.
 
-EXPLORE COMPLETE EMOJI
-- Search and browse the official fully qualified emoji set, including joined emoji, skin tones, flags and keycaps.
-- Copy or insert the complete sequence, preserving joiners and variation selectors. Inspect every component's name and code point.
-- Emoji order uses the version that introduced the emoji, shown separately from its components' Unicode ages.
+Compact keys keep a consistent height. The bottom-left U key shows/hides the Unicode toolbar, initially hidden. Digits appear when four character rows fit; a horizontally scrolling symbol strip appears at five. On iPhone in portrait, swipe the top grip up/down to add/remove one row on release, within screen limits. A simple triangle shows your drag direction.
 
-CHOOSE YOUR UNICODE EDITION
-- Switch between Unicode 18, the latest release, and the Unicode 19 development draft. Both catalogs are bundled for offline use; the draft is selected by default.
-- Discover characters across the catalog with the newest Unicode age first. Choose oldest first or code point order whenever you prefer.
-- The app and keyboard remember their own edition and order choices.
+SYMBOLS, YOUR WAY
+The star beside Space opens Favorites by default; its back arrow returns to QWERTY. Hold it to switch/manage boards or choose its default target. Symbols is included. Save characters or emoji to your chosen board.
 
-TYPE AND UNDERSTAND
-- Enable the Uniboard keyboard, search with its own keys, then tap a character or emoji to insert it at the cursor. The search query stays inside the keyboard.
-- Hold a key, or pause a pointer over it, to read its name, description, code points and properties without inserting it. Details include Unicode age, block, category, script, bidirectional class, combining class, decomposition and UTF-8 bytes where applicable.
-- Use the top-right backspace, including press-and-hold deletion, plus space, return and the globe menu.
-- Keep favorites and recent entries locally. The app and keyboard keep separate collections. Copy entries or combine text in the app's scratchpad.
+Saved and Recent symbols use rounded keycaps without code-point captions. Hold a key for variants, properties or editing. Keep punctuation, currencies, mathematics and phonetic marks close at hand. Original sequences are preserved.
 
-Search Unicode section names and informative notes as well as stable official names. For example, “Suzhou numerals” finds the characters officially named “Hangzhou numeral”; details retain the original name and explain the historical naming issue. Read typed aliases, related characters and numeric properties where Unicode supplies them.
+In app Settings, customize each main key’s long-press, swipe-up and swipe-down choices. Swipe a letter up for its opposite case and accents by default; slide left/right to choose before lifting. Save ordered choices, disable a gesture or restore defaults. Custom text keeps its exact case and sequence; ordinary taps keep their function.
+
+FIND ANY CHARACTER
+- Search official names, aliases, descriptions and block names. Try "arrow", "heart" or "Greek". Whole-word matches come before mid-word matches.
+- Look up U+1F680, 0x1F680, 1F680 or decimal:128640. In the app, paste a character to identify it.
+- Browse every Unicode block and assigned character. Fresh defaults use ascending code points; newest/oldest sorting is also available.
+- Search "Suzhou numerals" to find characters officially named "Hangzhou numeral". Details retain official names and distinguish corrections, annotations, aliases and related characters.
+
+Tap Unicode to browse, then edit its local search query separately from your document. Return to English and keep the query, results and cursor position. Hold or hover over a browse tile to read its properties without inserting.
+
+COMPLETE EMOJI AND DETAILS
+Find joined emoji, skin tones, flags and keycaps. Insert/copy whole sequences intact. Read names, descriptions, age, block, category, script, combining/bidirectional classes, decomposition, numeric/case properties and encodings. Emoji introduction versions differ from component Unicode ages.
+
+FOUR OFFLINE EDITIONS
+Choose in app Settings: Unicode 18 release (default), previous releases 17/16, or Unicode 19 DRAFT. All four character/property and emoji catalogs work offline. The keyboard reads your choice without Full Access. Fonts and the optional collapse key are also app settings. The keyboard’s … menu contains order and Open companion app.
 
 PRIVATE AND OFFLINE
-No account, ads, analytics SDK or keyboard Full Access. Uniboard does not send your typing or searches to a server.
+No account, ads, analytics SDK or Full Access. Typing and searches are not sent to a server. Boards, favorites, recents and scratchpad stay on-device. Only app-authored preferences and key choices pass one-way locally to the keyboard.
 
-Enable the keyboard in Settings > General > Keyboard > Keyboards > Add New Keyboard > Uniboard. While typing, hold the globe key to switch to it.
+Optional fonts improve some missing previews and default off. Receiving apps choose their own fonts. App Settings includes a keyboard test and font licenses.
 
-Draft names and assignments may change. Character and emoji display depends on iOS fonts; some entries may appear as boxes or separate glyphs. Names, descriptions and properties remain readable. Preview markers for invisible characters and combining marks are not inserted.
+Add Uniboard in iOS Settings > General > Keyboard > Keyboards > Add New Keyboard, then hold the globe while typing to select it.
 
-The interface, Unicode names and descriptions are in English. iOS uses its own keyboard in password and phone-number fields, and some apps disable custom keyboards.
-
-Requires iOS 17 or later.
+Draft assignments may change. Fonts may show boxes, but names/properties stay readable. Preview markers are never inserted. The interface and Unicode names/descriptions are English. iOS uses its own keyboard in secure/phone fields; some apps disable custom keyboards. Requires iOS 17 or later.

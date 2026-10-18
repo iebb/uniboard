@@ -27,12 +27,16 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ad.neko.uniboard
+        CODE_SIGN_ENTITLEMENTS: App/Uniboard.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_CFBundleDisplayName: Uniboard
     info:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Uniboard
+        CFBundleURLTypes:
+          - CFBundleURLName: ad.neko.uniboard
+            CFBundleURLSchemes: [uniboard]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
@@ -63,6 +67,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ad.neko.uniboard.keyboard
+        CODE_SIGN_ENTITLEMENTS: Keyboard/UniboardKeyboard.entitlements
         INFOPLIST_FILE: Keyboard/Info.plist
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
@@ -95,6 +100,8 @@ schemes:
         Uniboard: all
     test:
       gatherCoverageData: true
+      commandLineArguments:
+        --unit-testing: true
       environmentVariables:
         UNIBOARD_KEYBOARD_INTEGRATION: $(UNIBOARD_KEYBOARD_INTEGRATION)
       targets:

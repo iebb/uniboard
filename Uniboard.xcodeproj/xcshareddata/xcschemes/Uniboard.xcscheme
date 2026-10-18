@@ -64,6 +64,10 @@
          </TestableReference>
       </Testables>
       <CommandLineArguments>
+         <CommandLineArgument
+            argument = "--unit-testing"
+            isEnabled = "YES">
+         </CommandLineArgument>
       </CommandLineArguments>
       <EnvironmentVariables>
          <EnvironmentVariable

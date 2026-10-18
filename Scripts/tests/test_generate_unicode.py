@@ -132,10 +132,10 @@ class SourceValidationTests(unittest.TestCase):
 
     def test_real_cached_editions_still_satisfy_unicode_data_validation(self):
         # No network: independently verify that stricter range validation accepts
-        # both already-shipped official snapshots, including surrogate code units.
+        # every cached official snapshot, including surrogate code units.
         root = Path(__file__).resolve().parents[2]
         checked = 0
-        for source in ("latest", "draft"):
+        for source in ("latest", "previous", "older", "draft"):
             path = root / ".unicode-cache" / source / "UnicodeData.txt"
             if path.exists():
                 self.assertGreater(len(list(generator.unicode_data_rows(path.read_text("utf-8").splitlines()))), 40000)
@@ -318,25 +318,60 @@ class DownloadTests(unittest.TestCase):
             for name, content in originals.items():
                 self.assertEqual((resources / name).read_bytes(), content)
 
-    def test_both_editions_validate_before_any_resource_replacement(self):
+    def test_all_four_editions_validate_before_any_resource_replacement(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             resources = root / "Shared" / "Resources"
             resources.mkdir(parents=True)
             originals = {name: ("old " + name).encode() for name in (
                 "UnicodeCatalog.ucd", "UnicodeCatalog-latest.ucd", "UnicodeProperties.json",
-                "UnicodeProperties-latest.json", "EmojiCatalog-draft.json", "EmojiCatalog-latest.json")}
+                "UnicodeProperties-latest.json", "EmojiCatalog-draft.json", "EmojiCatalog-latest.json",
+                "UnicodeCatalog-previous.ucd", "UnicodeCatalog-older.ucd")}
             for name, content in originals.items():
                 (resources / name).write_bytes(content)
             with mock.patch.object(generator, "ROOT", root), \
                     mock.patch.object(generator.sys, "argv", ["generate_unicode.py", "--source", "all", "--refresh"]), \
+                    mock.patch.object(generator, "resolve_source", return_value=(
+                        "https://www.unicode.org/Public/18.0.0/ucd/", {"sourceKind": "unicode-release"})), \
                     mock.patch.object(generator, "generate_catalog", side_effect=[
-                        {"UnicodeCatalog-latest.ucd": b"new final edition"}, ValueError("invalid draft")]) as generate:
+                        {"UnicodeCatalog-latest.ucd": b"new final edition"},
+                        {"UnicodeCatalog-previous.ucd": b"new previous edition"},
+                        {"UnicodeCatalog-older.ucd": b"new older edition"}, ValueError("invalid draft")]) as generate:
                 with self.assertRaisesRegex(ValueError, "invalid draft"):
                     generator.main()
-            self.assertEqual([call.args[0] for call in generate.call_args_list], ["latest", "draft"])
+            self.assertEqual([call.args[0] for call in generate.call_args_list], ["latest", "17.0.0", "16.0.0", "draft"])
+            self.assertEqual([call.kwargs["slot"] for call in generate.call_args_list], ["latest", "previous", "older", "draft"])
             for name, content in originals.items():
                 self.assertEqual((resources / name).read_bytes(), content)
+
+    def test_rolling_release_slots_pin_one_latest_identity_and_advance_history(self):
+        for latest, expected in [("18.0.0", ["latest", "17.0.0", "16.0.0", "draft"]),
+                                 ("19.0.0", ["latest", "18.0.0", "17.0.0", "draft"])]:
+            resolved = (f"https://www.unicode.org/Public/{latest}/ucd/", {"sourceKind": "unicode-release"})
+            with self.subTest(latest=latest), mock.patch.object(generator, "resolve_source", return_value=resolved) as resolve:
+                plan = generator.generation_plan("all")
+                self.assertEqual([item[0] for item in plan], expected)
+                self.assertEqual([item[1] for item in plan], ["latest", "previous", "older", "draft"])
+                self.assertIs(plan[0][2], resolved)
+                resolve.assert_called_once_with("latest")
+                self.assertEqual(generator.generation_plan("previous")[0][:2], (expected[1], "previous"))
+                self.assertEqual(generator.generation_plan("older")[0][:2], (expected[2], "older"))
+        self.assertEqual(generator.generation_plan("draft"), [("draft", "draft", None)])
+        self.assertEqual(generator.generation_plan("16.0.0"), [("16.0.0", "latest", None)])
+        for base in ["https://example.invalid/18.0.0/", "https://www.unicode.org/Public/2.0.0/ucd/"]:
+            with mock.patch.object(generator, "resolve_source", return_value=(base, {})), self.assertRaises(ValueError):
+                generator.generation_plan("all")
+
+    def test_historical_emoji_archive_is_versioned_independently_before_unicode_17(self):
+        provenance = {"sourceKind": "unicode-release"}
+        self.assertEqual(generator.emoji_source_base("https://www.unicode.org/Public/16.0.0/ucd/", provenance),
+                         "https://www.unicode.org/Public/emoji/16.0/")
+        self.assertEqual(generator.emoji_source_base("https://www.unicode.org/Public/17.0.0/ucd/", provenance),
+                         "https://www.unicode.org/Public/17.0.0/emoji/")
+        self.assertEqual(generator.emoji_source_base("https://raw.githubusercontent.com/commit/ucd/dev/", {"sourceKind": "unicode-development-draft"}),
+                         "https://raw.githubusercontent.com/commit/emoji/dev/")
+        with self.assertRaises(ValueError):
+            generator.emoji_source_base("https://example.invalid/ucd/", provenance)
 
     def test_latest_release_resolves_final_version_to_immutable_directory(self):
         with mock.patch.object(generator, "fetch", return_value=b"This directory contains final data files for version 18.0.0 of the Unicode Character Database."):

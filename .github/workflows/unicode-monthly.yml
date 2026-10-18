@@ -41,11 +41,15 @@ jobs:
       - name: Validate bundled optional font pack
         run: python3 Scripts/validate_fonts.py
 
-      - name: Fetch the latest final Unicode release and development draft
+      - name: Fetch the latest three final Unicode releases and development draft
         run: python3 Scripts/generate_unicode.py --source all --refresh
 
       - name: Validate Unicode search and catalog
-        run: swift test
+        run: |
+          set -euo pipefail
+          swift test --enable-code-coverage
+          coverage_path="$(swift test --show-codecov-path)"
+          python3 Scripts/check_swift_coverage.py "$coverage_path"
 
       - name: Build the app and embedded keyboard
         run: |
@@ -64,14 +68,24 @@ jobs:
           git add -- \
             Shared/Resources/UnicodeCatalog.ucd \
             Shared/Resources/UnicodeCatalog-latest.ucd \
+            Shared/Resources/UnicodeCatalog-previous.ucd \
+            Shared/Resources/UnicodeCatalog-older.ucd \
             Shared/Resources/Blocks.json \
             Shared/Resources/Blocks-latest.json \
+            Shared/Resources/Blocks-previous.json \
+            Shared/Resources/Blocks-older.json \
             Shared/Resources/UnicodeProperties.json \
             Shared/Resources/UnicodeProperties-latest.json \
+            Shared/Resources/UnicodeProperties-previous.json \
+            Shared/Resources/UnicodeProperties-older.json \
             Shared/Resources/UnicodeSources.json \
             Shared/Resources/UnicodeSources-latest.json \
+            Shared/Resources/UnicodeSources-previous.json \
+            Shared/Resources/UnicodeSources-older.json \
             Shared/Resources/EmojiCatalog-draft.json \
             Shared/Resources/EmojiCatalog-latest.json \
+            Shared/Resources/EmojiCatalog-previous.json \
+            Shared/Resources/EmojiCatalog-older.json \
             Shared/Resources/Unicode-LICENSE.txt
           if git diff --cached --quiet; then
             echo 'The Unicode catalogs and emoji sequences are unchanged.' >> "$GITHUB_STEP_SUMMARY"
@@ -83,4 +97,4 @@ jobs:
           # A concurrent master update causes a normal push rejection. Never
           # rebase or force-push a result built against a different revision.
           git push origin HEAD:master
-          echo 'Updated both Unicode editions and emoji catalogs on master after tests and the iOS build passed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Updated three final Unicode releases, the development draft and all four emoji catalogs on master after tests and the iOS build passed.' >> "$GITHUB_STEP_SUMMARY"

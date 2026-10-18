@@ -1,14 +1,92 @@
 import Foundation
 
 enum UnicodeEdition: String, CaseIterable, Identifiable, Sendable {
-    case latest, draft
+    case latest, previous, older, draft
     var id: String { rawValue }
-    var title: String {
-        let number = catalog.version.split(separator: ".").first.map(String.init) ?? catalog.version
-        return "Unicode \(number) · \(self == .latest ? "latest" : "draft")"
+    /// Small provenance manifests are sufficient for settings/preferences; do
+    /// not map any character catalog merely to label or resolve a selection.
+    var versionLabel: String { Self.versionLabel(for: self, metadata: Self.bundledVersionLabels) }
+    /// Resolve the same missing-provenance label for bundled or custom metadata.
+    static func versionLabel(for edition: UnicodeEdition, metadata: [UnicodeEdition: String]) -> String {
+        metadata[edition] ?? "Unavailable"
     }
-    var catalog: UnicodeCatalog { self == .latest ? .latest : .shared }
-    var emojiCatalog: EmojiCatalog { self == .latest ? .latest : .shared }
+    var title: String {
+        // The bounded loader supplies a numeric label or "Unavailable". Both
+        // have a first component; prefix also safely handles an empty label.
+        let number = versionLabel.prefix { $0 != "." }
+        let status = self == .draft ? "DRAFT" : self == .latest ? "latest release" : "release"
+        return "Unicode \(number) · \(status)"
+    }
+    var catalog: UnicodeCatalog {
+        switch self {
+        case .latest: return .latest
+        case .previous: return .previous
+        case .older: return .older
+        case .draft: return .shared
+        }
+    }
+    var emojiCatalog: EmojiCatalog {
+        switch self {
+        case .latest: return .latest
+        case .previous: return .previous
+        case .older: return .older
+        case .draft: return .shared
+        }
+    }
+    /// Latest/draft follow a track. Historical selections retain their actual
+    /// version rather than silently changing when the rolling bundle advances.
+    var selectionIdentifier: String {
+        self == .latest || self == .draft ? rawValue : versionLabel
+    }
+    static func resolve(selectionIdentifier: String?) -> UnicodeEdition {
+        switch selectionIdentifier {
+        case "latest": return .latest
+        case "draft": return .draft
+        case let value?:
+            return [UnicodeEdition.previous, .older].first {
+                unicodeVersionKey($0.versionLabel) > 0 && $0.versionLabel == value
+            } ?? .latest
+        case nil: return .latest
+        }
+    }
+    var resourceSuffix: String { self == .draft ? "" : "-" + rawValue }
+    private static let bundledVersionLabels: [UnicodeEdition: String] = {
+        #if SWIFT_PACKAGE
+        let bundles = [Bundle.module, Bundle.main, Bundle(for: UnicodeCatalog.self)]
+        #else
+        let bundles = [Bundle.main, Bundle(for: UnicodeCatalog.self)]
+        #endif
+        var labels: [UnicodeEdition: String] = [:]
+        for edition in allCases {
+            for bundle in bundles {
+                guard let url = bundle.url(forResource: "UnicodeSources" + edition.resourceSuffix, withExtension: "json"),
+                      let stream = InputStream(url: url) else { continue }
+                stream.open()
+                // Each manifest is a few KiB. Bound the read even if a bundle's
+                // metadata is malformed, without mapping its catalog at all.
+                var buffer = [UInt8](repeating: 0, count: 65_537)
+                var count = 0
+                while count < buffer.count {
+                    let read = buffer.withUnsafeMutableBytes { bytes in
+                        stream.read(bytes.baseAddress!.assumingMemoryBound(to: UInt8.self).advanced(by: count),
+                                    maxLength: bytes.count - count)
+                    }
+                    if read <= 0 { if read < 0 { count = buffer.count }; break }
+                    count += read
+                }
+                stream.close()
+                guard count > 0, count <= 65_536,
+                      let identity = try? JSONDecoder().decode(UnicodeSourceIdentity.self, from: Data(buffer.prefix(count))),
+                      unicodeVersionKey(identity.versionLabel) > 0,
+                      identity.isDraft == (edition == .draft),
+                      identity.versionLabel.hasSuffix(" draft") == identity.isDraft,
+                      identity.edition == nil || identity.edition == edition.rawValue else { continue }
+                labels[edition] = identity.versionLabel
+                break
+            }
+        }
+        return labels
+    }()
 }
 
 enum UnicodeSortOrder: String, CaseIterable, Identifiable, Sendable {
@@ -45,15 +123,18 @@ enum CatalogSearchQueryPolicy {
         var seen = Set<Substring>()
         return normalized.split(separator: " ").compactMap { seen.insert($0).inserted ? String($0) : nil }
     }
-    static func hasExactTerms(in normalized: String, terms: [String]) -> Bool {
-        // Compare after stable deduplication without making another Set for
-        // every candidate. A repeated word never changes exact-name ranking.
-        var next = 0
-        for word in normalized.split(separator: " ") {
-            if next < terms.count && word == terms[next] { next += 1 }
-            else if !terms.prefix(next).contains(where: { $0 == word }) { return false }
+    static func containsWholeTerm(_ term: String, in normalized: String) -> Bool {
+        // Normalization retains Unicode letters/numbers and uses ASCII spaces
+        // for all boundaries. Do not use ASCII-only regular-expression words.
+        guard !term.isEmpty else { return false }
+        var start = normalized.startIndex
+        while start < normalized.endIndex, !Task.isCancelled,
+              let range = normalized.range(of: term, range: start..<normalized.endIndex) {
+            if (range.lowerBound == normalized.startIndex || normalized[normalized.index(before: range.lowerBound)] == " ")
+                && (range.upperBound == normalized.endIndex || normalized[range.upperBound] == " ") { return true }
+            start = range.upperBound
         }
-        return next == terms.count
+        return false
     }
 }
 
@@ -203,6 +284,8 @@ struct UnicodeBlock: Identifiable, Hashable, Sendable, Decodable {
 final class UnicodeCatalog: @unchecked Sendable {
     static let shared = UnicodeCatalog()
     static let latest = UnicodeCatalog(edition: .latest)
+    static let previous = UnicodeCatalog(edition: .previous)
+    static let older = UnicodeCatalog(edition: .older)
 
     let edition: UnicodeEdition
     let blocks: [UnicodeBlock]
@@ -240,7 +323,7 @@ final class UnicodeCatalog: @unchecked Sendable {
         let blocksURL: URL?
         let propertiesURL: URL?
         let sourcesURL: URL?
-        let suffix = edition == .latest ? "-latest" : ""
+        let suffix = edition.resourceSuffix
         if let resourceURL {
             let directory = resourceURL.pathExtension == "ucd" ? resourceURL.deletingLastPathComponent() : resourceURL
             catalogURL = resourceURL.pathExtension == "ucd" ? resourceURL : directory.appendingPathComponent("UnicodeCatalog\(suffix).ucd")
@@ -278,6 +361,7 @@ final class UnicodeCatalog: @unchecked Sendable {
         let sourceIdentityMatches = sourceIdentity.map {
             $0.versionLabel == loadedVersion && $0.isDraft == (edition == .draft)
                 && $0.isDraft == $0.versionLabel.hasSuffix(" draft")
+                && ($0.edition == nil || $0.edition == edition.rawValue)
         } ?? false
         if let loaded, let versionLabel = loadedVersion, !sourceIdentityRequired || sourceIdentityMatches {
             data = loaded
@@ -308,17 +392,6 @@ final class UnicodeCatalog: @unchecked Sendable {
             version = "Unavailable"
             resourceError = "The offline Unicode catalog could not be loaded."
         }
-    }
-
-    var featured: [UnicodeCharacter] {
-        let points: [UInt32] = [0x2605, 0x2665, 0x2192, 0x2713, 0x221E, 0x03C0, 0x00B0, 0x00D7,
-         0x00A9, 0x2122, 0x20AC, 0x00A5, 0x2014, 0x2022, 0x00BD, 0x2318,
-         0x1F680, 0x1F308, 0x1F338, 0x1F43E, 0x1F30D, 0x1F4A1, 0x1F9ED]
-        return points.reduce(into: [UnicodeCharacter]()) { result, cp in
-                if !result.contains(where: { $0.codePoint == cp }), let character = character(at: cp) {
-                    result.append(character)
-                }
-            }
     }
 
     /// Every valid scalar can be inspected, including reserved/noncharacters.
@@ -355,7 +428,7 @@ final class UnicodeCatalog: @unchecked Sendable {
     /// Pagination counts assigned Unicode scalars, not unused code-point slots.
     /// This keeps sparse blocks useful and excludes UTF-16 surrogates.
     func characters(in block: UnicodeBlock, offset: Int = 0, limit: Int = 256,
-                    order: UnicodeSortOrder = .newestFirst) -> [UnicodeCharacter] {
+                    order: UnicodeSortOrder = .codePoint) -> [UnicodeCharacter] {
         guard offset >= 0, limit > 0, block.start <= block.end, block.end <= 0x10FFFF else { return [] }
         let spans = properties.assignedSpans.compactMap { span -> UnicodeAssignedSpan? in
             guard span.start <= block.end && span.end >= block.start else { return nil }
@@ -367,12 +440,8 @@ final class UnicodeCatalog: @unchecked Sendable {
 
     /// Applies global ordering before pagination and creates only the requested page.
     func orderedCharacters(offset: Int = 0, limit: Int = 256,
-                           order: UnicodeSortOrder = .newestFirst) -> [UnicodeCharacter] {
+                           order: UnicodeSortOrder = .codePoint) -> [UnicodeCharacter] {
         page(in: properties.assignedSpans, offset: offset, limit: limit, order: order)
-    }
-
-    func newestCharacters(offset: Int = 0, limit: Int = 256) -> [UnicodeCharacter] {
-        orderedCharacters(offset: offset, limit: limit, order: .newestFirst)
     }
 
     private func page(in spans: [UnicodeAssignedSpan], offset: Int, limit: Int,
@@ -408,7 +477,7 @@ final class UnicodeCatalog: @unchecked Sendable {
     /// U+1F680 / 0x1F680 / 1F680 and decimal:128640. Bare hexadecimal values
     /// need a numeric digit, so names such as "face" remain text searches.
     func search(_ query: String, limit: Int = 240,
-                order: UnicodeSortOrder = .newestFirst) -> [UnicodeCharacter] {
+                order: UnicodeSortOrder = .codePoint) -> [UnicodeCharacter] {
         guard limit > 0, !Task.isCancelled, CatalogSearchQueryPolicy.accepts(query) else { return [] }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return orderedCharacters(limit: limit, order: order) }
@@ -427,9 +496,8 @@ final class UnicodeCatalog: @unchecked Sendable {
         let stringTokens = CatalogSearchQueryPolicy.terms(in: normalized)
         let tokens = stringTokens.map { Array($0.utf8) }
         guard !tokens.isEmpty else { return [] }
-        let exactBlock = blocks.first { CatalogSearchQueryPolicy.hasExactTerms(in: Self.normalized($0.name), terms: stringTokens) }
         return data.withUnsafeBytes { bytes in
-            var points: [UInt32] = []
+            var candidates: [(point: UInt32, key: Int, rank: Int)] = []
             for index in 0..<recordCount {
                 if index & 255 == 0 && Task.isCancelled { return [] }
                 let record = recordOffset + index * recordSize
@@ -437,10 +505,18 @@ final class UnicodeCatalog: @unchecked Sendable {
                 let length = Int(Self.u32(bytes, record + 20))
                 let contextStart = formatVersion >= 3 ? poolOffset + Int(Self.u32(bytes, record + 36)) : start
                 let contextLength = formatVersion >= 3 ? Int(Self.u32(bytes, record + 40)) : 0
-                if tokens.allSatisfy({ !Task.isCancelled && (Self.contains($0, bytes: bytes, start: start, length: length)
-                    || Self.contains($0, bytes: bytes, start: contextStart, length: contextLength)) }) {
+                var allMatch = true, allWhole = true
+                for token in tokens {
+                    if Task.isCancelled { return [] }
+                    let primary = Self.match(token, bytes: bytes, start: start, length: length)
+                    let context = primary == 2 ? 0 : Self.match(token, bytes: bytes, start: contextStart, length: contextLength)
+                    let kind = max(primary, context)
+                    if kind == 0 { allMatch = false; break }
+                    if kind != 2 { allWhole = false }
+                }
+                if allMatch {
                     let cp = Self.u32(bytes, record)
-                    points.append(cp)
+                    candidates.append((cp, sortKey(at: cp), allWhole ? 0 : 1))
                 }
             }
             // Algorithmic ranges are only expanded when their naming prefix or
@@ -467,9 +543,12 @@ final class UnicodeCatalog: @unchecked Sendable {
                         let blockStart = max(block.start, start)
                         let blockEnd = min(block.end, end)
                         if stringTokens.allSatisfy({ !Task.isCancelled && prefixAndBlock.contains($0) }) {
+                            let whole = stringTokens.allSatisfy {
+                                !Task.isCancelled && CatalogSearchQueryPolicy.containsWholeTerm($0, in: prefixAndBlock)
+                            }
                             for cp in blockStart...blockEnd {
                                 if cp & 255 == 0 && Task.isCancelled { return [] }
-                                points.append(cp)
+                                candidates.append((cp, sortKey(at: cp), whole ? 0 : 1))
                             }
                         } else {
                             let blockName = Self.normalized(block.name)
@@ -478,29 +557,19 @@ final class UnicodeCatalog: @unchecked Sendable {
                                 let text = algorithmicName(cp, range: range, bytes: bytes)
                                     .lowercased().replacingOccurrences(of: "-", with: " ") + " " + blockName
                                 if stringTokens.allSatisfy({ !Task.isCancelled && text.contains($0) }) {
-                                    points.append(cp)
+                                    let whole = stringTokens.allSatisfy {
+                                        !Task.isCancelled && CatalogSearchQueryPolicy.containsWholeTerm($0, in: text)
+                                    }
+                                    candidates.append((cp, sortKey(at: cp), whole ? 0 : 1))
                                 }
                             }
                         }
                     }
                 }
             }
-            // Rank exact meanings naturally, then sort ALL matches before limiting.
+            // Whole-word AND matches precede mid-word matches. Within each tier,
+            // sort ALL matches before limiting, including algorithmic names.
             // Candidates are compact numbers, not hundreds of thousands of objects.
-            var candidates: [(point: UInt32, key: Int, rank: Int)] = []
-            for (index, cp) in points.enumerated() {
-                if index & 255 == 0 && Task.isCancelled { return [] }
-                let block = block(containing: cp)
-                let name: String
-                if let index = recordIndex(cp, bytes: bytes) {
-                    let record = recordOffset + index * recordSize
-                    name = string(offset: Int(Self.u32(bytes, record + 4)), length: Self.u16(bytes, record + 8), bytes: bytes)
-                } else if let range = algorithmicRange(cp, bytes: bytes) {
-                    name = algorithmicName(cp, range: range, bytes: bytes)
-                } else { name = "" }
-                let rank = CatalogSearchQueryPolicy.hasExactTerms(in: Self.normalized(name), terms: stringTokens) ? 0 : block?.name == exactBlock?.name && exactBlock != nil ? 1 : 2
-                candidates.append((cp, sortKey(at: cp), rank))
-            }
             let sorted = candidates.sorted {
                 if $0.rank != $1.rank { return $0.rank < $1.rank }
                 if order != .codePoint && $0.key != $1.key {
@@ -646,7 +715,7 @@ final class UnicodeCatalog: @unchecked Sendable {
         else if lower.hasPrefix("decimal:") { digits = lower.dropFirst(8); radix = 10 }
         else if (4...6).contains(lower.count) && lower.allSatisfy({ $0.isASCII && $0.isHexDigit })
                     && lower.contains(where: { $0.isASCII && $0.isNumber }) {
-            digits = lower[...]; radix = 16
+            digits = lower[lower.startIndex..<lower.endIndex]; radix = 16
         } else { return nil }
         let text = digits.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty, text.allSatisfy({ $0.isASCII && (radix == 16 ? $0.isHexDigit : $0.isNumber) }) else { return nil }
@@ -657,14 +726,22 @@ final class UnicodeCatalog: @unchecked Sendable {
         (0xFDD0...0xFDEF).contains(cp) || cp & 0xFFFF >= 0xFFFE
     }
 
-    private static func contains(_ token: [UInt8], bytes: UnsafeRawBufferPointer, start: Int, length: Int) -> Bool {
-        guard token.count <= length else { return false }
+    /// 0 = absent, 1 = substring only, 2 = a complete normalized Unicode word.
+    /// Scan the existing mapped index; no per-query character/index rebuild.
+    private static func match(_ token: [UInt8], bytes: UnsafeRawBufferPointer, start: Int, length: Int) -> Int {
+        guard !token.isEmpty, token.count <= length else { return 0 }
+        var found = false
         for candidate in start...(start + length - token.count) where bytes[candidate] == token[0] {
+            if Task.isCancelled { return 0 }
             var matches = true
             for index in 1..<token.count where bytes[candidate + index] != token[index] { matches = false; break }
-            if matches { return true }
+            if matches {
+                found = true
+                if (candidate == start || bytes[candidate - 1] == 0x20)
+                    && (candidate + token.count == start + length || bytes[candidate + token.count] == 0x20) { return 2 }
+            }
         }
-        return false
+        return found ? 1 : 0
     }
 
     private static func uint32(_ data: Data, _ offset: Int) -> Int {
@@ -770,6 +847,7 @@ final class UnicodeCatalog: @unchecked Sendable {
 private struct UnicodeSourceIdentity: Decodable {
     let versionLabel: String
     let isDraft: Bool
+    let edition: String?
 }
 
 private struct UnicodeDetailData: Decodable {

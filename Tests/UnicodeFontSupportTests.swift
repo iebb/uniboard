@@ -81,5 +81,94 @@ final class UnicodeFontSupportTests: XCTestCase {
         app.reset()
         XCTAssertFalse(CatalogPreferences(defaults: defaults).useUnicodeFonts)
     }
+
+    func testInvalidAndExtremePointSizesHaveFiniteBoundedFallbacks() {
+        for input: CGFloat in [.nan, .infinity, -.infinity, -100, 0, .leastNonzeroMagnitude, .greatestFiniteMagnitude] {
+            let size = UnicodeFontSupport.normalizedPointSize(input)
+            XCTAssertTrue(size.isFinite)
+            XCTAssertTrue((1...512).contains(size))
+            for enabled in [false, true] {
+                let font = UnicodeFontSupport.font(for: "A", size: input, enabled: enabled)
+                XCTAssertEqual(font.pointSize, size)
+                XCTAssertNil(UnicodeFontSupport.sourceName(for: "A", size: input, enabled: enabled))
+            }
+        }
+        XCTAssertEqual(UnicodeFontSupport.normalizedPointSize(32), 32)
+        XCTAssertEqual(UnicodeFontSupport.loadedFontCount, 0)
+    }
+
+    func testEmptyControlAndFormattingTextDoesNotLoadOptionalFonts() {
+        for text in ["", "\u{0}", "\n\t", "\u{200B}", "\u{200D}", "\u{FE0E}", "\u{FE0F}", "\u{E0100}", "\u{034F}"] {
+            XCTAssertTrue(UnicodeFontSupport.missingCodePoints(in: text, font: .systemFont(ofSize: 32)).isEmpty, text.debugDescription)
+            XCTAssertNil(UnicodeFontSupport.sourceName(for: text, size: 32, enabled: true))
+            XCTAssertEqual(UnicodeFontSupport.font(for: text, size: 32, enabled: true).fontDescriptor,
+                           UIFont.systemFont(ofSize: 32).fontDescriptor)
+        }
+        XCTAssertEqual(UnicodeFontSupport.loadedFontCount, 0)
+    }
+
+    func testFontManifestRejectsInvalidAndUnsortedRanges() {
+        func asset(_ ranges: [[UInt32]]) -> UnicodeFontSupport.Asset {
+            .init(filename: "font.otf", displayName: "Fixture", postScriptName: "Fixture-Regular",
+                  sha256: String(repeating: "a", count: 64), sourceURL: "https://example.com/font.otf",
+                  licenseFilename: "OFL.txt", ranges: ranges)
+        }
+        let valid = asset([[0, 0xD7FF], [0xE000, 0x10FFFF]])
+        XCTAssertTrue(valid.isValid)
+        for point: UInt32 in [0, 0x41, 0xD7FF, 0xE000, 0x1F680, 0x10FFFF] { XCTAssertTrue(valid.contains(point)) }
+        XCTAssertFalse(valid.contains(0xD800))
+        XCTAssertFalse(valid.contains(0x110000))
+        for ranges: [[UInt32]] in [[], [[]], [[1]], [[1, 2, 3]], [[2, 1]], [[0x110000, 0x110000]],
+                                    [[0xD7FF, 0xE000]], [[4, 8], [1, 2]], [[1, 4], [4, 8]]] {
+            XCTAssertFalse(asset(ranges).isValid, "\(ranges)")
+        }
+        XCTAssertTrue(UnicodeFontSupport.assets.allSatisfy(\.isValid))
+    }
+
+    func testFontResourcesCannotEscapeTheirBundledDirectory() {
+        for filename in ["", ".", "..", "../Info.plist", "Fonts/font.otf", "\\font.otf", "/tmp/font.otf", "bad\0font.otf"] {
+            XCTAssertNil(UnicodeFontSupport.resourceURL(filename))
+        }
+        let invalid = UnicodeFontSupport.Asset(filename: "../font.otf", displayName: "Fixture",
+            postScriptName: "Fixture", sha256: String(repeating: "a", count: 64),
+            sourceURL: "https://example.com/font.otf", licenseFilename: "OFL.txt", ranges: [[1, 2]])
+        XCTAssertFalse(invalid.isValid)
+    }
+
+    func testInvalidAppPreferencesRecoverToSafeDefaults() {
+        let suite = "Uniboard.Preferences.Test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("unknown edition", forKey: "appUnicodeEdition")
+        defaults.set(123, forKey: "appUnicodeSort")
+        defaults.set("YES", forKey: "appUnicodeFonts")
+        let preferences = CatalogPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.edition, .draft)
+        XCTAssertEqual(preferences.order, .newestFirst)
+        XCTAssertFalse(preferences.useUnicodeFonts)
+    }
+
+    func testAppEditionAndSortPersistWithoutChangingKeyboardPreferences() {
+        let suite = "Uniboard.Preferences.Test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("draft", forKey: "keyboardUnicodeEdition")
+        defaults.set("oldestFirst", forKey: "keyboardUnicodeSort")
+        defaults.set(true, forKey: "keyboardUnicodeFonts")
+        let preferences = CatalogPreferences(defaults: defaults)
+        preferences.edition = .latest
+        preferences.order = .codePoint
+        preferences.useUnicodeFonts = true
+        let restored = CatalogPreferences(defaults: defaults)
+        XCTAssertEqual(restored.edition, .latest)
+        XCTAssertEqual(restored.order, .codePoint)
+        XCTAssertTrue(restored.useUnicodeFonts)
+        restored.reset()
+        XCTAssertEqual(CatalogPreferences(defaults: defaults).edition, .draft)
+        XCTAssertEqual(CatalogPreferences(defaults: defaults).order, .newestFirst)
+        XCTAssertEqual(defaults.string(forKey: "keyboardUnicodeEdition"), "draft")
+        XCTAssertEqual(defaults.string(forKey: "keyboardUnicodeSort"), "oldestFirst")
+        XCTAssertTrue(defaults.bool(forKey: "keyboardUnicodeFonts"))
+    }
 }
 #endif

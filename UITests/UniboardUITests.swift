@@ -428,6 +428,8 @@ final class UniboardUITests: XCTestCase {
         let context = "Host context stays visible."
         let input = openSystemKeyboardHost(initialText: context)
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        normalizeKeyboardBrowseHeight(input: input, context: context)
+        selectKeyboardFonts(false)
         assertControlValue("keyboard.unicodeFonts", equals: "Off")
         assertCompactKeyboardGeometry("portrait.browse", input: input, searching: false)
         enterKeyboardQuery("u+1f680")
@@ -474,10 +476,11 @@ final class UniboardUITests: XCTestCase {
     }
 
     func testSystemKeyboardPortraitResizeAndFoldedSearchPreserveInput() throws {
-        try requireKeyboardIntegration()
+        try requirePhonePortraitResizeIntegration()
         let context = "Host context stays visible."
         let input = openSystemKeyboardHost(initialText: context)
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        normalizeKeyboardBrowseHeight(input: input, context: context)
 
         let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
         XCTAssertTrue(grip.waitForExistence(timeout: 5))
@@ -627,6 +630,260 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(input.value as? String, context + "🚀", "Rotation must preserve host input and manual browse height")
     }
 
+    func testSystemKeyboardResponsiveResizeAndCrispQueryPreserveContext() throws {
+        try requirePhonePortraitResizeIntegration()
+        print("UNIBOARD_RESPONSIVE_FIXTURE version=1.1-audit centerDepth=9 expectedBaseline=300")
+        let context = "The host keeps its original text."
+        let input = openSystemKeyboardHost(initialText: context)
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        normalizeKeyboardBrowseHeight(input: input, context: context)
+
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
+        let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        XCTAssertTrue(grip.waitForExistence(timeout: 5))
+        attachResizeFrameDiagnostics(input: input)
+        assertResizeHeight(300)
+        assertResizeGripAtTop(input: input)
+        XCTAssertTrue(search.waitUntilValueEquals("No query"))
+        attachScreenshot("Crisp native placeholder and grip at the keyboard top")
+
+        // The runner records the complete screen independently. These explicit
+        // velocities and wall-clock markers locate each continuous gesture in
+        // that recording and the controller's DEBUG resize telemetry. Endpoint
+        // During a drag the target preview changes while the host/window stays
+        // fixed. The recording and DEBUG samples prove that behavior and the
+        // single smooth commit after release; endpoints alone cannot prove it.
+        dragKeyboardGrip(deltaY: -120, velocity: 80, label: "slow.expand", input: input, context: context)
+        dragKeyboardGrip(deltaY: 120, velocity: 80, label: "slow.contract", input: input, context: context)
+        dragKeyboardGrip(deltaY: -100, velocity: 600, label: "fast.expand", input: input, context: context)
+        dragKeyboardGrip(deltaY: 100, velocity: 600, label: "fast.contract", input: input, context: context)
+        let manualHeight = keyboardResizeHeight() ?? 0
+
+        enterKeyboardQuery("cat")
+        assertResizeHeight(max(340, manualHeight))
+        attachScreenshot("Crisp native cat query before moving its caret")
+        search.coordinate(withNormalizedOffset: .zero).withOffset(
+            CGVector(dx: 36, dy: search.frame.height / 2)).tap()
+        typeKeyboardQueryKeys("arrow ")
+        XCTAssertTrue(search.waitUntilValueEquals("arrow cat"))
+        app.buttons["keyboard.delete"].tap()
+        XCTAssertTrue(search.waitUntilValueEquals("arrowcat"),
+                      "Backspace at the moved caret must preserve the query suffix")
+        XCTAssertEqual(input.value as? String, context)
+        attachScreenshot("Crisp native middle caret preserves arrow and cat during editing")
+
+        let longQuery = "mathematical bold italic capital sigma"
+        enterKeyboardQuery(longQuery)
+        XCTAssertTrue(search.waitUntilValueEquals(longQuery))
+        attachScreenshot("Crisp native long query clips horizontally at the visible caret")
+        app.buttons["keyboard.delete"].tap()
+        XCTAssertTrue(search.waitUntilValueEquals(String(longQuery.dropLast())))
+        XCTAssertEqual(input.value as? String, context, "Query clipping and local editing must not enter host text")
+
+        enterKeyboardQuery("u+1f680")
+        let rocket = app.buttons["keyboard.character.U+1F680"].firstMatch
+        XCTAssertTrue(rocket.waitForExistence(timeout: 10))
+        closeKeyboardSearch()
+        assertResizeHeight(manualHeight)
+        XCTAssertTrue(search.waitUntilValueEquals("u+1f680"))
+        XCTAssertTrue(rocket.isHittable, "Folding must retain the actual filtered result")
+        XCTAssertEqual(input.value as? String, context)
+        assertResizeGripAtTop(input: input)
+        attachScreenshot("Responsive keyboard retains folded rocket search and visible host")
+        rocket.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "🚀"))
+        XCTAssertEqual((input.value as? String)?.unicodeScalars.map(\.value),
+                       context.unicodeScalars.map(\.value) + [0x1F680])
+
+        settleKeyboardOrientation(.landscapeLeft)
+        assertCompactKeyboardGeometry("responsive.landscape.folded", input: input, searching: false,
+                                      expectedSurfaceHeight: 220)
+        XCTAssertEqual(input.value as? String, context + "🚀")
+        settleKeyboardOrientation(.portrait)
+        assertResizeHeight(manualHeight)
+        assertResizeGripAtTop(input: input)
+        XCTAssertTrue(search.waitUntilValueEquals("u+1f680"))
+        XCTAssertTrue(rocket.isHittable)
+        XCTAssertEqual(input.value as? String, context + "🚀")
+        attachScreenshot("Responsive keyboard restores its manual height and folded query after rotation")
+    }
+
+    func testSystemKeyboardContinuousResizeMotion() throws {
+        try requirePhonePortraitResizeIntegration()
+        print("UNIBOARD_CONTINUOUS_MOTION_FIXTURE version=1.1-audit centerDepth=9 expectedBaseline=300")
+        let context = "Continuous resizing preserves this host text."
+        let input = openSystemKeyboardHost(initialText: context)
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        normalizeKeyboardBrowseHeight(input: input, context: context)
+        let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        XCTAssertTrue(grip.waitForExistence(timeout: 5))
+        attachResizeFrameDiagnostics(input: input)
+        assertResizeHeight(300)
+        assertResizeGripAtTop(input: input)
+        dragKeyboardGrip(deltaY: -120, velocity: 80, label: "slow.expand", input: input, context: context)
+        dragKeyboardGrip(deltaY: 120, velocity: 80, label: "slow.contract", input: input, context: context)
+        dragKeyboardGrip(deltaY: -100, velocity: 600, label: "fast.expand", input: input, context: context)
+        dragKeyboardGrip(deltaY: 100, velocity: 600, label: "fast.contract", input: input, context: context)
+    }
+
+    func testSystemKeyboardManualHeightPersistsAcrossHostRelaunchAndRotation() throws {
+        try requirePhonePortraitResizeIntegration()
+        let firstContext = "Manual keyboard height belongs to the keyboard."
+        var input = openSystemKeyboardHost(initialText: firstContext)
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        normalizeKeyboardBrowseHeight(input: input, context: firstContext)
+        let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        let fixedBottom = grip.frame.minY + 300
+        grip.tap()
+        assertResizeHeight(420)
+        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            grip.exists && abs(grip.frame.minY - (fixedBottom - 420)) <= 1
+        }, object: grip)
+        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed)
+        dragKeyboardGrip(deltaY: 115, velocity: 240, label: "persistence.choose305",
+                         input: input, context: firstContext)
+        assertResizeHeight(305)
+        enterKeyboardQuery("cat")
+        closeKeyboardSearch()
+        assertResizeHeight(305)
+        XCTAssertEqual(input.value as? String, firstContext)
+
+        // This is an actual host termination/relaunch, not a simulated
+        // mid-drag cancellation. The extension's own preference must survive
+        // the containing app's normal test reset and real keyboard handoff.
+        let resumedContext = "A new host session keeps the chosen keyboard height."
+        input = openSystemKeyboardHost(initialText: resumedContext)
+        assertResizeHeight(305)
+        assertCompactKeyboardGeometry("persistent-height.relaunched", input: input, searching: false,
+                                      expectedSurfaceHeight: 305)
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("No query"),
+                      "A prior session's query is cleared through the visible action before this case uses search")
+        settleKeyboardOrientation(.landscapeLeft)
+        assertCompactKeyboardGeometry("persistent-height.landscape", input: input, searching: false,
+                                      expectedSurfaceHeight: 220)
+        settleKeyboardOrientation(.portrait)
+        assertResizeHeight(305)
+        assertCompactKeyboardGeometry("persistent-height.returned", input: input, searching: false,
+                                      expectedSurfaceHeight: 305)
+        XCTAssertEqual(input.value as? String, resumedContext)
+
+        // A five-point movement is below pan recognition. This exercises the
+        // visible endpoint tap plus a full real drag used to establish a 300-point
+        // baseline when another case leaves a nearby persisted preference.
+        normalizeKeyboardBrowseHeight(input: input, context: resumedContext)
+        assertResizeHeight(300)
+        XCTAssertEqual(input.value as? String, resumedContext)
+        attachScreenshot("Visible normalization restores the 300-point baseline without changing host text")
+    }
+
+    private func dragKeyboardGrip(deltaY: CGFloat, velocity: CGFloat, label: String,
+                                  input: XCUIElement, context: String) {
+        let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        let preview = app.descendants(matching: .any)["keyboard.resize.preview"].firstMatch
+        let before = keyboardResizeHeight() ?? 0
+        XCTAssertFalse(preview.exists, "The target preview must be hidden before a new gesture")
+        XCTAssertTrue(grip.isHittable)
+        let frame = grip.frame
+        let start = grip.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: .zero).withOffset(
+            CGVector(dx: frame.midX, dy: frame.midY + deltaY))
+        let began = Date().timeIntervalSince1970
+        print("UNIBOARD_CONTINUOUS_DRAG_BEGIN \(label) epoch=\(began) height=\(before) deltaY=\(deltaY) velocity=\(velocity)")
+        start.press(forDuration: 0.15, thenDragTo: end,
+                    withVelocity: XCUIGestureVelocity(rawValue: velocity), thenHoldForDuration: 0.2)
+        let finished = Date().timeIntervalSince1970
+        let expected = min(420, max(220, CGFloat(before) - deltaY))
+        let expectedGripY = frame.minY + CGFloat(before) - expected
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            grip.exists && abs(grip.frame.minY - expectedGripY) <= 1
+        }, object: grip)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed,
+                       "The single post-release height animation must settle at the requested position")
+        XCTAssertTrue(preview.waitUntilAbsent(), "Releasing the grip must dismiss the target preview")
+        let settledEpoch = Date().timeIntervalSince1970
+        let after = keyboardResizeHeight() ?? 0
+        XCTAssertTrue((220...420).contains(after))
+        XCTAssertEqual(CGFloat(after), expected, accuracy: 3,
+                       "The final height must track the actual finger displacement without remote-window feedback")
+        if deltaY < 0 { XCTAssertGreaterThan(after - before, 40) }
+        else { XCTAssertGreaterThan(before - after, 40) }
+        XCTAssertLessThanOrEqual(abs(CGFloat(after - before)), abs(deltaY) + 30,
+                                 "The resize must follow the finger without amplifying its movement")
+        XCTAssertEqual(input.value as? String, context, "Dragging the grip must not insert or delete host text")
+        assertResizeHeight(after)
+        assertResizeGripAtTop(input: input)
+        let value: [String: Any] = ["gesture": label, "beganEpoch": began, "finishedEpoch": finished,
+            "requestedDeltaY": deltaY, "velocityPointsPerSecond": velocity,
+            "heightBefore": before, "heightAfter": after, "animationSettledEpoch": settledEpoch,
+            "previewAbsentAfterRelease": !preview.exists,
+            "hostUnchanged": (input.value as? String) == context,
+            "motionContract": "Changing target preview and fixed host during drag; one smooth height commit after release",
+            "intermediateSmoothnessEvidence": "Independent original screen recording plus complete preview, release and layout DEBUG telemetry"]
+        let data = try! JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+        attachment.name = "Continuous native resize gesture \(label)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        print("UNIBOARD_CONTINUOUS_DRAG_END " + String(data: data, encoding: .utf8)!.replacingOccurrences(of: "\n", with: ""))
+        attachScreenshot("Continuous native resize \(label) preserves the host")
+    }
+
+    private func normalizeKeyboardBrowseHeight(input: XCUIElement, context: String) {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return }
+        let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        XCTAssertTrue(grip.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitUntilAbsent())
+        guard var height = keyboardResizeHeight() else {
+            XCTFail("The real keyboard must report its current browse height")
+            return
+        }
+        XCTAssertTrue((220...420).contains(height))
+        guard height != 300 else { return }
+
+        // Preferences belong to the extension, so an app test reset cannot
+        // reset them. Establish the baseline through the same visible grip a
+        // user operates. A tiny delta cannot recognize a pan; first tap to a
+        // distant endpoint rather than accidentally interpreting it as a tap.
+        if abs(height - 300) <= 40 {
+            let expected = height < 320 ? 420 : 220
+            let expectedY = grip.frame.minY + CGFloat(height - expected)
+            grip.tap()
+            assertResizeHeight(expected)
+            let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                grip.exists && abs(grip.frame.minY - expectedY) <= 1
+            }, object: grip)
+            XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed)
+            height = expected
+        }
+        print("UNIBOARD_RESIZE_PRECONDITION actualHeight=\(height) targetHeight=300")
+        dragKeyboardGrip(deltaY: CGFloat(height - 300), velocity: 240,
+                         label: "precondition.normalize", input: input, context: context)
+        assertResizeHeight(300)
+    }
+
+    private func assertResizeGripAtTop(input: XCUIElement,
+                                       file: StaticString = #filePath, line: UInt = #line) {
+        let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
+        let gripFrame = grip.frame
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch.frame
+        let footer = app.buttons["keyboard.return"].firstMatch.frame
+        let surfaces = app.otherElements.containing(.any, identifier: "keyboard.search").allElementsBoundByIndex
+            .map(\.frame).filter { $0.width > app.frame.width * 0.7 && $0.contains(search)
+                && $0.contains(footer) && $0.insetBy(dx: -1, dy: -1).contains(gripFrame) }
+            .sorted { $0.height < $1.height }
+        XCTAssertEqual(gripFrame.height, 18, accuracy: 1, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(gripFrame.width, app.frame.width * 0.9, file: file, line: line)
+        XCTAssertFalse(surfaces.isEmpty, "Expected the keyboard root containing its native grip", file: file, line: line)
+        if let surface = surfaces.first {
+            XCTAssertEqual(gripFrame.minY, surface.minY, accuracy: 1,
+                           "The grip must begin at the keyboard's top without a blank band", file: file, line: line)
+            if let height = keyboardResizeHeight() {
+                XCTAssertEqual(surface.height, CGFloat(height), accuracy: 1, file: file, line: line)
+            }
+        }
+        assertHostEditorIsVisibleAboveKeyboard(input, file: file, line: line)
+    }
+
     private func keyboardResizeHeight() -> Int? {
         let grip = app.descendants(matching: .any)["keyboard.resize"].firstMatch
         guard grip.exists else { return nil }
@@ -672,6 +929,7 @@ final class UniboardUITests: XCTestCase {
         let context = "Host context stays visible."
         let input = openSystemKeyboardHost(initialText: context)
         defer { restoreEnglishKeyboard() }
+        normalizeKeyboardBrowseHeight(input: input, context: context)
         enterKeyboardQuery("u+2603")
         let snowman = app.buttons["keyboard.character.U+2603"].firstMatch
         XCTAssertTrue(snowman.waitForExistence(timeout: 10))
@@ -842,6 +1100,7 @@ final class UniboardUITests: XCTestCase {
         try requireKeyboardIntegration()
         let input = openSystemKeyboardHost()
         defer { restoreEnglishKeyboard() }
+        selectKeyboardOrder("newest")
         assertControlValue("keyboard.order", equals: "newestFirst")
         assertDeleteIsOnlyAtTopRight()
         assertKeyboardControlsAreVisible(isSearching: false)
@@ -952,34 +1211,38 @@ final class UniboardUITests: XCTestCase {
 
 
     private func selectKeyboardSection(_ section: String) {
-        let menu = app.buttons["keyboard.section"].firstMatch
-        let usesMenu = menu.exists
-        if usesMenu, menu.value as? String == section { return }
-        if usesMenu { menu.tap() }
+        let menu = app.descendants(matching: .any)["keyboard.section"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), "The keyboard section trigger must return after a prior menu closes")
+        if menu.value as? String == section { return }
+        menu.tap()
         let option = app.descendants(matching: .any)["keyboard.tab.\(section)"].firstMatch
         XCTAssertTrue(option.waitForExistence(timeout: 5))
         option.tap()
-        // The extension toolbar disappears briefly while the native menu
-        // dismisses. Preserve which interface opened rather than interpreting
-        // that transient absence as the older segmented-tab implementation.
-        if usesMenu {
-            XCTAssertTrue(menu.waitForExistence(timeout: 5))
-            assertControlValue("keyboard.section", equals: section)
-        } else { XCTAssertTrue(option.waitUntilSelected()) }
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        assertControlValue("keyboard.section", equals: section)
     }
 
     private func openKeyboardOptions() {
-        let menu = app.buttons["keyboard.options"].firstMatch
-        if menu.exists && !app.descendants(matching: .any)["keyboard.edition"].firstMatch.exists { menu.tap() }
+        let option = app.descendants(matching: .any)["keyboard.edition"].firstMatch
+        if option.exists { return }
+        let menu = app.descendants(matching: .any)["keyboard.options"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), "The keyboard options trigger must return before opening another menu")
+        menu.tap()
+        XCTAssertTrue(option.waitForExistence(timeout: 5), "The actual options menu must open")
     }
 
     private func closeKeyboardOptions() {
-        let menu = app.buttons["keyboard.options"].firstMatch
         let option = app.descendants(matching: .any)["keyboard.edition"].firstMatch
-        if menu.exists && option.exists {
-            menu.tap()
+        if option.exists {
+            // The toolbar trigger can disappear from AX while its popup is
+            // open. Dismiss by tapping the host navigation title, outside the
+            // popup and editor, so neither caret nor host contents can change.
+            let navigation = app.navigationBars["Try Uniboard"].firstMatch
+            XCTAssertTrue(navigation.waitForExistence(timeout: 5))
+            navigation.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             XCTAssertTrue(option.waitUntilAbsent())
         }
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.options"].firstMatch.waitForExistence(timeout: 5))
     }
 
     private func keyboardOption(_ identifier: String) -> XCUIElement {
@@ -1064,6 +1327,12 @@ final class UniboardUITests: XCTestCase {
         }
     }
 
+    private func requirePhonePortraitResizeIntegration() throws {
+        try requireKeyboardIntegration()
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .phone,
+                      "Manual portrait resizing is a phone feature; iPad uses its adaptive layout.")
+    }
+
     private func requireKeyboardIntegration() throws {
         let enabled = ProcessInfo.processInfo.environment["UNIBOARD_KEYBOARD_INTEGRATION"] == "1"
             || ProcessInfo.processInfo.arguments.contains("--keyboard-integration")
@@ -1108,6 +1377,17 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(input.value as? String, initialText)
         if app.buttons["keyboard.query.u"].firstMatch.exists { closeKeyboardSearch() }
         selectKeyboardSection("symbols")
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
+        if let retainedQuery = search.value as? String, retainedQuery != "No query", !retainedQuery.isEmpty {
+            let clear = app.buttons["keyboard.search.clear"].firstMatch
+            XCTAssertTrue(clear.waitForExistence(timeout: 5))
+            clear.tap()
+            XCTAssertTrue(search.waitUntilValueEquals("No query"))
+            XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitUntilAbsent(),
+                          "Clearing a prior folded query must keep browsing active")
+            XCTAssertEqual(input.value as? String, initialText,
+                           "Visible query cleanup must not alter the seeded host document")
+        }
         return input
     }
 
@@ -1309,8 +1589,12 @@ final class UniboardUITests: XCTestCase {
 
     private func assertControlValue(_ identifier: String, equals expected: String) {
         let optionFields = ["keyboard.edition": 0, "keyboard.order": 1, "keyboard.unicodeFonts": 2]
-        if let index = optionFields[identifier], app.buttons["keyboard.options"].firstMatch.exists {
-            let options = app.buttons["keyboard.options"].firstMatch
+        if let index = optionFields[identifier] {
+            // Selection dismisses the native submenu before the extension
+            // toolbar reappears. Its brief absence must not choose a fallback
+            // query for the submenu that has just closed.
+            let options = app.descendants(matching: .any)["keyboard.options"].firstMatch
+            XCTAssertTrue(options.waitForExistence(timeout: 5), "Expected the visible options summary after selecting \(identifier)")
             let predicate = NSPredicate { element, _ in
                 guard let element = element as? XCUIElement, let value = element.value as? String else { return false }
                 let parts = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }

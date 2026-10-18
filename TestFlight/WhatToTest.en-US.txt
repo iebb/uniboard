@@ -1,4 +1,6 @@
-This update adds portrait height adjustment and a movable local query cursor. Drag the top grip up/down or tap for compact/expanded browsing. Search expands to at least 340 points; Done folds its keys while keeping the query/results and restoring your saved browsing height. Tap the query to resume or Clear to restore the full catalog. Verify host text remains visible, portrait height survives rotation/relaunch, and landscape remains 220 points. Light/dark appearance and Reduce Transparency remain supported.
+Version 1.1 fixes blurred search text with Liquid Glass and improves height adjustment. Compare the placeholder, short/long queries and cursor in light/dark appearance and with Reduce Transparency. The top grip should have no extra blank area above it. Drag slowly and quickly in both directions: the target-height preview should follow your movement while the keyboard stays steady. Release to apply that height once, without bouncing. Check that host text remains visible and unchanged while resizing.
+
+Search expands to at least 340 points, subject to available display space; Done folds its keys while keeping the query/results and restoring your saved browsing height. Tap the query to resume or Clear to restore the full catalog. Portrait height survives rotation/relaunch, and landscape remains 220 points.
 
 Tap/drag inside "cat" to move the query cursor to its beginning. Insert "arrow ", confirm "arrow cat", and delete the space from the middle to get "arrowcat". Query keys/space/backspace must edit only the local query; after Done, space/return/backspace must edit the host normally. The cursor should follow text metrics, including long queries that scroll horizontally.
 
@@ -17,3 +19,5 @@ In Emojis, search head shaking horizontally and insert U+1F642 U+200D U+2194 U+F
 Extra Unicode fonts is optional and off by default. Enable it in Setup for app previews or the keyboard's Options > Extra Unicode fonts menu for keyboard previews; these choices are independent and survive relaunch. On older iOS, compare U+0558 or U+10940 with the option off/on, then confirm the original scalar is inserted. Emoji and already-supported characters should keep their native appearance. Disable it to restore system fonts. Read full font notices under Setup > Font licenses. Coverage is incomplete, and the receiving app still controls its own fonts.
 
 Draft assignments and names may change. Display depends on your iOS fonts, and some emoji may render as separate glyphs. Please report search or insertion problems, missing metadata and layout issues on iPhone and iPad.
+
+This build also hardens catalog validation, saved collections and query boundaries. Please check favorites/recents after relaunch and switching editions.

@@ -1,54 +1,28 @@
 import SwiftUI
 import UIKit
-
-/// Remote keyboard scenes can retain a stale interfaceOrientation after the
-/// host rotates. Phone layout follows the actual view width, never its height.
-enum KeyboardLayoutPolicy {
-    struct Metrics {
-        let isCompactLayout: Bool
-        let height: CGFloat
-        let portraitResizeRange: ClosedRange<CGFloat>?
-    }
-
-    static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
-                        compactVertical: Bool, isSearching: Bool, isInspecting: Bool,
-                        portraitBrowseHeight: CGFloat = 300, portraitExpandedHeight: CGFloat = 340) -> Metrics {
-        let edges: (short: CGFloat, long: CGFloat)? = displaySize.flatMap { size in
-            guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return nil }
-            return (min(size.width, size.height), max(size.width, size.height))
-        }
-        let compact: Bool
-        if isPad { compact = false }
-        else if let edges, viewWidth.isFinite, viewWidth > 0 {
-            compact = viewWidth > edges.short + max(24, edges.short * 0.10)
-        } else {
-            compact = compactVertical
-        }
-        let expanded = isSearching || isInspecting
-        let browseHeight = portraitBrowseHeight.isFinite ? min(420, max(220, portraitBrowseHeight)) : 300
-        let expandedHeight = portraitExpandedHeight.isFinite ? min(420, max(340, portraitExpandedHeight)) : 340
-        let target: CGFloat = isPad ? (expanded ? 380 : 340) : compact ? 220 : (expanded ? expandedHeight : browseHeight)
-        let effectiveHeight: CGFloat?
-        if !isPad, let edges {
-            effectiveHeight = compact ? edges.short : edges.long
-        } else {
-            effectiveHeight = sceneHeight
-        }
-        let fraction: CGFloat = isPad ? 0.50 : compact ? 0.60 : 0.55
-        let cap = effectiveHeight.flatMap { $0.isFinite && $0 > 0 ? $0 * fraction : nil }
-        let height = min(target, cap ?? target)
-        let maximum = min(420, cap ?? 420)
-        let range = !isPad && !compact ? min(expanded ? 340 : 220, maximum)...maximum : nil
-        return Metrics(isCompactLayout: compact, height: height, portraitResizeRange: range)
-    }
-}
+#if DEBUG
+import os
+#endif
 
 /// Query keys edit only the extension's local search. Insertion always sends the
 /// original scalar or complete emoji sequence to the host's document proxy.
+fileprivate final class KeyboardResizePreviewModel: ObservableObject {
+    @Published var height: CGFloat?
+}
+
 final class KeyboardViewController: UIInputViewController {
     private let model = KeyboardModel()
     private var keyboardHeight: NSLayoutConstraint?
     private var hostingController: UIHostingController<UnicodeKeyboardView>?
+    fileprivate let resizeHandle = ResizeHandleButton(backgroundColor: KeyboardPalette.backgroundUI.withAlphaComponent(0.02))
+    fileprivate let resizePreview = KeyboardResizePreviewModel()
+    private var resizeDisplayLink: CADisplayLink?
+    private var resizeDisplayTarget: ResizeDisplayTarget?
+    private var pendingResizeHeight: CGFloat?
+    private var isResizing = false
+#if DEBUG
+    private var resizeDiagnostics: KeyboardResizeDiagnostics?
+#endif
 
     override func loadView() {
         // Use the keyboard's system blur and tint instead of stacking another
@@ -81,6 +55,9 @@ final class KeyboardViewController: UIInputViewController {
             returnKey: { [weak self] in self?.returnKey() }
         )
         let host = UIHostingController(rootView: root)
+        // The input controller already owns its complete content bounds. The
+        // remote keyboard's container safe area must not add another top inset.
+        host.safeAreaRegions = []
         host.view.backgroundColor = .clear
         host.view.isOpaque = false
         host.view.translatesAutoresizingMaskIntoConstraints = false
@@ -94,6 +71,27 @@ final class KeyboardViewController: UIInputViewController {
         ])
         host.didMove(toParent: self)
         hostingController = host
+        resizeHandle.coordinateView = view
+        resizeHandle.toggle = { [weak self] in self?.model.togglePortraitHeight() }
+        resizeHandle.begin = { [weak self] in self?.beginInteractiveResize() }
+        resizeHandle.change = { [weak self] delta in
+            guard let self, self.isResizing,
+                  let height = self.model.resizeTarget(translationY: delta) else { return }
+#if DEBUG
+            self.resizeDiagnostics?.recordGesture()
+#endif
+            self.pendingResizeHeight = height
+#if DEBUG
+            self.resizeDiagnostics?.recordRequest()
+#endif
+        }
+        resizeHandle.end = { [weak self] commit in self?.endInteractiveResize(flush: commit) }
+        resizeHandle.step = { [weak self] delta in self?.model.stepPortraitHeight(delta) }
+#if DEBUG
+        resizeHandle.debugSample = { [weak self] sample in
+            self?.resizeDiagnostics?.recordSample(sample)
+        }
+#endif
         let height = view.heightAnchor.constraint(equalToConstant: 300)
         height.priority = .init(999)
         height.isActive = true
@@ -111,6 +109,14 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updateKeyboardHeight()
+#if DEBUG
+        resizeDiagnostics?.recordLayout(view.bounds.height)
+#endif
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        endInteractiveResize(flush: false)
+        super.viewWillDisappear(animated)
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -119,8 +125,11 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func synchronizeHostTraits() {
-        model.needsInputModeSwitchKey = needsInputModeSwitchKey
-        model.returnTitle = Self.returnTitle(for: textDocumentProxy.returnKeyType)
+        // UIKit can ask again during a remote resize. Do not invalidate every
+        // character key when neither input trait has changed.
+        if model.needsInputModeSwitchKey != needsInputModeSwitchKey { model.needsInputModeSwitchKey = needsInputModeSwitchKey }
+        let title = Self.returnTitle(for: textDocumentProxy.returnKeyType)
+        if model.returnTitle != title { model.returnTitle = title }
     }
 
     @objc private func updateBackdrop() {
@@ -143,18 +152,86 @@ final class KeyboardViewController: UIInputViewController {
         if model.isCompactLayout != metrics.isCompactLayout { model.isCompactLayout = metrics.isCompactLayout }
         if model.isPadLayout != pad { model.isPadLayout = pad }
         model.portraitResizeRange = metrics.portraitResizeRange
-        if model.presentationHeight != metrics.height { model.presentationHeight = metrics.height }
-        guard keyboardHeight?.constant != metrics.height else { return }
-        keyboardHeight?.constant = metrics.height
-        if animated && view.window != nil && !UIAccessibility.isReduceMotionEnabled {
-            UIView.animate(withDuration: 0.22, delay: 0,
-                           options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut]) {
-                self.view.superview?.layoutIfNeeded()
-                self.view.layoutIfNeeded()
-            }
-        } else {
-            view.setNeedsLayout()
+        let showsHandle = metrics.portraitResizeRange != nil
+        resizeHandle.isHidden = !showsHandle
+        resizeHandle.accessibilityHint = model.isSearching || model.inspection != nil
+            ? "Drag to preview a height, then release to resize. Double tap to return to browsing."
+            : "Drag to preview a height, then release to resize. Double tap to switch between compact and expanded."
+        if isResizing && !showsHandle { endInteractiveResize(flush: false) }
+        // The remote window stays fixed for the entire drag. Resizing it here
+        // rebases incoming touches asynchronously and causes visible feedback.
+        if isResizing { return }
+        applyKeyboardHeight(metrics.height, animated: animated)
+    }
+
+    private func applyKeyboardHeight(_ height: CGFloat, animated: Bool) {
+        guard height.isFinite, height > 0 else { return }
+        model.presentationHeight = height
+        resizeHandle.accessibilityValue = "\(Int(height.rounded())) points"
+        guard keyboardHeight?.constant != height else { return }
+        keyboardHeight?.constant = height
+        // The system must negotiate the input view's new size with its host.
+        // Forcing a local layout inside an animator can resize only our bounds
+        // without updating the remote keyboard frame.
+        view.setNeedsLayout()
+        view.superview?.setNeedsLayout()
+    }
+
+    private func beginInteractiveResize() {
+        guard !isResizing, model.portraitResizeRange != nil else { return }
+        let visibleHeight = view.bounds.height
+        isResizing = true
+        pendingResizeHeight = nil
+        guard let startHeight = model.beginResize(at: visibleHeight) else {
+            isResizing = false
+            return
         }
+        pendingResizeHeight = nil
+        resizePreview.height = startHeight
+#if DEBUG
+        resizeDiagnostics = KeyboardResizeDiagnostics(height: startHeight)
+#endif
+        let target = ResizeDisplayTarget(controller: self)
+        let link = CADisplayLink(target: target, selector: #selector(ResizeDisplayTarget.tick(_:)))
+        // Only the small preview observes these updates, never the key grid or
+        // remote height constraint. Commit the final target after release.
+        let fps = Float(min(60, view.window?.screen.maximumFramesPerSecond ?? 60))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: min(30, fps), maximum: fps, preferred: fps)
+        resizeDisplayTarget = target
+        resizeDisplayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    fileprivate func displayResizeFrame() {
+        guard let height = pendingResizeHeight else { return }
+        pendingResizeHeight = nil
+#if DEBUG
+        let began = CACurrentMediaTime()
+#endif
+        if resizePreview.height != height { resizePreview.height = height }
+#if DEBUG
+        resizeDiagnostics?.recordApply(height, began: began)
+#endif
+    }
+
+    private func endInteractiveResize(flush: Bool = true) {
+        guard isResizing else { return }
+        if flush { displayResizeFrame() }
+        let target = flush ? resizePreview.height : nil
+        pendingResizeHeight = nil
+        resizeDisplayLink?.invalidate()
+        resizeDisplayLink = nil
+        resizeDisplayTarget = nil
+        isResizing = false
+        resizePreview.height = nil
+#if DEBUG
+        let diagnostics = resizeDiagnostics
+        resizeDiagnostics = nil
+#endif
+        model.endResize(commitHeight: target)
+#if DEBUG
+        diagnostics?.finish(height: model.presentationHeight, committed: target != nil)
+#endif
     }
 
     private func deleteKey() {
@@ -188,8 +265,96 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    deinit { NotificationCenter.default.removeObserver(self) }
+    deinit {
+        resizeDisplayLink?.invalidate()
+        NotificationCenter.default.removeObserver(self)
+    }
 }
+
+/// CADisplayLink retains its target, so keep the input controller weak.
+private final class ResizeDisplayTarget: NSObject {
+    weak var controller: KeyboardViewController?
+    init(controller: KeyboardViewController) { self.controller = controller }
+    @objc func tick(_ link: CADisplayLink) { controller?.displayResizeFrame() }
+}
+
+#if DEBUG
+/// Local development-only timing evidence. No queries or host text are recorded,
+/// and the entire recorder is absent from distributed Release binaries.
+private final class KeyboardResizeDiagnostics {
+    private static var bodyEvaluations = 0
+    static func recordBodyEvaluation() { bodyEvaluations += 1 }
+    private let started = CACurrentMediaTime()
+    private let startedEpoch = Date().timeIntervalSince1970
+    private let initialHeight: CGFloat
+    private let initialBodyCount = bodyEvaluations
+    private var gestureCount = 0
+    private var requestCount = 0
+    private var pendingSince: CFTimeInterval?
+    private var applyTimes: [Double] = []
+    private var applyCosts: [Double] = []
+    private var latencies: [Double] = []
+    private var targets: [[Double]] = []
+    private var layouts: [[Double]] = []
+    private var inputSamples: [[String: Double]] = []
+
+    init(height: CGFloat) { initialHeight = height }
+    func recordGesture() { gestureCount += 1 }
+    func recordSample(_ sample: [String: Double]) {
+        if inputSamples.count < 2_048 { inputSamples.append(sample) }
+    }
+    func recordRequest() {
+        requestCount += 1
+        if pendingSince == nil { pendingSince = CACurrentMediaTime() }
+    }
+    func recordApply(_ height: CGFloat, began: CFTimeInterval) {
+        let now = CACurrentMediaTime()
+        applyTimes.append(began)
+        applyCosts.append((now - began) * 1_000)
+        if let pendingSince { latencies.append((began - pendingSince) * 1_000) }
+        pendingSince = nil
+        if targets.count < 1_024 { targets.append([began - started, Double(height)]) }
+    }
+    func recordLayout(_ height: CGFloat) {
+        guard height.isFinite, layouts.last?.last != Double(height), layouts.count < 1_024 else { return }
+        layouts.append([CACurrentMediaTime() - started, Double(height)])
+    }
+    func finish(height: CGFloat, committed: Bool) {
+        let gaps = zip(applyTimes.dropFirst(), applyTimes).map { ($0 - $1) * 1_000 }
+        func percentile(_ values: [Double], fraction: Double) -> Double {
+            let sorted = values.sorted()
+            return sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * fraction))]
+        }
+        let value: [String: Any] = [
+            "duration": CACurrentMediaTime() - started,
+            "startedEpoch": startedEpoch,
+            "commitEpoch": Date().timeIntervalSince1970,
+            "initialHeight": Double(initialHeight), "finalHeight": Double(height),
+            "gestureSamples": gestureCount, "queuedRequests": requestCount,
+            "previewUpdates": applyTimes.count,
+            "heightCommits": committed && height != initialHeight ? 1 : 0,
+            "commitTimestamp": CACurrentMediaTime(),
+            "maxApplyGapMs": gaps.max() ?? 0, "p95ApplyGapMs": percentile(gaps, fraction: 0.95),
+            "maxRequestToApplyMs": latencies.max() ?? 0,
+            "maxConstraintCostMs": applyCosts.max() ?? 0,
+            "bodyEvaluations": Self.bodyEvaluations - initialBodyCount,
+            "previewHeights": targets, "layoutHeightsDuringDrag": layouts,
+            "inputSamples": inputSamples
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else { return }
+        // Write once, after sampling stops. Unified logging truncates long
+        // vectors; this local DEBUG file preserves the complete timing proof.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("UniboardResizeMetrics", isDirectory: true)
+        if (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil {
+            let file = directory.appendingPathComponent(UUID().uuidString).appendingPathExtension("json")
+            try? data.write(to: file, options: .atomic)
+        }
+        Logger(subsystem: "ad.neko.uniboard.resize", category: "gesture")
+            .notice("resizeMetrics \(json, privacy: .public)")
+    }
+}
+#endif
 
 private enum KeyboardSection: String, CaseIterable {
     case symbols = "Symbols"
@@ -295,19 +460,23 @@ private final class KeyboardModel: ObservableObject {
     @Published var returnTitle = "Return"
     @Published var isCompactLayout = false
     @Published var isPadLayout = false
-    @Published var presentationHeight: CGFloat = 300
+    // Native resize layout owns this value. Publishing it would rebuild the
+    // entire SwiftUI character grid for every finger movement.
+    var presentationHeight: CGFloat = 300
     private(set) var portraitBrowseHeight: CGFloat
     private(set) var portraitExpandedHeight: CGFloat = 340
     var portraitResizeRange: ClosedRange<CGFloat>?
     var presentationChanged: ((Bool) -> Void)?
     private var batchingPresentation = false
-    private var resizeStartHeight: CGFloat?
+    private var resizeSession: KeyboardResizeSession?
     private let defaults = UserDefaults.standard
     private let pageSize = 160
     private var revision = 0
     private var searchTask: Task<Void, Never>?
     private var discoveryTask: Task<Void, Never>?
     private var blockTask: Task<Void, Never>?
+    private var symbolPageTask: Task<Void, Never>?
+    private var emojiPageTask: Task<Void, Never>?
     private var loadingSymbolPage = false
     private var loadingEmojiPage = false
 
@@ -324,7 +493,7 @@ private final class KeyboardModel: ObservableObject {
     var hasSearchQuery: Bool {
         (section == .symbols || section == .emojis) && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-    var queryCaretUTF16Offset: Int { query.prefix(queryCursor).utf16.count }
+    var queryCaretUTF16Offset: Int { KeyboardQueryPolicy.utf16Offset(forCharacterOffset: queryCursor, in: query) }
 
     init() {
         let storedHeight = defaults.double(forKey: "keyboard.portraitBrowseHeight")
@@ -335,8 +504,16 @@ private final class KeyboardModel: ObservableObject {
         case "codePoint": order = .codePoint
         default: order = .newestFirst
         }
-        useUnicodeFonts = defaults.bool(forKey: "keyboardUnicodeFonts")
+        useUnicodeFonts = LocalPreferencePolicy.boolean(forKey: "keyboardUnicodeFonts", in: defaults)
         refreshCatalog()
+    }
+
+    deinit {
+        searchTask?.cancel()
+        discoveryTask?.cancel()
+        blockTask?.cancel()
+        symbolPageTask?.cancel()
+        emojiPageTask?.cancel()
     }
 
     func beginSearch() {
@@ -361,56 +538,60 @@ private final class KeyboardModel: ObservableObject {
     }
     func closeInspection() { inspection = nil }
     func appendQuery(_ text: String) {
-        guard query.count < 100 else { return }
-        let insertion = query.index(query.startIndex, offsetBy: min(queryCursor, query.count))
-        let insertionEnd = query[..<insertion].utf16.count + text.utf16.count
-        query.insert(contentsOf: text, at: insertion)
-        moveQueryCaret(afterUTF16Offset: insertionEnd)
+        applyQueryEdit(KeyboardQueryPolicy.inserting(text, into: query, caretUTF16Offset: queryCaretUTF16Offset))
     }
     func deleteQueryCharacter() {
-        guard queryCursor > 0 else { return }
-        let end = query.index(query.startIndex, offsetBy: min(queryCursor, query.count))
-        let start = query.index(before: end)
-        let deletionStart = query[..<start].utf16.count
-        query.removeSubrange(start..<end)
-        moveQueryCaret(afterUTF16Offset: deletionStart)
+        applyQueryEdit(KeyboardQueryPolicy.deletingBackward(from: query, caretUTF16Offset: queryCaretUTF16Offset))
     }
     func moveQueryCaret(toUTF16Offset offset: Int) {
-        let boundaries = (0...query.count).map { query.prefix($0).utf16.count }
-        queryCursor = boundaries.indices.min(by: { abs(boundaries[$0] - offset) < abs(boundaries[$1] - offset) }) ?? 0
+        queryCursor = KeyboardQueryPolicy.characterOffset(forUTF16Offset: offset, in: query)
     }
-    private func moveQueryCaret(afterUTF16Offset offset: Int) {
-        // Inserting a combining mark or joiner can merge adjacent Characters.
-        // Land after the resulting whole grapheme, never inside it or past
-        // the next unrelated character.
-        queryCursor = (0...query.count).first(where: { query.prefix($0).utf16.count >= offset }) ?? query.count
+    private func applyQueryEdit(_ edit: KeyboardQueryPolicy.Edit) {
+        if query != edit.text { query = edit.text }
+        queryCursor = edit.caretCharacterOffset
     }
 
-    func beginResize(at height: CGFloat?) {
-        guard portraitResizeRange != nil else { return }
-        resizeStartHeight = height.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? presentationHeight
+    @discardableResult
+    func beginResize(at height: CGFloat?) -> CGFloat? {
+        guard let range = portraitResizeRange else { return nil }
+        let preference = isSearching || inspection != nil ? portraitExpandedHeight : portraitBrowseHeight
+        guard let session = KeyboardResizeSession(preferredHeight: preference, visibleHeight: height,
+            fallbackHeight: presentationHeight, range: range) else { return nil }
+        resizeSession = session
+        presentationHeight = session.startHeight
+        return session.startHeight
     }
-    func resize(translationY: CGFloat) {
-        guard let start = resizeStartHeight, translationY.isFinite else { return }
-        setPortraitHeight(start - translationY, animated: false)
+    func resizeTarget(translationY: CGFloat) -> CGFloat? {
+        guard let session = resizeSession, let range = portraitResizeRange else { return nil }
+        return session.target(translationY: translationY, range: range)
     }
-    func endResize() {
-        resizeStartHeight = nil
+    func endResize(commitHeight: CGFloat?) {
+        var session = resizeSession
+        resizeSession = nil
+        guard let range = portraitResizeRange, let height = session?.finish(commitHeight: commitHeight, range: range) else { return }
+        setPortraitHeight(height, animated: true)
         persistBrowseHeight()
     }
     func togglePortraitHeight() {
-        guard portraitResizeRange != nil else { return }
+        guard let range = portraitResizeRange else { return }
         if inspection != nil { closeInspection() }
         else if isSearching { endSearch() }
-        else { setPortraitHeight(presentationHeight < 320 ? 420 : 220, animated: true); persistBrowseHeight() }
+        else if let height = KeyboardResizePolicy.toggledHeight(current: presentationHeight, range: range) {
+            setPortraitHeight(height, animated: true)
+            persistBrowseHeight()
+        }
     }
     func stepPortraitHeight(_ delta: CGFloat) {
-        setPortraitHeight(presentationHeight + delta, animated: true)
+        guard let range = portraitResizeRange,
+              let height = KeyboardResizePolicy.target(startHeight: presentationHeight, translationY: -delta, in: range) else { return }
+        setPortraitHeight(height, animated: true)
         persistBrowseHeight()
     }
     private func setPortraitHeight(_ value: CGFloat, animated: Bool) {
-        guard let range = portraitResizeRange, value.isFinite else { return }
-        let height = min(range.upperBound, max(range.lowerBound, value)).rounded()
+        guard let range = portraitResizeRange,
+              let height = KeyboardResizePolicy.clampedHeight(value, in: range) else { return }
+        let previous = isSearching || inspection != nil ? portraitExpandedHeight : portraitBrowseHeight
+        guard height != previous else { return }
         if isSearching || inspection != nil { portraitExpandedHeight = height }
         else { portraitBrowseHeight = height }
         presentationChanged?(animated)
@@ -438,9 +619,9 @@ private final class KeyboardModel: ObservableObject {
         let activeCatalog = catalog, activeOrder = order, activeRevision = revision
         let offset = blockCharacters.count, limit = pageSize
         blockTask = Task { [weak self] in
-            let more = await Task.detached(priority: .userInitiated) {
+            let more = await CatalogWorker.run {
                 activeCatalog.characters(in: block, offset: offset, limit: limit, order: activeOrder)
-            }.value
+            }
             guard !Task.isCancelled, let self, self.revision == activeRevision,
                   self.selectedBlock?.id == block.id else { return }
             self.blockCharacters.append(contentsOf: more)
@@ -454,11 +635,11 @@ private final class KeyboardModel: ObservableObject {
         loadingSymbolPage = true
         let activeCatalog = catalog, activeOrder = order, activeRevision = revision
         let offset = discoveryCharacters.count, limit = pageSize
-        Task { [weak self] in
-            let more = await Task.detached(priority: .userInitiated) {
+        symbolPageTask = Task { [weak self] in
+            let more = await CatalogWorker.run {
                 activeCatalog.orderedCharacters(offset: offset, limit: limit, order: activeOrder)
-            }.value
-            guard let self, self.revision == activeRevision else { return }
+            }
+            guard !Task.isCancelled, let self, self.revision == activeRevision else { return }
             self.discoveryCharacters.append(contentsOf: more)
             self.moreSymbols = more.count == limit
             self.loadingSymbolPage = false
@@ -470,11 +651,11 @@ private final class KeyboardModel: ObservableObject {
         loadingEmojiPage = true
         let activeCatalog = emojiCatalog, activeOrder = order, activeRevision = revision
         let offset = discoveryEmojis.count, limit = pageSize
-        Task { [weak self] in
-            let more = await Task.detached(priority: .userInitiated) {
+        emojiPageTask = Task { [weak self] in
+            let more = await CatalogWorker.run {
                 activeCatalog.entries(offset: offset, limit: limit, order: activeOrder)
-            }.value
-            guard let self, self.revision == activeRevision else { return }
+            }
+            guard !Task.isCancelled, let self, self.revision == activeRevision else { return }
             self.discoveryEmojis.append(contentsOf: more)
             self.moreEmojis = more.count == limit
             self.loadingEmojiPage = false
@@ -510,8 +691,11 @@ private final class KeyboardModel: ObservableObject {
         revision += 1
         inspection = nil
         lastItem = nil
+        searchTask?.cancel()
         discoveryTask?.cancel()
         blockTask?.cancel()
+        symbolPageTask?.cancel()
+        emojiPageTask?.cancel()
         discoveryCharacters = []
         discoveryEmojis = []
         moreSymbols = false
@@ -522,10 +706,10 @@ private final class KeyboardModel: ObservableObject {
         let activeCatalog = catalog, activeEmojis = emojiCatalog, activeOrder = order
         let activeRevision = revision, limit = pageSize
         discoveryTask = Task { [weak self] in
-            let pages = await Task.detached(priority: .userInitiated) {
+            let pages = await CatalogWorker.run {
                 (activeCatalog.orderedCharacters(offset: 0, limit: limit, order: activeOrder),
                  activeEmojis.entries(offset: 0, limit: limit, order: activeOrder))
-            }.value
+            }
             guard !Task.isCancelled, let self, self.revision == activeRevision else { return }
             self.discoveryCharacters = pages.0
             self.discoveryEmojis = pages.1
@@ -553,10 +737,10 @@ private final class KeyboardModel: ObservableObject {
             do { try await Task.sleep(for: .milliseconds(100)) }
             catch { return }
             guard !Task.isCancelled else { return }
-            let matches: ([UnicodeCharacter], [UnicodeEmojiEntry]) = await Task.detached(priority: .userInitiated) {
+            let matches: ([UnicodeCharacter], [UnicodeEmojiEntry]) = await CatalogWorker.run {
                 if searchEmojis { return ([], activeEmojis.search(searchQuery, limit: 120, order: activeOrder)) }
                 return (activeCatalog.search(searchQuery, limit: 120, order: activeOrder), [])
-            }.value
+            }
             guard !Task.isCancelled, let self, self.revision == activeRevision,
                   self.query.trimmingCharacters(in: .whitespacesAndNewlines) == searchQuery,
                   (self.section == .emojis) == searchEmojis else { return }
@@ -668,41 +852,47 @@ private struct UnicodeKeyboardView: View {
     private var controlHeight: CGFloat { model.isCompactLayout ? 34 : 38 }
 
     var body: some View {
-        VStack(spacing: 6) {
-            if !model.isCompactLayout && !model.isPadLayout {
-                KeyboardResizeHandle(
-                    height: model.presentationHeight,
-                    isEditing: model.isSearching || model.inspection != nil,
-                    toggle: model.togglePortraitHeight,
-                    begin: { model.beginResize(at: controller?.view.bounds.height) },
-                    change: model.resize,
-                    end: model.endResize,
-                    step: model.stepPortraitHeight
-                )
-                .frame(maxWidth: .infinity).frame(height: 18)
+#if DEBUG
+        let _ = KeyboardResizeDiagnostics.recordBodyEvaluation()
+#endif
+        VStack(spacing: 0) {
+            if !model.isCompactLayout && !model.isPadLayout, let controller {
+                // Keep the control in the hosted remote input hierarchy so
+                // iOS forwards continuous touches as well as button actions.
+                KeyboardResizeHandle(button: controller.resizeHandle)
+                    .frame(height: 18)
+                    .contentShape(Rectangle())
             }
-            toolbar
-            if let inspected = model.inspection {
-                inspectionPanel(inspected)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .layoutPriority(1)
-            } else {
-                if model.isSearching {
-                    searchContent
+            VStack(spacing: 6) {
+                toolbar
+                if let inspected = model.inspection {
+                    inspectionPanel(inspected)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .layoutPriority(1)
                 } else {
-                    content
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .layoutPriority(1)
+                    if model.isSearching {
+                        searchContent
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .layoutPriority(1)
+                    } else {
+                        content
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .layoutPriority(1)
+                    }
                 }
+                controls
             }
-            controls
+            .padding(.horizontal, 8)
+            .padding(.top, model.isCompactLayout || model.isPadLayout ? 4 : 0)
+            .padding(.bottom, 6)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, model.isCompactLayout ? 4 : 6)
-        .padding(.bottom, 6)
         .background(KeyboardTray().ignoresSafeArea())
+        .overlay(alignment: .top) {
+            if let controller {
+                KeyboardResizePreview(model: controller.resizePreview)
+                    .padding(.top, 72)
+            }
+        }
         .tint(KeyboardPalette.accent)
         .environment(\.layoutDirection, .leftToRight)
         .dynamicTypeSize(.xSmall ... .xxxLarge)
@@ -740,7 +930,9 @@ private struct UnicodeKeyboardView: View {
                 }
             }
             .frame(height: headerHeight)
-            .keyboardControlSurface()
+            // Native query text must stay outside the glass compositor. A
+            // quiet key surface keeps the label and caret fully legible.
+            .keyboardKeySurface(radius: 12)
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(model.isSearching ? KeyboardPalette.accent.opacity(0.55) : Color.clear, lineWidth: 1))
 
             sectionMenu
@@ -1274,82 +1466,40 @@ private struct UnicodeKeyboardView: View {
     }
 }
 
-private struct KeyboardResizeHandle: UIViewRepresentable {
-    let height: CGFloat
-    let isEditing: Bool
-    let toggle: () -> Void
-    let begin: () -> Void
-    let change: (CGFloat) -> Void
-    let end: () -> Void
-    let step: (CGFloat) -> Void
+private struct KeyboardResizePreview: View {
+    @ObservedObject var model: KeyboardResizePreviewModel
 
-    func makeUIView(context: Context) -> ResizeHandleButton { ResizeHandleButton() }
-    func updateUIView(_ button: ResizeHandleButton, context: Context) {
-        button.toggle = toggle
-        button.begin = begin
-        button.change = change
-        button.end = end
-        button.step = step
-        button.accessibilityValue = "\(Int(height.rounded())) points"
-        button.accessibilityHint = isEditing
-            ? "Drag up to expand or down to shrink. Double tap to return to browsing."
-            : "Drag up to expand or down to shrink. Double tap to switch between compact and expanded."
+    var body: some View {
+        if let height = model.height {
+            HStack(spacing: 9) {
+                Image(systemName: "arrow.up.and.down")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(KeyboardPalette.accent)
+                VStack(spacing: 2) {
+                    Text("\(Int(height)) pt")
+                        .font(.system(size: 17, weight: .semibold).monospacedDigit())
+                    Text("Release to resize")
+                        .font(.system(size: 11))
+                        .foregroundStyle(KeyboardPalette.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+            .allowsHitTesting(false)
+            .accessibilityElement(children: .ignore)
+            .accessibilityIdentifier("keyboard.resize.preview")
+            .accessibilityLabel("Keyboard height preview")
+            .accessibilityValue("\(Int(height)) points. Release to resize.")
+        }
     }
 }
 
-private final class ResizeHandleButton: UIButton {
-    var toggle: (() -> Void)?
-    var begin: (() -> Void)?
-    var change: ((CGFloat) -> Void)?
-    var end: (() -> Void)?
-    var step: ((CGFloat) -> Void)?
-    private let grip = UIView()
-    private var initialScreenY: CGFloat?
-
-    init() {
-        super.init(frame: .zero)
-        grip.backgroundColor = .tertiaryLabel
-        grip.layer.cornerRadius = 2
-        grip.isUserInteractionEnabled = false
-        addSubview(grip)
-        accessibilityIdentifier = "keyboard.resize"
-        accessibilityLabel = "Keyboard height"
-        accessibilityTraits = [.button, .adjustable]
-        addTarget(self, action: #selector(tapped), for: .touchUpInside)
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(resized(_:)))
-        pan.maximumNumberOfTouches = 1
-        addGestureRecognizer(pan)
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: 18)
-    }
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        grip.frame = CGRect(x: (bounds.width - 40) / 2, y: (bounds.height - 4) / 2, width: 40, height: 4)
-    }
-    override func accessibilityActivate() -> Bool { toggle?(); return true }
-    override func accessibilityIncrement() { step?(40) }
-    override func accessibilityDecrement() { step?(-40) }
-    @objc private func tapped() { toggle?() }
-    @objc private func resized(_ gesture: UIPanGestureRecognizer) {
-        guard let window else { return }
-        // The keyboard's top edge moves while resizing. Screen coordinates keep
-        // that movement out of the finger's translation and prevent feedback.
-        let screenY = window.convert(gesture.location(in: window), to: window.screen.coordinateSpace).y
-        switch gesture.state {
-        case .began:
-            initialScreenY = screenY
-            begin?()
-        case .changed:
-            if let start = initialScreenY { change?(screenY - start) }
-        case .ended, .cancelled, .failed:
-            if let start = initialScreenY { change?(screenY - start) }
-            initialScreenY = nil
-            end?()
-        default: break
-        }
-    }
+private struct KeyboardResizeHandle: UIViewRepresentable {
+    let button: ResizeHandleButton
+    func makeUIView(context: Context) -> ResizeHandleButton { button }
+    func updateUIView(_ view: ResizeHandleButton, context: Context) {}
 }
 
 /// UIKit owns touch arbitration: a recognized long press cancels the button tap,

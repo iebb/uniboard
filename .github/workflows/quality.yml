@@ -1,0 +1,75 @@
+name: Quality checks
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    if: github.repository == 'iebb/uniboard'
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the exact source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Select the Liquid Glass SDK
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Validate generator and quality-check failure paths
+        run: python3 -m unittest discover -s Scripts/tests
+
+      - name: Validate release guards offline
+        run: ruby Scripts/tests/test_app_store_release.rb
+
+      - name: Validate optional font files and licenses
+        run: python3 Scripts/validate_fonts.py
+
+      - name: Test the shipped core and enforce its coverage
+        run: |
+          set -euo pipefail
+          swift test --enable-code-coverage
+          coverage_path="$(swift test --show-codecov-path)"
+          python3 Scripts/check_swift_coverage.py "$coverage_path"
+          cp "$coverage_path" "$RUNNER_TEMP/core-coverage.json"
+
+      - name: Run native iOS unit tests with coverage
+        run: |
+          set -euo pipefail
+          test_destination="$(python3 Scripts/select_ios_test_destination.py)"
+          xcodebuild \
+            -project Uniboard.xcodeproj -scheme Uniboard \
+            -configuration Debug -destination "$test_destination" \
+            -derivedDataPath "$RUNNER_TEMP/UniboardDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/UniboardUnitTests.xcresult" \
+            -enableCodeCoverage YES -only-testing:UniboardTests \
+            CODE_SIGNING_ALLOWED=NO test
+          xcrun xccov view --report --json "$RUNNER_TEMP/UniboardUnitTests.xcresult" \
+            > "$RUNNER_TEMP/ios-coverage.json"
+
+      - name: Preserve test and coverage evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-test-evidence
+          path: |
+            ${{ runner.temp }}/core-coverage.json
+            ${{ runner.temp }}/ios-coverage.json
+            ${{ runner.temp }}/UniboardUnitTests.xcresult
+          if-no-files-found: warn
+          retention-days: 14

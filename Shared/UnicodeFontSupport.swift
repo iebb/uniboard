@@ -15,6 +15,27 @@ enum UnicodeFontSupport {
         let licenseFilename: String
         let ranges: [[UInt32]]
 
+        var isValid: Bool {
+            guard Self.isResourceFilename(filename), Self.isResourceFilename(licenseFilename),
+                  !displayName.isEmpty, !postScriptName.isEmpty,
+                  sha256.count == 64, sha256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                  let source = URL(string: sourceURL), source.scheme == "https", source.host != nil,
+                  !ranges.isEmpty else { return false }
+            var previous: UInt32?
+            for range in ranges {
+                guard range.count == 2, range[0] <= range[1], range[1] <= 0x10FFFF,
+                      !(range[0] <= 0xDFFF && range[1] >= 0xD800),
+                      previous.map({ $0 < range[0] }) ?? true else { return false }
+                previous = range[1]
+            }
+            return true
+        }
+
+        fileprivate static func isResourceFilename(_ value: String) -> Bool {
+            !value.isEmpty && value != "." && value != ".." && !value.contains("/")
+                && !value.contains("\\") && !value.contains("\0")
+        }
+
         func contains(_ point: UInt32) -> Bool {
             var lower = 0, upper = ranges.count
             while lower < upper {
@@ -41,14 +62,18 @@ enum UnicodeFontSupport {
     static let assets: [Asset] = {
         guard let url = resourceURL("manifest.json"),
               let data = try? Data(contentsOf: url),
-              let manifest = try? JSONDecoder().decode(Manifest.self, from: data) else { return [] }
+              let manifest = try? JSONDecoder().decode(Manifest.self, from: data),
+              manifest.fonts.allSatisfy(\.isValid),
+              Set(manifest.fonts.map(\.filename)).count == manifest.fonts.count,
+              Set(manifest.fonts.map(\.postScriptName)).count == manifest.fonts.count else { return [] }
         return manifest.fonts
     }()
 
     static var loadedFontCount: Int { graphicsFonts.count }
 
     static func resourceURL(_ filename: String) -> URL? {
-        Bundle.main.url(forResource: filename, withExtension: nil, subdirectory: "Fonts")
+        guard Asset.isResourceFilename(filename) else { return nil }
+        return Bundle.main.url(forResource: filename, withExtension: nil, subdirectory: "Fonts")
     }
 
     static func clearCache() {
@@ -57,6 +82,7 @@ enum UnicodeFontSupport {
     }
 
     static func font(for text: String, size: CGFloat, enabled: Bool) -> UIFont {
+        let size = normalizedPointSize(size)
         let system = UIFont.systemFont(ofSize: size)
         guard enabled, !text.isEmpty, !preservesEmoji(text) else { return system }
         let index = choice(for: text, system: system)
@@ -66,8 +92,12 @@ enum UnicodeFontSupport {
 
     static func sourceName(for text: String, size: CGFloat, enabled: Bool) -> String? {
         guard enabled, !text.isEmpty, !preservesEmoji(text) else { return nil }
-        let index = choice(for: text, system: .systemFont(ofSize: size))
+        let index = choice(for: text, system: .systemFont(ofSize: normalizedPointSize(size)))
         return assets.indices.contains(index) ? assets[index].displayName : nil
+    }
+
+    static func normalizedPointSize(_ size: CGFloat) -> CGFloat {
+        size.isFinite && size > 0 ? min(512, max(1, size)) : UIFont.systemFontSize
     }
 
     /// Qualified and joined emoji retain Apple's color font and shaping.
@@ -147,7 +177,8 @@ enum UnicodeFontSupport {
         for scalar in text.unicodeScalars {
             let length = scalar.value > 0xFFFF ? 2 : 1
             defer { offset += length }
-            if scalar.properties.generalCategory == .control || scalar.properties.generalCategory == .format { continue }
+            if scalar.properties.generalCategory == .control || scalar.properties.generalCategory == .format
+                || scalar.properties.isDefaultIgnorableCodePoint { continue }
             if missingRanges.contains(where: { $0.location < offset + length && $0.location + $0.length > offset }) {
                 missing.append(scalar.value)
             }

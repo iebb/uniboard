@@ -25,11 +25,12 @@ struct KeyboardQueryField: UIViewRepresentable {
 
 final class KeyboardQueryControl: UIControl {
     private let magnifier = UIImageView(image: UIImage(systemName: "magnifyingglass"))
-    private let viewport = UIScrollView()
+    private let viewport = UIView()
     private let label = UILabel()
     private let caret = UIView()
     private var line: CTLine?
     private var lineWidth: CGFloat = 0
+    private var horizontalOffset: CGFloat = 0
     private var query = ""
     private var caretUTF16Offset = 0
     private var graphemeOffsets = [0]
@@ -58,13 +59,12 @@ final class KeyboardQueryControl: UIControl {
         magnifier.isUserInteractionEnabled = false
         addSubview(magnifier)
 
-        // Programmatic scrolling reveals the insertion point. Touches belong
-        // to this control's local caret gestures rather than a scroll view.
-        viewport.isScrollEnabled = false
+        // This is deliberately not a UIScrollView. A query is foreground
+        // control text; automatic scroll-edge effects can blur it under glass.
+        // Move the clipped label directly to reveal the local insertion point.
         viewport.isUserInteractionEnabled = false
-        viewport.showsHorizontalScrollIndicator = false
-        viewport.showsVerticalScrollIndicator = false
-        viewport.contentInsetAdjustmentBehavior = .never
+        viewport.backgroundColor = .clear
+        viewport.isOpaque = false
         viewport.clipsToBounds = true
         viewport.accessibilityElementsHidden = true
         addSubview(viewport)
@@ -108,7 +108,7 @@ final class KeyboardQueryControl: UIControl {
                    onActivate: @escaping () -> Void, onMoveCaret: @escaping (Int) -> Void) {
         let textChanged = self.query != query || self.isEmojiScope != isEmojiScope || label.attributedText == nil
         self.query = query
-        self.caretUTF16Offset = min(max(0, caretUTF16Offset), query.utf16.count)
+        self.caretUTF16Offset = KeyboardQueryPolicy.normalizedUTF16Offset(caretUTF16Offset, in: query)
         self.isEditingQuery = isEditing
         self.isEmojiScope = isEmojiScope
         self.onActivate = onActivate
@@ -125,12 +125,7 @@ final class KeyboardQueryControl: UIControl {
     }
 
     private func rebuildLine() {
-        var offset = 0
-        graphemeOffsets = [0]
-        for character in query {
-            offset += String(character).utf16.count
-            graphemeOffsets.append(offset)
-        }
+        graphemeOffsets = KeyboardQueryPolicy.utf16Boundaries(in: query)
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .left
         paragraph.baseWritingDirection = .leftToRight
@@ -152,29 +147,44 @@ final class KeyboardQueryControl: UIControl {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        let scale = renderingScale
+        // The remote keyboard can attach to a different display. Keep its
+        // text rasterization and final positions on that display's pixel grid.
+        for view in [self, viewport, label, magnifier, caret] where view.contentScaleFactor != scale {
+            view.contentScaleFactor = scale
+        }
         let width = bounds.width.isFinite ? max(0, bounds.width) : 0
         let height = bounds.height.isFinite ? max(0, bounds.height) : 0
-        magnifier.frame = CGRect(x: 11, y: max(0, (height - 16) / 2), width: 16, height: 16)
-        let viewportWidth = max(0, width - 34 - 8)
-        viewport.frame = CGRect(x: 34, y: 0, width: viewportWidth, height: height)
-        let contentWidth = max(viewportWidth, ceil(max(0, lineWidth)) + textInset * 2 + 2)
-        viewport.contentSize = CGSize(width: contentWidth, height: height)
-        label.frame = CGRect(x: textInset, y: 0, width: max(0, contentWidth - textInset * 2), height: height)
+        magnifier.frame = CGRect(x: aligned(11), y: aligned(max(0, (height - 16) / 2)), width: 16, height: 16)
+        let viewportWidth = max(0, aligned(width - 34 - 8))
+        viewport.frame = CGRect(x: aligned(34), y: 0, width: viewportWidth, height: height)
+        let contentWidth = max(viewportWidth, KeyboardQueryViewportPolicy.pixelAligned(max(0, lineWidth), scale: scale, rule: .up) + textInset * 2 + 2)
         let caretX = textInset + caretOffset(for: caretUTF16Offset)
-        caret.frame = CGRect(x: caretX, y: max(0, (height - 18) / 2), width: 2, height: min(18, height))
         revealCaret(at: caretX, viewportWidth: viewportWidth, contentWidth: contentWidth)
+        let labelX = aligned(textInset - horizontalOffset)
+        label.frame = CGRect(x: labelX, y: 0, width: max(0, contentWidth - textInset * 2), height: height)
+        caret.frame = CGRect(x: aligned(labelX + caretOffset(for: caretUTF16Offset)),
+                             y: aligned(max(0, (height - 18) / 2)), width: 2, height: min(18, height))
     }
 
     private func revealCaret(at x: CGFloat, viewportWidth: CGFloat, contentWidth: CGFloat) {
-        guard viewportWidth > 0 else { return }
-        let margin = min(8, viewportWidth / 4)
-        var offset = viewport.contentOffset.x
-        if x < offset + margin { offset = x - margin }
-        else if x + 2 > offset + viewportWidth - margin { offset = x + 2 - viewportWidth + margin }
-        offset = min(max(0, offset), max(0, contentWidth - viewportWidth))
-        if abs(viewport.contentOffset.x - offset) > 0.25 {
-            viewport.setContentOffset(CGPoint(x: offset, y: 0), animated: false)
-        }
+        horizontalOffset = KeyboardQueryViewportPolicy.horizontalOffset(
+            caretX: x, previousOffset: horizontalOffset, viewportWidth: viewportWidth,
+            contentWidth: contentWidth, scale: renderingScale)
+    }
+
+    private var renderingScale: CGFloat {
+        let scale = window?.screen.scale ?? traitCollection.displayScale
+        return scale.isFinite && scale > 0 ? scale : 1
+    }
+
+    private func aligned(_ value: CGFloat) -> CGFloat {
+        KeyboardQueryViewportPolicy.pixelAligned(value, scale: renderingScale)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        setNeedsLayout()
     }
 
     private func caretOffset(for index: Int) -> CGFloat {
@@ -185,16 +195,21 @@ final class KeyboardQueryControl: UIControl {
 
     private func index(at point: CGPoint) -> Int {
         guard !query.isEmpty, let line else { return 0 }
-        let x = point.x - viewport.frame.minX + viewport.contentOffset.x - textInset
+        let x = point.x - viewport.frame.minX - label.frame.minX
         guard x.isFinite else { return caretUTF16Offset }
         let hit = CTLineGetStringIndexForPosition(line, CGPoint(x: x, y: 0))
-        let index = hit == kCFNotFound ? (x <= 0 ? 0 : query.utf16.count) : min(max(0, hit), query.utf16.count)
+        if hit == kCFNotFound {
+            // Logical beginning/end can be on opposite visual edges in RTL
+            // runs. Pick the actual closest caret, rather than assuming LTR.
+            return KeyboardQueryPolicy.nearestVisualBoundary(to: x, boundaries: graphemeOffsets, offset: caretOffset)
+        }
+        let index = min(max(0, hit), query.utf16.count)
         if graphemeOffsets.contains(index) { return index }
         // Core Text can return an index inside a composed character. Choose
         // its nearest visual edge; the model also validates the boundary.
         let next = graphemeOffsets.first(where: { $0 > index }) ?? query.utf16.count
         let previous = graphemeOffsets.last(where: { $0 < index }) ?? 0
-        return abs(caretOffset(for: previous) - x) <= abs(caretOffset(for: next) - x) ? previous : next
+        return KeyboardQueryPolicy.nearestVisualBoundary(to: x, boundaries: [previous, next], offset: caretOffset)
     }
 
     @objc private func tapped(_ gesture: UITapGestureRecognizer) {
@@ -211,7 +226,7 @@ final class KeyboardQueryControl: UIControl {
 
     private func activateAndMove(to index: Int) {
         onActivate?()
-        caretUTF16Offset = min(max(0, index), query.utf16.count)
+        caretUTF16Offset = KeyboardQueryPolicy.normalizedUTF16Offset(index, in: query)
         onMoveCaret?(caretUTF16Offset)
         setNeedsLayout()
     }

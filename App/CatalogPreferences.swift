@@ -21,7 +21,7 @@ final class CatalogPreferences: ObservableObject {
         self.defaults = defaults
         edition = defaults.string(forKey: "appUnicodeEdition").flatMap(UnicodeEdition.init(rawValue:)) ?? .draft
         order = defaults.string(forKey: "appUnicodeSort").flatMap(UnicodeSortOrder.init(rawValue:)) ?? .newestFirst
-        useUnicodeFonts = defaults.bool(forKey: "appUnicodeFonts")
+        useUnicodeFonts = LocalPreferencePolicy.boolean(forKey: "appUnicodeFonts", in: defaults)
     }
     var catalog: UnicodeCatalog { edition.catalog }
     var emojis: EmojiCatalog { edition.emojiCatalog }

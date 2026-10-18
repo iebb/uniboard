@@ -14,7 +14,9 @@ import datetime
 import hashlib
 import http.client
 import json
+import os
 import re
+import shutil
 import struct
 import sys
 import tempfile
@@ -98,13 +100,71 @@ def fold(value: str) -> str:
 
 
 def span(value: str) -> tuple[int, int]:
-    bits = value.strip().split("..")
-    return int(bits[0], 16), int(bits[-1], 16)
+    text = value.strip()
+    if not re.fullmatch(r"[0-9A-Fa-f]{1,6}(?:\.\.[0-9A-Fa-f]{1,6})?", text):
+        raise ValueError(f"Invalid Unicode code-point range: {text}")
+    bits = text.split("..")
+    start, end = int(bits[0], 16), int(bits[-1], 16)
+    if not 0 <= start <= end <= 0x10FFFF:
+        raise ValueError(f"Invalid Unicode code-point range: {text}")
+    return start, end
 
 
 def version_key(value: str) -> int:
-    parts = value.split(".")
-    return int(parts[0]) * 100 + int(parts[1] if len(parts) > 1 else 0)
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,2}(?: draft)?", value):
+        raise ValueError(f"Invalid Unicode version: {value}")
+    parts = value.removesuffix(" draft").split(".")
+    major, minor = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+    if minor >= 100 or major > (sys.maxsize - minor) // 100:
+        raise ValueError(f"Unsupported Unicode version: {value}")
+    return major * 100 + minor
+
+
+def unicode_data_rows(source_lines: list[str]):
+    """Validate UnicodeData before its rows can form compressed lookup ranges.
+
+    Reject duplicates, truncated records and mismatched First/Last pairs even
+    under python -O. A partial parse is never returned as a complete catalog.
+    """
+    previous, pending = -1, None
+    count = 0
+    for line in source_lines:
+        fields = line.split(";")
+        if len(fields) != 15 or not re.fullmatch(r"[0-9A-F]{4,6}", fields[0]):
+            raise ValueError("Malformed UnicodeData record")
+        cp, name, category = int(fields[0], 16), fields[1], fields[2]
+        if cp <= previous or cp > 0x10FFFF:
+            raise ValueError("UnicodeData code points must be valid, unique and increasing")
+        if not name or category not in CATEGORIES or fields[4] not in BIDI_CLASSES:
+            raise ValueError("Invalid UnicodeData name/category/bidirectional class")
+        if (0xD800 <= cp <= 0xDFFF) != (category == "Cs"):
+            raise ValueError("UnicodeData surrogate/category mismatch")
+        if not re.fullmatch(r"[0-9]{1,3}", fields[3]) or int(fields[3]) > 255:
+            raise ValueError("Invalid UnicodeData combining class")
+        for mapping in fields[12:15]:
+            if mapping and (not re.fullmatch(r"[0-9A-F]{4,6}", mapping)
+                            or int(mapping, 16) > 0x10FFFF or 0xD800 <= int(mapping, 16) <= 0xDFFF):
+                raise ValueError("Invalid UnicodeData simple case mapping")
+        decomposition = re.sub(r"^<[A-Za-z]+> ", "", fields[5])
+        if decomposition:
+            for point in decomposition.split(" "):
+                if (not re.fullmatch(r"[0-9A-F]{4,6}", point) or int(point, 16) > 0x10FFFF
+                        or 0xD800 <= int(point, 16) <= 0xDFFF):
+                    raise ValueError("Invalid UnicodeData decomposition")
+        if name.endswith(", First>"):
+            if pending is not None:
+                raise ValueError("Nested UnicodeData First range")
+            pending = (name.removesuffix(", First>"), category, fields[3], fields[4])
+        elif name.endswith(", Last>"):
+            if pending != (name.removesuffix(", Last>"), category, fields[3], fields[4]):
+                raise ValueError("Unmatched UnicodeData Last range")
+            pending = None
+        elif pending is not None:
+            raise ValueError("UnicodeData First range has no matching Last")
+        previous, count = cp, count + 1
+        yield fields
+    if pending is not None or count == 0:
+        raise ValueError("UnicodeData is empty or has an unterminated First range")
 
 
 def add_name_aliases(records: dict, source_lines: list[str]) -> None:
@@ -117,6 +177,9 @@ def add_name_aliases(records: dict, source_lines: list[str]) -> None:
         code, alias, kind = (part.strip() for part in line.split(";"))
         if kind not in kinds:
             raise ValueError(f"Unsupported formal name alias kind: {kind}")
+        if (not alias or not re.fullmatch(r"[0-9A-F]{4,6}", code)
+                or int(code, 16) > 0x10FFFF or 0xD800 <= int(code, 16) <= 0xDFFF):
+            raise ValueError("Invalid formal name alias")
         record = records.get(int(code, 16))
         if record is not None:
             record.setdefault("aliases", []).append({"name": alias, "kind": kind})
@@ -223,6 +286,61 @@ def atomic_write(path: Path, content: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def replace_artifacts(output: Path, artifacts: dict[str, bytes]) -> None:
+    """Stage complete editions and backups before replacement; undo interrupted commits."""
+    output.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=".unicode-artifacts-", dir=output.parent))
+    retain_recovery = False
+    try:
+        backups = {}
+        for filename, content in artifacts.items():
+            if Path(filename).name != filename:
+                raise ValueError("Artifact filename escapes the resource directory")
+            atomic_write(stage / "new" / filename, content)
+            target = output / filename
+            backup = stage / "old" / filename
+            if target.exists():
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target, backup)
+                backups[filename] = backup
+            else:
+                backups[filename] = None
+        replaced = []
+        try:
+            for filename in artifacts:
+                os.replace(stage / "new" / filename, output / filename)
+                replaced.append(filename)
+        except BaseException as commit_error:
+            # Also restore on KeyboardInterrupt: never knowingly leave editions
+            # mixed after a cancelled monthly update or a failed disk operation.
+            unrecovered = []
+            for filename in reversed(replaced):
+                backup = backups[filename]
+                try:
+                    if backup is None:
+                        (output / filename).unlink()
+                    else:
+                        os.replace(backup, output / filename)
+                except BaseException:
+                    unrecovered.append(filename)
+            if unrecovered:
+                # Do not let automatic temporary-directory cleanup destroy the
+                # old bytes still needed for manual recovery. Try every restore
+                # first, even if an earlier one encountered a second I/O error.
+                retain_recovery = True
+                recovery = {"unrecoveredTargets": unrecovered,
+                            "originallyAbsent": [name for name in unrecovered if backups[name] is None]}
+                try:
+                    atomic_write(stage / "RECOVERY.json", (json.dumps(recovery, indent=2) + "\n").encode())
+                except BaseException:
+                    pass  # The original backups are more important than this diagnostic.
+                raise RuntimeError(f"Artifact rollback incomplete; recovery files retained at {stage}") from commit_error
+            raise
+    finally:
+        if not retain_recovery:
+            shutil.rmtree(stage)
+
+
 def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str, bytes]:
     args = argparse.Namespace(source=source, cache=cache, refresh=refresh)
     base, provenance = resolve_source(args.source)
@@ -290,6 +408,10 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
 
     ages = property_ranges("DerivedAge.txt")
     scripts = property_ranges("Scripts.txt")
+    if any(not item["value"] or not 0 < version_key(item["value"]) <= version_key(version) for item in ages):
+        raise ValueError("Invalid official Unicode Age interval")
+    if any(not item["value"] for item in scripts):
+        raise ValueError("Empty official Script value")
 
     blocks = []
     for line in lines("Blocks.txt"):
@@ -298,6 +420,10 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
             extent, name = line.split(";", 1)
             start, end = span(extent)
             blocks.append({"name": name.strip(), "start": start, "end": end})
+    if (not blocks or any(not item["name"] for item in blocks)
+            or len({item["name"] for item in blocks}) != len(blocks)
+            or any(left["end"] >= right["start"] for left, right in zip(blocks, blocks[1:]))):
+        raise ValueError("Unicode blocks must be nonempty, unique and ordered without overlap")
 
     def block_name(cp: int) -> str:
         for block in blocks:
@@ -316,19 +442,21 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
             extent, name = (part.strip() for part in line.split(";", 1))
             if "*" in name:
                 patterns.append((*span(extent), name.removesuffix("*")))
-    for line in lines("UnicodeData.txt"):
-        fields = line.split(";")
+    for fields in unicode_data_rows(lines("UnicodeData.txt")):
         cp, name, category = int(fields[0], 16), fields[1], fields[2]
         combining_class, bidi_class = int(fields[3]), fields[4]
         if name.endswith(", First>"):
             pending = (cp, name, category, combining_class, bidi_class)
         elif name.endswith(", Last>"):
-            assert pending is not None and pending[2] == category
+            if pending is None or pending[2] != category:
+                raise ValueError("Unmatched UnicodeData range")
             if category != "Cs" and (pending[3:] != (0, "L") or (combining_class, bidi_class) != (0, "L")):
                 raise ValueError(f"Unsupported algorithmic range properties: {pending[1]}")
             if category == "Co":
                 ranges.append((pending[0], cp, "PRIVATE USE-", category, 2))
             elif pending[1].startswith("<Hangul"):
+                if not 0xAC00 <= pending[0] <= cp <= 0xD7A3:
+                    raise ValueError("Hangul range is outside the normative syllable domain")
                 ranges.append((pending[0], cp, "HANGUL SYLLABLE ", category, 1))
             elif pending[1].startswith("<CJK"):
                 ranges.append((pending[0], cp, "CJK UNIFIED IDEOGRAPH-", category, 0))
@@ -376,7 +504,8 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
         for cp in range(start, end + 1):
             records.pop(cp, None)
     ranges.sort()
-    assert all(left[1] < right[0] for left, right in zip(ranges, ranges[1:]))
+    if any(left[1] >= right[0] for left, right in zip(ranges, ranges[1:])):
+        raise ValueError("Overlapping algorithmic naming ranges")
 
     # Assigned spans and Age intervals keep global ordering compact, including
     # large algorithmic/private-use ranges, without serializing 300K objects.
@@ -463,7 +592,8 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
         context_search_offset, context_search_length = string(fold(" ".join(
             [context.get("section", "")] + context.get("sectionAnnotations", []))))
         flags = int(cp in invisible or record["category"] in {"Cc", "Cf", "Zs", "Zl", "Zp"})
-        assert name_length <= 65535 and detail_length <= 65535
+        if name_length > 65535 or detail_length > 65535:
+            raise ValueError("Character name/detail exceeds the catalog field size")
         record_data.extend(struct.pack("<IIHHIIIBBBB", cp, name_offset, name_length,
                                        detail_length, detail_offset, search_offset,
                                        search_length, CATEGORIES.index(record["category"]), flags,
@@ -504,13 +634,18 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool) -> dict[str
             group = line.removeprefix("# group: ")
         elif line.startswith("# subgroup: "):
             subgroup = line.removeprefix("# subgroup: ")
-        elif "; fully-qualified" in line:
+        elif re.search(r";\s*fully-qualified\b", line):
             match = re.fullmatch(r"([0-9A-F ]+)\s*;\s*fully-qualified\s*#\s*\S+\s+E([0-9]+\.[0-9]+)\s+(.+)", line)
             if match is None or group is None or subgroup is None:
                 raise ValueError(f"Invalid fully-qualified emoji record: {line}")
             points = [int(part, 16) for part in match[1].split()]
             if not points or any(cp > 0x10FFFF or 0xD800 <= cp <= 0xDFFF for cp in points):
                 raise ValueError("Emoji sequence contains an invalid Unicode scalar")
+            if any(cp not in records and not any(start <= cp <= end for start, end, *_ in ranges) for cp in points):
+                raise ValueError("Emoji sequence contains an unassigned Unicode scalar")
+            if (not match[3].strip() or not group.strip() or not subgroup.strip()
+                    or not 0 < version_key(match[2]) <= version_key(emoji_version)):
+                raise ValueError("Invalid emoji name/group/introduction version")
             component_ages = [official_age(cp) for cp in points]
             unicode_age = (max(component_ages, key=version_key) if all(component_ages)
                            else "Pending draft age")
@@ -567,8 +702,7 @@ def main() -> None:
     if not license_path.exists():
         artifacts["Unicode-LICENSE.txt"] = fetch("https://www.unicode.org/license.txt")
     # Fetch and validate both complete editions before changing any resource.
-    for filename, content in artifacts.items():
-        atomic_write(output / filename, content)
+    replace_artifacts(output, artifacts)
 
 
 if __name__ == "__main__":

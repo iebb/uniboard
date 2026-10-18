@@ -5,6 +5,15 @@ require 'fileutils'
 require 'stringio'
 require_relative '../app_store_release'
 
+# These tests must never reach Apple or an upload endpoint, including when a
+# negative-path fixture accidentally stops intercepting a request.
+module ReleaseTestsNoNetwork
+  def start(*)
+    raise 'Unexpected network access in offline release tests'
+  end
+end
+Net::HTTP.singleton_class.prepend(ReleaseTestsNoNetwork)
+
 class AppStoreReleaseTest < Minitest::Test
   M = UniboardAppStoreRelease
   class FakeClient

@@ -9,6 +9,70 @@ import XCTest
 final class UnicodeCatalogTests: XCTestCase {
     private let catalog = UnicodeCatalog.shared
 
+    /// Tiny independent wire-format fixture: its coverage and malformed offsets
+    /// do not depend on the production generator or bundled Unicode contents.
+    private func fixture(records: [UInt32] = [0x41, 0x42],
+                         ranges: [(UInt32, UInt32, UInt8)] = [],
+                         details: [UInt32: String] = [:], names: [UInt32: String] = [:],
+                         versionLabel: String = "18.0.0") throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        var pool = Data()
+        func string(_ value: String) -> (UInt32, UInt32) {
+            let offset = UInt32(pool.count), data = Data(value.utf8)
+            pool.append(data)
+            return (offset, UInt32(data.count))
+        }
+        func append(_ value: UInt32, to data: inout Data) {
+            var little = value.littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        func short(_ value: UInt32, to data: inout Data) {
+            var little = UInt16(value).littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        let version = string(versionLabel)
+        var rows = Data(), rangeRows = Data()
+        for cp in records {
+            let label = names[cp] ?? String(format: "FIXTURE LETTER %04X", cp)
+            let name = string(label)
+            let detail = string(details[cp] ?? ""), search = string(label.lowercased())
+            append(cp, to: &rows); append(name.0, to: &rows)
+            short(name.1, to: &rows); short(detail.1, to: &rows)
+            append(detail.0, to: &rows); append(search.0, to: &rows); append(search.1, to: &rows)
+            rows.append(contentsOf: [0, 0, 0, 0])
+            for _ in 0..<4 { append(0, to: &rows) }
+        }
+        for (start, end, kind) in ranges {
+            let prefix = string(kind == 1 ? "HANGUL SYLLABLE " : "FIXTURE IDEOGRAPH-")
+            append(start, to: &rangeRows); append(end, to: &rangeRows); append(prefix.0, to: &rangeRows)
+            short(prefix.1, to: &rangeRows); rangeRows.append(contentsOf: [4, kind])
+        }
+        var data = Data("UBOARD17".utf8)
+        let rangeOffset = 48 + rows.count, poolOffset = rangeOffset + rangeRows.count
+        for value: UInt32 in [UInt32(records.count), 48, UInt32(ranges.count), UInt32(rangeOffset), UInt32(poolOffset), UInt32(pool.count), version.0, version.1, 0, 3] {
+            append(value, to: &data)
+        }
+        data.append(rows); data.append(rangeRows); data.append(pool)
+        try data.write(to: directory.appendingPathComponent("UnicodeCatalog.ucd"))
+        let blocks: [[String: Any]] = [["name": "Fixture", "start": 0, "end": 0x10FFFF]]
+        try JSONSerialization.data(withJSONObject: blocks).write(to: directory.appendingPathComponent("Blocks.json"))
+        let spans = (records.map { ($0, $0) } + ranges.map { ($0.0, $0.1) }).sorted { $0.0 < $1.0 }
+        let properties: [String: Any] = ["unicodeVersion": versionLabel, "ages": [["start": 0, "end": 0x10FFFF, "value": "1.1"]],
+            "scripts": [["start": 0, "end": 0x10FFFF, "value": "Latin"]], "decompositions": [],
+            "assignedSpans": spans.map { ["start": $0.0, "end": $0.1, "sortKey": 101, "draftAddition": false] as [String: Any] }]
+        try JSONSerialization.data(withJSONObject: properties).write(to: directory.appendingPathComponent("UnicodeProperties.json"))
+        return directory
+    }
+
+    private func changeProperties(at directory: URL, _ change: (inout [String: Any]) -> Void) throws {
+        let url = directory.appendingPathComponent("UnicodeProperties.json")
+        var properties = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        change(&properties)
+        try JSONSerialization.data(withJSONObject: properties).write(to: url)
+    }
+
     func testBundledCatalogAndCompleteBlockRanges() {
         XCTAssertNil(catalog.resourceError)
         XCTAssertNotEqual(catalog.version, "Unavailable")
@@ -328,5 +392,193 @@ final class UnicodeCatalogTests: XCTestCase {
         let oldest = catalog.characters(in: arrows, limit: 1000, order: .oldestFirst)
         XCTAssertEqual(oldest.first?.age, "1.1")
         XCTAssertEqual(catalog.characters(in: arrows, offset: 10, limit: 5, order: .oldestFirst), Array(oldest[10..<15]))
+    }
+
+    func testEveryTruncationAndImpossibleHeaderFailsWithoutUsingDetachedProperties() throws {
+        let directory = try fixture(), url = directory.appendingPathComponent("UnicodeCatalog.ucd")
+        let complete = try Data(contentsOf: url)
+        for length in 0..<complete.count {
+            try complete.prefix(length).write(to: url)
+            let broken = UnicodeCatalog(resourceURL: directory)
+            XCTAssertEqual(broken.version, "Unavailable", "Truncated at \(length)")
+            XCTAssertTrue(broken.orderedCharacters().isEmpty)
+            XCTAssertNil(broken.character(at: 0x41)?.age)
+        }
+        for field in [8, 12, 16, 20, 24, 28, 32, 36, 44] {
+            var bytes = complete
+            bytes.replaceSubrange(field..<(field + 4), with: [255, 255, 255, 255])
+            try bytes.write(to: url)
+            XCTAssertEqual(UnicodeCatalog(resourceURL: directory).version, "Unavailable")
+        }
+        var invalidUTF8 = complete
+        invalidUTF8[invalidUTF8.count - 1] = 0xFF
+        try invalidUTF8.write(to: url)
+        XCTAssertEqual(UnicodeCatalog(resourceURL: directory).version, "Unavailable")
+    }
+
+    func testMalformedScalarOrderAndAlgorithmicDomainsCannotReachLookup() throws {
+        for points: [UInt32] in [[0x42, 0x41], [0x41, 0x41], [0xD800], [0x110000], [UInt32.max]] {
+            let directory = try fixture(records: points)
+            let broken = UnicodeCatalog(resourceURL: directory)
+            XCTAssertEqual(broken.version, "Unavailable")
+            XCTAssertEqual(broken.character(at: 0x41)?.name, "UNASSIGNED")
+        }
+        let malformed: [[(UInt32, UInt32, UInt8)]] = [
+            [(0, 1, 1)], [(0xD7A3, 0xD7A4, 1)], [(0xD700, 0xE000, 0)],
+            [(0x80, 0x82, 0), (0x82, 0x84, 0)], [(0x90, 0x91, 0), (0x80, 0x81, 0)],
+            [(0x42, 0x44, 0)], [(0x90, 0x80, 0)]]
+        for ranges in malformed {
+            let directory = try fixture(ranges: ranges)
+            let broken = UnicodeCatalog(resourceURL: directory)
+            XCTAssertEqual(broken.version, "Unavailable")
+            XCTAssertTrue(broken.search("hangul").isEmpty)
+        }
+    }
+
+    func testInvalidBlocksNeverReachBinarySearchOrUnsignedSubtitleArithmetic() throws {
+        let directory = try fixture(), url = directory.appendingPathComponent("Blocks.json")
+        for blocks: [[String: Any]] in [
+            [["name": "Bad", "start": 42, "end": 1]],
+            [["name": "Bad", "start": 0, "end": 0x110000]],
+            [["name": "", "start": 0, "end": 127]],
+            [["name": "First", "start": 0, "end": 64], ["name": "Overlap", "start": 64, "end": 128]]
+        ] {
+            try JSONSerialization.data(withJSONObject: blocks).write(to: url)
+            let broken = UnicodeCatalog(resourceURL: directory)
+            XCTAssertNotNil(broken.resourceError)
+            XCTAssertTrue(broken.blocks.isEmpty)
+            XCTAssertEqual(broken.character(at: 0x41)?.blockName, "No Block")
+        }
+        XCTAssertEqual(UnicodeBlock(name: "Bad", start: UInt32.max, end: 0).subtitle, "Invalid code-point range")
+    }
+
+    func testForeignEditionAndInventedCoveragePropertiesAreNotUsed() throws {
+        for mutate in 0..<4 {
+            let directory = try fixture()
+            try changeProperties(at: directory) { properties in
+                switch mutate {
+                case 0: properties["unicodeVersion"] = "19.0.0 draft"
+                case 1: properties["assignedSpans"] = [["start": 0x43, "end": 0x44, "sortKey": 101, "draftAddition": false]]
+                case 2: properties["assignedSpans"] = [["start": 0x41, "end": 0x42, "sortKey": Int.max, "draftAddition": false]]
+                default: properties["ages"] = [["start": 0, "end": 0x10FFFF, "value": "999999999999999999999.0"]]
+                }
+            }
+            let broken = UnicodeCatalog(resourceURL: directory)
+            XCTAssertNotNil(broken.resourceError)
+            XCTAssertEqual(broken.character(at: 0x41)?.name, "FIXTURE LETTER 0041")
+            XCTAssertNil(broken.character(at: 0x41)?.age)
+            XCTAssertTrue(broken.orderedCharacters().isEmpty)
+        }
+    }
+
+    func testInvalidStructuredDetailsCannotExposeInvalidMappingsOrInventFormalAliases() throws {
+        let detail = #"{"aliases":[{"name":"Invented","kind":"unknown"}],"references":[{"codePoint":1114112,"name":"Invalid"}],"simpleUppercase":55296}"#
+        let directory = try fixture(details: [0x41: detail])
+        let character = try XCTUnwrap(UnicodeCatalog(resourceURL: directory).character(at: 0x41))
+        XCTAssertEqual(character.text, "A")
+        XCTAssertTrue(character.nameAliases.isEmpty)
+        XCTAssertTrue(character.crossReferences.isEmpty)
+        XCTAssertNil(character.simpleUppercase)
+        XCTAssertFalse(UnicodeNameAlias(name: "Unknown", kind: "unknown").isFormal)
+    }
+
+    func testFixturePagesReconstructExactAssignedScalarSetWithExtremeOffsetsAndLimits() throws {
+        let directory = try fixture(records: [0, 0x41, 0x1F680], ranges: [(0xAC00, 0xAC05, 1)])
+        let fixture = UnicodeCatalog(resourceURL: directory)
+        XCTAssertNil(fixture.resourceError)
+        let expected: [UInt32] = [0, 0x41, 0xAC00, 0xAC01, 0xAC02, 0xAC03, 0xAC04, 0xAC05, 0x1F680]
+        for order in UnicodeSortOrder.allCases {
+            for size in 1...5 {
+                var pages: [UnicodeCharacter] = []
+                while true {
+                    let page = fixture.orderedCharacters(offset: pages.count, limit: size, order: order)
+                    if page.isEmpty { break }
+                    pages += page
+                    XCTAssertLessThanOrEqual(pages.count, expected.count)
+                }
+                XCTAssertEqual(pages.map(\.codePoint), expected)
+                XCTAssertEqual(Set(pages.map(\.codePoint)).count, expected.count)
+            }
+            XCTAssertTrue(fixture.orderedCharacters(offset: Int.max, limit: Int.max, order: order).isEmpty)
+            XCTAssertEqual(fixture.orderedCharacters(limit: Int.max, order: order).map(\.codePoint), expected)
+        }
+    }
+
+    func testVersionOverflowAndSignedCodePointSyntaxAreRejected() {
+        XCTAssertEqual(unicodeVersionKey("15.1 draft"), 1501)
+        for value in ["\(Int.max).0", "18.100", "-1.0", "18..0", "18.zero", ""] {
+            XCTAssertEqual(unicodeVersionKey(value), 0, value)
+        }
+        for query in ["U++0041", "0x+0041", "decimal:+65", "decimal:٦٥"] {
+            XCTAssertTrue(catalog.search(query).isEmpty, query)
+        }
+    }
+
+    func testCancelledSearchAndBrowsingDoNotProduceStalePages() async {
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            let catalog = UnicodeCatalog.shared
+            return catalog.search("cjk ideograph", limit: Int.max).isEmpty
+                && catalog.orderedCharacters(limit: Int.max).isEmpty
+                && catalog.search("U+1F680").isEmpty
+        }
+        let cancelled = await task.value
+        XCTAssertTrue(cancelled)
+    }
+
+    func testSearchUTF8LimitPrecedesFoldingAndKeepsTheExactBoundary() throws {
+        let directory = try fixture(records: [0x1F680]), fixture = UnicodeCatalog(resourceURL: directory)
+        let boundary = "🚀" + String(repeating: " ", count: 4092)
+        XCTAssertEqual(boundary.utf8.count, 4096)
+        XCTAssertTrue(CatalogSearchQueryPolicy.accepts(boundary))
+        XCTAssertEqual(fixture.search(boundary).map(\.codePoint), [0x1F680])
+        XCTAssertFalse(CatalogSearchQueryPolicy.accepts(boundary + " "))
+        XCTAssertTrue(fixture.search(boundary + " ").isEmpty)
+        XCTAssertTrue(fixture.search(String(repeating: "a\u{301}", count: 20_000)).isEmpty)
+    }
+
+    func testDuplicateANDTermsKeepFirstOrderAndIdenticalExactNameRanking() throws {
+        let directory = try fixture(names: [0x41: "ROCKET", 0x42: "ROCKET ROCKET"])
+        let fixture = UnicodeCatalog(resourceURL: directory)
+        XCTAssertEqual(CatalogSearchQueryPolicy.terms(in: "rocket arrow rocket letter arrow"), ["rocket", "arrow", "letter"])
+        XCTAssertTrue(CatalogSearchQueryPolicy.hasExactTerms(in: "rocket rocket arrow", terms: ["rocket", "arrow"]))
+        XCTAssertFalse(CatalogSearchQueryPolicy.hasExactTerms(in: "arrow rocket", terms: ["rocket", "arrow"]))
+        for order in UnicodeSortOrder.allCases {
+            XCTAssertEqual(fixture.search("rocket rocket rocket", order: order), fixture.search("rocket", order: order))
+            XCTAssertEqual(fixture.search(String(repeating: "rocket ", count: 585), order: order), fixture.search("rocket", order: order))
+        }
+        XCTAssertEqual(fixture.search("U+0041").map(\.codePoint), [0x41])
+    }
+
+    func testEmptyRecordAndRangeCatalogCannotReportHealthyResources() throws {
+        let directory = try fixture(records: [])
+        let empty = UnicodeCatalog(resourceURL: directory)
+        XCTAssertNotNil(empty.resourceError)
+        XCTAssertEqual(empty.version, "Unavailable")
+        XCTAssertTrue(empty.orderedCharacters().isEmpty)
+    }
+
+    func testAuthoritativeManifestRejectsSwappedFinalPairWithoutInferringEditionFromFilename() throws {
+        let directory = try fixture() // Final binary + final properties under custom/draft filenames.
+        XCTAssertNil(UnicodeCatalog(resourceURL: directory).resourceError, "A manifest-free custom fixture remains supported")
+        let manifest = directory.appendingPathComponent("UnicodeSources.json")
+        for identity: [String: Any] in [
+            ["versionLabel": "19.0.0 draft", "isDraft": true], // binary/property swap alone
+            ["versionLabel": "18.0.0", "isDraft": false], // entire final manifest swapped too
+            ["versionLabel": "18.0.0", "isDraft": true] // inconsistent authoritative flag
+        ] {
+            try JSONSerialization.data(withJSONObject: identity).write(to: manifest)
+            let swapped = UnicodeCatalog(resourceURL: directory)
+            XCTAssertEqual(swapped.version, "Unavailable")
+            XCTAssertNotNil(swapped.resourceError)
+            XCTAssertTrue(swapped.orderedCharacters().isEmpty)
+        }
+        try Data("invalid provenance".utf8).write(to: manifest)
+        XCTAssertEqual(UnicodeCatalog(resourceURL: directory).version, "Unavailable")
+        let validDraft = try fixture(versionLabel: "19.0.0 draft")
+        try JSONSerialization.data(withJSONObject: ["versionLabel": "19.0.0 draft", "isDraft": true])
+            .write(to: validDraft.appendingPathComponent("UnicodeSources.json"))
+        XCTAssertNil(UnicodeCatalog(resourceURL: validDraft).resourceError)
+        XCTAssertEqual(UnicodeCatalog(resourceURL: validDraft).version, "19.0.0 draft")
     }
 }

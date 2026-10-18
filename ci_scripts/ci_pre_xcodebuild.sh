@@ -15,6 +15,7 @@ python3 Scripts/validate_fonts.py
 # This mode fetches fresh sources and fails on network or format errors; the
 # build must never quietly continue using a stale cached draft.
 python3 -m unittest discover -s Scripts/tests
+ruby Scripts/tests/test_app_store_release.rb
 python3 Scripts/generate_unicode.py --source all --refresh
 swift test
 

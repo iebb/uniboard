@@ -60,17 +60,19 @@ final class CatalogSearch: ObservableObject {
             return
         }
         searching = true
-        task = Task {
+        task = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(140)) } catch { return }
             guard !Task.isCancelled else { return }
-            let matches = await Task.detached(priority: .userInitiated) {
+            let matches = await CatalogWorker.run {
                 catalog.search(query, limit: limit, order: order)
-            }.value
-            guard !Task.isCancelled else { return }
-            results = matches
-            searching = false
+            }
+            guard !Task.isCancelled, let self else { return }
+            self.results = matches
+            self.searching = false
         }
     }
+
+    deinit { task?.cancel() }
 }
 
 struct ExploreView: View {

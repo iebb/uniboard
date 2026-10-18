@@ -4,6 +4,7 @@ import http.client
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import unittest
 import urllib.error
@@ -75,6 +76,152 @@ class NamesListTests(unittest.TestCase):
     def test_unknown_formal_alias_kind_fails_instead_of_inventing_a_correction(self):
         with self.assertRaisesRegex(ValueError, "Unsupported formal name alias kind"):
             generator.add_name_aliases({0x3021: self.record("HANGZHOU NUMERAL ONE")}, ["3021;SUZHOU NUMERAL ONE;informal-correction"])
+
+
+class SourceValidationTests(unittest.TestCase):
+    @staticmethod
+    def row(code="0041", name="LATIN CAPITAL LETTER A", category="Lu", **changes):
+        fields = [code, name, category, "0", "L", "", "", "", "", "N", "", "", "", "", ""]
+        for index, value in changes.items():
+            fields[int(index.removeprefix("f"))] = value
+        return ";".join(fields)
+
+    def test_span_rejects_descending_out_of_range_and_extra_endpoints(self):
+        for value in ["0042..0041", "110000", "0041..0042..0043", "-1", "+0041", "0041..", ""]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                generator.span(value)
+        self.assertEqual(generator.span("10FFFE..10FFFF"), (0x10FFFE, 0x10FFFF))
+        self.assertEqual(generator.span("D800..DFFF"), (0xD800, 0xDFFF))  # Blocks/Age contain code units too.
+
+    def test_unicode_data_duplicate_unsorted_and_invalid_scalars_fail_closed(self):
+        rows = [self.row(), self.row("0061", "LATIN SMALL LETTER A", "Ll")]
+        self.assertEqual(len(list(generator.unicode_data_rows(rows))), 2)
+        for invalid in [rows + [rows[0]], rows[::-1], [self.row("110000")], [self.row("D800")], []]:
+            with self.subTest(rows=invalid), self.assertRaises(ValueError):
+                list(generator.unicode_data_rows(invalid))
+
+    def test_unicode_data_first_last_pair_identity_and_completion_are_required(self):
+        first = self.row("AC00", "<Hangul Syllable, First>", "Lo")
+        last = self.row("D7A3", "<Hangul Syllable, Last>", "Lo")
+        self.assertEqual(len(list(generator.unicode_data_rows([first, last]))), 2)
+        for rows in [[first], [last], [first, self.row("D7A3", "<CJK Ideograph, Last>", "Lo")],
+                     [first, self.row("AC01", "<Other, First>", "Lo"), last],
+                     [first, self.row("AC01", "HANGUL SYLLABLE GAG", "Lo"), last]]:
+            with self.subTest(rows=rows), self.assertRaises(ValueError):
+                list(generator.unicode_data_rows(rows))
+
+    def test_truncated_and_invalid_normative_property_rows_are_rejected(self):
+        rows = [self.row().rsplit(";", 1)[0], self.row(f3="256"), self.row(f4="Bogus"),
+                self.row(category="Bogus"), self.row(f12="D800"), self.row(f5="<font> 110000")]
+        for row in rows:
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                list(generator.unicode_data_rows([row]))
+
+    def test_version_keys_reject_ambiguous_or_unrepresentable_numbers(self):
+        self.assertEqual(generator.version_key("15.1 draft"), 1501)
+        self.assertEqual(generator.version_key("18.0.0"), 1800)
+        for version in ["-1.0", "18.100", "18..0", "18.zero", str(2**63 - 1) + ".0"]:
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                generator.version_key(version)
+
+    def test_empty_or_invalid_aliases_never_become_metadata(self):
+        records = {0x41: {"name": "A", "aliases": [], "notes": []}}
+        for line in ["0041;;alternate", "110000;Bad;alternate", "D800;Bad;alternate", "+0041;Bad;alternate"]:
+            with self.subTest(line=line), self.assertRaises(ValueError):
+                generator.add_name_aliases(records, [line])
+
+    def test_real_cached_editions_still_satisfy_unicode_data_validation(self):
+        # No network: independently verify that stricter range validation accepts
+        # both already-shipped official snapshots, including surrogate code units.
+        root = Path(__file__).resolve().parents[2]
+        checked = 0
+        for source in ("latest", "draft"):
+            path = root / ".unicode-cache" / source / "UnicodeData.txt"
+            if path.exists():
+                self.assertGreater(len(list(generator.unicode_data_rows(path.read_text("utf-8").splitlines()))), 40000)
+                checked += 1
+        if checked == 0:
+            self.skipTest("Official local source cache is absent; injected normative-source tests still run")
+
+
+class ArtifactTransactionTests(unittest.TestCase):
+    def test_stage_failure_never_changes_any_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "Resources"
+            output.mkdir()
+            (output / "A").write_bytes(b"old A")
+            original = generator.atomic_write
+            def write(path, content):
+                if path.name == "B":
+                    raise OSError("fixture disk full")
+                return original(path, content)
+            with mock.patch.object(generator, "atomic_write", side_effect=write):
+                with self.assertRaises(OSError):
+                    generator.replace_artifacts(output, {"A": b"new A", "B": b"new B"})
+            self.assertEqual((output / "A").read_bytes(), b"old A")
+            self.assertFalse((output / "B").exists())
+
+    def test_commit_failure_or_cancellation_restores_replaced_files_and_removes_new_ones(self):
+        for error in [OSError("fixture replace failed"), KeyboardInterrupt()]:
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "Resources"
+                output.mkdir()
+                (output / "A").write_bytes(b"old A")
+                original = os.replace
+                def replace(source, target):
+                    if Path(target) == output / "B":
+                        raise error
+                    return original(source, target)
+                with mock.patch.object(generator.os, "replace", side_effect=replace):
+                    with self.assertRaises(type(error)):
+                        generator.replace_artifacts(output, {"new": b"new file", "A": b"new A", "B": b"new B"})
+                self.assertEqual((output / "A").read_bytes(), b"old A")
+                self.assertEqual(sorted(path.name for path in output.iterdir()), ["A"])
+
+    def test_success_replaces_exact_artifacts_without_touching_unrelated_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "Resources"
+            output.mkdir()
+            (output / "unrelated").write_bytes(b"preserved")
+            generator.replace_artifacts(output, {"A": b"new A", "B": b"new B"})
+            self.assertEqual((output / "A").read_bytes(), b"new A")
+            self.assertEqual((output / "B").read_bytes(), b"new B")
+            self.assertEqual((output / "unrelated").read_bytes(), b"preserved")
+
+    def test_rollback_failure_attempts_remaining_restores_and_preserves_recovery_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "Resources"
+            output.mkdir()
+            (output / "A").write_bytes(b"old A")
+            (output / "C").write_bytes(b"old C")
+            original_replace, original_unlink = os.replace, Path.unlink
+            restored = []
+            def replace(source, target):
+                source, target = Path(source), Path(target)
+                if target == output / "B":
+                    raise OSError("fixture commit failure")
+                if source.parent.name == "old":
+                    restored.append(target.name)
+                    if target == output / "C":
+                        raise OSError("fixture restore failure")
+                return original_replace(source, target)
+            def unlink(path, *args, **kwargs):
+                if path == output / "new":
+                    raise OSError("fixture new-file removal failure")
+                return original_unlink(path, *args, **kwargs)
+            with mock.patch.object(generator.os, "replace", side_effect=replace), \
+                    mock.patch.object(Path, "unlink", autospec=True, side_effect=unlink):
+                with self.assertRaisesRegex(RuntimeError, "recovery files retained at"):
+                    generator.replace_artifacts(output, {"A": b"new A", "C": b"new C", "new": b"new file", "B": b"not committed"})
+            # Failure removing a new file and restoring C must not skip A.
+            self.assertEqual(restored, ["C", "A"])
+            self.assertEqual((output / "A").read_bytes(), b"old A")
+            self.assertEqual((output / "C").read_bytes(), b"new C")
+            stages = list(Path(directory).glob(".unicode-artifacts-*"))
+            self.assertEqual(len(stages), 1)
+            self.assertEqual((stages[0] / "old" / "C").read_bytes(), b"old C")
+            recovery = json.loads((stages[0] / "RECOVERY.json").read_text())
+            self.assertEqual(recovery, {"unrecoveredTargets": ["new", "C"], "originallyAbsent": ["new"]})
 
 
 class DownloadTests(unittest.TestCase):

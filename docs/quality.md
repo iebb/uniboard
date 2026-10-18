@@ -21,6 +21,7 @@ generator checks. Tests do not contact App Store Connect or send typing data.
 | Height policy | Portrait/landscape/iPad, scene caps, fractional limits, NaN/infinity, extreme dimensions, drag overflow | `KeyboardInteractionPolicyTests` |
 | Query editing | Empty/start/middle/end, extreme integer offsets, whole graphemes, combining marks, ZWJ, flags, RTL, insertion limits, clipped viewport and pixel alignment | `KeyboardInteractionPolicyTests` and native query cases |
 | UIKit resize lifecycle | Release commits; cancel/failure/detachment discard; callback cleanup occurs once | `KeyboardResizeHandleControlTests` |
+| Held deletion | Original query/host scope and document, pre-render mode changes, stale timers, repeated down, release/cancel/detach and callback reentrancy | `KeyboardRepeatingDeleteControlTests` |
 | Optional fonts | Default off, no global registration, actual missing-glyph outlines, native emoji preservation, malformed metadata/ranges, invalid sizes and paths | `UnicodeFontSupportTests`, `Scripts/validate_fonts.py` |
 | Real keyboard behavior | Host text/focus preservation, local search/caret editing, complete insertion, folded results, slow/fast drag previews, actual release height, persisted height and rotation | Opt-in `UniboardUITests` plus original simulator recordings |
 | Publication tools | Identity/build/archive/locale guards, rejected operations, offline-only test transport | `Scripts/tests/test_app_store_release.rb` |

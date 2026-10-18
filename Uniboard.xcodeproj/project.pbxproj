@@ -40,6 +40,7 @@
 		6A995752DA8E4B8FD0AEB3BA /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */; };
 		6B866426EF7B9F015ABCCB97 /* UnicodeFontSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5345E5836B3801BB96805A87 /* UnicodeFontSupportTests.swift */; };
 		6E9C637749D4AA9EC16A7D1B /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50167B2ECEEF4DFCF3D6C893 /* Design.swift */; };
+		74025CC98C01E19956D82DCE /* KeyboardRepeatingDeleteControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD9AE24B925558FFEF4DF2BD /* KeyboardRepeatingDeleteControlTests.swift */; };
 		78768285C1D49F9A586E54BE /* UnicodeCatalog.ucd in Resources */ = {isa = PBXBuildFile; fileRef = B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */; };
 		7B29071466AD3A55676FA54B /* UnicodeFontSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FCD917B7BA585375F02ACA /* UnicodeFontSupport.swift */; };
 		87ED240C5FCF15F0EBADC0AF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0A43A2B3EBE1567FC006A4C /* Assets.xcassets */; };
@@ -53,6 +54,7 @@
 		A5E11B89A1F2E1E4961B8495 /* EmojiCatalog-draft.json in Resources */ = {isa = PBXBuildFile; fileRef = C6B5A677ABB9118AF14E1B2C /* EmojiCatalog-draft.json */; };
 		AA26193F861F3E54D40A3DD4 /* EmojisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7843518DDC3C9656827D184 /* EmojisView.swift */; };
 		B09CEAAD19C426CB3809D22E /* UniboardApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A751792BE65134112FCC8556 /* UniboardApp.swift */; };
+		B2205CB811B3275BF3AD088C /* KeyboardRepeatingDeleteControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC483210EFEC390B79F8B5BB /* KeyboardRepeatingDeleteControl.swift */; };
 		B31BEE3D2BA746AD3C608C2D /* UnicodeSources-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = 3BD257CE430069C4D4200695 /* UnicodeSources-latest.json */; };
 		BCDD2D2225E610AF83BA2879 /* CharacterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D36C0B886711536D6C72D540 /* CharacterStore.swift */; };
 		C1B417957D800D0B171FC926 /* KeyboardInteractionPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8504175A3CB2AEA7218AF691 /* KeyboardInteractionPolicyTests.swift */; };
@@ -70,6 +72,7 @@
 		E922C4FE06C66E51C3F36346 /* EmojiCatalog-draft.json in Resources */ = {isa = PBXBuildFile; fileRef = C6B5A677ABB9118AF14E1B2C /* EmojiCatalog-draft.json */; };
 		E93DAC28C3A83FD14274C71D /* LocalPreferencePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5B6E9300EFF6D8D8A8BE211 /* LocalPreferencePolicy.swift */; };
 		EECEB364F7CCB2F3D61173B1 /* CatalogWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E8034D4526F95C6B7DCC1E /* CatalogWorker.swift */; };
+		F0FCF93DE576D58FD5C3C1CB /* KeyboardRepeatingDeleteControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC483210EFEC390B79F8B5BB /* KeyboardRepeatingDeleteControl.swift */; };
 		F5A017F5BA3746D69BF7C97F /* UnicodeSources.json in Resources */ = {isa = PBXBuildFile; fileRef = 8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */; };
 		FE07DF89E53353E8E507EB1E /* EmojiCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3DCCA512819F343E378874 /* EmojiCatalog.swift */; };
 		FF013DFD084189ACCC303669 /* KeyboardResizeHandleControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150383FB7385523FAF62E8AA /* KeyboardResizeHandleControl.swift */; };
@@ -148,8 +151,10 @@
 		ACC24723A64562F6EDD61941 /* KeyboardInteractionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInteractionPolicy.swift; sourceTree = "<group>"; };
 		B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */ = {isa = PBXFileReference; path = UnicodeCatalog.ucd; sourceTree = "<group>"; };
 		BB9BAA50EF4DC94FB5B03CD1 /* UniboardUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = UniboardUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BD9AE24B925558FFEF4DF2BD /* KeyboardRepeatingDeleteControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardRepeatingDeleteControlTests.swift; sourceTree = "<group>"; };
 		C0C20A0D596CCC44AB869917 /* EmojiCatalog-latest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "EmojiCatalog-latest.json"; sourceTree = "<group>"; };
 		C6B5A677ABB9118AF14E1B2C /* EmojiCatalog-draft.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "EmojiCatalog-draft.json"; sourceTree = "<group>"; };
+		CC483210EFEC390B79F8B5BB /* KeyboardRepeatingDeleteControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardRepeatingDeleteControl.swift; sourceTree = "<group>"; };
 		D36C0B886711536D6C72D540 /* CharacterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterStore.swift; sourceTree = "<group>"; };
 		D736B529369E279CBA7EF9D6 /* CharacterStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterStoreTests.swift; sourceTree = "<group>"; };
 		D7843518DDC3C9656827D184 /* EmojisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojisView.swift; sourceTree = "<group>"; };
@@ -232,6 +237,7 @@
 				D736B529369E279CBA7EF9D6 /* CharacterStoreTests.swift */,
 				1B6F9FAEABD4F15AA4EDC7AD /* EmojiCatalogTests.swift */,
 				8504175A3CB2AEA7218AF691 /* KeyboardInteractionPolicyTests.swift */,
+				BD9AE24B925558FFEF4DF2BD /* KeyboardRepeatingDeleteControlTests.swift */,
 				A6A751D5D5826D5CAF743ED8 /* KeyboardResizeHandleControlTests.swift */,
 				DA24ADEEB30AF21752C6C8E3 /* LocalPreferencePolicyTests.swift */,
 				22CAA7A19492D753D0BC5772 /* UnicodeCatalogTests.swift */,
@@ -261,6 +267,7 @@
 				D36C0B886711536D6C72D540 /* CharacterStore.swift */,
 				2F3DCCA512819F343E378874 /* EmojiCatalog.swift */,
 				ACC24723A64562F6EDD61941 /* KeyboardInteractionPolicy.swift */,
+				CC483210EFEC390B79F8B5BB /* KeyboardRepeatingDeleteControl.swift */,
 				150383FB7385523FAF62E8AA /* KeyboardResizeHandleControl.swift */,
 				E5B6E9300EFF6D8D8A8BE211 /* LocalPreferencePolicy.swift */,
 				2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */,
@@ -460,6 +467,7 @@
 				8DC50D89E92F82490FDEBB2B /* CharacterStoreTests.swift in Sources */,
 				4F5823B90C266C49C2557168 /* EmojiCatalogTests.swift in Sources */,
 				C1B417957D800D0B171FC926 /* KeyboardInteractionPolicyTests.swift in Sources */,
+				74025CC98C01E19956D82DCE /* KeyboardRepeatingDeleteControlTests.swift in Sources */,
 				E0416938AC871ED0BC30216F /* KeyboardResizeHandleControlTests.swift in Sources */,
 				E0FACCB152A3529201D858E7 /* LocalPreferencePolicyTests.swift in Sources */,
 				28C42E6074C8E415AEA640E2 /* UnicodeCatalogTests.swift in Sources */,
@@ -477,6 +485,7 @@
 				44D6271BB541B1F1A9EC55F5 /* EmojiCatalog.swift in Sources */,
 				270D9F9A5D245AD880A66B96 /* KeyboardInteractionPolicy.swift in Sources */,
 				58262731BA177C6020154261 /* KeyboardQueryField.swift in Sources */,
+				F0FCF93DE576D58FD5C3C1CB /* KeyboardRepeatingDeleteControl.swift in Sources */,
 				FF013DFD084189ACCC303669 /* KeyboardResizeHandleControl.swift in Sources */,
 				18E0F035EBA7D7EE39166431 /* KeyboardViewController.swift in Sources */,
 				0A5B060BF07F04A7587EB34F /* LocalPreferencePolicy.swift in Sources */,
@@ -499,6 +508,7 @@
 				FE07DF89E53353E8E507EB1E /* EmojiCatalog.swift in Sources */,
 				AA26193F861F3E54D40A3DD4 /* EmojisView.swift in Sources */,
 				D3670CEDCF619C16FAFCEC70 /* KeyboardInteractionPolicy.swift in Sources */,
+				B2205CB811B3275BF3AD088C /* KeyboardRepeatingDeleteControl.swift in Sources */,
 				5971B7E210A2AA44A9B58F7C /* KeyboardResizeHandleControl.swift in Sources */,
 				E93DAC28C3A83FD14274C71D /* LocalPreferencePolicy.swift in Sources */,
 				1262E56C314CA8FAB23F5014 /* SavedView.swift in Sources */,

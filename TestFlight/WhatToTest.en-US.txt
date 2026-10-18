@@ -21,3 +21,5 @@ Extra Unicode fonts is optional and off by default. Enable it in Setup for app p
 Draft assignments and names may change. Display depends on your iOS fonts, and some emoji may render as separate glyphs. Please report search or insertion problems, missing metadata and layout issues on iPhone and iPad.
 
 This build also hardens catalog validation, saved collections and query boundaries. Please check favorites/recents after relaunch and switching editions.
+
+Held delete must stop on release, mode or document changes.

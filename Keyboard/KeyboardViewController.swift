@@ -50,7 +50,7 @@ final class KeyboardViewController: UIInputViewController {
                 CharacterStore.shared.recordEmojiUse(emoji)
                 self?.model.lastItem = .emoji(emoji)
             },
-            delete: { [weak self] in self?.deleteKey() },
+            delete: { [weak self] isQuery in self?.makeDeleteAction(isQuery: isQuery) ?? { false } },
             space: { [weak self] in self?.spaceKey() },
             returnKey: { [weak self] in self?.returnKey() }
         )
@@ -234,9 +234,15 @@ final class KeyboardViewController: UIInputViewController {
 #endif
     }
 
-    private func deleteKey() {
-        if model.isSearching { model.deleteQueryCharacter() }
-        else { textDocumentProxy.deleteBackward() }
+    private func makeDeleteAction(isQuery: Bool) -> RepeatingDeleteButton.DeleteAction {
+        let context = KeyboardDeleteContext(isQuery: isQuery, documentIdentifier: textDocumentProxy.documentIdentifier)
+        return context.guardedAction(currentContext: { [weak self] in
+            guard let self else { return nil }
+            return KeyboardDeleteContext(isQuery: self.model.isSearching, documentIdentifier: self.textDocumentProxy.documentIdentifier)
+        }, delete: { [weak self] in
+            if isQuery { self?.model.deleteQueryCharacter() }
+            else { self?.textDocumentProxy.deleteBackward() }
+        })
     }
 
     private func spaceKey() {
@@ -841,7 +847,7 @@ private struct UnicodeKeyboardView: View {
     weak var controller: KeyboardViewController?
     let insert: (UnicodeCharacter) -> Void
     let insertEmoji: (UnicodeEmojiEntry) -> Void
-    let delete: () -> Void
+    let delete: (Bool) -> RepeatingDeleteButton.DeleteAction
     let space: () -> Void
     let returnKey: () -> Void
     private var columns: [GridItem] {
@@ -1681,53 +1687,12 @@ private struct InputModeSwitchKey: UIViewRepresentable {
 }
 
 private struct RepeatingDeleteKey: UIViewRepresentable {
-    let action: () -> Void
+    let action: (Bool) -> RepeatingDeleteButton.DeleteAction
     let isQuery: Bool
     func makeUIView(context: Context) -> RepeatingDeleteButton { RepeatingDeleteButton() }
     func updateUIView(_ uiView: RepeatingDeleteButton, context: Context) {
-        uiView.action = action
-        uiView.accessibilityLabel = isQuery ? "Delete search character" : "Delete backward"
+        // Capture the scope this key currently displays, even before a model
+        // transition has reached updateUIView. Each press gets one action.
+        uiView.configure(isQuery: isQuery, actionFactory: { [isQuery] in action(isQuery) })
     }
-}
-
-private final class RepeatingDeleteButton: UIButton {
-    var action: (() -> Void)?
-    private var delayTimer: Timer?
-    private var repeatTimer: Timer?
-    init() {
-        super.init(frame: .zero)
-        setImage(UIImage(systemName: "delete.left", withConfiguration: UIImage.SymbolConfiguration(pointSize: 19)), for: .normal)
-        tintColor = .label
-        backgroundColor = .clear
-        isOpaque = false
-        layer.cornerRadius = 12
-        layer.cornerCurve = .continuous
-        accessibilityIdentifier = "keyboard.delete"
-        accessibilityHint = "Hold to delete repeatedly"
-        addTarget(self, action: #selector(startDeleting), for: .touchDown)
-        addTarget(self, action: #selector(stopDeleting), for: [.touchUpInside, .touchUpOutside, .touchCancel, .touchDragExit])
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    override var isHighlighted: Bool { didSet { backgroundColor = isHighlighted ? UIColor.tertiarySystemFill : .clear } }
-    override func accessibilityActivate() -> Bool { action?(); return true }
-    @objc private func startDeleting() {
-        stopDeleting()
-        action?()
-        delayTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            self.action?()
-            self.repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.085, repeats: true) { [weak self] _ in self?.action?() }
-        }
-    }
-    @objc private func stopDeleting() {
-        delayTimer?.invalidate()
-        repeatTimer?.invalidate()
-        delayTimer = nil
-        repeatTimer = nil
-    }
-    override func willMove(toWindow newWindow: UIWindow?) {
-        if newWindow == nil { stopDeleting() }
-        super.willMove(toWindow: newWindow)
-    }
-    deinit { delayTimer?.invalidate(); repeatTimer?.invalidate() }
 }

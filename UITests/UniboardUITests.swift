@@ -4,6 +4,13 @@ import UIKit
 @MainActor
 final class UniboardUITests: XCTestCase {
     private var app: XCUIApplication!
+    private struct KeyboardOptionsSnapshot {
+        let triggerFrame: CGRect
+        let hostText: String
+        let queryValue: String
+        let optionsValue: String
+    }
+    private var keyboardOptionsSnapshot: KeyboardOptionsSnapshot?
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -313,6 +320,42 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
         XCTAssertTrue(appUnicodeFontsSwitch().waitUntilValueEquals("0"), "Turning fonts off must also persist")
         attachScreenshot("App preview-font choice persists and can be disabled")
+    }
+
+    func testSystemKeyboardHeldDeleteKeepsQueryAndHostScopesSeparate() throws {
+        try requireKeyboardIntegration()
+        let context = "Retain this host context."
+        let input = openSystemKeyboardHost(initialText: context)
+        defer { restoreEnglishKeyboard() }
+        let query = "abcdefghijklmnop"
+        enterKeyboardQuery(query)
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
+        let delete = app.buttons["keyboard.delete"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+
+        delete.press(forDuration: 0.75)
+        let remainingQuery = search.value as? String ?? ""
+        XCTAssertFalse(remainingQuery.isEmpty)
+        XCTAssertTrue(query.hasPrefix(remainingQuery), "Held search delete may only remove the query suffix")
+        XCTAssertGreaterThanOrEqual(query.count - remainingQuery.count, 2,
+                                    "The real hold must exercise repeating deletion, not only one tap")
+        XCTAssertEqual(input.value as? String, context, "Query deletion must never reach the host")
+        assertValueRemainsAfterRelease(search, equals: remainingQuery)
+        XCTAssertEqual(input.value as? String, context)
+        attachScreenshot("Held query delete stops on release without changing host text")
+
+        closeKeyboardSearch()
+        XCTAssertTrue(search.waitUntilValueEquals(remainingQuery))
+        delete.press(forDuration: 0.75)
+        let remainingHost = input.value as? String ?? ""
+        XCTAssertFalse(remainingHost.isEmpty)
+        XCTAssertTrue(context.hasPrefix(remainingHost), "Folded delete may only remove the host suffix")
+        XCTAssertGreaterThanOrEqual(context.count - remainingHost.count, 2,
+                                    "The real folded hold must exercise repeating host deletion")
+        XCTAssertEqual(search.value as? String, remainingQuery, "Folded host deletion must retain the query")
+        assertValueRemainsAfterRelease(input, equals: remainingHost)
+        XCTAssertTrue(search.waitUntilValueEquals(remainingQuery))
+        attachScreenshot("Held host delete stops on release and preserves the folded query")
     }
 
     func testSystemKeyboardOptionalFontsAreLocalAndPreserveExactInsertion() throws {
@@ -1227,22 +1270,59 @@ final class UniboardUITests: XCTestCase {
         if option.exists { return }
         let menu = app.descendants(matching: .any)["keyboard.options"].firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 5), "The keyboard options trigger must return before opening another menu")
+        let input = app.textViews["keyboardTestInput"].firstMatch
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        let frame = menu.frame
+        XCTAssertTrue(frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0)
+        XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(frame), "The real options trigger must be on screen")
+        guard let hostText = input.value as? String,
+              let queryValue = search.value as? String,
+              let optionsValue = menu.value as? String else {
+            XCTFail("The options dismissal precondition must preserve readable host, query and options values")
+            return
+        }
+        keyboardOptionsSnapshot = KeyboardOptionsSnapshot(triggerFrame: frame, hostText: hostText,
+                                                          queryValue: queryValue, optionsValue: optionsValue)
         menu.tap()
         XCTAssertTrue(option.waitForExistence(timeout: 5), "The actual options menu must open")
     }
 
     private func closeKeyboardOptions() {
+        defer { keyboardOptionsSnapshot = nil }
         let option = app.descendants(matching: .any)["keyboard.edition"].firstMatch
         if option.exists {
-            // The toolbar trigger can disappear from AX while its popup is
-            // open. Dismiss by tapping the host navigation title, outside the
-            // popup and editor, so neither caret nor host contents can change.
-            let navigation = app.navigationBars["Try Uniboard"].firstMatch
-            XCTAssertTrue(navigation.waitForExistence(timeout: 5))
-            navigation.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            XCTAssertTrue(option.waitUntilAbsent())
+            // A host-app tap does not reliably dismiss a remote keyboard
+            // popup. Use the actual source-button frame observed before it
+            // opened; the native menu consumes this tap without an action.
+            guard let snapshot = keyboardOptionsSnapshot else {
+                XCTFail("A native menu dismissal requires its observed keyboard source-button frame")
+                return
+            }
+            app.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(dx: snapshot.triggerFrame.midX - app.frame.minX,
+                         dy: snapshot.triggerFrame.midY - app.frame.minY)).tap()
         }
-        XCTAssertTrue(app.descendants(matching: .any)["keyboard.options"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(option.waitUntilAbsent(), "The actual native options popup must close")
+        let menu = app.descendants(matching: .any)["keyboard.options"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        if let snapshot = keyboardOptionsSnapshot {
+            XCTAssertTrue(app.textViews["keyboardTestInput"].firstMatch.waitUntilValueEquals(snapshot.hostText))
+            XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals(snapshot.queryValue))
+            XCTAssertTrue(menu.waitUntilValueEquals(snapshot.optionsValue), "Dismissing must not select a menu action")
+        }
+    }
+
+    private func assertValueRemainsAfterRelease(_ element: XCUIElement, equals expected: String,
+                                               file: StaticString = #filePath, line: UInt = #line) {
+        let changedAfterRelease = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !element.exists || element.value as? String != expected
+        }, object: element)
+        changedAfterRelease.isInverted = true
+        XCTAssertEqual(XCTWaiter.wait(for: [changedAfterRelease], timeout: 0.6), .completed,
+                       "A released delete press must not keep editing", file: file, line: line)
+        XCTAssertEqual(element.value as? String, expected, file: file, line: line)
     }
 
     private func keyboardOption(_ identifier: String) -> XCUIElement {

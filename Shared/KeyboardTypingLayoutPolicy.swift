@@ -35,6 +35,9 @@ enum KeyboardTypingLayoutPolicy {
     static let maximumRows = 8
     static let maximumFavoriteRows = 4
     static let favoriteColumns = 10
+    static func typingKeyHeight(availableWidth: CGFloat, isPad: Bool) -> CGFloat {
+        isPad && availableWidth.isFinite && availableWidth >= 650 ? 52 : regularKeyHeight
+    }
     private static let digits = Array("1234567890").map(String.init)
     private static let auxiliarySymbols = ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="]
     private static let secondarySymbols = ["_", "\\", "|", "~", "<", ">", "€", "£", "¥", "•"]
@@ -92,6 +95,16 @@ enum KeyboardTypingLayoutPolicy {
         // budget cannot produce positive-width keys, even with scrolling.
         guard availableHeight.isFinite, availableWidth.isFinite,
               availableHeight > rowSpacing * 2, availableWidth > gaps else { return nil }
+        // iPad keeps three character rows. Digits and punctuation live on
+        // down-flicks rather than adding duplicate rows above the letters.
+        if isPad {
+            let spacing: CGFloat = availableWidth >= 650 && availableHeight > 12 ? 6 : rowSpacing
+            let height = min(typingKeyHeight(availableWidth: availableWidth, isPad: true),
+                             (availableHeight - spacing * 2) / 3)
+            return KeyboardTypingLayoutPlan(keyHeight: height, rowSpacing: spacing, keySpacing: keySpacing,
+                rowCapacity: 3, numberRowCount: 0, favoriteRowsCount: 0,
+                favoritesPerRow: favoriteColumns, favoriteKeyWidth: (availableWidth - gaps) / CGFloat(favoriteColumns))
+        }
         let standard: CGFloat = compact ? compactKeyHeight : regularKeyHeight
         let baselineHeight: CGFloat = standard * 3 + rowSpacing * 2
         let keyHeight: CGFloat

@@ -1,12 +1,12 @@
-Uniboard 1.1: daily English, configurable keys, symbol boards and offline Unicode. Public release waits for physical-device approval.
+Uniboard 1.1 beta: English, custom keys and offline Unicode. App Store release awaits device approval.
 
 TYPING AND KEY GESTURES
-Literal QWERTY starts with the toolbar hidden. U toggles it without losing the query/caret. Check Shift/Caps, capitalization, double-Space, URL/email, Space, Return and Backspace. Wide iPad adds Tab, Caps Lock, row-side Return/Delete, dual Shift and comma/period; rotate and check the single Return. Hold a letter for accents. Swipe a letter up for the opposite case and its accents; slide left/right before lifting. The default case flick retains Shift.
+Literal QWERTY starts with the toolbar hidden. U toggles it without losing the query/caret. Test Shift/Caps, capitalization, double-Space, URL/email, Return and Backspace. Wide iPad defaults to three rows, gray Tab/Caps/Shift/Delete, blue Return and secondary down-flick hints. Rotate; verify one Return. Hold a letter for accents. Swipe a letter up for the opposite case and its accents; slide left/right before lifting. Case flicks retain Shift.
 
 App Settings > Customize keyboard keys configures letter/number/symbol long press and up/down swipes. Function keys, ordinary taps and query typing remain standard. Test Default, Off and Custom separately. Save/reorder up to 16 exact choices, including whole emoji and precomposed/decomposed text. Custom text must retain its saved case and sequence. Cancel, switch fields, resize or rotate mid-press: no stale insertion. Relaunch and reopen the keyboard with Full Access OFF to verify saved choices.
 
 ROWS AND SYMBOL BOARDS
-Keys stay 36 pt. At four character rows English gains 1–0 and #+=; the full symbol page then contains NO digits and two complementary ten-symbol rows. Short 123 layouts retain digits. Five rows adds the scrolling saved-symbol strip. All saved/Recent keys must match digit width, height, spacing and rounded white surfaces, without code-point captions. Scrolling must not insert.
+Phone keys stay 36 pt; wide iPad uses equal 52 pt keys and no extra rows. On phone, four rows add 1–0 and #+=; the full symbol page then contains NO digits and two complementary ten-symbol rows. Short 123 layouts retain digits. On phone, five rows add the saved strip. All saved/Recent keys must match digit width, height, spacing and rounded white surfaces, without code-point captions. Scrolling must not insert.
 
 The star beside Space opens Favorites by default; the back arrow returns to QWERTY. Hold it to switch/manage boards and choose its preferred target. Temporary selection must not change the preference. Symbols is included. Create/rename/reorder/delete a custom board, make it preferred, relaunch, then delete it: Star returns to Favorites. Saving a Unicode character or emoji asks which board to use.
 

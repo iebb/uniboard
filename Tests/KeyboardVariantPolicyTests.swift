@@ -8,6 +8,35 @@ import XCTest
 #endif
 
 final class KeyboardVariantPolicyTests: XCTestCase {
+    func testPadDownFlicksMatchAllPrintedHintsAndRespectDisabledAndCustomChoices() {
+        let keys = Array("qwertyuiopasdfghjklzxcvbnm,.").map(String.init)
+        let values = Array("1234567890@#¥&*()'\"%-+=/;:!?").map(String.init)
+        XCTAssertEqual(keys.count, 28)
+        XCTAssertEqual(values.count, keys.count)
+        var state = KeyboardTypingState()
+        for shift in [KeyboardShiftState.lowercase, .uppercase, .capsLock] {
+            state = KeyboardTypingState()
+            if shift == .uppercase { state.pressShift(at: 1) }
+            if shift == .capsLock { state.toggleCapsLock() }
+            for (key, expected) in zip(keys, values) {
+                let choices = KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state, widePad: true)
+                XCTAssertEqual(choices.first, expected)
+                XCTAssertEqual(Set(choices).count, choices.count)
+                XCTAssertEqual(choices, KeyboardVariantPolicy.options(text: expected, variants: KeyboardVariantPolicy.stockVariants(for: expected)))
+                XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state, widePad: false), [])
+                XCTAssertEqual(KeyboardVariantPolicy.candidates(override: [], defaults: choices), [])
+                XCTAssertEqual(KeyboardVariantPolicy.candidates(override: ["abc"], defaults: choices), ["abc"])
+            }
+        }
+        for invalid in ["", "Q", "é", "qq", "1", "\t", "utility.space"] {
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: invalid, state: state, widePad: true), [])
+        }
+        for layout in [KeyboardTypingLayout.numbers, .symbols] {
+            state.selectLayout(layout)
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true), [])
+        }
+    }
+
     func testConfiguredCandidatesDistinguishDefaultsDisabledAndLiteralOverrides() {
         let defaults = ["A", "À", "Á"]
         XCTAssertEqual(KeyboardVariantPolicy.candidates(override: nil, defaults: defaults), defaults)

@@ -334,6 +334,7 @@ final class KeyboardVariantInteraction {
 @MainActor
 final class KeyboardVariantButton: UIControl {
     private let title = UILabel()
+    private let secondaryTitle = UILabel()
     private let image = UIImageView()
     let interaction: KeyboardVariantInteraction
     private let hover = KeyboardInspectableInteraction()
@@ -369,7 +370,15 @@ final class KeyboardVariantButton: UIControl {
         title.isUserInteractionEnabled = false
         image.contentMode = .center
         image.isUserInteractionEnabled = false
-        addSubview(title); addSubview(image)
+        secondaryTitle.textAlignment = .center
+        secondaryTitle.font = .systemFont(ofSize: 12)
+        secondaryTitle.textColor = .secondaryLabel
+        secondaryTitle.adjustsFontSizeToFitWidth = true
+        secondaryTitle.minimumScaleFactor = 0.7
+        secondaryTitle.isUserInteractionEnabled = false
+        secondaryTitle.isAccessibilityElement = false
+        secondaryTitle.isHidden = true
+        addSubview(title); addSubview(image); addSubview(secondaryTitle)
         interaction.show = { [weak self] values, inspect, edit in self?.showPopup(values, inspect: inspect, edit: edit) ?? false }
         interaction.hide = { [weak self] in self?.removePopup() }
         interaction.highlight = { [weak self] index in self?.highlight(index) }
@@ -393,6 +402,10 @@ final class KeyboardVariantButton: UIControl {
     override func layoutSubviews() {
         super.layoutSubviews()
         title.frame = bounds.insetBy(dx: 3, dy: 2)
+        if !secondaryTitle.isHidden {
+            secondaryTitle.frame = CGRect(x: 3, y: 3, width: max(0, bounds.width - 6), height: 15)
+            title.frame = CGRect(x: 3, y: 17, width: max(0, bounds.width - 6), height: max(0, bounds.height - 19))
+        }
         image.frame = bounds
         if interaction.hasPhysicalPress, !geometryIsCurrent { interaction.cancel() }
     }
@@ -401,6 +414,7 @@ final class KeyboardVariantButton: UIControl {
                    font: UIFont, symbol: String? = nil, foreground: UIColor = .label,
                    preservesPressAcrossTextChanges: Bool = false,
                    longPressOptions: [String]? = nil, swipeUp: [String]? = nil, swipeDown: [String]? = nil,
+                   secondaryText: String? = nil,
                    showsInspection: Bool = false, showsEditing: Bool = false, holdLabel: String? = nil,
                    popupFont: ((String) -> UIFont)? = nil,
                    displayText: @escaping (String) -> String = { $0 },
@@ -419,6 +433,9 @@ final class KeyboardVariantButton: UIControl {
         isAccessibilityElement = enabled
         accessibilityElementsHidden = !enabled
         self.displayText = displayText
+        secondaryTitle.text = secondaryText
+        secondaryTitle.isHidden = secondaryText?.isEmpty != false || symbol != nil
+        setNeedsLayout()
         title.text = displayText(text)
         title.isHidden = symbol != nil
         title.font = font

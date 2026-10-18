@@ -17,6 +17,15 @@ enum KeyboardVariantPolicy {
         return options(text: original, variants: englishVariants(for: key, uppercase: uppercase))
     }
 
+    static func defaultSwipeDown(for key: String, state: KeyboardTypingState, widePad: Bool) -> [String] {
+        guard widePad, state.layout == .letters else { return [] }
+        let keys = Array("qwertyuiopasdfghjklzxcvbnm,.").map(String.init)
+        let values = Array("1234567890@#¥&*()'\"%-+=/;:!?").map(String.init)
+        guard let index = keys.firstIndex(of: key) else { return [] }
+        let text = values[index]
+        return options(text: text, variants: stockVariants(for: text))
+    }
+
     static func candidates(override: [String]?, defaults: [String]) -> [String] {
         let values = override ?? defaults
         let limit = override == nil ? maximumVariants + 1 : maximumVariants

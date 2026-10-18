@@ -162,6 +162,10 @@ private struct KeyboardGestureSettingsView: View {
                         Text("Selects the opposite case first, followed by its accented choices. The keyboard’s Shift state stays unchanged.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    if gesture == .swipeDown {
+                        Text("On the full-width iPad letter layout, swipe down to type the small number or symbol printed above the letter. Narrow layouts have no default down gesture. Custom choices replace the hint; Off hides it.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 } else if mode == .disabled {
                     Text("This gesture is disabled. An ordinary tap still works.").foregroundStyle(.secondary)
                 }

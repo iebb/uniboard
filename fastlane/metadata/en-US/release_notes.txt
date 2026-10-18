@@ -9,4 +9,4 @@ A daily English keyboard with full Unicode close at hand.
 - Edition, optional preview fonts and the optional collapse key are controlled only in app Settings. The keyboard menu offers order and Open companion app.
 - Matching rounded symbol keycaps; expanded symbol pages replace redundant digits with common symbols.
 - App-only letter/number/symbol settings for long press, swipe up/down and ordered literal candidates; function keys keep their usual actions. Opposite-case letter flicks retain Shift and support horizontal choice selection.
-- Wide iPad QWERTY adds Tab, Caps Lock, row-side Return/Delete, both Shift keys and comma/period; compact fallback in narrow windows.
+- Wide iPad defaults to three letter rows, gray modifiers, blue Return, Tab/Caps Lock and down-flick number/symbol hints. Narrow windows retain compact keys.

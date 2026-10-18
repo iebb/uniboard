@@ -57,6 +57,28 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
         }
     }
 
+    func testPadKeepsExactlyThreeRowsAcrossAllPagesHeightsAndSavedCounts() throws {
+        for layout in KeyboardTypingLayout.allCases {
+            for width: CGFloat in [220, 649, 650, 768, 1350, .greatestFiniteMagnitude] {
+                for height: CGFloat in [8.1, 12, 12.1, 80, 116, 168, 500, .greatestFiniteMagnitude] {
+                    for count in [0, 1, 40, Int.max] {
+                        let value = try plan(height, width: width, page: layout, favorites: count, isPad: true)
+                        XCTAssertEqual(value.rowCount, 3)
+                        XCTAssertEqual(value.numberRowCount, 0)
+                        XCTAssertEqual(value.favoriteRowsCount, 0)
+                        XCTAssertGreaterThan(value.keyHeight, 0)
+                        XCTAssertLessThanOrEqual(value.contentHeight, height + 0.00001)
+                        XCTAssertLessThanOrEqual(value.keyHeight, width >= 650 ? 52 : 36)
+                    }
+                }
+            }
+        }
+        for width: CGFloat in [.nan, .infinity, -.infinity, 0, 649] {
+            XCTAssertEqual(KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: width, isPad: true), 36)
+        }
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: 1000, isPad: false), 36)
+    }
+
     private func plan(_ height: CGFloat, width: CGFloat = 402, compact: Bool = false,
                       page: KeyboardTypingLayout = .letters, favorites: Int = 64,
                       isPad: Bool = false, threshold: Int = 5) throws -> KeyboardTypingLayoutPlan {
@@ -201,7 +223,7 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
                 XCTAssertTrue(value.favoriteKeyWidth.isFinite)
                 XCTAssertGreaterThan(value.favoriteKeyWidth, 0)
                 XCTAssertTrue(value.contentHeight.isFinite)
-                XCTAssertEqual(value.favoriteRowsCount, 4)
+                XCTAssertEqual(value.favoriteRowsCount, isPad ? 0 : 4)
             }
         }
     }
@@ -308,7 +330,7 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
                 XCTAssertEqual(value.keySpacing, spacing)
                 XCTAssertEqual(value.favoritesPerRow, 10)
                 XCTAssertEqual(value.favoriteKeyWidth, expected, accuracy: 0.000_001)
-                XCTAssertEqual(value.keyHeight, 36)
+                XCTAssertEqual(value.keyHeight, isPad && width >= 650 ? 52 : 36)
                 XCTAssertEqual(value.favoriteKeyWidth * 10 + spacing * 9, width, accuracy: 0.000_001)
             }
         }
@@ -320,8 +342,8 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
                 for (count, expectedRows) in [(0, 0), (1, 1), (10, 1), (11, 2), (20, 2), (21, 3), (31, 4), (41, 4)] {
                     let value = try plan(316, width: width, favorites: count, isPad: isPad)
                     XCTAssertEqual(value.favoritesPerRow, 10)
-                    XCTAssertEqual(value.favoriteRowsCount, expectedRows)
-                    XCTAssertEqual(value.rowCount, 4 + expectedRows)
+                    XCTAssertEqual(value.favoriteRowsCount, isPad ? 0 : expectedRows)
+                    XCTAssertEqual(value.rowCount, isPad ? 3 : 4 + expectedRows)
                 }
             }
         }

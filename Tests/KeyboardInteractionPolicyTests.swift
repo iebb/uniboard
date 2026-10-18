@@ -16,6 +16,30 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
             portraitBrowseHeight: browse, portraitExpandedHeight: expanded)
     }
 
+    func testPadTypingFitsThreeRowsAndFooterWithoutBrowserHeightOrBlankStrips() {
+        for width: CGFloat in [320, 665, 666, 768, 1024, 1366, .nan, .infinity] {
+            for toolbar in [false, true] {
+                let result = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                    isPad: true, compactVertical: false, isSearching: false, isInspecting: false,
+                    isTyping: true, showsToolbar: toolbar)
+                let wide = width.isFinite && width >= 666
+                XCTAssertEqual(result.height, (wide ? 238 : 170) + (toolbar ? 36 : 0))
+                XCTAssertEqual(result.typingKeyHeight, wide ? 52 : 36)
+                XCTAssertNil(result.portraitResizeRange)
+            }
+        }
+        let small = KeyboardLayoutPolicy.metrics(viewWidth: 1024, displaySize: nil, sceneHeight: 400,
+            isPad: true, compactVertical: false, isSearching: false, isInspecting: false, isTyping: true)
+        XCTAssertEqual(small.height, 200)
+        XCTAssertEqual(small.typingKeyHeight, 42.5)
+        for searching in [false, true] {
+            let result = KeyboardLayoutPolicy.metrics(viewWidth: 1024, displaySize: nil, sceneHeight: 300,
+                isPad: true, compactVertical: false, isSearching: searching, isInspecting: !searching,
+                isTyping: true, showsToolbar: true)
+            XCTAssertEqual(result.height, 150)
+        }
+    }
+
     func testFreshPortraitDefaultIsCompactAndDoesNotReplaceAnExplicitSavedHeight() {
         let fresh = KeyboardLayoutPolicy.metrics(viewWidth: 402,
             displaySize: CGSize(width: 402, height: 874), sceneHeight: 874,

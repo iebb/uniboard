@@ -3,9 +3,9 @@ Literal English typing, accents, symbols and whole emoji in one offline keyboard
 YOUR EVERYDAY KEYBOARD
 Keep your words as typed, without autocorrect or predictions. Use Shift, Caps Lock, number/symbol pages and long-press accented letters. Capitalization follows the receiving field; double Space after a word adds a period and space. URL/email fields retain literal input.
 
-Fixed-height keycaps; U toggles the initially hidden Unicode toolbar. Four character rows add digits; five add a scrolling saved-symbol strip. On iPhone portrait, swipe the grip up/down to add/remove one row on release; ▲/▼ appears only when the height can change.
+U toggles the initially hidden Unicode toolbar. On iPhone, four rows add digits; five add a saved-symbol strip. Swipe the portrait grip up/down to add/remove one row on release; ▲/▼ shows an available step.
 
-Wide iPad layouts add Tab, Caps Lock, row-side Delete/Return, two Shift keys and comma/period. Narrow windows use compact keys.
+Wide iPad defaults to three letter rows, gray Tab/Caps/Shift/Delete and blue Return. Small digits and symbols show down-flick choices. Narrow windows use compact keys.
 
 SYMBOLS, YOUR WAY
 The star beside Space opens Favorites by default; its back arrow returns to QWERTY. Hold it to switch/manage boards or choose its default target. Symbols is included. Save characters or emoji to your chosen board.

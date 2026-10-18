@@ -516,6 +516,40 @@ final class KeyboardVariantControlTests: XCTestCase {
         }
     }
 
+    func testSecondaryHintRendersAbovePrimaryAndClearsWithoutChangingLiteralOrAccessibleChoices() throws {
+        let button = KeyboardVariantButton()
+        let route = Route(), mode = route.context!.modeIdentifier
+        func configure(_ hint: String?, symbol: String? = nil) {
+            button.configure(context: mode, key: "q", text: "q", variants: [], enabled: true,
+                font: .systemFont(ofSize: 23), symbol: symbol, swipeDown: ["1"], secondaryText: hint,
+                factory: { route.factory(rendered: mode) })
+            button.frame = CGRect(x: 0, y: 0, width: 64, height: 52)
+            button.setNeedsLayout(); button.layoutIfNeeded()
+        }
+        configure("1")
+        let labels = button.subviews.compactMap { $0 as? UILabel }
+        let primary = try XCTUnwrap(labels.first { $0.text == "q" })
+        let hint = try XCTUnwrap(labels.first { $0.text == "1" })
+        XCTAssertFalse(hint.isHidden)
+        XCTAssertFalse(hint.isUserInteractionEnabled)
+        XCTAssertFalse(hint.isAccessibilityElement)
+        XCTAssertLessThanOrEqual(hint.frame.maxY, primary.frame.minY + 1)
+        XCTAssertTrue(button.bounds.contains(hint.frame))
+        XCTAssertTrue(button.bounds.contains(primary.frame))
+        XCTAssertTrue(button.accessibilityCustomActions?.contains { $0.name.hasPrefix("Swipe down:") } == true)
+        configure(nil)
+        XCTAssertTrue(hint.isHidden)
+        XCTAssertEqual(primary.frame, button.bounds.insetBy(dx: 3, dy: 2))
+        configure("")
+        XCTAssertTrue(hint.isHidden)
+        configure("1", symbol: "star")
+        XCTAssertTrue(hint.isHidden)
+        XCTAssertTrue(primary.isHidden)
+        configure("1")
+        XCTAssertFalse(hint.isHidden)
+        XCTAssertFalse(primary.isHidden)
+    }
+
     func testActualPopupIsInsideInputViewAndRotationCancelsBeforeInsertion() throws {
         let clock = Clock(), route = Route(), owner = NSObject(), state = KeyboardVariantInteraction(schedule: clock.schedule)
         let button = KeyboardVariantButton(interaction: state)

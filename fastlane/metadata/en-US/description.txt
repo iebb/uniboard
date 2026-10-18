@@ -1,16 +1,18 @@
-Type English, accented letters, special symbols and complete emoji from one keyboard. Uniboard pairs literal QWERTY with custom symbol boards and offline Unicode search for iPhone and iPad.
+Literal English typing, accents, symbols and whole emoji in one offline keyboard. Uniboard combines QWERTY, custom symbol boards and Unicode search for iPhone and iPad.
 
 YOUR EVERYDAY KEYBOARD
 Keep your words as typed, without autocorrect or predictions. Use Shift, Caps Lock, number/symbol pages and long-press accented letters. Capitalization follows the receiving field; double Space after a word adds a period and space. URL/email fields retain literal input.
 
-Compact keys keep a consistent height. The bottom-left U key shows/hides the Unicode toolbar, initially hidden. Digits appear when four character rows fit; a horizontally scrolling symbol strip appears at five. On iPhone in portrait, swipe the top grip up/down to add/remove one row on release, within screen limits. A simple triangle shows your drag direction.
+Fixed-height keycaps; U toggles the initially hidden Unicode toolbar. Four character rows add digits; five add a scrolling saved-symbol strip. On iPhone portrait, swipe the grip up/down to add/remove one row on release; ▲/▼ appears only when the height can change.
+
+Wide iPad layouts add Tab, Caps Lock, row-side Delete/Return, two Shift keys and comma/period. Narrow windows use compact keys.
 
 SYMBOLS, YOUR WAY
 The star beside Space opens Favorites by default; its back arrow returns to QWERTY. Hold it to switch/manage boards or choose its default target. Symbols is included. Save characters or emoji to your chosen board.
 
 Saved and Recent symbols use rounded keycaps without code-point captions. Hold a key for variants, properties or editing. Keep punctuation, currencies, mathematics and phonetic marks close at hand. Original sequences are preserved.
 
-In app Settings, customize each main key’s long-press, swipe-up and swipe-down choices. Swipe a letter up for its opposite case and accents by default; slide left/right to choose before lifting. Save ordered choices, disable a gesture or restore defaults. Custom text keeps its exact case and sequence; ordinary taps keep their function.
+In app Settings, set letter/number/symbol long-press and up/down-swipe choices. Function keys keep their usual actions. Letter up-swipes default to opposite case and accents; slide left/right before lifting. Save ordered literal choices, disable gestures or restore defaults. Exact case and Unicode sequences are preserved.
 
 FIND ANY CHARACTER
 - Search official names, aliases, descriptions and block names. Try "arrow", "heart" or "Greek". Whole-word matches come before mid-word matches.

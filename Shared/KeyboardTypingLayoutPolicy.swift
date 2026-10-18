@@ -88,6 +88,14 @@ enum KeyboardTypingLayoutPolicy {
         return state.shiftsANSISymbols ? key : alternate
     }
 
+    static func usesShiftedTap(for key: String, state: KeyboardTypingState, ansiPad: Bool) -> Bool {
+        guard state.layout == .letters else { return false }
+        if key.utf8.count == 1, let byte = key.utf8.first, (97...122).contains(byte) {
+            return state.shift != .lowercase
+        }
+        return ansiPad && state.shiftsANSISymbols && shiftedANSI[key] != nil
+    }
+
     /// The number page already contains its sole digit row. Its auxiliary row
     /// supplies symbols; the letters and symbols pages instead gain digits.
     static func auxiliaryRow(for layout: KeyboardTypingLayout, ansiPad: Bool = false) -> [String] {

@@ -7,6 +7,27 @@ import XCTest
 #endif
 
 final class KeyboardFooterLayoutPolicyTests: XCTestCase {
+    func testPadModifierTextUsesBottomCornersWithSafeInsetsAndNeverEscapesShortKeys() {
+        let natural = CGRect(x: 20, y: 12, width: 35, height: 16)
+        let bounds = CGRect(x: 0, y: 0, width: 100, height: 52)
+        XCTAssertEqual(KeyboardKeyContentPosition.center.alignedRect(natural, in: bounds), natural)
+        XCTAssertEqual(KeyboardKeyContentPosition.bottomLeft.alignedRect(natural, in: bounds), CGRect(x: 8, y: 30, width: 35, height: 16))
+        XCTAssertEqual(KeyboardKeyContentPosition.bottomRight.alignedRect(natural, in: bounds), CGRect(x: 57, y: 30, width: 35, height: 16))
+        for width: CGFloat in [1, 10, 20, 44, 120] {
+            for height: CGFloat in [1, 5, 36, 52] {
+                let frame = CGRect(x: 7, y: 9, width: width, height: height)
+                for position in [KeyboardKeyContentPosition.bottomLeft, .bottomRight] {
+                    let value = position.alignedRect(natural, in: frame)
+                    XCTAssertTrue(frame.contains(value))
+                    XCTAssertTrue([value.minX, value.minY, value.width, value.height].allSatisfy(\.isFinite))
+                }
+            }
+        }
+        for bad in [CGRect.zero, CGRect(x: CGFloat.infinity, y: 0, width: 44, height: 52), CGRect(x: 0, y: 0, width: CGFloat.nan, height: 52)] {
+            XCTAssertEqual(KeyboardKeyContentPosition.bottomRight.alignedRect(natural, in: bad), .zero)
+        }
+        XCTAssertEqual(KeyboardKeyContentPosition.bottomLeft.alignedRect(CGRect(x: 0, y: 0, width: CGFloat.nan, height: 16), in: bounds), .zero)
+    }
     func testLandscapePadReservesComfortableTrailingKeysAndASmallerSpace() throws {
         for width: CGFloat in [980, 1008, 1180, 1350] {
             for globe in [false, true] {

@@ -8,6 +8,22 @@ import XCTest
 #endif
 
 final class KeyboardVariantPolicyTests: XCTestCase {
+    func testVisibleDigitRowReplacesEveryQToPDownFlickWithItsComplementarySymbolPageKey() {
+        var state = KeyboardTypingState()
+        let keys = KeyboardTypingLayout.letters.rows[0]
+        let expected = KeyboardTypingLayoutPolicy.rows(for: .numbers, hasAuxiliaryRow: true)[0]
+        for wide in [false, true] {
+            for (key, text) in zip(keys, expected) {
+                let defaults = KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state, widePad: wide, hasNumberRow: true)
+                XCTAssertEqual(defaults.first, text)
+                XCTAssertEqual(KeyboardVariantPolicy.candidates(override: ["custom"], defaults: defaults), ["custom"])
+            }
+        }
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state, widePad: false, hasNumberRow: true), [])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true, mapping: .none, hasNumberRow: true), [])
+        state.selectLayout(.numbers)
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true, hasNumberRow: true), [])
+    }
     func testStandardPageMappingAndOffPresetRemainOverrideable() {
         let state = KeyboardTypingState()
         for (key, expected) in [("q", "1"), ("p", "0"), ("a", "-"), ("l", "@"), ("z", "."), ("n", "\""), ("m", "[")] {

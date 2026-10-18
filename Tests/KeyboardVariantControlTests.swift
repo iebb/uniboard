@@ -5,6 +5,48 @@ import XCTest
 
 @MainActor
 final class KeyboardVariantControlTests: XCTestCase {
+    func testPadModifierButtonTextUsesTheRequestedBottomCornerWithoutChangingActions() {
+        let button = KeyboardTouchActionButton(frame: CGRect(x: 0, y: 0, width: 100, height: 52))
+        button.setTitle("tab", for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 13)
+        var calls = 0
+        button.configure(contextIdentifier: UUID()) { { calls += 1; return true } }
+        for position in [KeyboardKeyContentPosition.bottomLeft, .bottomRight] {
+            button.contentPosition = position
+            let rect = button.titleRect(forContentRect: button.bounds)
+            XCTAssertEqual(rect.maxY, 46, accuracy: 0.01)
+            if position == .bottomLeft { XCTAssertEqual(rect.minX, 8, accuracy: 0.01) }
+            else { XCTAssertEqual(rect.maxX, 92, accuracy: 0.01) }
+            XCTAssertTrue(button.accessibilityActivate())
+        }
+        XCTAssertEqual(calls, 2)
+        let delete = RepeatingDeleteButton()
+        delete.setTitle("delete", for: .normal)
+        delete.setImage(nil, for: .normal)
+        delete.contentPosition = .bottomRight
+        let rect = delete.titleRect(forContentRect: button.bounds)
+        XCTAssertEqual(rect.maxX, 92, accuracy: 0.01)
+        XCTAssertEqual(rect.maxY, 46, accuracy: 0.01)
+    }
+    func testRemappedTapLongPressUpAndDownRouteToFourSeparateOutputs() {
+        let state = KeyboardVariantInteraction()
+        var events: [String] = []
+        let owner = NSObject()
+        state.configure(context: UUID(), key: "q", text: "w", variants: [], enabled: true) {
+            .init(isCurrent: { true }, insert: { _ in XCTFail("Gesture routes cannot fall through to a normal character"); return false },
+                options: ["q"], longPressOptions: ["h"], swipeUp: ["u"], swipeDown: ["d"],
+                tap: { events.append("w"); return true },
+                insertGesture: { value, gesture in events.append(gesture.rawValue + ":" + value); return true })
+        }
+        XCTAssertTrue(state.begin(owner: owner))
+        XCTAssertTrue(state.end(owner: owner, inside: true))
+        XCTAssertTrue(state.activateGesture(.longPress))
+        XCTAssertTrue(state.activateGesture(.swipeUp))
+        XCTAssertTrue(state.activateGesture(.swipeDown))
+        XCTAssertFalse(state.activateGesture(.tap))
+        XCTAssertFalse(state.activateGesture(.shiftedTap))
+        XCTAssertEqual(events, ["w", "longPress:h", "swipeUp:u", "swipeDown:d"])
+    }
     @MainActor private final class GestureClock {
         var jobs: [() -> Void] = []
         var intervals: [TimeInterval] = []

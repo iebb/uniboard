@@ -1,5 +1,21 @@
 import Foundation
 
+enum KeyboardKeyContentPosition {
+    case center, bottomLeft, bottomRight
+
+    func alignedRect(_ natural: CGRect, in bounds: CGRect) -> CGRect {
+        guard self != .center else { return natural }
+        guard [natural.width, natural.height, bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, bounds.width, bounds.height].allSatisfy(\.isFinite),
+              natural.width >= 0, natural.height >= 0, bounds.width > 0, bounds.height > 0 else { return .zero }
+        let inset = min(8, bounds.width / 2)
+        let bottom = min(6, bounds.height)
+        let width = min(natural.width, max(0, bounds.width - inset * 2))
+        let height = min(natural.height, max(0, bounds.height - bottom))
+        let x = self == .bottomLeft ? bounds.minX + inset : bounds.maxX - inset - width
+        return CGRect(x: x, y: bounds.maxY - bottom - height, width: width, height: height)
+    }
+}
+
 /// Footer sizing reserves a real Space target before optional controls. The
 /// narrower fallback is for small phones with both Globe and Collapse shown.
 enum KeyboardFooterLayoutPolicy {

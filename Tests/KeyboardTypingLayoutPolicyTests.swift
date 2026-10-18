@@ -7,6 +7,21 @@ import XCTest
 #endif
 
 final class KeyboardTypingLayoutPolicyTests: XCTestCase {
+    func testShiftedTapFollowsLettersAndManualANSIShiftButNeverSentenceDigitsOrOtherPages() {
+        var state = KeyboardTypingState()
+        XCTAssertFalse(KeyboardTypingLayoutPolicy.usesShiftedTap(for: "q", state: state, ansiPad: true))
+        state.synchronizeAutomaticCapitalization(true)
+        XCTAssertTrue(KeyboardTypingLayoutPolicy.usesShiftedTap(for: "q", state: state, ansiPad: false))
+        for key in ["1", "[", "", "qq", "é"] { XCTAssertFalse(KeyboardTypingLayoutPolicy.usesShiftedTap(for: key, state: state, ansiPad: true)) }
+        state.pressShift(at: 1); state.pressShift(at: 2)
+        XCTAssertTrue(KeyboardTypingLayoutPolicy.usesShiftedTap(for: "1", state: state, ansiPad: true))
+        XCTAssertFalse(KeyboardTypingLayoutPolicy.usesShiftedTap(for: "1", state: state, ansiPad: false))
+        state.toggleCapsLock()
+        XCTAssertTrue(KeyboardTypingLayoutPolicy.usesShiftedTap(for: "q", state: state, ansiPad: true))
+        XCTAssertFalse(KeyboardTypingLayoutPolicy.usesShiftedTap(for: "1", state: state, ansiPad: true))
+        state.selectLayout(.numbers)
+        XCTAssertFalse(KeyboardTypingLayoutPolicy.usesShiftedTap(for: "q", state: state, ansiPad: true))
+    }
     func testEveryLandscapePresetKeepsItsSelectedRowsAndCompactANSIHasATopRightDelete() throws {
         for preset in KeyboardPadLayout.allCases {
             let pad = try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: 1008, isPad: true, layout: .letters,

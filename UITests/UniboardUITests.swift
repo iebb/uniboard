@@ -780,6 +780,58 @@ final class UniboardUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["keyboard.typing.favorites"].exists, file: file, line: line)
     }
 
+    func testSystemKeyboardTapRemapsAndThreeIndependentGestures() throws {
+        try requireKeyboardIntegration()
+        configureAppKeyGesture(keyID: "letter.q", gesture: "tap", choices: ["w"])
+        configureAppKeyGesture(keyID: "letter.q", gesture: "shiftedTap", choices: ["Ω"])
+        configureAppKeyGesture(keyID: "letter.q", gesture: "longPress", choices: ["h"])
+        configureAppKeyGesture(keyID: "letter.q", gesture: "swipeUp", choices: ["u"])
+        configureAppKeyGesture(keyID: "letter.q", gesture: "swipeDown", choices: ["d"])
+        configureAppKeyGesture(keyID: "digit.1", gesture: "tap", choices: ["2"])
+        let input = openSystemKeyboardHost(unicodeBrowse: false)
+        defer { restoreEnglishKeyboard() }
+        let q = app.buttons["keyboard.typing.key.q"].firstMatch
+        let shift = app.buttons["keyboard.typing.shift"].firstMatch
+        XCTAssertTrue(shift.waitUntilValueEquals("uppercase"))
+        XCTAssertEqual(q.label, "Ω", "The keycap reflects its exact shifted tap mapping")
+        q.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("Ω"))
+        XCTAssertTrue(shift.waitUntilValueEquals("lowercase"))
+        XCTAssertEqual(q.label, "w")
+        q.tap()
+        q.press(forDuration: 0.65)
+        flickMainKey(q, up: true)
+        flickMainKey(q, up: false)
+        XCTAssertTrue(input.waitUntilValueEquals("Ωwhud"), "Tap, long press, up and down must each use only their own mapping")
+        app.buttons["keyboard.typing.number.1"].tap()
+        XCTAssertTrue(input.waitUntilValueEquals("Ωwhud2"), "Digit remaps apply to the auxiliary physical key too")
+        flickMainKey(app.buttons["keyboard.typing.key.w"].firstMatch, up: false)
+        flickMainKey(app.buttons["keyboard.typing.key.p"].firstMatch, up: false)
+        XCTAssertTrue(input.waitUntilValueEquals("Ωwhud2\\•"), "Visible digits replace W/P down-flicks with the complementary symbol-page characters")
+        attachScreenshot("Independent remapped tap hold up down and nonduplicate top letter flicks")
+        restoreEnglishKeyboard()
+        openAppSettings()
+        app.buttons["keyboardKeySettings"].tap()
+        app.buttons["keySettings.key.letter.q"].tap()
+        app.buttons["keySettings.gesture.tap"].tap()
+        app.segmentedControls["keySettings.behavior"].buttons["Off"].tap()
+        app.buttons["keySettings.save"].tap()
+        XCTAssertTrue(app.buttons["keySettings.gesture.tap"].waitUntilValueEquals("Off"))
+        app.navigationBars.buttons.firstMatch.tap()
+        app.navigationBars.buttons.firstMatch.tap()
+        let fresh = openSystemKeyboardHost(unicodeBrowse: false)
+        if shift.value as? String != "lowercase" { shift.tap() }
+        q.tap()
+        XCTAssertEqual(fresh.value as? String, "", "Disabled ordinary tap must not insert the original physical letter")
+        flickMainKey(q, up: true)
+        q.press(forDuration: 0.65)
+        flickMainKey(q, up: false)
+        XCTAssertTrue(fresh.waitUntilValueEquals("uhd"), "Disabling tap does not disable the three independent gestures")
+        restoreEnglishKeyboard()
+        resetAppKey("letter.q")
+        resetAppKey("digit.1")
+    }
+
     func testSystemKeyboardAppConfiguredFlicksPreserveLiteralTextAndShift() throws {
         try requireKeyboardIntegration()
         configureAppKeyGesture(keyID: "letter.q", gesture: "swipeUp", choices: ["xy", "cd"])

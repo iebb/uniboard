@@ -668,6 +668,9 @@ final class KeyboardViewController: UIInputViewController {
             : KeyboardTypingLayoutPolicy.output(for: key, state: captured, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout)
         guard let original else { return nil }
         let settings = model.keySettings
+        let hasNumberRow = captured.layout == .letters && (hasAuxiliaryRow || (ansiPad && padLayout == .ansiNumbers))
+        let tapText = settings.tapOutput(for: keyID, defaultText: original,
+            shifted: KeyboardTypingLayoutPolicy.usesShiftedTap(for: key, state: captured, ansiPad: ansiPad))
         let choices = KeyboardVariantPolicy.options(text: original,
             variants: KeyboardVariantPolicy.englishVariants(for: key, uppercase: captured.shift != .lowercase))
         let longOverride = settings.candidates(for: keyID, gesture: .longPress)
@@ -675,7 +678,7 @@ final class KeyboardViewController: UIInputViewController {
         let up = KeyboardVariantPolicy.candidates(override: settings.candidates(for: keyID, gesture: .swipeUp),
             defaults: isAuxiliaryKey ? [] : KeyboardVariantPolicy.defaultSwipeUp(for: key, state: captured))
         let down = KeyboardVariantPolicy.candidates(override: settings.candidates(for: keyID, gesture: .swipeDown),
-            defaults: KeyboardVariantPolicy.defaultSwipeDown(for: key, state: captured, widePad: widePad, ansiPad: ansiPad, mapping: mapping))
+            defaults: KeyboardVariantPolicy.defaultSwipeDown(for: key, state: captured, widePad: widePad, ansiPad: ansiPad, mapping: mapping, hasNumberRow: hasNumberRow))
         let accepts: () -> Bool = { [weak self] in
             current() && self?.model.showsUnicode == false && self?.model.hasSymbolBoardOverlay == false
                 && self?.model.keySettings == settings && self?.model.padLayout == padLayout && self?.model.padSymbolMapping == mapping
@@ -683,17 +686,21 @@ final class KeyboardViewController: UIInputViewController {
                 && (self?.model.typingWidePadVisible.map({ $0 == widePad }) ?? !widePad)
                 && (self?.model.typingANSIPadVisible.map({ $0 == ansiPad }) ?? !ansiPad)
         }
-        return .init(isCurrent: accepts, insert: { [weak self] text in
-            guard let self, accepts(), KeyboardVariantPolicy.contains(text, in: choices) else { return false }
+        let insertOrdinary: (String) -> Bool = { [weak self] text in
+            guard let self, accepts() else { return false }
             self.doubleSpaceState.reset()
             guard self.insertHostText(text) else { return false }
             if captured.layout == .letters && !isAuxiliaryKey && (ansiPad || captured.output(for: key) != nil) { self.model.didInsertTypingKey(key, capturedState: captured, ansiPad: ansiPad, padLayout: padLayout) }
             else { self.model.didInsertNumberRowKey(capturedState: captured) }
             self.synchronizeHostTraits()
             return true
+        }
+        return .init(isCurrent: accepts, insert: { text in
+            KeyboardVariantPolicy.contains(text, in: choices) && insertOrdinary(text)
         }, options: choices, longPressOptions: longOverride, swipeUp: up, swipeDown: down,
+           tap: { tapText.map(insertOrdinary) ?? false },
            insertGesture: { [weak self] text, gesture in
-            guard let self, accepts() else { return false }
+            guard let self, accepts(), gesture == .longPress || gesture == .swipeUp || gesture == .swipeDown else { return false }
             let allowed = gesture == .longPress ? longChoices : gesture == .swipeUp ? up : down
             guard KeyboardVariantPolicy.contains(text, in: allowed) else { return false }
             self.doubleSpaceState.reset()
@@ -2709,6 +2716,7 @@ private struct UnicodeKeyboardView: View {
     }
 
     private var usesLandscapeFooter: Bool { model.isLandscapePadLayout && !model.showsUnicode }
+    private var usesPadKeyPositions: Bool { model.isPadLayout && !model.showsUnicode && model.typingKeyHeight >= 44 }
     private var displaysCollapseKey: Bool { model.showsCollapseKey || usesLandscapeFooter }
 
     private var controls: some View {
@@ -2730,10 +2738,12 @@ private struct UnicodeKeyboardView: View {
             KeyboardTouchKey(title: "U", identifier: "keyboard.toggleUnicodeToolbar",
                 label: model.showsUnicodeToolbar ? "Hide Unicode toolbar" : "Show Unicode toolbar",
                 value: model.showsUnicodeToolbar ? "on" : "off", fontSize: 18,
+                contentPosition: usesPadKeyPositions ? .bottomLeft : .center,
                 route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .toolbar) })
                 .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
             if model.needsInputModeSwitchKey {
-                InputModeSwitchKey(controller: controller, isModifier: model.isPadLayout && !model.showsUnicode)
+                InputModeSwitchKey(controller: controller, isModifier: model.isPadLayout && !model.showsUnicode,
+                    contentPosition: usesPadKeyPositions ? .bottomLeft : .center)
                     .frame(width: plan.keyWidth, height: controlHeight)
             }
             if displaysCollapseKey && !usesLandscapeFooter { footerCollapseKey(plan) }
@@ -2742,7 +2752,8 @@ private struct UnicodeKeyboardView: View {
                 label: model.isShowingFavorites ? "Back to English keyboard" : "Symbol keyboard",
                 value: model.isShowingFavorites ? "favorites" : model.modeValue,
                 symbol: model.isShowingFavorites ? "arrow.left" : "star", route: model.inputModeID,
-                enabled: !resizeActivity.isActive, fontSize: 20, holdLabel: "Manage symbol keyboards",
+                enabled: !resizeActivity.isActive, fontSize: 20,
+                contentPosition: usesPadKeyPositions ? .bottomLeft : .center, holdLabel: "Manage symbol keyboards",
                 factory: { [mode = model.inputModeID] in favoritesActions(mode) })
                 .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
             KeyboardTouchKey(title: model.isSearching ? "Search space" : "space", identifier: "keyboard.space",
@@ -2757,7 +2768,7 @@ private struct UnicodeKeyboardView: View {
                 let inspecting = model.inspection != nil || model.symbolBoardInspectionText != nil
                 KeyboardTouchKey(title: model.isSearching ? "Done" : inspecting ? "Back" : model.returnTitle,
                     identifier: "keyboard.return", label: model.isSearching ? "Close search keys" : inspecting ? "Close Unicode properties" : "\(model.returnTitle) key",
-                    fontSize: 14, isAction: true, route: model.inputModeID,
+                    fontSize: 14, isAction: true, contentPosition: usesPadKeyPositions ? .bottomRight : .center, route: model.inputModeID,
                     factory: { [mode = model.inputModeID] in action(mode, .returnKey) })
                     .frame(width: plan.returnWidth, height: controlHeight)
                     .background(model.isPadLayout && !model.showsUnicode ? Color(uiColor: .systemBlue) : KeyboardPalette.action, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -2767,14 +2778,17 @@ private struct UnicodeKeyboardView: View {
     private func footerCollapseKey(_ plan: KeyboardFooterLayoutPolicy.Plan) -> some View {
         KeyboardTouchKey(title: nil, symbol: "keyboard.chevron.compact.down",
             identifier: "keyboard.collapse", label: "Dismiss keyboard", fontSize: 17,
+            contentPosition: usesPadKeyPositions ? .bottomRight : .center,
             route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .collapse) })
             .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
     }
     private func footerPageKey(_ plan: KeyboardFooterLayoutPolicy.Plan) -> some View {
         let letters = model.typingState.layout != .letters
-        return KeyboardTouchKey(title: letters ? "ABC" : KeyboardTypingLayoutPolicy.entryTitle(auxiliaryRowVisible: typingAuxiliaryRowVisible || (usesLandscapeFooter && model.padLayout == .ansiNumbers)),
+        let symbols = typingAuxiliaryRowVisible || (usesLandscapeFooter && model.padLayout == .ansiNumbers)
+        return KeyboardTouchKey(title: letters ? "ABC" : symbols ? "#+=" : usesPadKeyPositions ? ".?123" : "123",
             identifier: letters ? "keyboard.typing.letters" : "keyboard.typing.numbers",
             label: letters ? "Letters" : (typingAuxiliaryRowVisible || (usesLandscapeFooter && model.padLayout == .ansiNumbers)) ? "Symbols" : "Numbers", value: model.typingLayoutValue, fontSize: 13,
+            contentPosition: usesPadKeyPositions ? (usesLandscapeFooter ? .bottomRight : .bottomLeft) : .center,
             route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .layout(letters ? .letters : .numbers)) })
             .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
     }
@@ -2837,7 +2851,7 @@ private struct KeyboardTypingView: View {
                                         .keyboardKeySurface(radius: 7)
                                 }
                                 if index == 2 {
-                                    RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete")
+                                    RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete", padStyle: isPad)
                                         .frame(width: isPad ? 64 : 42, height: plan.keyHeight)
                                         .keyboardKeySurface(radius: 7, modifier: isPad)
                                     if isLandscape { padReturn(width: 112, height: plan.keyHeight) }
@@ -2860,12 +2874,12 @@ private struct KeyboardTypingView: View {
         ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: .letters, hasAuxiliaryRow: false, widePad: true).enumerated()), id: \.offset) { row, keys in
             HStack(spacing: pad.keySpacing) {
                 if row == 0 {
-                    KeyboardTouchKey(title: "tab", identifier: "keyboard.typing.tab", label: "Tab", fontSize: 13,
+                    KeyboardTouchKey(title: "tab", identifier: "keyboard.typing.tab", label: "Tab", fontSize: 13, contentPosition: .bottomLeft,
                         route: mode, factory: { [mode = mode] in action(mode, .tab) })
                         .frame(width: pad.characterWidth, height: height).keyboardKeySurface(radius: 7, modifier: true)
                 } else if row == 1 {
                     KeyboardTouchKey(title: "caps lock", identifier: "keyboard.typing.capsLock", label: "Caps Lock",
-                        value: typing.state.shift == .capsLock ? "on" : "off", fontSize: 12,
+                        value: typing.state.shift == .capsLock ? "on" : "off", fontSize: 12, contentPosition: .bottomLeft,
                         route: mode, factory: { [mode = mode] in action(mode, .capsLock) })
                         .frame(width: pad.capsWidth, height: height).keyboardKeySurface(radius: 7, modifier: true)
                         .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(typing.state.shift == .capsLock ? KeyboardPalette.accent : Color.clear, lineWidth: 1))
@@ -2878,7 +2892,7 @@ private struct KeyboardTypingView: View {
                         .frame(width: pad.characterWidth, height: height).keyboardKeySurface(radius: 7)
                 }
                 if row == 0 {
-                    RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete")
+                    RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete", padStyle: true)
                         .frame(width: pad.characterWidth, height: height).keyboardKeySurface(radius: 7, modifier: true)
                 } else if row == 1 {
                     padReturn(width: pad.returnWidth, height: height)
@@ -2895,12 +2909,12 @@ private struct KeyboardTypingView: View {
         return ForEach(Array(rows.enumerated()), id: \.offset) { row, keys in
             HStack(spacing: pad.keySpacing) {
                 if row == offset {
-                    KeyboardTouchKey(title: "tab", identifier: "keyboard.typing.tab", label: "Tab", fontSize: 13,
+                    KeyboardTouchKey(title: "tab", identifier: "keyboard.typing.tab", label: "Tab", fontSize: 13, contentPosition: .bottomLeft,
                         route: mode, factory: { [mode = mode] in action(mode, .tab) })
                         .frame(width: pad.tabWidth, height: height).keyboardKeySurface(radius: 7, modifier: true)
                 } else if row == offset + 1 {
                     KeyboardTouchKey(title: "caps lock", identifier: "keyboard.typing.capsLock", label: "Caps Lock",
-                        value: typing.state.shift == .capsLock ? "on" : "off", fontSize: 12,
+                        value: typing.state.shift == .capsLock ? "on" : "off", fontSize: 12, contentPosition: .bottomLeft,
                         route: mode, factory: { [mode = mode] in action(mode, .capsLock) })
                         .frame(width: pad.capsWidth, height: height).keyboardKeySurface(radius: 7, modifier: true)
                 } else if row == offset + 2 { padShift(width: pad.shiftWidth, height: height, right: false) }
@@ -2911,7 +2925,7 @@ private struct KeyboardTypingView: View {
                         .keyboardKeySurface(radius: 7)
                 }
                 if row == 0 {
-                    RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete")
+                    RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete", padStyle: true)
                         .frame(width: pad.deleteWidth, height: height).keyboardKeySurface(radius: 7, modifier: true)
                 } else if row == offset + 1 {
                     padReturn(width: pad.returnWidth, height: height)
@@ -2922,15 +2936,15 @@ private struct KeyboardTypingView: View {
 
     private func padReturn(width: CGFloat, height: CGFloat) -> some View {
         KeyboardTouchKey(title: returnTitle, identifier: "keyboard.return", label: "\(returnTitle) key", fontSize: 14,
-            isAction: true, route: mode, factory: { [mode = mode] in action(mode, .returnKey) })
+            isAction: true, contentPosition: .bottomRight, route: mode, factory: { [mode = mode] in action(mode, .returnKey) })
             .frame(width: width, height: height)
             .background(Color(uiColor: .systemBlue), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
     private func padShift(width: CGFloat, height: CGFloat, right: Bool) -> some View {
-        KeyboardTouchKey(title: nil,
-            symbol: typing.state.shift == .capsLock ? "capslock.fill" : typing.state.shift == .uppercase ? "shift.fill" : "shift",
+        KeyboardTouchKey(title: "shift",
             identifier: right ? "keyboard.typing.shift.right" : "keyboard.typing.shift", label: "Shift", value: shiftValue,
+            fontSize: 13, contentPosition: right ? .bottomRight : .bottomLeft,
             route: mode, factory: { [mode = mode] in action(mode, .shift) })
             .frame(width: width, height: height).keyboardKeySurface(radius: 7, modifier: true)
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(typing.state.shift == .lowercase ? Color.clear : KeyboardPalette.accent.opacity(0.65), lineWidth: 1))
@@ -2951,18 +2965,23 @@ private struct KeyboardTypingView: View {
     private func typingCharacterKey(_ key: String, hasAuxiliaryRow: Bool, isAuxiliaryKey: Bool, widePad: Bool = false, ansiPad: Bool = false,
                                     identifier: String, fontSize: CGFloat) -> some View {
         let keyID = KeyboardKeySettings.identifier(forCharacter: key) ?? ""
-        let text = isAuxiliaryKey ? key : KeyboardTypingLayoutPolicy.output(for: key, state: typing.state, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout) ?? key
+        let original = isAuxiliaryKey ? key : KeyboardTypingLayoutPolicy.output(for: key, state: typing.state, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout) ?? key
+        let text = keySettings.tapOutput(for: keyID, defaultText: original,
+            shifted: KeyboardTypingLayoutPolicy.usesShiftedTap(for: key, state: typing.state, ansiPad: ansiPad))
+        let hasNumberRow = typing.state.layout == .letters && (hasAuxiliaryRow || (ansiPad && padLayout == .ansiNumbers))
         let down = KeyboardVariantPolicy.candidates(override: keySettings.candidates(for: keyID, gesture: .swipeDown),
-            defaults: KeyboardVariantPolicy.defaultSwipeDown(for: key, state: typing.state, widePad: widePad, ansiPad: ansiPad, mapping: symbolMapping))
-        return KeyboardVariantKey(text: text,
+            defaults: KeyboardVariantPolicy.defaultSwipeDown(for: key, state: typing.state, widePad: widePad, ansiPad: ansiPad, mapping: symbolMapping, hasNumberRow: hasNumberRow))
+        return KeyboardVariantKey(text: text ?? original,
             variants: KeyboardVariantPolicy.englishVariants(for: key, uppercase: typing.state.shift != .lowercase),
             identifier: identifier, value: layoutValue, route: mode, enabled: enabled, fontSize: fontSize,
+            foreground: text == nil ? .secondaryLabel : .label,
+            hint: text == nil ? "Tap is off. Hold or swipe for configured choices." : nil,
             preservesPressAcrossTextChanges: true,
             longPressOptions: keySettings.candidates(for: keyID, gesture: .longPress),
             swipeUp: keySettings.candidates(for: keyID, gesture: .swipeUp)
                 ?? (isAuxiliaryKey ? [] : KeyboardVariantPolicy.defaultSwipeUp(for: key, state: typing.state)),
             swipeDown: down,
-            secondaryText: widePad ? down.first.map(symbolBoardPreview) : nil,
+            secondaryText: widePad || hasNumberRow ? down.first.map(symbolBoardPreview) : nil,
             factory: { [mode = mode] in variants(mode, key, hasAuxiliaryRow, isAuxiliaryKey, widePad, ansiPad) })
     }
 
@@ -2977,9 +2996,10 @@ private struct KeyboardTypingView: View {
                 .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(typing.state.shift == .lowercase ? Color.clear : KeyboardPalette.accent.opacity(0.65), lineWidth: 1))
         } else {
             let symbols = typing.state.layout == .numbers
-            KeyboardTouchKey(title: symbols ? "#+=" : isLandscape && padLayout == .ansiNumbers ? "=<>" : "123",
+            KeyboardTouchKey(title: symbols ? "#+=" : isLandscape && padLayout == .ansiNumbers ? "=<>" : isPad ? ".?123" : "123",
                 identifier: symbols ? "keyboard.typing.symbols" : "keyboard.typing.numbers",
                 label: symbols ? "More symbols" : "Numbers", value: layoutValue, fontSize: 13,
+                contentPosition: isPad && height >= 44 ? .bottomLeft : .center,
                 route: mode, factory: { [mode = mode] in action(mode, .layout(symbols ? .symbols : .numbers)) })
                 .frame(width: isPad ? 64 : 42, height: height)
                 .keyboardKeySurface(radius: 7, modifier: isPad)
@@ -3040,6 +3060,7 @@ private struct KeyboardTouchKey: UIViewRepresentable {
     var fontSize: CGFloat = 20
     var secondary = false
     var isAction = false
+    var contentPosition: KeyboardKeyContentPosition = .center
     let route: UUID
     let factory: () -> (() -> Bool)
 
@@ -3048,7 +3069,8 @@ private struct KeyboardTouchKey: UIViewRepresentable {
         view.configure(contextIdentifier: route, actionFactory: factory)
         view.setTitle(title, for: .normal)
         view.setImage(symbol.flatMap { UIImage(systemName: $0) }, for: .normal)
-        view.titleLabel?.font = .systemFont(ofSize: fontSize, weight: isAction ? .semibold : .regular)
+        view.contentPosition = contentPosition
+        view.titleLabel?.font = .systemFont(ofSize: fontSize, weight: isAction && contentPosition == .center ? .semibold : .regular)
         view.titleLabel?.adjustsFontSizeToFitWidth = true
         view.titleLabel?.minimumScaleFactor = 0.7
         let foreground = isAction ? KeyboardPalette.actionTextUI : secondary ? UIColor.secondaryLabel : UIColor.label
@@ -3227,8 +3249,9 @@ private final class InspectableKeyButton: UIControl {
 private struct InputModeSwitchKey: UIViewRepresentable {
     weak var controller: KeyboardViewController?
     var isModifier = false
-    func makeUIView(context: Context) -> UIButton {
-        let button = UIButton(type: .system)
+    var contentPosition: KeyboardKeyContentPosition = .center
+    func makeUIView(context: Context) -> KeyboardGlobeButton {
+        let button = KeyboardGlobeButton(type: .system)
         button.setImage(UIImage(systemName: "globe", withConfiguration: UIImage.SymbolConfiguration(pointSize: 19)), for: .normal)
         button.tintColor = .label
         button.backgroundColor = isModifier ? KeyboardPalette.modifierUI : KeyboardPalette.keyUI
@@ -3245,9 +3268,17 @@ private struct InputModeSwitchKey: UIViewRepresentable {
         button.addTarget(controller, action: #selector(UIInputViewController.handleInputModeList(from:with:)), for: .allTouchEvents)
         return button
     }
-    func updateUIView(_ uiView: UIButton, context: Context) {
+    func updateUIView(_ uiView: KeyboardGlobeButton, context: Context) {
+        uiView.contentPosition = contentPosition
         uiView.backgroundColor = isModifier ? KeyboardPalette.modifierUI : KeyboardPalette.keyUI
         uiView.layer.borderColor = KeyboardPalette.borderUI.resolvedColor(with: uiView.traitCollection).cgColor
+    }
+}
+
+private final class KeyboardGlobeButton: UIButton {
+    var contentPosition: KeyboardKeyContentPosition = .center { didSet { setNeedsLayout() } }
+    override func imageRect(forContentRect contentRect: CGRect) -> CGRect {
+        contentPosition.alignedRect(super.imageRect(forContentRect: contentRect), in: contentRect)
     }
 }
 
@@ -3257,11 +3288,17 @@ private struct RepeatingDeleteKey: UIViewRepresentable {
     let route: UUID
     var identifier = "keyboard.delete"
     var enabled = true
+    var padStyle = false
     func makeUIView(context: Context) -> RepeatingDeleteButton { RepeatingDeleteButton() }
     func updateUIView(_ uiView: RepeatingDeleteButton, context: Context) {
         // Capture the scope this key currently displays, even before a model
         // transition has reached updateUIView. Each press gets one action.
         uiView.configure(isQuery: isQuery, enabled: enabled, actionFactory: { [route, isQuery] in action(route, isQuery) })
+        uiView.contentPosition = padStyle ? .bottomRight : .center
+        uiView.setTitle(padStyle ? "delete" : nil, for: .normal)
+        uiView.setTitleColor(.label, for: .normal)
+        uiView.titleLabel?.font = .systemFont(ofSize: 13)
+        uiView.setImage(padStyle ? nil : UIImage(systemName: "delete.left", withConfiguration: UIImage.SymbolConfiguration(pointSize: 19)), for: .normal)
         uiView.accessibilityIdentifier = identifier
     }
 }

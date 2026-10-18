@@ -1,17 +1,17 @@
 Uniboard 1.1 beta: English, configurable keys and offline Unicode. Public App Store release awaits device approval.
 
 IPAD LAYOUTS
-Portrait keeps three letter rows. App Settings > iPad keyboard selects wide-landscape stock three-row, compact ANSI three-row, or ANSI with dedicated digits (default). Narrow/floating panes retain compact keys. Check equal key heights, staggered punctuation, gray Tab/Caps/Shift/Delete and one blue Return on every page. Numbers/Symbols and Hide Keyboard sit right of Space; U/Globe/Star sit left. Test actual hide/reopen and both rotations without text changes.
+Portrait keeps three letter rows. App Settings > iPad keyboard selects wide-landscape stock three-row, compact ANSI three-row, or ANSI with dedicated digits (default). Narrow/floating panes retain compact keys. Check equal key heights, staggered punctuation, gray corner-aligned modifiers and one blue Return on every page. Numbers/Symbols and Hide Keyboard sit right of Space; U/Globe/Star sit left. Test actual hide/reopen and both rotations without text changes.
 
-Manual Shift changes ANSI digits/punctuation (1 to !, [ to {). Caps Lock and automatic sentence capitals must keep digits literal. In four-row mode, both symbol pages replace repeated digits with complementary symbols. App-only swipe-down mapping offers the standard symbol page, iPad hints or Off. Per-key overrides win; ordinary taps remain QWERTY. Relaunch and reopen with Full Access OFF to verify each preset.
+Manual Shift changes ANSI digits/punctuation (1 to !, [ to {). Caps Lock and automatic sentence capitals must keep digits literal. In four-row mode, both symbol pages replace repeated digits with complementary symbols. App-only swipe-down mapping offers the standard symbol page, iPad hints or Off. Per-key overrides win; default taps stay QWERTY. Relaunch and reopen with Full Access OFF to verify each preset.
 
 TYPING AND CUSTOM KEYS
 QWERTY starts with the toolbar hidden. U toggles it without losing the query/caret. Check Shift/Caps, automatic capitalization, double-Space, URL/email, Return and held Backspace. Hold letters for accents. Up selects the opposite case and accents without consuming Shift; slide sideways before lifting.
 
-App Settings > Customize keyboard keys changes letter/number/symbol long press and up/down swipes. Function and query keys stay standard. Test Default, Off and Custom. Save/reorder up to 16 exact choices, including whole emoji and decomposed text. Exact case/sequences must survive relaunch. Cancel, change field, resize or rotate mid-press: no stale insertion.
+App Settings > Customize keyboard keys: independent Tap, Shifted tap, Long press, Up, Down. Tap has one output; gestures have16 choices. Default Shift uppercases one remapped letter; custom Shifted tap is exact. Test Off without losing other gestures, emoji and decomposed text. Reopen with Full Access OFF. Cancel/rotate/resize mid-press: no stale insertion.
 
 PHONE ROWS AND BOARDS
-Phone keys stay36pt; four character rows add1–0 and #+=, five add a scrolling saved strip. The expanded symbol page omits digits. Short123 pages retain digits. Saved/Recent keys match digit widths, spacing and rounded surfaces without code-point captions. Scrolling must not insert.
+Phone keys stay36pt; four character rows add1–0 and #+=, five add a scrolling saved strip. The expanded symbol page omits digits. Short123 pages retain digits. With a number row, Q–P down-flicks use ten replacement symbols; overrides win. Saved/Recent keys match digit widths, spacing and rounded surfaces without code-point captions. Scrolling must not insert.
 
 Star opens Favorites; back returns to QWERTY. Hold to switch/manage boards or choose Star’s preferred target. Temporary selection does not change it. Create/rename/reorder/delete a board, make it preferred, relaunch and delete it: Star falls back to Favorites. Symbols is included; saving asks for a board.
 

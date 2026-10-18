@@ -2,10 +2,10 @@ import SwiftUI
 
 private extension KeyboardKeySettings.Gesture {
     var title: String {
-        switch self { case .longPress: return "Long press"; case .swipeUp: return "Swipe up"; case .swipeDown: return "Swipe down" }
+        switch self { case .tap: return "Tap"; case .shiftedTap: return "Shifted tap"; case .longPress: return "Long press"; case .swipeUp: return "Swipe up"; case .swipeDown: return "Swipe down" }
     }
     var icon: String {
-        switch self { case .longPress: return "hand.tap"; case .swipeUp: return "arrow.up"; case .swipeDown: return "arrow.down" }
+        switch self { case .tap: return "hand.point.up"; case .shiftedTap: return "shift"; case .longPress: return "hand.tap"; case .swipeUp: return "arrow.up"; case .swipeDown: return "arrow.down" }
     }
 }
 
@@ -27,8 +27,8 @@ struct KeyboardKeySettingsView: View {
                 Section { Text(error).foregroundStyle(.red).accessibilityIdentifier("keySettings.saveError") }
             }
             Section {
-                Text("Choose a letter, number or symbol key to change its long press, swipe up and swipe down choices. After swiping, slide left or right to select a choice, then lift to insert.")
-                Text("Ordinary taps keep their usual behavior. Custom choices are inserted exactly as saved, regardless of Shift.")
+                Text("Choose a letter, number or symbol key to remap its tap, shifted tap, long press, swipe up and swipe down independently. After swiping, slide left or right to select a choice, then lift to insert.")
+                Text("A tap has one output; gestures can have multiple literal choices. Default shifted taps capitalize a remapped single letter. Set Shifted tap to choose an exact alternative.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             ForEach(groups, id: \.0) { title, kind in
@@ -72,7 +72,7 @@ struct KeyboardKeySettingsView: View {
         }
         .searchable(text: $query, prompt: "Find a key")
         .onAppear { keys.refresh() }
-        .confirmationDialog("Restore every key’s default gestures?", isPresented: $resetConfirmation, titleVisibility: .visible) {
+        .confirmationDialog("Restore every key’s defaults?", isPresented: $resetConfirmation, titleVisibility: .visible) {
             Button("Restore all defaults", role: .destructive) { keys.resetAll() }
         } message: { Text("Your symbol boards and favorites are kept.") }
     }
@@ -100,7 +100,7 @@ private struct KeyboardSingleKeySettingsView: View {
                         .accessibilityValue(summary(keys.snapshot.candidates(for: descriptor.id, gesture: gesture)))
                 }
             } footer: {
-                Text("The first choice is selected when a gesture opens. Slide left or right before lifting to choose another.")
+                Text("Tap and shifted tap each have one output. Long press, swipe up and swipe down have separate choices; slide sideways before lifting to choose another.")
             }
             Section {
                 Button("Restore this key’s defaults", role: .destructive) { resetConfirmation = true }
@@ -112,7 +112,7 @@ private struct KeyboardSingleKeySettingsView: View {
         .navigationTitle(descriptor.title + " key").navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("keySettings.detail.\(descriptor.id)")
         .onAppear { keys.refresh() }
-        .confirmationDialog("Restore this key’s default gestures?", isPresented: $resetConfirmation, titleVisibility: .visible) {
+        .confirmationDialog("Restore this key’s defaults?", isPresented: $resetConfirmation, titleVisibility: .visible) {
             Button("Restore defaults", role: .destructive) { keys.reset(keyID: descriptor.id) }
         }
     }
@@ -157,7 +157,11 @@ private struct KeyboardGestureSettingsView: View {
                     ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }.pickerStyle(.segmented).accessibilityIdentifier("keySettings.behavior")
                 if mode == .system {
-                    Text("Use Uniboard’s built-in behavior for this gesture.").foregroundStyle(.secondary)
+                    Text("Use Uniboard’s built-in behavior.").foregroundStyle(.secondary)
+                    if gesture == .tap || gesture == .shiftedTap {
+                        Text("Tap remaps this physical key without changing its hold or swipes. Default Shifted tap uppercases a remapped single letter; snippets and symbols stay literal. A custom Shifted tap is always exact. On ANSI symbol keys, only manual Shift selects it; Caps Lock and automatic capitals do not.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if gesture == .swipeUp && descriptor.kind == .letter {
                         Text("Selects the opposite case first, followed by its accented choices. The keyboard’s Shift state stays unchanged.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -167,7 +171,7 @@ private struct KeyboardGestureSettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } else if mode == .disabled {
-                    Text("This gesture is disabled. An ordinary tap still works.").foregroundStyle(.secondary)
+                    Text(gesture.maximumChoices == 1 ? "This tap is disabled. The other tap and gestures keep their own settings." : "This gesture is disabled. An ordinary tap still works.").foregroundStyle(.secondary)
                 }
             }
             if mode == .custom {
@@ -184,16 +188,18 @@ private struct KeyboardGestureSettingsView: View {
                     }
                     .onDelete { choices.remove(atOffsets: $0) }
                     .onMove { choices.move(fromOffsets: $0, toOffset: $1) }
-                    Button { choices.append(Choice(text: "")) } label: { Label("Add choice", systemImage: "plus") }
-                        .disabled(choices.count >= KeyboardVariantPolicy.maximumVariants)
-                        .accessibilityIdentifier("keySettings.addChoice")
+                    if gesture.maximumChoices > 1 {
+                        Button { choices.append(Choice(text: "")) } label: { Label("Add choice", systemImage: "plus") }
+                            .disabled(choices.count >= gesture.maximumChoices)
+                            .accessibilityIdentifier("keySettings.addChoice")
+                    }
                     Button { showsUnicodePicker = true } label: { Label("Choose from Unicode", systemImage: "character.book.closed") }
-                        .disabled(choices.count >= KeyboardVariantPolicy.maximumVariants)
+                        .disabled(gesture.maximumChoices > 1 && choices.count >= gesture.maximumChoices)
                         .accessibilityIdentifier("keySettings.chooseUnicode")
-                } header: { Text("Choices in selection order") } footer: {
-                    Text("Up to 16 different choices, each up to 64 Unicode scalars. Paste a whole emoji or combining sequence into one choice. Swipe a row to remove it; use Edit to reorder.")
+                } header: { Text(gesture.maximumChoices == 1 ? "Tap output" : "Choices in selection order") } footer: {
+                    Text(gesture.maximumChoices == 1 ? "One output, up to 64 Unicode scalars. Use a single letter, whole emoji, combining sequence or text snippet. Choosing from Unicode replaces this output." : "Up to 16 different choices, each up to 64 Unicode scalars. Paste a whole emoji or combining sequence into one choice. Swipe a row to remove it; use Edit to reorder.")
                 }
-                if !valid { Text("Choices must be nonempty and cannot repeat exactly. Check the 16-choice and 64-scalar limits.").font(.caption).foregroundStyle(.red) }
+                if !valid { Text(gesture.maximumChoices == 1 ? "Use one nonempty output, up to 64 Unicode scalars." : "Choices must be nonempty and cannot repeat exactly. Check the 16-choice and 64-scalar limits.").font(.caption).foregroundStyle(.red) }
             }
             if saveAttempted, let error = keys.saveError {
                 Text(error).foregroundStyle(.red).accessibilityIdentifier("keySettings.saveError")
@@ -208,7 +214,7 @@ private struct KeyboardGestureSettingsView: View {
                     else { saveAlert = true }
                 }.disabled(!valid).accessibilityIdentifier("keySettings.save")
             }
-            ToolbarItem(placement: .bottomBar) { if mode == .custom { EditButton() } }
+            ToolbarItem(placement: .bottomBar) { if mode == .custom && gesture.maximumChoices > 1 { EditButton() } }
         }
         .onChange(of: mode) { _, value in if value == .custom && choices.isEmpty { choices.append(Choice(text: "")) } }
         .alert("Couldn’t save key", isPresented: $saveAlert) {
@@ -216,7 +222,8 @@ private struct KeyboardGestureSettingsView: View {
         } message: { Text(keys.saveError ?? "Please try again.") }
         .sheet(isPresented: $showsUnicodePicker) {
             KeyboardKeyUnicodePicker { text in
-                guard choices.count < KeyboardVariantPolicy.maximumVariants else { return }
+                if gesture.maximumChoices == 1 { choices = [Choice(text: text)]; return }
+                guard choices.count < gesture.maximumChoices else { return }
                 if choices.count == 1 && choices[0].text.isEmpty { choices[0].text = text }
                 else { choices.append(Choice(text: text)) }
             }

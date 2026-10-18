@@ -8,5 +8,5 @@ A daily English keyboard with full Unicode close at hand.
 - Unicode 18 latest release by default, previous releases 17/16 and optional 19 DRAFT, selected only in app Settings. All four work offline in the keyboard without Full Access.
 - Edition, optional preview fonts and the optional collapse key are controlled only in app Settings. The keyboard menu offers order and Open companion app.
 - Matching rounded symbol keycaps; expanded symbol pages replace redundant digits with common symbols.
-- App-only letter/number/symbol settings for long press, swipe up/down and ordered literal candidates; function keys keep their usual actions. Opposite-case letter flicks retain Shift and support horizontal choice selection.
+- Independent Tap, Shifted tap, Long press, Up and Down mappings for character keys. One tap output or ordered gesture choices; function keys stay standard. With digits visible, Q–P down-flicks use ten complementary symbols.
 - iPad portrait keeps three rows. App-only landscape presets offer stock, compact ANSI or ANSI with digits; Numbers/Symbols and Hide Keyboard sit right of Space. Choose standard/iPad swipe-down symbols or Off. Manual Shift handles ANSI punctuation; Caps Lock and automatic capitals keep digits literal.

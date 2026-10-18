@@ -24,7 +24,7 @@ struct SetupView: View {
                         Image(systemName: "keyboard").font(.title2)
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Customize keyboard keys").font(.headline)
-                            Text("Long press and swipe choices for each key.")
+                            Text("Tap mappings, long press and swipe choices.")
                                 .font(.caption).foregroundStyle(Palette.muted)
                         }
                         Spacer()

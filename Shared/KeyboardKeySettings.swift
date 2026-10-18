@@ -8,7 +8,9 @@ import Glibc
 /// Explicit app-authored key choices. The keyboard only reads this fixed file;
 /// host text, query text and transient typing state are never stored here.
 struct KeyboardKeySettings {
-    enum Gesture: String, CaseIterable, Codable, Sendable { case longPress, swipeUp, swipeDown }
+    enum Gesture: String, CaseIterable, Codable, Sendable { case tap, shiftedTap, longPress, swipeUp, swipeDown
+        var maximumChoices: Int { self == .tap || self == .shiftedTap ? 1 : KeyboardVariantPolicy.maximumVariants }
+    }
     enum Kind: String, Sendable { case letter, digit, character }
     struct Descriptor: Identifiable, Equatable, Sendable {
         let id: String
@@ -18,23 +20,28 @@ struct KeyboardKeySettings {
     }
 
     struct Overrides: Codable, Equatable, Sendable {
+        let tap: [String]?
+        let shiftedTap: [String]?
         let longPress: [String]?
         let swipeUp: [String]?
         let swipeDown: [String]?
 
-        init(longPress: [String]? = nil, swipeUp: [String]? = nil, swipeDown: [String]? = nil) {
+        init(tap: [String]? = nil, shiftedTap: [String]? = nil, longPress: [String]? = nil, swipeUp: [String]? = nil, swipeDown: [String]? = nil) {
+            self.tap = tap; self.shiftedTap = shiftedTap
             self.longPress = longPress; self.swipeUp = swipeUp; self.swipeDown = swipeDown
         }
         /// nil means the system default; an explicit empty list disables it.
         func candidates(for gesture: Gesture) -> [String]? {
-            switch gesture { case .longPress: return longPress; case .swipeUp: return swipeUp; case .swipeDown: return swipeDown }
+            switch gesture { case .tap: return tap; case .shiftedTap: return shiftedTap; case .longPress: return longPress; case .swipeUp: return swipeUp; case .swipeDown: return swipeDown }
         }
-        fileprivate var usesDefaults: Bool { longPress == nil && swipeUp == nil && swipeDown == nil }
+        fileprivate var usesDefaults: Bool { tap == nil && shiftedTap == nil && longPress == nil && swipeUp == nil && swipeDown == nil }
         fileprivate func replacing(_ values: [String]?, for gesture: Gesture) -> Overrides {
             switch gesture {
-            case .longPress: return .init(longPress: values, swipeUp: swipeUp, swipeDown: swipeDown)
-            case .swipeUp: return .init(longPress: longPress, swipeUp: values, swipeDown: swipeDown)
-            case .swipeDown: return .init(longPress: longPress, swipeUp: swipeUp, swipeDown: values)
+            case .tap: return .init(tap: values, shiftedTap: shiftedTap, longPress: longPress, swipeUp: swipeUp, swipeDown: swipeDown)
+            case .shiftedTap: return .init(tap: tap, shiftedTap: values, longPress: longPress, swipeUp: swipeUp, swipeDown: swipeDown)
+            case .longPress: return .init(tap: tap, shiftedTap: shiftedTap, longPress: values, swipeUp: swipeUp, swipeDown: swipeDown)
+            case .swipeUp: return .init(tap: tap, shiftedTap: shiftedTap, longPress: longPress, swipeUp: values, swipeDown: swipeDown)
+            case .swipeDown: return .init(tap: tap, shiftedTap: shiftedTap, longPress: longPress, swipeUp: swipeUp, swipeDown: values)
             }
         }
         static func == (lhs: Self, rhs: Self) -> Bool {
@@ -46,11 +53,13 @@ struct KeyboardKeySettings {
                 }
             }
         }
-        private enum CodingKeys: String, CodingKey { case longPress, swipeUp, swipeDown }
+        private enum CodingKeys: String, CodingKey { case tap, shiftedTap, longPress, swipeUp, swipeDown }
         init(from decoder: Decoder) throws {
-            try KeyboardKeySettings.allowKeys(decoder, ["longPress", "swipeUp", "swipeDown"])
+            try KeyboardKeySettings.allowKeys(decoder, ["tap", "shiftedTap", "longPress", "swipeUp", "swipeDown"])
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            self.init(longPress: try c.decodeIfPresent([String].self, forKey: .longPress),
+            self.init(tap: try c.decodeIfPresent([String].self, forKey: .tap),
+                      shiftedTap: try c.decodeIfPresent([String].self, forKey: .shiftedTap),
+                      longPress: try c.decodeIfPresent([String].self, forKey: .longPress),
                       swipeUp: try c.decodeIfPresent([String].self, forKey: .swipeUp),
                       swipeDown: try c.decodeIfPresent([String].self, forKey: .swipeDown))
             try KeyboardKeySettings.validate(self)
@@ -58,6 +67,8 @@ struct KeyboardKeySettings {
         func encode(to encoder: Encoder) throws {
             try KeyboardKeySettings.validate(self)
             var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encodeIfPresent(tap, forKey: .tap)
+            try c.encodeIfPresent(shiftedTap, forKey: .shiftedTap)
             try c.encodeIfPresent(longPress, forKey: .longPress)
             try c.encodeIfPresent(swipeUp, forKey: .swipeUp)
             try c.encodeIfPresent(swipeDown, forKey: .swipeDown)
@@ -71,6 +82,21 @@ struct KeyboardKeySettings {
         func candidates(for keyID: String, gesture: Gesture) -> [String]? {
             guard KeyboardKeySettings.descriptor(for: keyID) != nil else { return nil }
             return overrides[keyID]?.candidates(for: gesture)
+        }
+        /// Taps are independent of the three gesture candidate sets. Explicit
+        /// shifted text stays literal; a default shifted letter mapping follows
+        /// the remapped letter's case, while snippets and symbols stay exact.
+        func tapOutput(for keyID: String, defaultText: String, shifted: Bool) -> String? {
+            guard let descriptor = KeyboardKeySettings.descriptor(for: keyID), KeyboardVariantPolicy.validText(defaultText) else { return nil }
+            let values = overrides[keyID]
+            let explicitShift = shifted ? values?.shiftedTap : nil
+            guard let choices = explicitShift ?? values?.tap else { return defaultText }
+            guard choices.count == 1, let text = choices.first, KeyboardVariantPolicy.validText(text) else { return nil }
+            if shifted && explicitShift == nil && descriptor.kind == .letter && text.count == 1 && text.first?.isLetter == true {
+                let upper = text.uppercased()
+                return KeyboardVariantPolicy.validText(upper) ? upper : text
+            }
+            return text
         }
         /// The editor prepares a value first, then publishes it only if save succeeds.
         func updating(_ candidates: [String]?, for keyID: String, gesture: Gesture) -> Snapshot? {
@@ -90,12 +116,14 @@ struct KeyboardKeySettings {
         init(from decoder: Decoder) throws {
             try KeyboardKeySettings.allowKeys(decoder, ["schemaVersion", "overrides"])
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            guard try c.decode(Int.self, forKey: .schemaVersion) == 1 else { throw Invalid.settings }
+            let schema = try c.decode(Int.self, forKey: .schemaVersion)
+            guard schema == 1 || schema == 2 else { throw Invalid.settings }
             let entries = try c.decode([Entry].self, forKey: .overrides)
             guard entries.count <= KeyboardKeySettings.descriptors.count + KeyboardKeySettings.legacyFunctionKeyIDs.count else { throw Invalid.settings }
             var seen = Set<String>()
             var result: [String: Overrides] = [:]
             for entry in entries {
+                guard schema != 1 || !entry.includesTapFields else { throw Invalid.settings }
                 guard seen.insert(entry.keyID).inserted else { throw Invalid.settings }
                 // Earlier 1.1 betas offered function-key overrides. Retire only
                 // those exact IDs without discarding valid character settings.
@@ -111,7 +139,7 @@ struct KeyboardKeySettings {
         func encode(to encoder: Encoder) throws {
             try KeyboardKeySettings.validate(self)
             var c = encoder.container(keyedBy: CodingKeys.self)
-            try c.encode(1, forKey: .schemaVersion)
+            try c.encode(2, forKey: .schemaVersion)
             let entries = overrides.sorted { $0.key < $1.key }.map { Entry(keyID: $0.key, values: $0.value) }
             try c.encode(entries, forKey: .overrides)
         }
@@ -122,13 +150,20 @@ struct KeyboardKeySettings {
     private struct Entry: Codable {
         let keyID: String
         let values: Overrides
-        private enum CodingKeys: String, CodingKey { case keyID, longPress, swipeUp, swipeDown }
-        init(keyID: String, values: Overrides) { self.keyID = keyID; self.values = values }
+        let includesTapFields: Bool
+        private enum CodingKeys: String, CodingKey { case keyID, tap, shiftedTap, longPress, swipeUp, swipeDown }
+        init(keyID: String, values: Overrides) {
+            self.keyID = keyID; self.values = values
+            includesTapFields = values.tap != nil || values.shiftedTap != nil
+        }
         init(from decoder: Decoder) throws {
-            try KeyboardKeySettings.allowKeys(decoder, ["keyID", "longPress", "swipeUp", "swipeDown"])
+            try KeyboardKeySettings.allowKeys(decoder, ["keyID", "tap", "shiftedTap", "longPress", "swipeUp", "swipeDown"])
             let c = try decoder.container(keyedBy: CodingKeys.self)
             keyID = try c.decode(String.self, forKey: .keyID)
-            values = Overrides(longPress: try c.decodeIfPresent([String].self, forKey: .longPress),
+            includesTapFields = c.contains(.tap) || c.contains(.shiftedTap)
+            values = Overrides(tap: try c.decodeIfPresent([String].self, forKey: .tap),
+                               shiftedTap: try c.decodeIfPresent([String].self, forKey: .shiftedTap),
+                               longPress: try c.decodeIfPresent([String].self, forKey: .longPress),
                                swipeUp: try c.decodeIfPresent([String].self, forKey: .swipeUp),
                                swipeDown: try c.decodeIfPresent([String].self, forKey: .swipeDown))
             try KeyboardKeySettings.validate(values)
@@ -136,6 +171,8 @@ struct KeyboardKeySettings {
         func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(keyID, forKey: .keyID)
+            try c.encodeIfPresent(values.tap, forKey: .tap)
+            try c.encodeIfPresent(values.shiftedTap, forKey: .shiftedTap)
             try c.encodeIfPresent(values.longPress, forKey: .longPress)
             try c.encodeIfPresent(values.swipeUp, forKey: .swipeUp)
             try c.encodeIfPresent(values.swipeDown, forKey: .swipeDown)
@@ -231,8 +268,9 @@ struct KeyboardKeySettings {
         guard Set(fields.keys).isSubset(of: allowed) else { throw Invalid.settings }
     }
     private static func validate(_ values: Overrides) throws {
-        for candidates in Gesture.allCases.compactMap({ values.candidates(for: $0) }) {
-            guard candidates.count <= KeyboardVariantPolicy.maximumVariants else { throw Invalid.settings }
+        for gesture in Gesture.allCases {
+            guard let candidates = values.candidates(for: gesture) else { continue }
+            guard candidates.count <= gesture.maximumChoices else { throw Invalid.settings }
             var seen: Set<[UInt16]> = []
             for text in candidates {
                 guard KeyboardVariantPolicy.validText(text), seen.insert(Array(text.utf16)).inserted else { throw Invalid.settings }

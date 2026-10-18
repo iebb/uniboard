@@ -302,6 +302,7 @@ final class KeyboardVariantInteraction {
         guard let captured = freshAccessibilityActions() else { return false }
         let values: [String]?
         switch gesture {
+        case .tap, .shiftedTap: return false
         case .longPress: values = captured.longPressOptions ?? captured.options ?? options
         case .swipeUp: values = captured.swipeUp
         case .swipeDown: values = captured.swipeDown
@@ -352,6 +353,7 @@ final class KeyboardVariantButton: UIControl {
     private var originalRect = CGRect.zero
     private var currentOptions: [String] = []
     private var configuredFont: UIFont = .systemFont(ofSize: 23)
+    private var contentPosition: KeyboardKeyContentPosition = .center
     private var popupFont: ((String) -> UIFont)?
     private var displayText: (String) -> String = { $0 }
     private lazy var holdArbitration = UILongPressGestureRecognizer(target: self, action: #selector(arbitrateHold(_:)))
@@ -403,10 +405,13 @@ final class KeyboardVariantButton: UIControl {
         super.layoutSubviews()
         title.frame = bounds.insetBy(dx: 3, dy: 2)
         if !secondaryTitle.isHidden {
-            secondaryTitle.frame = CGRect(x: 3, y: 3, width: max(0, bounds.width - 6), height: 15)
-            title.frame = CGRect(x: 3, y: 17, width: max(0, bounds.width - 6), height: max(0, bounds.height - 19))
+            let compact = bounds.height < 44
+            secondaryTitle.font = .systemFont(ofSize: compact ? 9 : 12)
+            secondaryTitle.frame = CGRect(x: 3, y: compact ? 1 : 3, width: max(0, bounds.width - 6), height: compact ? 10 : 15)
+            title.frame = CGRect(x: 3, y: compact ? 11 : 17, width: max(0, bounds.width - 6), height: max(0, bounds.height - (compact ? 12 : 19)))
         }
-        image.frame = bounds
+        image.frame = contentPosition.alignedRect(CGRect(origin: .zero, size: image.image?.size ?? bounds.size), in: bounds)
+        if contentPosition == .center { image.frame = bounds }
         if interaction.hasPhysicalPress, !geometryIsCurrent { interaction.cancel() }
     }
 
@@ -415,6 +420,7 @@ final class KeyboardVariantButton: UIControl {
                    preservesPressAcrossTextChanges: Bool = false,
                    longPressOptions: [String]? = nil, swipeUp: [String]? = nil, swipeDown: [String]? = nil,
                    secondaryText: String? = nil,
+                   contentPosition: KeyboardKeyContentPosition = .center,
                    showsInspection: Bool = false, showsEditing: Bool = false, holdLabel: String? = nil,
                    popupFont: ((String) -> UIFont)? = nil,
                    displayText: @escaping (String) -> String = { $0 },
@@ -433,6 +439,7 @@ final class KeyboardVariantButton: UIControl {
         isAccessibilityElement = enabled
         accessibilityElementsHidden = !enabled
         self.displayText = displayText
+        self.contentPosition = contentPosition
         secondaryTitle.text = secondaryText
         secondaryTitle.isHidden = secondaryText?.isEmpty != false || symbol != nil
         setNeedsLayout()

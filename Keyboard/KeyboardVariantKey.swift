@@ -20,6 +20,7 @@ struct KeyboardVariantKey: UIViewRepresentable {
     var swipeUp: [String]? = nil
     var swipeDown: [String]? = nil
     var secondaryText: String? = nil
+    var contentPosition: KeyboardKeyContentPosition = .center
     var showsInspection = false
     var showsEditing = false
     var holdLabel: String? = nil
@@ -31,7 +32,7 @@ struct KeyboardVariantKey: UIViewRepresentable {
         view.configure(context: route, key: identifier, text: text, variants: variants,
             enabled: enabled, font: font, symbol: symbol, foreground: foreground,
             preservesPressAcrossTextChanges: preservesPressAcrossTextChanges,
-            longPressOptions: longPressOptions, swipeUp: swipeUp, swipeDown: swipeDown, secondaryText: secondaryText,
+            longPressOptions: longPressOptions, swipeUp: swipeUp, swipeDown: swipeDown, secondaryText: secondaryText, contentPosition: contentPosition,
             showsInspection: showsInspection, showsEditing: showsEditing, holdLabel: holdLabel,
             popupFont: { UnicodeFontSupport.font(for: symbolBoardPreview($0), size: fontSize, enabled: useUnicodeFonts) },
             displayText: symbolBoardPreview, factory: factory)

@@ -12,6 +12,72 @@ import Glibc
 #endif
 
 final class KeyboardKeySettingsTests: XCTestCase {
+    func testTapShiftedTapAndThreeGesturesAreIndependentAndRoundTripForEveryCharacterKey() throws {
+        for key in Settings.descriptors {
+            var value = Settings.Snapshot.defaults
+            for (gesture, text) in zip(Settings.Gesture.allCases, ["w", "Ω", "é", "↑", "↓"]) {
+                value = try XCTUnwrap(value.updating([text], for: key.id, gesture: gesture))
+                XCTAssertEqual(value.candidates(for: key.id, gesture: gesture), [text])
+            }
+            XCTAssertEqual(load(try data(value)), value)
+            let encoded = try JSONEncoder().encode(try XCTUnwrap(value.overrides[key.id]))
+            XCTAssertEqual(try JSONDecoder().decode(Settings.Overrides.self, from: encoded), value.overrides[key.id])
+            for gesture in Settings.Gesture.allCases {
+                value = try XCTUnwrap(value.updating(nil, for: key.id, gesture: gesture))
+            }
+            XCTAssertEqual(value, .defaults)
+        }
+    }
+
+    func testTapResolutionCoversCaseExactSequencesDisabledOutputsAndMalformedDirectValues() throws {
+        let defaults = Settings.Snapshot.defaults
+        XCTAssertEqual(defaults.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Q")
+        for (text, upper) in [("w", "W"), ("é", "É"), ("e\u{301}", "E\u{301}"), ("ß", "SS"), ("xy", "xy"), ("👩‍💻", "👩‍💻"), (" ", " ")] {
+            let value = try XCTUnwrap(defaults.updating([text], for: "letter.q", gesture: .tap))
+            XCTAssertEqual(value.tapOutput(for: "letter.q", defaultText: "q", shifted: false)?.utf16.map { $0 }, Array(text.utf16))
+            XCTAssertEqual(value.tapOutput(for: "letter.q", defaultText: "Q", shifted: true)?.utf16.map { $0 }, Array(upper.utf16))
+            let shifted = try XCTUnwrap(value.updating(["Ω"], for: "letter.q", gesture: .shiftedTap))
+            XCTAssertEqual(shifted.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Ω")
+            XCTAssertEqual(shifted.tapOutput(for: "letter.q", defaultText: "q", shifted: false), text)
+        }
+        var value = try XCTUnwrap(defaults.updating([], for: "letter.q", gesture: .tap))
+        XCTAssertNil(value.tapOutput(for: "letter.q", defaultText: "Q", shifted: true))
+        value = try XCTUnwrap(value.updating(["Shift only"], for: "letter.q", gesture: .shiftedTap))
+        XCTAssertEqual(value.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Shift only")
+        XCTAssertNil(value.tapOutput(for: "letter.q", defaultText: "q", shifted: false))
+        value = try XCTUnwrap(value.updating([], for: "letter.q", gesture: .shiftedTap))
+        XCTAssertNil(value.tapOutput(for: "letter.q", defaultText: "Q", shifted: true))
+        let symbol = Settings.Snapshot(overrides: ["digit.1": .init(tap: ["q"])])
+        XCTAssertEqual(symbol.tapOutput(for: "digit.1", defaultText: "!", shifted: true), "q")
+        for invalid in [["a", "b"], [""], [String(repeating: "a", count: 65)]] {
+            XCTAssertNil(Settings.Snapshot(overrides: ["letter.q": .init(tap: invalid)]).tapOutput(for: "letter.q", defaultText: "q", shifted: false))
+        }
+        XCTAssertNil(defaults.tapOutput(for: "utility.space", defaultText: " ", shifted: false))
+        XCTAssertNil(defaults.tapOutput(for: "letter.q", defaultText: "", shifted: false))
+        let expansive = "\u{0390}" + String(repeating: "\u{0301}", count: 63)
+        XCTAssertEqual(expansive.count, 1)
+        XCTAssertGreaterThan(expansive.uppercased().unicodeScalars.count, 64)
+        let bounded = try XCTUnwrap(defaults.updating([expansive], for: "letter.q", gesture: .tap))
+        XCTAssertEqual(bounded.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), expansive)
+    }
+
+    func testTapSlotsHaveOneOutputWhileGesturesKeepSixteenAndVersionOneCannotSmuggleNewFields() throws {
+        for gesture in [Settings.Gesture.tap, .shiftedTap] {
+            for choices in [[], ["👩‍💻"], [String(repeating: "😀", count: 64)]] {
+                XCTAssertNotNil(Settings.Snapshot.defaults.updating(choices, for: "letter.a", gesture: gesture))
+            }
+            XCTAssertNil(Settings.Snapshot.defaults.updating(["a", "b"], for: "letter.a", gesture: gesture))
+            XCTAssertNil(Settings.Snapshot.defaults.updating([""], for: "letter.a", gesture: gesture))
+            XCTAssertNil(Settings.Snapshot.defaults.updating([String(repeating: "a", count: 65)], for: "letter.a", gesture: gesture))
+            let bytes = try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "overrides": [["keyID": "letter.a", gesture.rawValue: NSNull()]]])
+            XCTAssertThrowsError(try JSONDecoder().decode(Settings.Snapshot.self, from: bytes))
+        }
+        let old = json(#"{"schemaVersion":1,"overrides":[{"keyID":"letter.q","longPress":["h"],"swipeUp":["u"],"swipeDown":["d"]}]}"#)
+        let migrated = load(old)
+        XCTAssertEqual(migrated.candidates(for: "letter.q", gesture: .longPress), ["h"])
+        XCTAssertNil(migrated.candidates(for: "letter.q", gesture: .tap))
+        XCTAssertEqual(load(try data(migrated)), migrated)
+    }
     private typealias Settings = KeyboardKeySettings
     private let container = URL(fileURLWithPath: "/injected-key-settings", isDirectory: true)
     private enum Failure: Error { case unavailable }
@@ -153,7 +219,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
         XCTAssertTrue(settings.save(expected)); XCTAssertEqual(saved, first)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: first) as? [String: Any])
         XCTAssertEqual(Set(object.keys), ["schemaVersion", "overrides"])
-        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(object["schemaVersion"] as? Int, 2)
         let entries = try XCTUnwrap(object["overrides"] as? [[String: Any]])
         XCTAssertEqual(entries.compactMap { $0["keyID"] as? String }, ["letter.a", "letter.z"])
         XCTAssertEqual(Set(entries[0].keys), ["keyID", "longPress"])
@@ -227,7 +293,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
 
     func testEditableReadRequiresValidBoundedSnapshotWhileKeyboardRetainsSafeFallback() throws {
         let valid = try data(example)
-        let malformed = [Data(), Data([0xFF]), Data(valid.dropLast()), json(#"{"schemaVersion":2,"overrides":[]}"#),
+        let malformed = [Data(), Data([0xFF]), Data(valid.dropLast()), json(#"{"schemaVersion":3,"overrides":[]}"#),
                          json(#"{"schemaVersion":1,"overrides":[{"keyID":"unknown"}]}"#),
                          valid + Data(repeating: 0x20, count: Settings.maximumPayloadBytes + 1 - valid.count)]
         for bytes in malformed {
@@ -244,7 +310,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
         let malformed = [
             #"{"schemaVersion":true,"overrides":[]}"#,
             #"{"schemaVersion":"1","overrides":[]}"#,
-            #"{"schemaVersion":2,"overrides":[]}"#,
+            #"{"schemaVersion":3,"overrides":[]}"#,
             #"{"schemaVersion":1.5,"overrides":[]}"#,
             #"{"schemaVersion":1}"#,
             #"{"schemaVersion":1,"overrides":[],"hostText":"not settings"}"#,

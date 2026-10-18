@@ -15,6 +15,10 @@ struct KeyboardDeleteContext: Equatable {
 }
 
 final class RepeatingDeleteButton: UIButton {
+    var contentPosition: KeyboardKeyContentPosition = .center { didSet { setNeedsLayout() } }
+    override func titleRect(forContentRect contentRect: CGRect) -> CGRect {
+        contentPosition.alignedRect(super.titleRect(forContentRect: contentRect), in: contentRect)
+    }
     typealias DeleteAction = () -> Bool
     typealias ActionFactory = () -> DeleteAction
     typealias TimerScheduler = (TimeInterval, Bool, @escaping (Timer) -> Void) -> Timer

@@ -26,8 +26,15 @@ enum KeyboardVariantPolicy {
     }
 
     static func defaultSwipeDown(for key: String, state: KeyboardTypingState, widePad: Bool, ansiPad: Bool = false,
-                                 mapping: KeyboardPadSymbolMapping = .iPad) -> [String] {
-        guard widePad, state.layout == .letters, mapping != .none else { return [] }
+                                 mapping: KeyboardPadSymbolMapping = .iPad, hasNumberRow: Bool = false) -> [String] {
+        guard (widePad || hasNumberRow), state.layout == .letters, (!widePad || mapping != .none) else { return [] }
+        if hasNumberRow, let index = KeyboardTypingLayout.letters.rows[0].firstIndex(of: key) {
+            let symbols = KeyboardTypingLayoutPolicy.rows(for: .numbers, hasAuxiliaryRow: true)[0]
+            guard symbols.indices.contains(index) else { return [] }
+            let text = symbols[index]
+            return options(text: text, variants: stockVariants(for: text))
+        }
+        guard widePad else { return [] }
         if ansiPad, let text = KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: key, state: state) {
             return options(text: text, variants: stockVariants(for: text))
         }

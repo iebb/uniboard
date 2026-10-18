@@ -17,6 +17,13 @@ struct KeyboardInputActionContext: Equatable {
 /// Single actions snapshot one factory at touch-down; updates never retarget a
 /// held press. Unlike repeated Delete, these keys execute only on touch-up.
 final class KeyboardTouchActionButton: UIButton {
+    var contentPosition: KeyboardKeyContentPosition = .center { didSet { setNeedsLayout() } }
+    override func titleRect(forContentRect contentRect: CGRect) -> CGRect {
+        contentPosition.alignedRect(super.titleRect(forContentRect: contentRect), in: contentRect)
+    }
+    override func imageRect(forContentRect contentRect: CGRect) -> CGRect {
+        contentPosition.alignedRect(super.imageRect(forContentRect: contentRect), in: contentRect)
+    }
     typealias Action = () -> Bool
     typealias ActionFactory = () -> Action
     private var contextIdentifier: UUID?

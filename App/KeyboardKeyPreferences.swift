@@ -31,7 +31,7 @@ final class KeyboardKeyPreferences: ObservableObject {
             return false
         }
         guard let updated = current.updating(candidates, for: keyID, gesture: gesture) else {
-            saveError = "Use up to 16 different, nonempty choices, each no longer than 64 Unicode scalars."
+            saveError = gesture.maximumChoices == 1 ? "Use one nonempty tap output, no longer than 64 Unicode scalars." : "Use up to 16 different, nonempty choices, each no longer than 64 Unicode scalars."
             return false
         }
         return persist(updated)

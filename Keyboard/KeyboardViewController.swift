@@ -2737,10 +2737,16 @@ private struct UnicodeKeyboardView: View {
         HStack(spacing: plan.spacing) {
             KeyboardTouchKey(title: "U", identifier: "keyboard.toggleUnicodeToolbar",
                 label: model.showsUnicodeToolbar ? "Hide Unicode toolbar" : "Show Unicode toolbar",
-                value: model.showsUnicodeToolbar ? "on" : "off", fontSize: 18,
+                value: model.showsUnicodeToolbar ? "on" : "off", fontSize: 18, tinted: true,
                 contentPosition: usesPadKeyPositions ? .bottomLeft : .center,
                 route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .toolbar) })
-                .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
+                .frame(width: plan.keyWidth, height: controlHeight)
+                .background(KeyboardPalette.accent.opacity(model.showsUnicodeToolbar ? 0.08 : 0.03),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .keyboardKeySurface()
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(model.showsUnicodeToolbar ? KeyboardPalette.accent.opacity(0.65) : Color.clear, lineWidth: 1)
+                    .allowsHitTesting(false))
             if model.needsInputModeSwitchKey {
                 InputModeSwitchKey(controller: controller, isModifier: model.isPadLayout && !model.showsUnicode,
                     contentPosition: usesPadKeyPositions ? .bottomLeft : .center)
@@ -3059,6 +3065,7 @@ private struct KeyboardTouchKey: UIViewRepresentable {
     var value: String? = nil
     var fontSize: CGFloat = 20
     var secondary = false
+    var tinted = false
     var isAction = false
     var contentPosition: KeyboardKeyContentPosition = .center
     let route: UUID
@@ -3073,7 +3080,7 @@ private struct KeyboardTouchKey: UIViewRepresentable {
         view.titleLabel?.font = .systemFont(ofSize: fontSize, weight: isAction && contentPosition == .center ? .semibold : .regular)
         view.titleLabel?.adjustsFontSizeToFitWidth = true
         view.titleLabel?.minimumScaleFactor = 0.7
-        let foreground = isAction ? KeyboardPalette.actionTextUI : secondary ? UIColor.secondaryLabel : UIColor.label
+        let foreground = isAction ? KeyboardPalette.actionTextUI : tinted ? KeyboardPalette.accentUI : secondary ? UIColor.secondaryLabel : UIColor.label
         view.setTitleColor(foreground, for: .normal)
         view.tintColor = foreground
         view.accessibilityIdentifier = identifier

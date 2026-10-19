@@ -41,7 +41,7 @@ final class AppSearchFieldTests: XCTestCase {
         XCTAssertEqual(field.smartQuotesType, .no)
         XCTAssertEqual(field.smartDashesType, .no)
         XCTAssertEqual(field.smartInsertDeleteType, .no)
-        XCTAssertEqual(field.returnKeyType, .search)
+        XCTAssertEqual(field.returnKeyType, .done)
         XCTAssertEqual(field.clearButtonMode, .never)
         XCTAssertTrue(field.adjustsFontForContentSizeCategory)
         XCTAssertEqual(field.font, UIFont.preferredFont(forTextStyle: .subheadline))
@@ -102,7 +102,7 @@ final class AppSearchFieldTests: XCTestCase {
         XCTAssertEqual(Array((field.text ?? "").utf16), Array(decomposed.utf16))
     }
 
-    func testNativeSearchReturnResignsWithoutChangingOrPublishingTheQuery() async throws {
+    func testKeyboardDoneResignsWithoutChangingOrPublishingTheQuery() async throws {
         try withVisibleField { field in
             var edits: [String] = []
             field.configure(text: "u+0041", placeholder: "Search", identifier: "unicodeSearch") { edits.append($0) }
@@ -114,32 +114,12 @@ final class AppSearchFieldTests: XCTestCase {
         }
     }
 
-    func testActualDoneAccessoryTargetResignsWithoutChangingTheQuery() async throws {
-        try withVisibleField { field in
-            var edits: [String] = []
-            field.configure(text: "arrows", placeholder: "Search", identifier: "unicodeSearch") { edits.append($0) }
-            XCTAssertTrue(field.becomeFirstResponder())
-            let toolbar = try XCTUnwrap(field.inputAccessoryView as? UIToolbar)
-            let done = try XCTUnwrap(toolbar.items?.last)
-            field.sendAction(try XCTUnwrap(done.action), to: done.target, for: nil)
-            XCTAssertFalse(field.isFirstResponder)
-            XCTAssertEqual(field.text, "arrows")
-            XCTAssertTrue(edits.isEmpty)
-        }
-    }
-
-    func testNativeAccessoryStartsWithFiniteFixedHeightAndFlexibleWidth() async throws {
+    func testSearchHasNoAccessoryOrFloatingConfirmationControls() async {
         let field = AppSearchTextField()
-        let toolbar = try XCTUnwrap(field.inputAccessoryView as? UIToolbar)
-        XCTAssertTrue([toolbar.frame.minX, toolbar.frame.minY, toolbar.frame.width, toolbar.frame.height].allSatisfy(\.isFinite))
-        XCTAssertEqual(toolbar.frame.height, 44)
-        XCTAssertGreaterThan(toolbar.frame.width, 0)
-        XCTAssertTrue(toolbar.autoresizingMask.contains(.flexibleWidth))
-        XCTAssertFalse(toolbar.autoresizingMask.contains(.flexibleHeight))
-        XCTAssertEqual(toolbar.items?.count, 2)
-        XCTAssertNil(toolbar.items?.first?.action)
-        XCTAssertTrue(toolbar.items?.last?.target === field)
-        XCTAssertNotNil(toolbar.items?.last?.action)
+        XCTAssertNil(field.inputAccessoryView)
+        field.configure(text: "arrows", placeholder: "Search", identifier: "unicodeSearch") { _ in }
+        XCTAssertNil(field.inputAccessoryView, "Done belongs to the keyboard, not an app accessory toolbar")
+        XCTAssertEqual(field.returnKeyType, .done)
     }
 }
 #endif

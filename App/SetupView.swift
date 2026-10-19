@@ -96,7 +96,7 @@ struct SetupView: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     Label("Favorites & touch feedback", systemImage: "hand.tap").font(.headline)
-                    Text("Saved and the keyboard’s Favorites board share your explicit favorites on this device. Allow Full Access in iOS keyboard settings to sync saves and removals from the keyboard back to the app. With it off, app favorites reach the keyboard, while keyboard changes wait locally. Custom boards and Recently used stay separate.")
+                    Text("Saved and the keyboard’s Favorites page share your explicit favorites on this device. Allow Full Access in iOS keyboard settings to sync saves and removals from the keyboard back to the app. With it off, app favorites reach the keyboard, while keyboard changes wait locally. Custom pages and Recently used stay separate.")
                         .font(.caption).foregroundStyle(Palette.muted)
                     Text("Keys highlight while touched. Light haptics are available on supported iPhones with Full Access. No typing, searches or favorites are sent to a server, even with Full Access enabled.")
                         .font(.caption).foregroundStyle(Palette.muted)
@@ -169,29 +169,44 @@ struct SetupView: View {
 
 struct KeyboardTestView: View {
     @State private var text = ""
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dismiss) private var dismiss
+    private var compactPhone: Bool { verticalSizeClass == .compact }
+
     var body: some View {
         GeometryReader { geometry in
-            let compact = geometry.size.height < 220
+            let compact = compactPhone || geometry.size.height < 220
             VStack(alignment: .leading, spacing: compact ? 8 : 18) {
                 if !compact {
                     Text("Tap below, then hold 🌐 to choose Uniboard.")
                         .font(.subheadline).foregroundStyle(Palette.muted)
                 }
-                TextEditor(text: $text)
-                    .keyboardType(.default)
-                    .textInputAutocapitalization(.sentences)
-                    .font(compact ? .body : .title2)
-                    .padding(compact ? 4 : 12).scrollContentBackground(.hidden)
-                    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
-                    .accessibilityIdentifier("keyboardTestInput")
+                HStack(alignment: .top, spacing: 8) {
+                    if compactPhone {
+                        Button { dismiss() } label: {
+                            Image(systemName: "chevron.left").frame(width: 36, height: 44)
+                        }
+                        .accessibilityLabel("Back to keyboard settings")
+                        .accessibilityIdentifier("keyboardTestBack")
+                    }
+                    TextEditor(text: $text)
+                        .keyboardType(.default)
+                        .textInputAutocapitalization(.sentences)
+                        .font(compact ? .body : .title2)
+                        .frame(height: compactPhone ? 44 : nil, alignment: .top)
+                        .padding(compact ? 4 : 12).scrollContentBackground(.hidden)
+                        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+                        .accessibilityIdentifier("keyboardTestInput")
+                }
                 if !compact {
                     Text("Type English normally, or tap Unicode to search and browse every character.")
                         .font(.caption).foregroundStyle(Palette.muted)
                 }
             }
-            .padding(.horizontal, 22).padding(.vertical, compact ? 4 : 22)
+            .padding(.horizontal, compact ? 8 : 22).padding(.vertical, compact ? 0 : 22)
         }.background(Palette.background)
             .navigationTitle("Try Uniboard").navigationBarTitleDisplayMode(.inline)
+            .toolbar(compactPhone ? .hidden : .visible, for: .navigationBar)
     }
 }
 

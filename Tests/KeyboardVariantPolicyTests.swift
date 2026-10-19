@@ -259,16 +259,16 @@ final class KeyboardVariantPolicyTests: XCTestCase {
         }
     }
 
-    func testHorizontalSelectionStartsAtFirstChoiceRoundsHalfStridesAndClamps() {
+    func testHorizontalSelectionStartsInCenterAlternatesSidesAndClamps() {
         let fixtures: [(CGFloat, Int)] = [(0, 0), (CGFloat(18).nextDown, 0), (18, 1), (36, 1),
-                                         (CGFloat(54).nextDown, 1), (54, 2), (-18, 0), (-100, 0), (1000, 3)]
+                                         (CGFloat(54).nextDown, 1), (54, 3), (-18, 2), (-100, 2), (1000, 3)]
         for (x, expected) in fixtures {
             XCTAssertEqual(KeyboardVariantPolicy.horizontalChoice(deltaX: x, count: 4), expected)
         }
         XCTAssertEqual(KeyboardVariantPolicy.horizontalChoice(deltaX: 5, count: 3, stride: 10), 1)
-        XCTAssertEqual(KeyboardVariantPolicy.horizontalChoice(deltaX: 15, count: 3, stride: 10), 2)
-        XCTAssertEqual(KeyboardVariantPolicy.horizontalChoice(deltaX: .greatestFiniteMagnitude, count: 17), 16)
-        XCTAssertEqual(KeyboardVariantPolicy.horizontalChoice(deltaX: -.greatestFiniteMagnitude, count: 17), 0)
+        XCTAssertEqual(KeyboardVariantPolicy.horizontalChoice(deltaX: -5, count: 3, stride: 10), 2)
+        XCTAssertEqual(KeyboardVariantPolicy.horizontalChoice(deltaX: .greatestFiniteMagnitude, count: 17), 15)
+        XCTAssertEqual(KeyboardVariantPolicy.horizontalChoice(deltaX: -.greatestFiniteMagnitude, count: 17), 16)
         XCTAssertEqual(KeyboardVariantPolicy.horizontalChoice(deltaX: .greatestFiniteMagnitude, count: 1), 0)
     }
 
@@ -415,4 +415,46 @@ final class KeyboardVariantPolicyTests: XCTestCase {
         XCTAssertNil(KeyboardVariantPopupLayout(anchor: CGRect(x: 0, y: 4, width: 42, height: 42),
             container: CGRect(x: 0, y: 0, width: 100, height: 52), count: 14))
     }
+    func testCenterOutOrderIsExactCompleteAndBounded() {
+        XCTAssertEqual(KeyboardVariantPolicy.centerOutIndices(count: 7), [6, 4, 2, 0, 1, 3, 5])
+        XCTAssertEqual(KeyboardVariantPolicy.centerOutIndices(count: 6), [4, 2, 0, 1, 3, 5])
+        for count in 1...19 {
+            let order = KeyboardVariantPolicy.centerOutIndices(count: count)
+            XCTAssertEqual(order.sorted(), Array(0..<count))
+            XCTAssertEqual(order[(count - 1) / 2], 0)
+            if count <= 17 {
+                for (position, logical) in order.enumerated() {
+                    let delta = CGFloat(position - (count - 1) / 2) * 36
+                    XCTAssertEqual(KeyboardVariantPolicy.horizontalChoice(deltaX: delta, count: count), logical)
+                }
+            }
+        }
+        for count in [Int.min, -1, 0, 20, Int.max] {
+            XCTAssertEqual(KeyboardVariantPolicy.centerOutIndices(count: count), [])
+        }
+    }
+
+    func testCenteredPopupMapsVisualCellsBackToExactChoicesAndKeepsCommandsTrailing() throws {
+        let container = CGRect(x: 0, y: 0, width: 700, height: 400)
+        let anchor = CGRect(x: 329, y: 220, width: 42, height: 42)
+        let layout = try XCTUnwrap(KeyboardVariantPopupLayout(anchor: anchor, container: container, count: 9, choiceCount: 7))
+        let order = layout.cells.indices.sorted { layout.cells[$0].minX < layout.cells[$1].minX }
+        XCTAssertEqual(order, [6, 4, 2, 0, 1, 3, 5, 7, 8])
+        XCTAssertEqual(layout.frame.minX + layout.cells[0].midX, anchor.midX, accuracy: 0.001)
+        for (logical, frame) in layout.cells.enumerated() {
+            XCTAssertEqual(layout.index(at: CGPoint(x: frame.midX, y: frame.midY)), logical)
+        }
+        for choices in [Int.min, -1, 0, 10, Int.max] {
+            XCTAssertNil(KeyboardVariantPopupLayout(anchor: anchor, container: container, count: 9, choiceCount: choices))
+        }
+        for width: CGFloat in [100, 220, 402] {
+            let wrapped = try XCTUnwrap(KeyboardVariantPopupLayout(anchor: CGRect(x: 24, y: 240, width: 42, height: 42),
+                container: CGRect(x: 0, y: 0, width: width, height: 400), count: 19, choiceCount: 17))
+            XCTAssertEqual(Set(wrapped.cells.map { "\($0.midX),\($0.midY)" }).count, 19)
+            for (logical, frame) in wrapped.cells.enumerated() {
+                XCTAssertEqual(wrapped.index(at: CGPoint(x: frame.midX, y: frame.midY)), logical)
+            }
+        }
+    }
+
 }

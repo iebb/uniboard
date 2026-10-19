@@ -31,7 +31,7 @@ struct SymbolBoardPickerTarget: Equatable {
     let keyID: String?
 }
 
-/// Custom boards stay local. The built-in Favorites board shares only explicit
+/// Custom pages stay local. The built-in Favorites page shares only explicit
 /// saved symbols through the App Group, with a local three-way merge baseline.
 @MainActor
 final class SymbolBoardStore: ObservableObject {
@@ -47,10 +47,10 @@ final class SymbolBoardStore: ObservableObject {
     static let maximumPayloadBytes = 512 * 1024
 
     enum LoadIssue: String {
-        case unwritable = "Symbol boards could not be saved. Close and reopen the keyboard before editing."
-        case unreadable = "Saved symbol boards could not be read. Their original data has been kept."
-        case unsupportedVersion = "These symbol boards use a newer format. Their original data has been kept."
-        case oversized = "Saved symbol boards exceed the storage limit. Their original data has been kept."
+        case unwritable = "Pages could not be saved. Close and reopen the keyboard before editing."
+        case unreadable = "Saved pages could not be read. Their original data has been kept."
+        case unsupportedVersion = "These pages use a newer format. Their original data has been kept."
+        case oversized = "Saved pages exceed the storage limit. Their original data has been kept."
         case legacyTooLarge = "Original favorites have been retained. Editing is disabled because they exceed the import limit. Only entries available in the selected Unicode edition are shown below."
     }
     private struct State: Codable {

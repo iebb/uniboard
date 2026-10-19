@@ -25,14 +25,14 @@ generator checks. Tests do not contact App Store Connect or send typing data.
 | Query touch routing | Original physical touch and UTF-16 text, owned search activation, field/mode/bounds changes, delayed callbacks, detach and fresh accessibility actions | `KeyboardQueryInteractionTests` and native query cases |
 | English typing | QWERTY/page membership, one-shot Shift, timed Caps Lock, manual capitalization overrides, field/context capitalization, Unicode word boundaries, guarded double-Space replacement, query isolation | `KeyboardTypingPolicyTests`, `KeyboardEnglishInputPolicyTests`, native typing cases |
 | Adaptive English rows | Fixed keycap height, exact row thresholds, fractional/nonfinite and constrained dimensions, number-row validation, saved-symbol capacity | `KeyboardTypingLayoutPolicyTests` and native typing cases |
-| Symbol boards | Stock board, bounded schema and migration, independent preferred Star target defaulting to Favorites, deletion fallback, exact UTF-16 identity, malformed-data preservation, failed persistence, board CRUD/variants, save target selection, glyph-only scrolling keys, configuration without host insertion | `SymbolBoardStoreTests` plus native board cases |
+| Pages | Stock board, bounded schema and migration, independent preferred Star target defaulting to Favorites, deletion fallback, exact UTF-16 identity, malformed-data preservation, failed persistence, board CRUD/variants, save target selection, glyph-only scrolling keys, configuration without host insertion | `SymbolBoardStoreTests` plus native board cases |
 | Variant interaction | English diacritics and symbol variants, captured case/context, slide/release, cancellation, reentrant callbacks, popup geometry and accessibility | `KeyboardVariantPolicyTests`, `KeyboardVariantControlTests` plus native board/typing cases |
 | Fixed keyboard template | Always-visible number row, 15% taller equal caps, one optional symbol/search bar, exact viewport containment, settings persistence | `KeyboardTypingLayoutPolicyTests`, `UnicodeEditionSettingsTests`, native fixed-layout cases |
 | Held deletion | Original query/host scope and document, pre-render mode changes, stale timers, repeated down, release/cancel/detach and callback reentrancy | `KeyboardRepeatingDeleteControlTests` |
 | Document connection | Missing or invalid early UIKit identifiers cannot crash the keyboard or authorize host edits; valid public identifiers retain their exact value | `KeyboardDocumentIdentityTests`, real extension startup |
 | Optional fonts | Default off, no global registration, actual missing-glyph outlines, native emoji preservation, malformed metadata/ranges, invalid sizes and paths | `UnicodeFontSupportTests`, `Scripts/validate_fonts.py` |
 | Packaged privacy manifests | App and embedded keyboard both declare no collection/tracking and the required preferences/elapsed-timing API reasons | `PrivacyManifestTests` |
-| Real keyboard behavior | Host text/focus preservation, local search/caret editing, complete insertion, folded results, one-row height swipes, restored results/scroll position, persisted height and rotation | Opt-in `UniboardUITests` plus original simulator recordings |
+| Real keyboard behavior | Host text/focus preservation, local search/caret editing, complete insertion, retained results, fixed layout, page swipes, restored scroll position and rotation | Opt-in `UniboardUITests` plus original simulator recordings |
 | Publication tools | Identity/build/archive/locale guards, rejected operations, offline-only test transport | `Scripts/tests/test_app_store_release.rb` |
 
 ## Coverage gates
@@ -81,7 +81,8 @@ xcodebuild -project Uniboard.xcodeproj -scheme Uniboard \
 ```
 
 The CI destination selector is intended for an ephemeral GitHub runner. Local
-device work always names the owned QA simulator explicitly.
+device work targets iOS 27 and always names an owned QA simulator explicitly.
+The old iOS 18.5 Uniboard devices are retired; do not recreate them for QA.
 
 App-to-keyboard delivery UI checks require the App Group entitlement on the
 installed simulator binaries. Build that QA product with simulator ad-hoc
@@ -101,7 +102,7 @@ writes it. Edition and Boolean font/collapse preferences use one bounded file;
 explicitly configured per-key gesture choices use a separate bounded file.
 Version-1 edition-only files default both flags off; v1/v2 files default to ANSI-with-numbers and standard symbol mapping. Version 3 validates all six keys and preserves every field when another preference changes; malformed snapshots
 fall back safely. Only app Settings changes these choices. The keyboard … menu
-contains Order and Open companion app; sort, recents and custom boards remain local. Explicit Favorites share a separate bounded file. An unavailable or malformed setting falls back
+contains only Order; sort, recents and custom boards remain local. Explicit Favorites share a separate bounded file. An unavailable or malformed setting falls back
 to the latest release; tests must distinguish that fallback from successful
 non-default app-to-keyboard delivery. Settings labels and preference resolution
 read only bounded small manifests, not all four full catalogs.
@@ -113,7 +114,7 @@ the key settings file; document typing and search queries never enter it.
 
 ## Native keyboard checks
 
-Keyboard UI tests require `UNIBOARD_KEYBOARD_INTEGRATION=1` and a compatible runtime exposing the remote keyboard. Setup uses the actual Settings/globe flow on owned QA simulators. The fixed template has four character rows (one number row plus three letter rows) and a matching footer. App Settings selects an optional symbol strip or its search-bar replacement; only one top bar is mounted. Verify 41.4-point phone keys and 59.8-point wide iPad keys, full viewport containment, consistent digit/letter/footer sizes and unchanged height between the two top-bar contents. A host's genuine scene constraint may reduce all keys uniformly.
+Keyboard UI tests require `UNIBOARD_KEYBOARD_INTEGRATION=1` and a compatible runtime exposing the remote keyboard. Setup uses the actual Settings/globe flow on owned QA simulators. The fixed template has four character rows (one number row plus three letter rows) and a matching footer. App Settings selects an optional symbol strip or its search-bar replacement; only one top bar is mounted. Verify 41.4-point phone keys and 59.8-point wide iPad keys, full viewport containment, consistent digit/letter/footer sizes and unchanged height between the two top-bar contents. A host's genuine scene constraint may reduce all keys uniformly. Geometry checks observe the owning UIInputView, rather than SwiftUI’s content bounds. The companion test pad keeps a visible single editing line and an inline Back action in compact landscape.
 
 The retired resize handle, session policies, preview/triangle views, saved-height storage and dragging tests have been removed. Verify their accessibility identifiers are absent. Keep typing, literal Unicode, query-caret, settings persistence, popup, symbol-board and public UIKit fitting tests. Check that horizontal symbol scrolling never inserts, and that iOS 26 scroll-edge effects do not mask the row.
 
@@ -127,8 +128,6 @@ Wide iPad always has a number row and three letter rows; landscape offers iPad, 
 
 App-only swipe-down mapping offers the standard symbol page, iPad hints, macOS U.S. Option symbols and Off; per-key custom choices override all presets. Default taps and function keys remain standard; explicit tap mappings change only character keys. Verify saved layout/mapping after relaunch and a real keyboard switch with Full Access off, then rotate back to portrait.
 
-The owned iPadOS 18.5 QA fixture may opt into `UNIBOARD_IPAD_LAST_KEYBOARD=ad.neko.uniboard.keyboard` only after recording its exact enabled order: English US, Emoji, Uniboard. This handles a native picker whose visible rows are absent from remote accessibility. The fixture selects the last row relative to the actual onscreen Globe frame, then still requires real, hittable U/Star/Space controls and unchanged host text. Normal CI and other devices do not opt in. Never change global keyboard preferences to manufacture a pass.
-
 Tap-map schema 2 reads schema-1 gesture files without changing their contents. Version 1 cannot smuggle new tap fields, including nulls. Tap and shifted tap each accept one exact output or Off; long press/up/down remain independent. Default shifted single letters uppercase the remapped letter, bounded to 64 scalars; snippets and symbols stay literal. Explicit Shifted tap is exact. Physical IDs persist across pages and ANSI Shift. Disabled tap must not insert an original letter, and its independent gestures must still work. A visible number row replaces Q–P default down-flick digits with the same ten symbols used by the expanded symbol page; explicit overrides and iPad mapping Off win.
 
 iPad modifier content positions are tested separately from hit targets: finite corner geometry and clamped insets, actual UIButton title rectangles, unchanged actions, and native light/dark screenshots. Left and right Shift/Delete use stock-style text while accessibility identifiers and repeat deletion stay intact.
@@ -137,7 +136,7 @@ The macOS preset and long-press candidates use Apple’s U.S. ANSI Option and Sh
 
 ## Favorites sync and touch feedback
 
-Saved and the built-in Favorites board use the same store within each process. Migrate the union of the two sandboxes without dropping exact scalar sequences, custom boards, key variants or preferred Star target. Shared writes require Full Access only in the extension; test app-to-keyboard delivery with it OFF and reverse delivery with it ON. Granting/revoking this permission may restart the app and extension, so reacquire the editor through real navigation. Restore OFF on the owned QA simulator after testing.
+Saved and the built-in Favorites page use the same store within each process. Migrate the union of the two sandboxes without dropping exact scalar sequences, custom boards, key variants or preferred Star target. Shared writes require Full Access only in the extension; test app-to-keyboard delivery with it OFF and reverse delivery with it ON. Granting/revoking this permission may restart the app and extension, so reacquire the editor through real navigation. Restore OFF on the owned QA simulator after testing.
 
 Cover pending edits across relaunch, remote additions/deletions, reorder, exact composed/decomposed text, supplementary scalars, emoji, arbitrary saved text, invalid/oversized schemas, unreadable or unwritable storage, nonblocking lock contention, concurrent writers, links and non-regular files. An unavailable shared document must not overwrite original bytes or discard local favorites. The three-way baseline is persisted with local board state. Only explicit favorite text crosses the App Group boundary; recents, documents and queries do not. The file-type check uses fstat, declared with C617.1 for app/App Group metadata in both shipped manifests.
 
@@ -146,3 +145,11 @@ Pressed overlays never receive touches or change geometry. Verify physical down/
 Shared settings schema 4 preserves schemas 1–3 and defaults to the symbol bar. Both top-bar switches require JSON Booleans; malformed/unknown fields fail closed. Toggling the symbol bar off retains the saved search replacement preference without displaying it. Failed writes keep previous UI/settings values. The bounded payload limit is 512 bytes.
 
 Gesture candidate resolution reserves explicit custom choices, then primary defaults, then unused alternatives. Assert exact UTF-16 uniqueness across Hold/Up/Down for every physical character key, layout, Shift state and mapping. Do not normalize composed/decomposed sequences. Stock currency holds keep their family; Q–P mapped currency hints remain distinct. Shift-origin sliding commits exactly once in its original document; cancellation, stale context, geometry changes, detachment and release over non-character controls must not type or toggle Shift.
+
+## Symbol pages
+
+All saved pages and Recent appear in a horizontal pager. A swipe advances one page without inserting a key; taps and held choices are authorized only for the currently selected page and input context. Preserve U/search visibility when opening Star or editing pages, including the Unicode picker round trip. Check page creation, rename, reorder, deletion of the visible page, empty pages, first/last boundaries and the preferred Star target. A failed selection write must leave the old page selected. Page names, keys, storage IDs and exact Unicode strings remain compatible with previous builds.
+
+The naming pad and its Add/Save action stay inside the extension. App search has no accessory toolbar; its in-keyboard Done key dismisses without changing the query. The keyboard menu shows the three sort choices directly under Character order, with no app-opening action or denial guidance. Verify actual selections and dismissal in portrait and landscape. VoiceOver next/previous uses the same guarded page selection as physical swipes.
+
+Popup choices read 7,5,3,1,2,4,6 for seven candidates. Primary output stays under its original key where screen bounds permit; wrapped rows and Inspect/Edit retain an exact logical index mapping. Both left and right travel can select alternatives, while an ordinary vertical flick retains the primary. Cover every supported count, edge clamping, malformed geometry, command slots and nonfinite movement.

@@ -618,7 +618,7 @@ final class KeyboardVariantButton: UIControl {
     private func showPopup(_ values: [String], inspect: Bool, edit: Bool) -> Bool {
         guard geometryIsCurrent, let capturedContainer,
               let layout = KeyboardVariantPopupLayout(anchor: originalRect, container: capturedContainer.bounds,
-                  count: values.count + (inspect ? 1 : 0) + (edit ? 1 : 0)) else { return false }
+                  count: values.count + (inspect ? 1 : 0) + (edit ? 1 : 0), choiceCount: values.count) else { return false }
         let popup = UIView(frame: layout.frame)
         popup.backgroundColor = .secondarySystemBackground
         popup.layer.cornerRadius = 10

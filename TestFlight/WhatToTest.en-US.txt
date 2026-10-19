@@ -3,12 +3,12 @@ Uniboard 1.1 beta. Public release awaits device approval.
 FIXED KEYBOARD TEMPLATE
 The number row is always present in normal typing. Phone/narrow keys are 41.4pt; wide iPad keys are 59.8pt (+15%). Digits, letters and footer share one height. There is no resize grip, dragging, saved height, triangle or preview.
 
-App Settings > Keyboard layout: Show symbol bar; Show search bar instead. The second switch appears only while the first is on. Exactly one optional top row can appear. Replacing symbols with search keeps the same height. Check a fully visible, opaque symbol strip with rounded keycaps and horizontal scrolling. Scrolling must not insert. Empty selected boards use the stock strip without changing the preferred Star board. Test both switches, relaunch and Full Access OFF.
+App Settings > Keyboard layout: Show symbol bar; Show search bar instead. The second switch appears only while the first is on. Exactly one optional top row can appear. Replacing symbols with search keeps the same height. Check a fully visible, opaque symbol strip with rounded keycaps and horizontal scrolling. Scrolling must not insert. Empty selected pages use the stock strip without changing the preferred Star page. Test both switches, relaunch and Full Access OFF.
 
 LETTER GESTURES AND SHIFT
 Hold: accents in the current case. Up: opposite case first, then accented forms. Down: mapped digit/symbol plus unused macOS Option outputs. Each default candidate belongs to only one group per key. With digits visible, I and O start with £ and ¥, without repeating currency families; actual currency-key holds keep their family.
 
-Vertical flicks must keep their first candidate even when the finger crosses the popup. Slide sideways to change choices. Test I/O, left/right screen edges, both Shift states, cancellation and rotation. Exact composed/decomposed Unicode must stay exact.
+Vertical flicks must keep their first candidate even when the finger crosses the popup. Choices alternate around the primary: 7,5,3,1,2,4,6. Slide left/right to change choices. Test I/O, left/right screen edges, both Shift states, cancellation and rotation. Exact composed/decomposed Unicode must stay exact.
 
 Shift: tap for one capital, double-tap for Caps Lock, or touch Shift and slide to a letter for one capital. Stationary holds act as one Shift tap. A cancelled/outside slide must neither insert nor leave Shift stuck. Test one insertion per release, normal taps afterward and remapped Shifted tap outputs.
 
@@ -17,12 +17,12 @@ Check portrait and landscape number rows, stock-style Tab/Caps/Shift, gray modif
 
 Customize keyboard keys: independent Tap, Shifted tap, Hold, Up, Down. Test literal emoji, combining text, Off, failed saves and Full Access OFF. Explicit candidates take priority; stored mappings are not rewritten. Query editing never reaches the host.
 
-BOARDS, FAVORITES AND FEEDBACK
-Star opens the preferred symbol board and returns to QWERTY. Hold Star to manage boards. Test create/rename/reorder/delete, preferred target, exact variants and save-to-board selection. Saved/Recent show rounded keycaps without code-point captions. Editor controls must remain in a bounded opaque panel.
+PAGES, FAVORITES AND FEEDBACK
+Star opens the preferred page and returns to QWERTY. Swipe horizontally across ALL pages and Recent, one page per swipe. Opening pages preserves U/search visibility. Hold Star to edit pages; New page has local keycaps and Add inside the keyboard. Test create/rename/reorder/delete, visible-page deletion, empty pages, preferred target and exact variants. Saved/Recent show rounded keycaps without code-point captions. Editor controls must remain in a bounded opaque panel.
 
-Saved shares built-in Favorites. App edits reach the keyboard with Full Access OFF. Keyboard edits stay pending locally until optional Full Access permits writing back. Test both directions, removal, concurrent saves, relaunch and unavailable storage; failures must keep local data. Custom boards and Recent remain local. Nothing is sent over a network.
+Saved shares built-in Favorites. App edits reach the keyboard with Full Access OFF. Keyboard edits stay pending locally until optional Full Access permits writing back. Test both directions, removal, concurrent saves, relaunch and unavailable storage; failures must keep local data. Custom pages and Recent remain local. Nothing is sent over a network.
 
 Keys highlight on touch and clear on release/cancel/scroll/rotation. On a supported physical iPhone with Full Access, verify light key-down haptics, without a held-Delete repeat stream.
 
 UNICODE SEARCH
-U opens Unicode browsing. Test query cursor positioning, middle insertion/deletion, sharp text in light/dark and Reduce Transparency, retained results and exact whole-emoji insertion. Unicode 18 release is default; 16/17 are previous releases and 19 is DRAFT. Fonts/version/collapse are app-only. Keyboard … contains only Order/Open app. Search names, blocks, descriptions, code points and Suzhou numerals. Inspect unsupported glyphs without inserting.
+U opens Unicode browsing. Test query cursor positioning, middle insertion/deletion, sharp text in light/dark and Reduce Transparency, retained results and exact whole-emoji insertion. Unicode 18 release is default; 16/17 are previous releases and 19 is DRAFT. Fonts/version/collapse are app-only. Keyboard … contains only Order. App search uses the in-keyboard Done key; no floating accessory confirmation. Search names, blocks, descriptions, code points and Suzhou numerals. Inspect unsupported glyphs without inserting.

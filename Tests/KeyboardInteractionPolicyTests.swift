@@ -189,4 +189,28 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
             }
         }
     }
+    func testSymbolPagingRoundsClampsAndAdvancesOnlyOneNeighbor() {
+        for (offset, expected) in [(CGFloat(-100), 0), (0, 0), (49, 0), (50, 1), (150, 2), (10000, 16)] {
+            XCTAssertEqual(KeyboardSymbolPagePolicy.index(offset: offset, width: 100, count: 17), expected)
+        }
+        XCTAssertEqual(KeyboardSymbolPagePolicy.index(offset: 10000, width: 100, count: 17, startingAt: 8), 9)
+        XCTAssertEqual(KeyboardSymbolPagePolicy.index(offset: -10000, width: 100, count: 17, startingAt: 8), 7)
+        XCTAssertEqual(KeyboardSymbolPagePolicy.index(offset: 10000, width: 100, count: 1, startingAt: 0), 0)
+    }
+    func testSymbolPagingRejectsInvalidCountsTravelWidthsAndStarts() {
+        for count in [Int.min, -1, 0, 18, Int.max] {
+            XCTAssertNil(KeyboardSymbolPagePolicy.index(offset: 0, width: 100, count: count))
+        }
+        for value: CGFloat in [.nan, .infinity, -.infinity] {
+            XCTAssertNil(KeyboardSymbolPagePolicy.index(offset: value, width: 100, count: 3))
+        }
+        for width: CGFloat in [0, -1, .nan, .infinity, -.infinity] {
+            XCTAssertNil(KeyboardSymbolPagePolicy.index(offset: 0, width: width, count: 3))
+        }
+        for start in [Int.min, -1, 3, Int.max] {
+            XCTAssertNil(KeyboardSymbolPagePolicy.index(offset: 0, width: 100, count: 3, startingAt: start))
+        }
+        XCTAssertNil(KeyboardSymbolPagePolicy.index(offset: .greatestFiniteMagnitude, width: .leastNonzeroMagnitude, count: 3))
+    }
+
 }

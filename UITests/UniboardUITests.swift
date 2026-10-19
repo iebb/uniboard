@@ -5,7 +5,7 @@ import UIKit
 final class UniboardUITests: XCTestCase {
     private var app: XCUIApplication!
     private struct KeyboardOptionsSnapshot {
-        let triggerFrame: CGRect
+        let dismissalPoints: [CGPoint]
         let hostText: String
         let queryValue: String
         let optionsValue: String
@@ -881,13 +881,16 @@ final class UniboardUITests: XCTestCase {
         let q = app.buttons["keyboard.typing.key.q"].firstMatch
         flickMainKey(q, up: false, horizontal: 36)
         XCTAssertTrue(input.waitUntilValueEquals("œ"))
-        flickMainKey(q, up: false, horizontal: 72)
+        flickMainKey(q, up: false, horizontal: -36)
         XCTAssertTrue(input.waitUntilValueEquals("œŒ"), "Shift–Option stays literal, independent of Shift state")
+        let displayedQ = q.label
+        XCTAssertTrue(["q", "Q"].contains(displayedQ), "The actual key label establishes the case-flick precondition")
+        let expected = "œŒ" + (displayedQ == "q" ? "Q" : "q")
         flickMainKey(q, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals("œŒQ"), "Default up-flick still changes case")
+        XCTAssertTrue(input.waitUntilValueEquals(expected), "Up-flick inputs the opposite case of the displayed key")
         if UIDevice.current.userInterfaceIdiom == .pad {
             flickMainKey(app.buttons["keyboard.typing.key.a"].firstMatch, up: false)
-            XCTAssertTrue(input.waitUntilValueEquals("œŒQå"))
+            XCTAssertTrue(input.waitUntilValueEquals(expected + "å"))
             assertPadFooter(pageID: "keyboard.typing.numbers")
         }
         attachScreenshot("macOS Option and Shift Option candidates retain independent case flicks")
@@ -1098,12 +1101,23 @@ final class UniboardUITests: XCTestCase {
                               file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(key.waitForExistence(timeout: 5), file: file, line: line)
         XCTAssertTrue(key.isHittable, file: file, line: line)
-        let start = key.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let frame = key.frame
+        guard usableHeightFrame(frame), app.frame.contains(frame) else {
+            XCTFail("A character gesture requires a visible keycap", file: file, line: line); return
+        }
+        // A leftward candidate on Q must finish on screen. Starting near
+        // its trailing edge keeps the physical gesture inside the keyboard.
+        let x = min(frame.maxX - 2, max(frame.minX + 2,
+            min(app.frame.maxX - horizontal - 4, max(frame.midX, app.frame.minX - horizontal + 4))))
+        let start = app.coordinate(withNormalizedOffset: .zero).withOffset(
+            CGVector(dx: x - app.frame.minX, dy: frame.midY - app.frame.minY))
         let distance = max(28, abs(horizontal) + 12)
         let vertical = start.withOffset(CGVector(dx: 0, dy: up ? -distance : distance))
         if horizontal == 0 {
             start.press(forDuration: 0.05, thenDragTo: vertical)
         } else {
+            XCTAssertTrue(app.frame.contains(CGPoint(x: x + horizontal, y: frame.midY + (up ? -distance : distance))),
+                          "The gesture's actual endpoint must be on screen", file: file, line: line)
             let finish = vertical.withOffset(CGVector(dx: horizontal, dy: 0))
             start.press(forDuration: 0.05, thenDragTo: finish, withVelocity: .slow, thenHoldForDuration: 0.1)
         }
@@ -1147,9 +1161,14 @@ final class UniboardUITests: XCTestCase {
 
     func testSystemKeyboardFavoritesKeyPreservesQueryCaretAndExactHost() throws {
         try requirePhoneKeyboardIntegration()
+        configureTopBar(symbols: true, search: true)
         let context = "Favorites preserve this host."
-        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
-        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false, searchBarVisible: true)
+        defer {
+            XCUIDevice.shared.orientation = .portrait
+            restoreEnglishKeyboard()
+            configureTopBar(symbols: true, search: false)
+        }
         selectSymbolBoard("migrated-favorites", input: input, context: context, returnToTyping: true,
                           preferredStarBoardID: "migrated-favorites")
         let favoriteKey = app.buttons["keyboard.openFavorites"].firstMatch
@@ -1177,10 +1196,9 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(recent.waitForExistence(timeout: 5))
         recent.tap()
         XCTAssertTrue(recent.waitUntilSelected())
-        XCTAssertEqual(favoriteKey.label, "Symbol keyboard", "Recent keeps the star so one tap selects the preferred board")
-        let abc = app.descendants(matching: .any)["keyboard.openTyping"].firstMatch
-        XCTAssertTrue(abc.waitUntilValueEquals("unicode"))
-        abc.tap()
+        XCTAssertEqual(favoriteKey.label, "Back to English keyboard", "Star returns to English from every symbol page, including Recent")
+        XCTAssertTrue(favoriteKey.waitUntilValueEquals("favorites"))
+        favoriteKey.tap()
         assertHostTypingPanel()
         XCTAssertEqual(input.value as? String, context)
 
@@ -1450,7 +1468,6 @@ final class UniboardUITests: XCTestCase {
             footer.tap()
             assertHostTypingPanel()
         }
-        ensureUnicodeToolbarVisible()
     }
 
     private func setPreferredSymbolBoardInManager(_ boardID: String, input: XCUIElement, context: String) {
@@ -1553,6 +1570,29 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(input.value as? String, context, "The save target chooser never inserts the selected Unicode text")
     }
 
+    private func swipeSymbolPage(left: Bool, file: StaticString = #filePath, line: UInt = #line) {
+        let pager = app.descendants(matching: .any)["keyboard.pages.pager"].firstMatch
+        guard pager.exists, usableHeightFrame(pager.frame), app.frame.contains(pager.frame) else {
+            XCTFail("A page drag needs the real visible keyboard viewport", file: file, line: line); return
+        }
+        let frame = pager.frame
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: frame.minX + frame.width * (left ? 0.8 : 0.2) - app.frame.minX,
+                                               dy: frame.midY - app.frame.minY))
+        let end = origin.withOffset(CGVector(dx: frame.minX + frame.width * (left ? 0.2 : 0.8) - app.frame.minX,
+                                             dy: frame.midY - app.frame.minY))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
+    }
+
+    private func waitForSymbolPage(_ id: String) -> Bool {
+        let tab = app.buttons["keyboard.pages.tab.\(id)"].firstMatch
+        let pager = app.descendants(matching: .any)["keyboard.pages.pager"].firstMatch
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            tab.exists && tab.isSelected && pager.exists && (pager.value as? String) == tab.label
+        }, object: app)
+        return XCTWaiter.wait(for: [settled], timeout: 5) == .completed
+    }
+
     private func symbolBoardKey(_ text: String, typing: Bool = false) -> XCUIElement {
         let prefix = typing ? "keyboard.typing.favorite." : "keyboard.board."
         let points = text.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
@@ -1583,11 +1623,20 @@ final class UniboardUITests: XCTestCase {
         let cellHeight = min(CGFloat(48), (root.height - 8) / CGFloat(rows))
         let width = CGFloat(columns) * cellWidth, height = CGFloat(rows) * cellHeight
         let anchor = key.frame
-        let x = min(root.maxX - 4 - width, max(root.minX + 4, anchor.midX - width / 2))
+        let primaryColumn = (min(optionCount, columns) - 1) / 2
+        let x = min(root.maxX - 4 - width, max(root.minX + 4, anchor.midX - (CGFloat(primaryColumn) + 0.5) * cellWidth))
         let above = anchor.minY - 6 - height
         let y = min(root.maxY - 4 - height, max(root.minY + 4, above >= root.minY + 4 ? above : anchor.maxY + 6))
-        let point = CGPoint(x: x + (CGFloat(selectedIndex % columns) + 0.5) * cellWidth,
-                            y: y + (CGFloat(selectedIndex / columns) + 0.5) * cellHeight)
+        var visualOrder: [Int] = []
+        for start in stride(from: 0, to: optionCount, by: columns) {
+            let rowCount = min(columns, optionCount - start)
+            visualOrder += (0..<rowCount).filter { $0 % 2 == 0 }.reversed().map { start + $0 }
+            visualOrder += (0..<rowCount).filter { $0 % 2 == 1 }.map { start + $0 }
+        }
+        visualOrder += optionCount..<count
+        let position = visualOrder.firstIndex(of: selectedIndex)!
+        let point = CGPoint(x: x + (CGFloat(position % columns) + 0.5) * cellWidth,
+                            y: y + (CGFloat(position / columns) + 0.5) * cellHeight)
         XCTAssertTrue(root.contains(point))
         let end = app.coordinate(withNormalizedOffset: .zero).withOffset(
             CGVector(dx: point.x - app.frame.minX, dy: point.y - app.frame.minY))
@@ -1595,8 +1644,220 @@ final class UniboardUITests: XCTestCase {
             .press(forDuration: 0.8, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
+    func testAppSearchDoneStaysInsideKeyboardAndDismissesWithoutChangingQuery() throws {
+        try requirePhoneKeyboardIntegration()
+        configureTopBar(symbols: true, search: false)
+        _ = openSystemKeyboardHost(unicodeBrowse: false)
+        restoreEnglishKeyboard()
+        app.terminate(); app.launch()
+        appTab("Explore").tap()
+        searchUnicode("snow")
+        let field = app.textFields["unicodeSearch"].firstMatch
+        XCTAssertTrue(field.waitUntilValueEquals("snow"))
+        selectUniboardKeyboard(input: field, expectedHost: "snow")
+        let done = app.buttons["keyboard.return"].firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        XCTAssertEqual(done.label, "Done key")
+        guard let root = measuredKeyboardSurfaceFrame() else { XCTFail("Expected the actual keyboard allocation"); return }
+        XCTAssertTrue(root.insetBy(dx: -1, dy: -1).contains(done.frame))
+        XCTAssertFalse(app.toolbars.buttons["Done"].firstMatch.exists, "No floating app-owned Done accessory remains")
+        attachScreenshot("Live search uses the Done key inside Uniboard")
+        done.tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !self.uniboardKeyboardIsVisible() }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 5), .completed)
+        XCTAssertTrue(field.waitUntilValueEquals("snow"), "Done dismisses without inserting a newline or changing the query")
+        attachScreenshot("Keyboard Done dismisses while retaining the exact live search")
+    }
+
+    func testSystemKeyboardIPadSymbolPagesRotateWithoutChangingToolbar() throws {
+        try requireKeyboardIntegration()
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "Owned iPad fixture only")
+        configureTopBar(symbols: true, search: false)
+        let context = "iPad pages preserve this host."
+        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        let star = app.buttons["keyboard.openFavorites"].firstMatch
+        let toggle = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch
+        star.tap()
+        XCTAssertTrue(waitForSymbolPage("migrated-favorites"))
+        XCTAssertTrue(toggle.waitUntilValueEquals("off"))
+        swipeSymbolPage(left: false)
+        XCTAssertTrue(waitForSymbolPage("stock-symbols"))
+        let bang = symbolBoardKey("!")
+        XCTAssertTrue(bang.waitForExistence(timeout: 5))
+        XCTAssertEqual(bang.frame.height, 59.8, accuracy: 1)
+        func tapVisible(_ control: XCUIElement) {
+            guard let root = measuredKeyboardSurfaceFrame(), usableHeightFrame(control.frame), root.contains(control.frame) else {
+                XCTFail("Require the actual visible iPad key inside the keyboard allocation"); return
+            }
+            let frame = control.frame
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX-app.frame.minX, dy: frame.midY-app.frame.minY)).tap()
+        }
+        tapVisible(bang)
+        XCTAssertTrue(input.waitUntilValueEquals(context + "!"))
+        tapVisible(app.buttons["keyboard.pages.delete"].firstMatch)
+        XCTAssertTrue(input.waitUntilValueEquals(context))
+        settleKeyboardOrientation(.landscapeLeft, toolbarVisible: false)
+        XCTAssertTrue(waitForSymbolPage("stock-symbols"))
+        XCTAssertTrue(toggle.waitUntilValueEquals("off"))
+        XCTAssertEqual(bang.frame.height, 59.8, accuracy: 1)
+        attachScreenshot("Landscape iPad symbol pages retain full keycaps and U-off")
+        swipeSymbolPage(left: true); XCTAssertTrue(waitForSymbolPage("migrated-favorites"))
+        swipeSymbolPage(left: true); XCTAssertTrue(waitForSymbolPage("recent"))
+        let recent = app.buttons["keyboard.character.U+0021"].firstMatch
+        XCTAssertTrue(recent.waitForExistence(timeout: 5)); tapVisible(recent)
+        XCTAssertTrue(input.waitUntilValueEquals(context + "!"))
+        settleKeyboardOrientation(.portrait, toolbarVisible: false)
+        XCTAssertTrue(waitForSymbolPage("recent"))
+        XCTAssertTrue(toggle.waitUntilValueEquals("off"))
+        tapVisible(app.buttons["keyboard.pages.delete"].firstMatch)
+        XCTAssertTrue(input.waitUntilValueEquals(context))
+        attachScreenshot("Portrait iPad restores Recent without opening the search bar")
+        star.tap(); assertHostTypingPanel()
+    }
+
+    func testSystemKeyboardSymbolPagesSynchronizeVisiblePageAndKeys() throws {
+        try requirePhoneKeyboardIntegration()
+        configureTopBar(symbols: true, search: false)
+        let context = "Page sync "
+        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
+        defer { restoreEnglishKeyboard() }
+        let star = app.buttons["keyboard.openFavorites"].firstMatch
+        let toggle = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch
+        star.tap()
+        XCTAssertTrue(waitForSymbolPage("migrated-favorites"))
+        swipeSymbolPage(left: false)
+        XCTAssertTrue(waitForSymbolPage("stock-symbols"))
+        let bang = symbolBoardKey("!")
+        XCTAssertTrue(bang.waitForExistence(timeout: 5))
+        func tapVisible(_ control: XCUIElement) {
+            guard let root = measuredKeyboardSurfaceFrame(), usableHeightFrame(control.frame), root.contains(control.frame) else {
+                XCTFail("Require an actual visible symbol-page key"); return
+            }
+            let frame = control.frame
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX-app.frame.minX, dy: frame.midY-app.frame.minY)).tap()
+        }
+        tapVisible(bang); XCTAssertTrue(input.waitUntilValueEquals(context + "!"))
+        tapVisible(app.buttons["keyboard.pages.delete"].firstMatch)
+        XCTAssertTrue(input.waitUntilValueEquals(context))
+        swipeSymbolPage(left: true); XCTAssertTrue(waitForSymbolPage("migrated-favorites"))
+        XCTAssertFalse(symbolBoardKey("!").exists, "An off-page board must not expose active character keys")
+        swipeSymbolPage(left: false); XCTAssertTrue(waitForSymbolPage("stock-symbols"))
+        XCTAssertTrue(toggle.waitUntilValueEquals("off"))
+        XCTAssertEqual(input.value as? String, context)
+        attachScreenshot("Visible symbol page, highlighted tab and accepted key actions stay synchronized")
+        star.tap(); assertHostTypingPanel()
+    }
+
+    func testSystemKeyboardSymbolPagesPreserveVisibleSearchBarAndKeys() throws {
+        try requirePhoneKeyboardIntegration()
+        configureTopBar(symbols: true, search: true)
+        let context = "Visible toolbar pages."
+        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false, searchBarVisible: true)
+        defer { restoreEnglishKeyboard(); configureTopBar(symbols: true, search: false) }
+        let star = app.buttons["keyboard.openFavorites"].firstMatch
+        let toggle = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
+        star.tap()
+        XCTAssertTrue(waitForSymbolPage("migrated-favorites"))
+        XCTAssertTrue(toggle.waitUntilValueEquals("on"))
+        XCTAssertTrue(search.waitUntilValueEquals("No query"))
+        swipeSymbolPage(left: false)
+        XCTAssertTrue(waitForSymbolPage("stock-symbols"))
+        let bang = symbolBoardKey("!")
+        XCTAssertTrue(bang.waitForExistence(timeout: 5))
+        for control in [bang, app.buttons["keyboard.pages.delete"].firstMatch] {
+            guard let root = measuredKeyboardSurfaceFrame(), usableHeightFrame(control.frame), root.contains(control.frame) else {
+                XCTFail("A real symbol-page key must be fully inside the visible keyboard"); return
+            }
+            control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            XCTAssertTrue(input.waitUntilValueEquals(control.identifier == bang.identifier ? context + "!" : context))
+        }
+        swipeSymbolPage(left: true)
+        XCTAssertTrue(waitForSymbolPage("migrated-favorites"))
+        toggle.tap()
+        XCTAssertTrue(toggle.waitUntilValueEquals("off"))
+        XCTAssertTrue(waitForSymbolPage("migrated-favorites"))
+        XCTAssertFalse(search.exists)
+        swipeSymbolPage(left: false)
+        XCTAssertTrue(waitForSymbolPage("stock-symbols"))
+        toggle.tap()
+        XCTAssertTrue(toggle.waitUntilValueEquals("on"))
+        XCTAssertTrue(waitForSymbolPage("stock-symbols"))
+        XCTAssertTrue(search.waitUntilValueEquals("No query"))
+        XCTAssertEqual(input.value as? String, context)
+        attachScreenshot("Paging and actual key actions preserve U through live toolbar changes")
+        star.tap(); assertHostTypingPanel()
+    }
+
+    func testSystemKeyboardSymbolPagesCreateSwipeAndDeleteWithToolbarHidden() throws {
+        try requirePhoneKeyboardIntegration()
+        configureTopBar(symbols: true, search: false)
+        let context = "Pages preserve this host."
+        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        let star = app.buttons["keyboard.openFavorites"].firstMatch
+        let toggle = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch
+        XCTAssertTrue(toggle.waitUntilValueEquals("off"))
+        star.press(forDuration: 1)
+        assertSymbolBoardOverlay(input: input, context: context)
+        var created: [String] = []
+        for name in ["qaone", "qatwo"] {
+            let create = app.buttons["keyboard.boards.create"].firstMatch
+            tapSymbolBoardControl(create)
+            let add = app.buttons["keyboard.boards.pad.save"].firstMatch
+            XCTAssertTrue(add.waitForExistence(timeout: 5)); XCTAssertFalse(add.isEnabled)
+            let entryHierarchy = XCTAttachment(string: app.debugDescription)
+            entryHierarchy.name = "New page keyboard and local letter control identities"
+            entryHierarchy.lifetime = .keepAlways; self.add(entryHierarchy)
+            assertSymbolBoardOverlay(input: input, context: context)
+            typeSymbolBoardLocalPad(name)
+            XCTAssertTrue(add.isEnabled)
+            assertSymbolBoardOverlay(input: input, context: context)
+            attachScreenshot("New page has a contained name field, keycaps and Add action")
+            tapSymbolBoardControl(add)
+            let selected = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@", "keyboard.boards.select.", "Selected")).firstMatch
+            XCTAssertTrue(selected.waitForExistence(timeout: 5))
+            created.append(String(selected.identifier.dropFirst("keyboard.boards.select.".count)))
+        }
+        let ids = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "keyboard.boards.select."))
+            .allElementsBoundByAccessibilityElement.map { String($0.identifier.dropFirst("keyboard.boards.select.".count)) }
+        XCTAssertGreaterThanOrEqual(ids.count, 4)
+        let first = app.buttons["keyboard.boards.select.\(ids[0])"].firstMatch
+        tapSymbolBoardControl(first)
+        XCTAssertTrue(waitForSymbolPage(ids[0]))
+        XCTAssertTrue(toggle.waitUntilValueEquals("off"), "Opening or editing pages must preserve U-off")
+        XCTAssertFalse(app.descendants(matching: .any)["keyboard.search"].firstMatch.exists)
+        for id in Array(ids.dropFirst()) + ["recent"] {
+            swipeSymbolPage(left: true)
+            XCTAssertTrue(waitForSymbolPage(id), "Each horizontal gesture advances exactly one page")
+            XCTAssertTrue(toggle.waitUntilValueEquals("off"))
+            XCTAssertEqual(input.value as? String, context, "Swiping cancels key presses instead of inserting")
+        }
+        swipeSymbolPage(left: true)
+        XCTAssertTrue(waitForSymbolPage("recent"), "The last page does not wrap or lose selection")
+        swipeSymbolPage(left: false)
+        XCTAssertTrue(waitForSymbolPage(ids.last!))
+        attachScreenshot("All saved pages and Recent are reachable with one-page horizontal swipes")
+        for id in created {
+            star.press(forDuration: 1)
+            let edit = app.buttons["keyboard.boards.edit.\(id)"].firstMatch
+            tapSymbolBoardControl(edit)
+            let remove = app.buttons["keyboard.boards.delete"].firstMatch
+            tapSymbolBoardControl(remove)
+            XCTAssertTrue(app.buttons["keyboard.boards.select.\(id)"].firstMatch.waitUntilAbsent())
+            tapSymbolBoardControl(app.buttons["keyboard.boards.close"].firstMatch)
+            XCTAssertTrue(toggle.waitUntilValueEquals("off"))
+        }
+        star.tap()
+        assertHostTypingPanel()
+        XCTAssertTrue(toggle.waitUntilValueEquals("off"))
+        XCTAssertEqual(input.value as? String, context)
+    }
+
     func testSystemKeyboardSymbolBoardsPreserveExactVariantsAndLocalConfiguration() throws {
         try requirePhoneKeyboardIntegration()
+        configureTopBar(symbols: true, search: false)
         let context = "Symbol boards preserve this host."
         let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
@@ -1681,7 +1942,7 @@ final class UniboardUITests: XCTestCase {
         assertSymbolBoardOverlay(input: input, context: context)
         XCTAssertEqual(input.value as? String, context)
         app.buttons["keyboard.boards.close"].tap()
-        settleKeyboardOrientation(.landscapeLeft)
+        settleKeyboardOrientation(.landscapeLeft, toolbarVisible: false)
         app.buttons["keyboard.openFavorites"].press(forDuration: 1)
         assertSymbolBoardOverlay(input: input, context: context)
         app.buttons["keyboard.boards.edit.\(boardID)"].tap()
@@ -1705,7 +1966,12 @@ final class UniboardUITests: XCTestCase {
         app.buttons["keyboard.boards.back"].tap()
         assertSymbolBoardOverlay(input: input, context: context)
         app.buttons["keyboard.boards.close"].tap()
-        settleKeyboardOrientation(.portrait)
+        settleKeyboardOrientation(.portrait, toolbarVisible: false)
+        let toolbarToggle = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch
+        XCTAssertTrue(toolbarToggle.waitUntilValueEquals("off"))
+        XCTAssertFalse(search.exists)
+        toolbarToggle.tap()
+        XCTAssertTrue(waitForSymbolPage(boardID))
         XCTAssertTrue(search.waitUntilValueEquals("arrow cat"))
         let configured = symbolBoardKey("☃")
         XCTAssertTrue(configured.waitForExistence(timeout: 5))
@@ -1734,6 +2000,7 @@ final class UniboardUITests: XCTestCase {
         app.buttons["keyboard.boards.close"].tap()
         app.buttons["keyboard.openFavorites"].tap()
         assertHostTypingPanel()
+        ensureUnicodeToolbarVisible()
         XCTAssertTrue(search.waitUntilValueEquals("arrow cat"))
         search.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 20, dy: search.frame.height / 2)).tap()
         typeKeyboardQueryKeys("x")
@@ -1767,105 +2034,53 @@ final class UniboardUITests: XCTestCase {
                                           file: StaticString = #filePath, line: UInt = #line) {
         let manager = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
         let header = app.descendants(matching: .any)["keyboard.boards.header"].firstMatch
-        let scroll = app.scrollViews["keyboard.boards.scroll"].firstMatch
         XCTAssertTrue(manager.waitForExistence(timeout: 5), file: file, line: line)
+        let entry = app.descendants(matching: .any)["keyboard.boards.entryPanel"].firstMatch
+        let scroll = app.scrollViews["keyboard.boards.scroll"].firstMatch
+        let content = entry.exists ? entry : scroll
         guard usableHeightFrame(manager.frame), app.frame.contains(manager.frame),
-              header.exists, scroll.exists, usableHeightFrame(header.frame), usableHeightFrame(scroll.frame) else {
-            XCTFail("Configuration needs a finite opaque panel, header and bounded scroll viewport", file: file, line: line); return
+              header.exists, content.exists, usableHeightFrame(header.frame), usableHeightFrame(content.frame) else {
+            XCTFail("Page editing needs an on-screen opaque panel, header and bounded content", file: file, line: line); return
         }
-        let panel = manager.frame, headerFrame = header.frame, viewport = scroll.frame
-        let roots = app.otherElements.containing(.any, identifier: "keyboard.boards.manager")
-            .allElementsBoundByAccessibilityElement.map(\.frame).filter { frame in
-                self.usableHeightFrame(frame) && self.app.frame.contains(frame) && abs(frame.width-self.app.frame.width) <= 1
-                    && frame.contains(panel)
-            }.sorted { $0.height < $1.height }
-        guard let root = roots.first else { XCTFail("Expected the actual full-width root containing the board overlay", file: file, line: line); return }
-        let gripHeight: CGFloat = 0
-        let geometry = XCTAttachment(string: "manager=\(panel) header=\(headerFrame) viewport=\(viewport) root=\(root) gripHeight=\(gripHeight)")
-        geometry.name = "Actual symbol-board accessibility container and inner viewport bounds"
-        geometry.lifetime = .keepAlways
-        add(geometry)
-        // The remote landscape keyboard container also contains iOS's
-        // lateral globe/dictation gutters and bottom safe-area band. Its
-        // hosted extension panel must stay centred and wholly contained.
-        // Portrait exposes the extension's exact allocation instead.
-        if app.frame.width > app.frame.height {
-            XCTAssertEqual(panel.midX, root.midX, accuracy: 1, file: file, line: line)
-            XCTAssertGreaterThanOrEqual(panel.width, root.width * 0.7, file: file, line: line)
-            XCTAssertEqual(panel.height, 278.4, accuracy: 1, file: file, line: line)
-            XCTAssertLessThanOrEqual(panel.maxY, root.maxY, file: file, line: line)
-            let hierarchy = XCTAttachment(string: app.debugDescription)
-            hierarchy.name = "Original landscape hosted panel and system keyboard gutters"
-            hierarchy.lifetime = .keepAlways
-            add(hierarchy)
-        } else {
-            XCTAssertEqual(panel.minX-root.minX, 0, accuracy: 1, file: file, line: line)
-            XCTAssertEqual(root.maxX-panel.maxX, 0, accuracy: 1, file: file, line: line)
-            XCTAssertEqual(root.maxY-panel.maxY, 0, accuracy: 1, file: file, line: line)
+        let panel = manager.frame
+        XCTAssertTrue(panel.insetBy(dx: -1, dy: -1).contains(header.frame), file: file, line: line)
+        XCTAssertTrue(panel.insetBy(dx: -1, dy: -1).contains(content.frame), file: file, line: line)
+        XCTAssertLessThanOrEqual(header.frame.maxY, content.frame.minY + 1, file: file, line: line)
+        for control in header.buttons.allElementsBoundByAccessibilityElement {
+            XCTAssertTrue(panel.contains(control.frame), "Every header action stays inside the keyboard", file: file, line: line)
         }
-        XCTAssertEqual(panel.minY-root.minY, gripHeight, accuracy: 1, file: file, line: line)
-        // The explicit panel container includes the caller's outer padding.
-        // Measure its real scroll viewport, never the OS-owned gutters.
-        XCTAssertEqual(viewport.minX-panel.minX, 8, accuracy: 1, file: file, line: line)
-        XCTAssertEqual(panel.maxX-viewport.maxX, 8, accuracy: 1, file: file, line: line)
-        XCTAssertEqual(panel.maxY-viewport.maxY, 8, accuracy: 1, file: file, line: line)
-        // This AX group reports the union of its 32-point navigation
-        // controls, centred inside the actual 36-point header layout band.
-        let headerBand = CGRect(x: viewport.minX, y: panel.minY + 8, width: viewport.width, height: 36)
-        XCTAssertEqual(headerFrame.height, 32, accuracy: 1, file: file, line: line)
-        XCTAssertEqual(headerFrame.midY, headerBand.midY, accuracy: 1, file: file, line: line)
-        XCTAssertTrue(headerBand.contains(headerFrame), file: file, line: line)
-        XCTAssertEqual(viewport.minY-headerBand.maxY, 6, accuracy: 1, file: file, line: line)
-        XCTAssertTrue(panel.contains(headerFrame) && panel.contains(viewport), file: file, line: line)
-        XCTAssertGreaterThanOrEqual(viewport.minY-headerFrame.maxY, 4, file: file, line: line)
-        for id in ["keyboard.boards.back", "keyboard.boards.close"] {
-            let control = app.buttons[id].firstMatch
-            if id == "keyboard.boards.back" && !control.exists { continue }
-            let navigationGeometry = XCTAttachment(string: "\(id) frame=\(control.frame) headerBand=\(headerBand)")
-            navigationGeometry.name = "Actual symbol-board navigation bounds"
-            navigationGeometry.lifetime = .keepAlways
-            add(navigationGeometry)
-            // Navigation belongs to the full layout band. AX focus unions
-            // can round a shared edge by a fraction of a display pixel.
-            guard control.exists, usableHeightFrame(control.frame),
-                  headerBand.insetBy(dx: -0.5, dy: -0.5).contains(control.frame),
-                  app.frame.insetBy(dx: -0.5, dy: -0.5).contains(control.frame) else {
-                XCTFail("Board navigation must remain fully inside its fixed header", file: file, line: line); return
+        if entry.exists {
+            for control in entry.buttons.allElementsBoundByAccessibilityElement {
+                XCTAssertTrue(usableHeightFrame(control.frame) && panel.contains(control.frame),
+                              "The naming pad must fit without scrolling or clipping", file: file, line: line)
             }
-            XCTAssertGreaterThanOrEqual(control.frame.width, 44, file: file, line: line)
-            XCTAssertGreaterThanOrEqual(control.frame.height, 32, file: file, line: line)
-            XCTAssertTrue(control.isHittable, file: file, line: line)
         }
-        // This six-point separator is deliberately inert. Its opaque panel
-        // must intercept the underlying toolbar/key instead of forwarding it.
-        let point = CGPoint(x: panel.midX, y: (headerFrame.maxY+viewport.minY)/2)
-        XCTAssertTrue(panel.contains(point), file: file, line: line)
-        app.coordinate(withNormalizedOffset: .zero).withOffset(
-            CGVector(dx: point.x-app.frame.minX, dy: point.y-app.frame.minY)).tap()
-        XCTAssertTrue(manager.exists, file: file, line: line)
         XCTAssertTrue(input.waitUntilValueEquals(context), file: file, line: line)
-        attachScreenshot("Opaque symbol-board editor owns its full header/body/footer area without host insertion")
+        attachScreenshot("Page configuration and its local keyboard stay inside the extension")
     }
 
-
     private func typeSymbolBoardLocalPad(_ text: String) {
+        let field = app.descendants(matching: .any)["keyboard.boards.entry"].firstMatch
+        var expected = field.value as? String ?? ""
         for character in text {
             let key = app.buttons["keyboard.boards.pad.\(character)"].firstMatch
             XCTAssertTrue(key.waitForExistence(timeout: 5))
-            revealSymbolBoardControl(key)
-            XCTAssertTrue(key.isHittable)
-            key.tap()
+            tapSymbolBoardControl(key)
+            expected.append(character)
+            XCTAssertTrue(field.waitUntilValueEquals(expected), "Every real local-key tap must edit the name/variant, never the receiving document")
         }
     }
 
     private func revealSymbolBoardControl(_ control: XCUIElement) {
+        let manager = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
+        if control.exists, manager.exists, usableHeightFrame(control.frame), manager.frame.contains(control.frame) { return }
         let scroll = app.scrollViews["keyboard.boards.scroll"].firstMatch
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
         for step in 0..<8 {
             let viewport = scroll.frame.intersection(app.frame)
             guard usableHeightFrame(viewport) else { XCTFail("Expected the actual configuration viewport"); return }
             print("UNIBOARD_EDITOR_REVEAL step=\(step) target=\(control.identifier) viewport=\(viewport) targetFrame=\(control.exists ? String(describing: control.frame) : "absent")")
-            if control.exists, usableHeightFrame(control.frame), viewport.contains(control.frame), control.isHittable { return }
+            if control.exists, usableHeightFrame(control.frame), viewport.contains(control.frame) { return }
             let down = control.exists && usableHeightFrame(control.frame) && control.frame.minY < viewport.minY
             let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             let end = start.withOffset(CGVector(dx: 0, dy: min(44, viewport.height * 0.3) * (down ? 1 : -1)))
@@ -1880,9 +2095,17 @@ final class UniboardUITests: XCTestCase {
             add(diagnostic)
         }
         XCTAssertTrue(revealed)
-        XCTAssertTrue(control.isHittable)
     }
 
+    private func tapSymbolBoardControl(_ control: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        revealSymbolBoardControl(control)
+        let manager = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
+        let frame = control.frame
+        guard manager.exists, usableHeightFrame(frame), manager.frame.contains(frame), app.frame.contains(frame), control.isEnabled else {
+            XCTFail("A configuration tap needs an enabled, fully visible control inside the current panel", file: file, line: line); return
+        }
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX - app.frame.minX, dy: frame.midY - app.frame.minY)).tap()
+    }
 
     private func assertExpandedSymbolPageHasNoDigits(file: StaticString = #filePath, line: UInt = #line) {
         for digit in "0123456789" {
@@ -2063,7 +2286,7 @@ final class UniboardUITests: XCTestCase {
             if app.buttons["keyboard.query.u"].firstMatch.exists { closeKeyboardSearch() }
             restoreEnglishKeyboard()
         }
-        assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+        assertKeyboardSettingsMenuOnlyOrder()
         XCTAssertFalse(app.buttons["keyboard.collapse"].exists)
         enterKeyboardQuery("u+0558")
         let armenian = app.buttons["keyboard.character.U+0558"].firstMatch
@@ -2077,7 +2300,7 @@ final class UniboardUITests: XCTestCase {
         input = openSystemKeyboardHost()
         XCTAssertTrue(app.buttons["keyboard.collapse"].firstMatch.waitForExistence(timeout: 5),
                       "The keyboard reads its optional collapse-key choice from App Settings")
-        assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+        assertKeyboardSettingsMenuOnlyOrder()
         enterKeyboardQuery("u+0558")
         let enabledArmenian = app.buttons["keyboard.character.U+0558"].firstMatch
         XCTAssertTrue(enabledArmenian.waitUntilValueEquals("Preview font: GNU Unifont"))
@@ -2091,7 +2314,7 @@ final class UniboardUITests: XCTestCase {
         app.buttons["keyboard.properties.close"].tap()
         app.buttons.matching(identifier: "keyboard.character.U+0558").firstMatch.tap()
         XCTAssertTrue(input.waitUntilValueEquals("\u{0558}"))
-        assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+        assertKeyboardSettingsMenuOnlyOrder()
         attachScreenshot("Optional font preview inserts the original scalar with intact portrait toolbar")
         closeKeyboardSearch()
 
@@ -2101,7 +2324,7 @@ final class UniboardUITests: XCTestCase {
             return frame.width > frame.height
         }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 5), .completed)
-        assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+        assertKeyboardSettingsMenuOnlyOrder()
         enterKeyboardQuery("u+10940")
         assertKeyboardControlsAreVisible(isSearching: true)
         assertHostEditorIsVisibleAboveKeyboard(input)
@@ -2113,7 +2336,7 @@ final class UniboardUITests: XCTestCase {
         sidetic.tap()
         XCTAssertTrue(input.waitUntilValueEquals("\u{0558}\u{10940}"))
         XCTAssertEqual((input.value as? String)?.unicodeScalars.map { $0.value }, [0x0558, 0x10940])
-        assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+        assertKeyboardSettingsMenuOnlyOrder()
         attachScreenshot("Supplementary fallback glyph inserts exact text in compact landscape")
         closeKeyboardSearch()
         openUnicodeBrowse()
@@ -2170,101 +2393,10 @@ final class UniboardUITests: XCTestCase {
         disabledArmenian.tap()
         XCTAssertTrue(input.waitUntilValueEquals("\u{0558}"))
         XCTAssertEqual((input.value as? String)?.unicodeScalars.map(\.value), [0x0558])
-        assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+        assertKeyboardSettingsMenuOnlyOrder()
         attachScreenshot("App Settings fonts and collapse off are reflected by the relaunched keyboard")
     }
 
-
-    func testSystemKeyboardOpenCompanionAppRoutesToSettingsOrShowsDeniedGuidance() throws {
-        try requireKeyboardIntegration()
-        let context = "Opening settings must not type into this host."
-        let input = openSystemKeyboardHost(initialText: context)
-        defer { if input.exists { restoreEnglishKeyboard() } }
-        enterKeyboardQuery("cat")
-        XCTAssertEqual(input.value as? String, context)
-        XCTAssertTrue(app.navigationBars["Try Uniboard"].exists)
-        XCTAssertFalse(app.navigationBars["Settings"].exists,
-                       "The host must be on its pushed screen before exercising the Settings route")
-        assertCompanionAppMenuActuation(input: input, context: context, query: "cat")
-    }
-
-    private func assertCompanionAppMenuActuation(input: XCUIElement, context: String, query: String,
-                                                 file: StaticString = #filePath, line: UInt = #line) {
-        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
-        XCTAssertTrue(input.waitUntilValueEquals(context), file: file, line: line)
-        XCTAssertTrue(search.waitUntilValueEquals(query), file: file, line: line)
-        openKeyboardOptions()
-        // The remote native popup removes the covered query control from
-        // accessibility. Require its actual pre-popup snapshot instead;
-        // denied navigation also verifies the live query after dismissal.
-        XCTAssertEqual(keyboardOptionsSnapshot?.hostText, context, file: file, line: line)
-        XCTAssertEqual(keyboardOptionsSnapshot?.queryValue, query, file: file, line: line)
-        guard let popup = nativeKeyboardOptionsPopup() else {
-            XCTFail("Require the actual native options popup before opening the companion app", file: file, line: line); return
-        }
-        let action = app.descendants(matching: .any)["keyboard.openCompanionApp"].firstMatch
-        guard revealNativeKeyboardOption(action, in: popup), usableHeightFrame(action.frame),
-              popup.frame.intersection(app.frame).insetBy(dx: -1, dy: -1).contains(action.frame) else {
-            XCTFail("Open companion app must be fully visible in its actual native popup", file: file, line: line); return
-        }
-        XCTAssertTrue(action.isHittable, file: file, line: line)
-        XCTAssertEqual(input.value as? String, context, file: file, line: line)
-        attachScreenshot("Actual companion app menu action before its single tap")
-        action.tap()
-        keyboardOptionsSnapshot = nil
-
-        let settings = app.navigationBars["Settings"].firstMatch
-        let selector = app.descendants(matching: .any)["unicodeEdition"].firstMatch
-        let guidance = app.descendants(matching: .any)["keyboard.openCompanionApp.guidance"].firstMatch
-        let explanation = app.staticTexts["Open Uniboard from the Home Screen to change settings."].firstMatch
-        func settingsAreVisible() -> Bool {
-            guard settings.exists, !app.navigationBars["Try Uniboard"].exists, !input.exists,
-                  selector.exists, usableHeightFrame(selector.frame), app.frame.contains(selector.frame) else { return false }
-            return selector.isHittable
-        }
-        func deniedGuidanceIsVisible() -> Bool {
-            guard guidance.exists, explanation.exists, usableHeightFrame(guidance.frame),
-                  usableHeightFrame(explanation.frame), app.frame.contains(guidance.frame),
-                  guidance.frame.contains(explanation.frame) else { return false }
-            return explanation.isHittable
-        }
-        let outcome = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            settingsAreVisible() || deniedGuidanceIsVisible()
-        }, object: app)
-        guard XCTWaiter.wait(for: [outcome], timeout: 10) == .completed else {
-            attachScreenshot("Companion app action produced neither real Settings nor explicit denial guidance")
-            XCTFail("One real menu tap must open Settings or show the explicit Home Screen guidance", file: file, line: line); return
-        }
-        XCTAssertTrue(popup.waitUntilAbsent(), file: file, line: line)
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5), file: file, line: line)
-        let openedSettings = settingsAreVisible()
-        let denied = deniedGuidanceIsVisible()
-        XCTAssertNotEqual(openedSettings, denied, "Exactly one actual route outcome must be visible", file: file, line: line)
-        if openedSettings {
-            // The route deliberately recreates the Settings navigation stack.
-            // Its removed host view cannot supply an after-navigation text read.
-            XCTAssertFalse(input.exists, file: file, line: line)
-            XCTAssertFalse(guidance.exists, file: file, line: line)
-            attachScreenshot("Open companion app actually navigates from the host to App Settings")
-        } else {
-            XCTAssertTrue(denied, file: file, line: line)
-            XCTAssertTrue(app.navigationBars["Try Uniboard"].exists, file: file, line: line)
-            XCTAssertTrue(input.waitUntilValueEquals(context), file: file, line: line)
-            XCTAssertTrue(search.waitUntilValueEquals(query), file: file, line: line)
-            assertHostEditorIsVisibleAboveKeyboard(input, file: file, line: line)
-            attachScreenshot("OS-denied companion opening leaves exact host and query with explicit Home Screen guidance")
-        }
-        let receipt: [String: Any] = ["actionTaps": 1,
-            "outcome": openedSettings ? "actual-settings-navigation" : "explicit-os-denied-guidance",
-            "hostTextVerifiedBeforeTap": context, "queryVerifiedBeforeTap": query,
-            "postNavigationHostReadAvailable": !openedSettings,
-            "manualNavigationOrRetryUsed": false]
-        let data = try! JSONSerialization.data(withJSONObject: receipt, options: [.prettyPrinted, .sortedKeys])
-        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
-        attachment.name = "Native companion app route outcome"
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
 
     func testSystemKeyboardCompactLayoutPreservesVisibleHostAndExactInput() throws {
         try requireKeyboardIntegration()
@@ -2273,7 +2405,7 @@ final class UniboardUITests: XCTestCase {
         let input = openSystemKeyboardHost(initialText: context)
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
 
-        assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+        assertKeyboardSettingsMenuOnlyOrder()
         assertCompactKeyboardGeometry("portrait.browse", input: input, searching: false)
         enterKeyboardQuery("u+1f680")
         XCTAssertEqual(input.value as? String, context)
@@ -2321,9 +2453,10 @@ final class UniboardUITests: XCTestCase {
 
     func testSystemKeyboardLandscapeOptionsAcceptsVisibleCenterTouch() throws {
         try requirePhoneKeyboardIntegration()
+        configureTopBar(symbols: true, search: true)
         let context = "Landscape menu preserves this document."
         let input = openSystemKeyboardHost(initialText: context)
-        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard(); configureTopBar(symbols: true, search: false) }
 
         enterKeyboardQuery("u+1f680")
         closeKeyboardSearch()
@@ -2332,6 +2465,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(rocket.waitForExistence(timeout: 5))
         rocket.tap()
         XCTAssertTrue(input.waitUntilValueEquals(context + "🚀"))
+        assertKeyboardSettingsMenuOnlyOrder()
         XCUIDevice.shared.orientation = .landscapeLeft
         let landscape = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             self.app.frame.width > self.app.frame.height
@@ -2346,10 +2480,15 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("Original landscape options before actual native menu interaction")
         // Observe real popup opening, actions and dismissal rather than
         // substituting an accessibility hitpoint prediction for the touch.
-        assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+        assertKeyboardSettingsMenuOnlyOrder()
         XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("u+1f680"))
         XCTAssertEqual(input.value as? String, context + "🚀")
-        attachScreenshot("Actual landscape options menu closes without changing host or retained query")
+        for order in ["newest", "oldest", "codepoint"] {
+            selectKeyboardOrder(order)
+            XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("u+1f680"))
+            XCTAssertEqual(input.value as? String, context + "🚀")
+        }
+        attachScreenshot("Direct sorting choices work and dismiss in portrait and landscape without changing input")
     }
 
 
@@ -2416,7 +2555,7 @@ final class UniboardUITests: XCTestCase {
         app.buttons["keyboard.properties.close"].tap()
         assertKeyboardHasNoEditionSelector()
         selectKeyboardOrder("codepoint")
-        assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+        assertKeyboardSettingsMenuOnlyOrder()
         selectKeyboardOrder("newest")
         XCTAssertEqual(input.value as? String, context + "☃", "Menus must not enter text into the host")
         selectKeyboardSection("symbols")
@@ -2448,7 +2587,6 @@ final class UniboardUITests: XCTestCase {
         let search = searchElement.exists ? searchElement.frame : .zero
         let footer = app.buttons["keyboard.return"].firstMatch.frame
         let candidates = measuredKeyboardSurfaceFrame().map { [$0] } ?? []
-        let landscape = app.frame.width > app.frame.height
         let pad = UIDevice.current.userInterfaceIdiom == .pad
         let effectiveExpected = expectedSurfaceHeight
         let maximum: CGFloat = effectiveExpected ?? (pad ? 396 : 280)
@@ -2509,7 +2647,7 @@ final class UniboardUITests: XCTestCase {
             let input = openSystemKeyboardHost(initialText: context)
             // The keyboard has no edition readout or setter. Its actual
             // assigned/unassigned results below prove the app-owned choice.
-            assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+            assertKeyboardSettingsMenuOnlyOrder()
             for (codepoint, age) in fixtures {
                 enterKeyboardQuery("u+\(codepoint.lowercased())")
                 let result = app.buttons["keyboard.character.U+\(codepoint)"].firstMatch
@@ -2517,7 +2655,7 @@ final class UniboardUITests: XCTestCase {
                 XCTAssertTrue(result.waitUntilLabelHasSuffix(age.isEmpty ? ", Unassigned" : ", U\(age)"))
                 XCTAssertEqual(input.value as? String, context, "App edition synchronization must not edit the host")
                 closeKeyboardSearch()
-                assertKeyboardSettingsMenuOnlyOrderAndOpenApp()
+                assertKeyboardSettingsMenuOnlyOrder()
             }
             attachScreenshot("Real keyboard follows app Settings \(edition) without a catalog selector")
         }
@@ -2527,8 +2665,9 @@ final class UniboardUITests: XCTestCase {
 
     private func assertKeyboardHasNoEditionSelector() {
         openKeyboardOptions()
-        let popup = nativeKeyboardOptionsPopup()
-        XCTAssertNotNil(popup, "Require the actual native options menu before checking its available actions")
+        guard let popup = nativeKeyboardOptionsPopup() else {
+            XCTFail("Require the actual native options menu before checking its available actions"); return
+        }
         for id in ["keyboard.edition", "keyboard.edition.latest", "keyboard.edition.previous",
                    "keyboard.edition.older", "keyboard.edition.draft"] {
             XCTAssertFalse(app.descendants(matching: .any)[id].firstMatch.exists,
@@ -2665,7 +2804,7 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func openKeyboardOptions() {
-        let option = app.descendants(matching: .any)["keyboard.order"].firstMatch
+        let option = keyboardSortOption("codepoint")
         if option.exists { return }
         ensureUnicodeToolbarVisible()
         let menu = app.descendants(matching: .any)["keyboard.options"].firstMatch
@@ -2683,7 +2822,17 @@ final class UniboardUITests: XCTestCase {
             XCTFail("The options dismissal precondition must preserve readable host, query and options values")
             return
         }
-        keyboardOptionsSnapshot = KeyboardOptionsSnapshot(triggerFrame: frame, hostText: hostText,
+        guard let surface = measuredKeyboardSurfaceFrame(), usableHeightFrame(surface) else {
+            XCTFail("Menu dismissal needs the real keyboard surface before presentation"); return
+        }
+        let footer = app.buttons["keyboard.space"].firstMatch.frame
+        guard usableHeightFrame(footer), surface.contains(footer) else {
+            XCTFail("Menu dismissal needs the visible keyboard footer"); return
+        }
+        let gapY = footer.minY - 2
+        let points = [surface.minX + 2, surface.maxX - 2, surface.midX].map { CGPoint(x: $0, y: gapY) }
+        guard points.allSatisfy(surface.contains) else { XCTFail("Dismissal points must remain inside the keyboard"); return }
+        keyboardOptionsSnapshot = KeyboardOptionsSnapshot(dismissalPoints: points, hostText: hostText,
                                                           queryValue: queryValue, optionsValue: optionsValue)
         // iPad's observed accessibility tap point was near the rounded cap's
         // corner. Target its centre explicitly while keeping real menu checks.
@@ -2691,24 +2840,26 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(option.waitForExistence(timeout: 5), "The actual options menu must open")
     }
 
-    private func closeKeyboardOptions(_ nativePopup: XCUIElement? = nil) {
+    private func keyboardSortOption(_ order: String) -> XCUIElement {
+        let titles = ["newest": "Newest first", "oldest": "Oldest first", "codepoint": "Code point"]
+        guard let title = titles[order] else { XCTFail("Unknown test sort option"); return app.buttons["missing.sort.option"] }
+        // UIKit's remote menu drops custom SwiftUI identifiers on iOS 27.
+        return app.buttons[title].firstMatch
+    }
+
+    private func closeKeyboardOptions(_ nativePopup: XCUIElement) {
         defer { keyboardOptionsSnapshot = nil }
-        let option = app.descendants(matching: .any)["keyboard.order"].firstMatch
-        if nativePopup?.exists == true || option.exists {
-            // A host-app tap does not reliably dismiss a remote keyboard
-            // popup. Use the actual source-button frame observed before it
-            // opened; the native menu consumes this tap without an action.
-            guard let snapshot = keyboardOptionsSnapshot else {
-                XCTFail("A native menu dismissal requires its observed keyboard source-button frame")
-                return
+        let option = keyboardSortOption("codepoint")
+        if nativePopup.exists || option.exists {
+            guard let snapshot = keyboardOptionsSnapshot,
+                  usableHeightFrame(nativePopup.frame),
+                  let point = snapshot.dismissalPoints.first(where: { !nativePopup.frame.insetBy(dx: -4, dy: -4).contains($0) }) else {
+                XCTFail("Dismissal requires a measured blank keyboard gap outside the actual popup"); return
             }
             app.coordinate(withNormalizedOffset: .zero).withOffset(
-                CGVector(dx: snapshot.triggerFrame.midX - app.frame.minX,
-                         dy: snapshot.triggerFrame.midY - app.frame.minY)).tap()
+                CGVector(dx: point.x - app.frame.minX, dy: point.y - app.frame.minY)).tap()
         }
-        if let nativePopup {
-            XCTAssertTrue(nativePopup.waitUntilAbsent(), "The actual native popup must close after its items scroll offscreen")
-        }
+        XCTAssertTrue(nativePopup.waitUntilAbsent(), "The actual native popup must close")
         XCTAssertTrue(option.waitUntilAbsent(), "The actual native options popup must close")
         let menu = app.descendants(matching: .any)["keyboard.options"].firstMatch
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
@@ -2730,18 +2881,14 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(element.value as? String, expected, file: file, line: line)
     }
 
-    private func keyboardOption(_ identifier: String) -> XCUIElement {
-        openKeyboardOptions()
-        let item = app.descendants(matching: .any)[identifier].firstMatch
-        XCTAssertTrue(item.waitForExistence(timeout: 5), "Expected keyboard option \(identifier): \(app.debugDescription)")
-        return item
-    }
-
     private func selectKeyboardOrder(_ order: String) {
-        keyboardOption("keyboard.order").tap()
-        let option = app.descendants(matching: .any)["keyboard.order.\(order)"].firstMatch
+        openKeyboardOptions()
+        let option = keyboardSortOption(order)
         XCTAssertTrue(option.waitForExistence(timeout: 5))
-        option.tap()
+        let frame = option.frame
+        XCTAssertTrue(usableHeightFrame(frame) && app.frame.contains(frame))
+        app.coordinate(withNormalizedOffset: .zero).withOffset(
+            CGVector(dx: frame.midX - app.frame.minX, dy: frame.midY - app.frame.minY)).tap()
         let value = ["newest": "newestFirst", "oldest": "oldestFirst", "codepoint": "codePoint"][order]!
         assertControlValue("keyboard.order", equals: value)
     }
@@ -2780,111 +2927,32 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func nativeKeyboardOptionsPopup() -> XCUIElement? {
-        // Preserve the actual AX element after Order scrolls out of view.
+        // Identify the actual popup through a stable visible sort action.
         app.collectionViews.allElementsBoundByAccessibilityElement.first(where: {
-            $0.descendants(matching: .any)["keyboard.order"].firstMatch.exists
+            $0.buttons["Code point"].firstMatch.exists
         })
     }
 
-    private func revealNativeKeyboardOption(_ control: XCUIElement, in popup: XCUIElement) -> Bool {
-        func usable(_ frame: CGRect) -> Bool {
-            frame.minX.isFinite && frame.minY.isFinite && frame.maxX.isFinite && frame.maxY.isFinite
-                && frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0
-        }
-        func nearlyEqual(_ a: CGRect, _ b: CGRect) -> Bool {
-            abs(a.minX - b.minX) <= 0.5 && abs(a.minY - b.minY) <= 0.5
-                && abs(a.width - b.width) <= 0.5 && abs(a.height - b.height) <= 0.5
-        }
-        func settledAndVisible() -> Bool {
-            var previous: (CGRect, CGRect, CGRect)?
-            var stableSince: TimeInterval?
-            let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                guard popup.exists, control.exists else { previous = nil; stableSince = nil; return false }
-                let appFrame = self.app.frame
-                let popupFrame = popup.frame
-                let frame = control.frame
-                let viewport = popupFrame.intersection(appFrame)
-                guard usable(appFrame), usable(popupFrame), usable(viewport), usable(frame),
-                      popupFrame.insetBy(dx: -1, dy: -1).contains(frame),
-                      appFrame.insetBy(dx: -1, dy: -1).contains(frame),
-                      viewport.insetBy(dx: -1, dy: -1).contains(frame) else {
-                    previous = nil; stableSince = nil; return false
-                }
-                let now = ProcessInfo.processInfo.systemUptime
-                let same = previous.map { nearlyEqual($0.0, frame) && nearlyEqual($0.1, popupFrame)
-                    && nearlyEqual($0.2, appFrame) } ?? false
-                if !same { stableSince = now }
-                previous = (frame, popupFrame, appFrame)
-                // Do not accept a transient frame during native-menu momentum.
-                return now - (stableSince ?? now) >= 0.3 && control.isHittable
-            }, object: control)
-            return XCTWaiter.wait(for: [visible], timeout: 3) == .completed
-        }
-
-        // Four bounded gestures, with a final settled visibility check.
-        for attempt in 0...4 {
-            if settledAndVisible() { return true }
-            guard popup.exists else { return false }
-            let appFrame = app.frame
-            let popupFrame = popup.frame
-            let viewport = popupFrame.intersection(appFrame)
-            guard usable(appFrame), usable(popupFrame), usable(viewport) else { return false }
-            let frame = control.exists ? control.frame : .null
-            print("UNIBOARD_NATIVE_MENU_REVEAL attempt=\(attempt) popup=\(popupFrame) app=\(appFrame) visible=\(viewport) control=\(frame)")
-            guard attempt < 4 else { return false }
-            var downward = false
-            var distance = viewport.height * 0.3
-            if usable(frame) {
-                guard frame.height <= viewport.height + 2 else { return false }
-                if frame.minY < viewport.minY {
-                    downward = true
-                    distance = min(distance, max(24, viewport.minY - frame.minY + 6))
-                } else if frame.maxY > viewport.maxY {
-                    distance = min(distance, max(24, frame.maxY - viewport.maxY + 6))
-                } else {
-                    // A contained but masked/unstable control needs another
-                    // bounded observation, not a speculative scroll.
-                    continue
-                }
-            }
-            // Native scroll recognition consumes the first ~10 points. A
-            // tiny clipping correction must still cross that threshold; 24pt
-            // remains capped by the original 30%-viewport maximum.
-            let startY = viewport.minY + viewport.height * (downward ? 0.35 : 0.65)
-            let endY = startY + (downward ? distance : -distance)
-            let origin = app.coordinate(withNormalizedOffset: .zero)
-            let start = origin.withOffset(CGVector(dx: viewport.midX - appFrame.minX,
-                                                  dy: startY - appFrame.minY))
-            let end = origin.withOffset(CGVector(dx: viewport.midX - appFrame.minX,
-                                                dy: endY - appFrame.minY))
-            // Slow motion plus a terminal hold suppresses a fling past a
-            // multiline row. Both points stay in popup intersect display.
-            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
-        }
-        return false
-    }
-
-    private func assertKeyboardSettingsMenuOnlyOrderAndOpenApp(file: StaticString = #filePath, line: UInt = #line) {
+    private func assertKeyboardSettingsMenuOnlyOrder(file: StaticString = #filePath, line: UInt = #line) {
         openKeyboardOptions()
         guard let popup = nativeKeyboardOptionsPopup() else {
             XCTFail("Expected the native options popup collection", file: file, line: line)
             return
         }
         defer { closeKeyboardOptions(popup) }
-        for identifier in ["keyboard.edition", "keyboard.unicodeFonts", "keyboard.showCollapseKey", "keyboard.inspectLast", "keyboard.saveLast"] {
+        for identifier in ["keyboard.edition", "keyboard.unicodeFonts", "keyboard.showCollapseKey", "keyboard.inspectLast", "keyboard.saveLast", "keyboard.openCompanionApp", "keyboard.openCompanionApp.guidance"] {
             XCTAssertFalse(app.descendants(matching: .any)[identifier].firstMatch.exists,
-                           "Keyboard options contain only ordering and opening the companion app", file: file, line: line)
+                           "Keyboard options contain only ordering", file: file, line: line)
         }
-        XCTAssertFalse(app.buttons["Save to symbol board"].firstMatch.exists)
-        let controls = [app.descendants(matching: .any)["keyboard.order"].firstMatch,
-                        app.descendants(matching: .any)["keyboard.openCompanionApp"].firstMatch]
+        XCTAssertFalse(app.buttons["Save to page"].firstMatch.exists)
+        let controls = ["newest", "oldest", "codepoint"].map { keyboardSortOption($0) }
         for control in controls {
-            XCTAssertTrue(revealNativeKeyboardOption(control, in: popup),
-                          "Order and Open companion app must each settle fully on screen and be hittable", file: file, line: line)
+            XCTAssertTrue(control.waitForExistence(timeout: 5), file: file, line: line)
+            XCTAssertTrue(control.isEnabled, file: file, line: line)
             let frame = control.frame
+            XCTAssertTrue(usableHeightFrame(frame), file: file, line: line)
             XCTAssertTrue(popup.frame.insetBy(dx: -1, dy: -1).contains(frame),
                           "Each native menu action must be fully revealed in its actual scroll viewport", file: file, line: line)
-            XCTAssertTrue(control.isHittable, file: file, line: line)
             XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(frame),
                           "A keyboard setting must not be clipped: \(frame)", file: file, line: line)
         }
@@ -3051,7 +3119,19 @@ final class UniboardUITests: XCTestCase {
         app.buttons["keyboard.return"].tap()
         assertHostTypingPanel()
         XCTAssertTrue(input.waitUntilValueEquals(hostText ?? ""), "Done returns English typing without editing the host")
-        XCTAssertTrue(search.waitUntilValueEquals(query ?? "No query"), "Done retains the exact local query")
+        let toggle = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch
+        if toggle.value as? String == "off" {
+            XCTAssertFalse(search.exists)
+            toggle.tap()
+            XCTAssertTrue(search.waitUntilValueEquals(query ?? "No query"), "U reopens the exact retained query")
+            toggle.tap()
+            XCTAssertTrue(toggle.waitUntilValueEquals("off"))
+            assertHostTypingPanel()
+            XCTAssertFalse(search.exists)
+        } else {
+            XCTAssertTrue(search.waitUntilValueEquals(query ?? "No query"), "Done retains the exact local query")
+        }
+        XCTAssertTrue(input.waitUntilValueEquals(hostText ?? ""))
     }
 
     private func assertHostTypingPanel(file: StaticString = #filePath, line: UInt = #line) {
@@ -3205,7 +3285,6 @@ final class UniboardUITests: XCTestCase {
             // Remote menus can report isHittable=false after rotation or a
             // host relaunch. Require the physical centre touch to open the
             // actual popup, then verify its items and dismissal.
-            assertKeyboardSettingsMenuOnlyOrderAndOpenApp(file: file, line: line)
         }
     }
 
@@ -3373,7 +3452,7 @@ final class UniboardUITests: XCTestCase {
 
     private func assertControlValue(_ identifier: String, equals expected: String) {
         if identifier == "keyboard.order" {
-            // Selection dismisses the submenu before the toolbar reappears.
+            // Selection dismisses the sorting menu before the toolbar reappears.
             // The options trigger now exposes only its current ordering.
             let options = app.descendants(matching: .any)["keyboard.options"].firstMatch
             XCTAssertTrue(options.waitForExistence(timeout: 5), "Expected the visible options summary after selecting Order")
@@ -3596,31 +3675,10 @@ final class UniboardUITests: XCTestCase {
             XCTAssertTrue(globe.waitForExistence(timeout: 5), "Expected the system keyboard globe key: \(app.debugDescription)")
             XCTAssertTrue(systemKeyboardGlobeIsVisible(globe), "A remote AX keyboard below the display is not a usable software keyboard")
             XCTAssertEqual(input.value as? String, expectedHost)
-            let pickerAnchor = globe.frame
             globe.press(forDuration: 1)
             if dismissKeyboardSwitcherTipIfPresent() { continue }
             if keyboard.waitForExistence(timeout: 3) {
                 keyboard.tap()
-                waitForVisibleUniboardAfterSwitch(input: input, expectedHost: expectedHost)
-                return
-            }
-            if UIDevice.current.userInterfaceIdiom == .pad,
-               ProcessInfo.processInfo.environment["UNIBOARD_IPAD_LAST_KEYBOARD"] == "ad.neko.uniboard.keyboard" {
-                // Explicit QA fixture only: the harness verifies English,
-                // Emoji, Uniboard in that order before launch. iPadOS 18.5
-                // can show this native menu without exposing its rows in AX.
-                // Its last row is immediately above the actual globe anchor.
-                let point = CGPoint(x: pickerAnchor.midX, y: pickerAnchor.minY - pickerAnchor.height / 2)
-                guard usableHeightFrame(pickerAnchor), app.frame.contains(pickerAnchor), app.frame.contains(point),
-                      app.state == .runningForeground else {
-                    XCTFail("The verified iPad keyboard-picker fixture must remain fully onscreen")
-                    return
-                }
-                XCTAssertEqual(input.value as? String, expectedHost)
-                attachScreenshot("Verified three-keyboard iPad fixture before selecting its last native picker row")
-                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y)).tap()
-                // Selection never counts as success by itself: require the
-                // real U, Star and Space controls onscreen, and unchanged text.
                 waitForVisibleUniboardAfterSwitch(input: input, expectedHost: expectedHost)
                 return
             }

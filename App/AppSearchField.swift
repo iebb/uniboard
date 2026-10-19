@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// App search uses a native accessory bar. The system owns its keyboard
-/// sizing, without SwiftUI's InputAccessoryBar introducing another layout.
+/// Live search finishes with the keyboard's own Done key. No accessory bar
+/// adds a floating confirmation button or another keyboard layout band.
 struct AppSearchField: UIViewRepresentable {
     @Binding var text: String
     let placeholder: String
@@ -26,8 +26,8 @@ struct AppSearchField: UIViewRepresentable {
     }
 }
 
-/// The delegate and accessory targets live with the actual field, rather than
-/// an independently retained coordinator or a second text-input responder.
+/// The delegate lives with the actual field, preserving its native caret
+/// through ordinary SwiftUI binding updates.
 final class AppSearchTextField: UITextField, UITextFieldDelegate {
     private var textChanged: ((String) -> Void)?
 
@@ -46,21 +46,11 @@ final class AppSearchTextField: UITextField, UITextFieldDelegate {
         smartDashesType = .no
         smartInsertDeleteType = .no
         keyboardType = .default
-        returnKeyType = .search
+        returnKeyType = .done
         clearButtonMode = .never // SearchBar owns the visible clear action.
         setContentHuggingPriority(.defaultLow, for: .horizontal)
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addTarget(self, action: #selector(editingChanged), for: .editingChanged)
-
-        // A valid initial height is important before UIKit attaches the bar.
-        // Its width follows the actual input window, including after rotation.
-        let bar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
-        bar.autoresizingMask = [.flexibleWidth]
-        bar.items = [
-            UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil),
-            UIBarButtonItem(barButtonSystemItem: .done, target: self, action: #selector(donePressed))
-        ]
-        inputAccessoryView = bar
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -78,10 +68,6 @@ final class AppSearchTextField: UITextField, UITextFieldDelegate {
 
     @objc private func editingChanged() {
         textChanged?(text ?? "")
-    }
-
-    @objc private func donePressed() {
-        resignFirstResponder()
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {

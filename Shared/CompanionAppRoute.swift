@@ -1,9 +1,7 @@
 import Foundation
 
-/// A fixed navigation request. Keyboard text and preferences never enter a URL.
+/// Validate the app’s external Settings route without accepting embedded data.
 enum CompanionAppRoute {
-    static let settingsURL = URL(string: "uniboard://settings")
-
     static func isSettings(_ url: URL) -> Bool {
         url.scheme?.lowercased() == "uniboard"
             && url.host?.lowercased() == "settings"

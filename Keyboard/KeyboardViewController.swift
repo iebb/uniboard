@@ -27,6 +27,9 @@ final class KeyboardViewController: UIInputViewController {
         // Use the keyboard's system blur and tint instead of stacking another
         // full-size material behind the control glass.
         view = KeyboardSelfSizingInputView(frame: .zero, inputViewStyle: .keyboard)
+        view.accessibilityIdentifier = "keyboard.surface"
+        view.accessibilityContainerType = .semanticGroup
+        view.shouldGroupAccessibilityChildren = true
     }
 
     override func viewDidLoad() {
@@ -664,6 +667,7 @@ private enum KeyboardSection: String, CaseIterable {
     case blocks = "Blocks"
     case saved = "Saved"
 
+    var title: String { self == .saved ? "Pages" : rawValue }
     var icon: String {
         switch self {
         case .symbols: return "sparkles"
@@ -793,7 +797,8 @@ private final class KeyboardModel: ObservableObject {
     @Published private(set) var showsCollapseKey: Bool
     @Published private(set) var showsSymbolBar: Bool
     @Published private(set) var searchBarInsteadOfSymbols: Bool
-    var showsUnicodeToolbar: Bool { showsUnicode || (showsSymbolBar && searchBarInsteadOfSymbols) }
+    @Published private(set) var symbolPagesToolbarVisible: Bool?
+    var showsUnicodeToolbar: Bool { symbolPagesToolbarVisible ?? (showsUnicode || (showsSymbolBar && searchBarInsteadOfSymbols)) }
     @Published private(set) var results: [UnicodeCharacter] = []
     @Published private(set) var emojiResults: [UnicodeEmojiEntry] = []
     @Published private(set) var searchInProgress = false
@@ -838,6 +843,7 @@ private final class KeyboardModel: ObservableObject {
         let inspection: KeyboardItem?
         let boardInspection: String?
         let editingKeyID: String?
+        let pagesToolbarVisible: Bool?
     }
     private var symbolBoardPickerSnapshot: SymbolBoardPickerSnapshot?
     private var symbolBoardPickerSessionID: UUID?
@@ -866,7 +872,7 @@ private final class KeyboardModel: ObservableObject {
 
     var showsUnicode: Bool { panel == .unicode || isSearching || inspection != nil || symbolBoardInspectionText != nil || symbolBoardManagerPresented }
     var hasSymbolBoardOverlay: Bool { symbolBoardManagerPresented || symbolBoardSaveText != nil }
-    var isShowingFavorites: Bool { panel == .unicode && section == .saved && showFavorites && !isSearching }
+    var isShowingSymbolPages: Bool { panel == .unicode && section == .saved && !isSearching }
     var modeValue: String { inspection != nil || symbolBoardInspectionText != nil ? "inspection" : isSearching ? "query" : panel == .typing ? "typing" : "unicode" }
     var typingLayoutValue: String {
         switch typingState.layout { case .letters: return "letters"; case .numbers: return "numbers"; case .symbols: return "symbols" }
@@ -907,16 +913,17 @@ private final class KeyboardModel: ObservableObject {
     }
     func openUnicode() {
         ensureCatalogLoaded()
+        symbolPagesToolbarVisible = nil
         panel = .unicode
         presentationChanged?()
     }
     @discardableResult
     func toggleFavorites() -> Bool {
         symbolBoardActionError = nil
-        if isShowingFavorites { openTyping(); return true }
+        if isShowingSymbolPages { openTyping(); return true }
         let boards = SymbolBoardStore.shared
         guard boards.selectPreferredStarBoard() else {
-            symbolBoardActionError = "Unable to open your preferred symbol board. Hold the star to review symbol boards."
+            symbolBoardActionError = "Unable to open your preferred page. Hold the star to review pages."
             return false
         }
         openFavorites()
@@ -924,13 +931,39 @@ private final class KeyboardModel: ObservableObject {
     }
 
     func toggleUnicodeToolbar() {
+        if isShowingSymbolPages {
+            symbolPagesToolbarVisible = !showsUnicodeToolbar
+            invalidateInputMode()
+            presentationChanged?()
+            return
+        }
         if showsUnicode { openTyping() } else { openUnicode() }
     }
     func openFavorites() {
         cancelSymbolBoardPick(returnToManager: false)
+        let toolbarWasVisible = showsUnicodeToolbar
         ensureCatalogLoaded()
         showFavorites = true
         selectSection(.saved)
+        symbolPagesToolbarVisible = toolbarWasVisible
+    }
+    @discardableResult
+    func selectSymbolPage(_ page: SymbolPageID) -> Bool {
+        guard isShowingSymbolPages, !hasSymbolBoardOverlay else { return false }
+        switch page {
+        case .board(let id):
+            let changed = !showFavorites || SymbolBoardStore.shared.activeBoardID != id
+            guard SymbolBoardStore.shared.selectBoard(id) else {
+                symbolBoardActionError = "This page could not be opened. Your saved pages have been kept."
+                return false
+            }
+            showFavorites = true
+            if changed { invalidateInputMode() }
+        case .recent:
+            showFavorites = false
+        }
+        symbolBoardActionError = nil
+        return true
     }
     func openSymbolBoardManager(editingKeyID: String? = nil) {
         symbolBoardActionError = nil
@@ -950,7 +983,7 @@ private final class KeyboardModel: ObservableObject {
               target.keyID.map({ SymbolBoardStore.shared.key(boardID: target.boardID, keyID: $0) != nil }) ?? true else { return false }
         symbolBoardPickerSnapshot = .init(query: query, caret: queryCursor, section: section, panel: panel,
             searching: isSearching, inspection: inspection, boardInspection: symbolBoardInspectionText,
-            editingKeyID: target.keyID ?? symbolBoardEditingKeyID)
+            editingKeyID: target.keyID ?? symbolBoardEditingKeyID, pagesToolbarVisible: symbolPagesToolbarVisible)
         let pickerSession = UUID()
         symbolBoardPickerSessionID = pickerSession
         symbolBoardPickerDocumentIsCurrent = { [weak self] in
@@ -959,6 +992,7 @@ private final class KeyboardModel: ObservableObject {
         }
         batchingPresentation = true
         symbolBoardManagerPresented = false
+        symbolPagesToolbarVisible = nil
         symbolBoardSaveText = nil
         inspection = nil; symbolBoardInspectionText = nil
         panel = .unicode; section = .symbols; isSearching = true
@@ -996,6 +1030,7 @@ private final class KeyboardModel: ObservableObject {
         section = snapshot.section; panel = snapshot.panel; isSearching = snapshot.searching
         inspection = snapshot.inspection; symbolBoardInspectionText = snapshot.boardInspection
         symbolBoardEditingKeyID = snapshot.editingKeyID
+        symbolPagesToolbarVisible = snapshot.pagesToolbarVisible
         symbolBoardManagerPresented = returnToManager
         invalidateInputMode()
         batchingPresentation = false
@@ -1019,6 +1054,7 @@ private final class KeyboardModel: ObservableObject {
         symbolBoardInspectionText = nil
         symbolBoardManagerPresented = false
         symbolBoardSaveText = nil
+        symbolPagesToolbarVisible = nil
         isSearching = false
         selectTypingLayout(.letters)
         panel = .typing
@@ -1034,6 +1070,7 @@ private final class KeyboardModel: ObservableObject {
         inspection = nil
         symbolBoardInspectionText = nil
         panel = .unicode
+        if section != .saved { symbolPagesToolbarVisible = nil }
         if section == .blocks || section == .saved { isSearching = false }
         self.section = section
         batchingPresentation = false
@@ -1100,6 +1137,7 @@ private final class KeyboardModel: ObservableObject {
         guard !isSearching || inspection != nil else { return }
         batchingPresentation = true
         panel = .unicode
+        symbolPagesToolbarVisible = nil
         inspection = nil
         symbolBoardInspectionText = nil
         if section == .blocks || section == .saved { section = .symbols }
@@ -1387,11 +1425,8 @@ private struct KeyboardTypingWidePadVisible: PreferenceKey {
 }
 
 private struct UnicodeKeyboardView: View {
-    @Environment(\.openURL) private var openURL
     @ObservedObject var model: KeyboardModel
     @ObservedObject var store: CharacterStore
-    @State private var companionOpenRequest: UUID?
-    @State private var companionOpenFailed = false
     @ObservedObject var symbolBoards = SymbolBoardStore.shared
     weak var controller: KeyboardViewController?
     let delete: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
@@ -1419,20 +1454,16 @@ private struct UnicodeKeyboardView: View {
                 // The model restores the exact query and caret when shown.
                 if model.showsUnicodeToolbar {
                     toolbar.frame(height: headerHeight)
-                } else if model.showsSymbolBar {
+                } else if model.showsSymbolBar && !model.showsUnicode {
                     symbolBar.frame(height: headerHeight)
                 }
                 // Preserve the same row budget with the toolbar unmounted:
                 // four points before the content and before the footer.
                 Color.clear.frame(height: 4).accessibilityHidden(true)
                 ZStack {
-                    // Keep the browser and its scroll state
-                    // mounted when daily typing covers it.
-                    unicodeContent
-                        .opacity(model.showsUnicode ? 1 : 0)
-                        .allowsHitTesting(model.showsUnicode)
-                        .accessibilityHidden(!model.showsUnicode)
-                    if !model.showsUnicode {
+                    if model.showsUnicode {
+                        unicodeContent
+                    } else {
                         typingContent
                     }
                 }
@@ -1469,18 +1500,17 @@ private struct UnicodeKeyboardView: View {
 
         }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("keyboard.surface")
         .background(KeyboardTray().ignoresSafeArea())
         .overlay(alignment: .top) {
-            if companionOpenFailed || model.symbolBoardActionError != nil {
+            if let message = model.symbolBoardActionError {
                 HStack(spacing: 8) {
-                    Text(companionOpenFailed ? "Open Uniboard from the Home Screen to change settings." : model.symbolBoardActionError ?? "")
+                    Text(message)
                         .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
-                    Button { companionOpenFailed = false; model.symbolBoardActionError = nil } label: { Image(systemName: "xmark") }
+                    Button { model.symbolBoardActionError = nil } label: { Image(systemName: "xmark") }
                         .accessibilityLabel("Dismiss guidance")
                 }
                 .padding(8).keyboardKeySurface(radius: 7).padding(8)
-                .accessibilityIdentifier(companionOpenFailed ? "keyboard.openCompanionApp.guidance" : "keyboard.boards.actionError")
+                .accessibilityIdentifier("keyboard.boards.actionError")
             }
         }
         .tint(KeyboardPalette.accent)
@@ -1491,8 +1521,6 @@ private struct UnicodeKeyboardView: View {
         }
         .onPreferenceChange(KeyboardTypingWidePadVisible.self) { model.typingWidePadVisible = $0 }
         .onPreferenceChange(KeyboardTypingANSIPadVisible.self) { model.typingANSIPadVisible = $0 }
-        .onChange(of: model.inputModeID) { _, _ in companionOpenRequest = nil; companionOpenFailed = false }
-        .onDisappear { companionOpenRequest = nil; companionOpenFailed = false }
     }
 
     @ViewBuilder private var toolbar: some View {
@@ -1573,7 +1601,7 @@ private struct UnicodeKeyboardView: View {
         VStack(spacing: 4) {
             if let target = model.symbolBoardPickerTarget {
                 HStack {
-                    Text(target.keyID == nil ? "Choose a key for this board" : "Choose a variant for this key")
+                    Text(target.keyID == nil ? "Choose a key for this page" : "Choose a variant for this key")
                         .font(.system(size: 11)).lineLimit(1)
                     Spacer(minLength: 2)
                     Button("Cancel") { model.cancelSymbolBoardPick() }
@@ -1612,7 +1640,7 @@ private struct UnicodeKeyboardView: View {
                 Button {
                     model.selectSection(section)
                 } label: {
-                    Label(section.rawValue, systemImage: model.section == section ? "checkmark" : section.icon)
+                    Label(section.title, systemImage: model.section == section ? "checkmark" : section.icon)
                 }
                 .accessibilityAddTraits(model.section == section ? .isSelected : [])
                 .accessibilityIdentifier("keyboard.tab.\(section.rawValue.lowercased())")
@@ -1634,20 +1662,12 @@ private struct UnicodeKeyboardView: View {
 
     private var optionsMenu: some View {
         Menu {
-            Menu {
+            Section("Character order") {
                 sortOption(.newestFirst, identifier: "newest")
                 sortOption(.oldestFirst, identifier: "oldest")
                 sortOption(.codePoint, identifier: "codepoint")
-            } label: {
-                Label("Order: \(model.order.title)", systemImage: "arrow.up.arrow.down")
             }
-            .accessibilityLabel("Character order")
-            .accessibilityValue(model.orderValue)
-            .accessibilityIdentifier("keyboard.order")
-            Button { [mode = model.inputModeID] in openCompanionApp(renderedMode: mode) } label: {
-                Label("Open companion app", systemImage: "arrow.up.forward.app")
-            }
-            .accessibilityIdentifier("keyboard.openCompanionApp")
+
         } label: {
             Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color.primary)
@@ -1658,19 +1678,6 @@ private struct UnicodeKeyboardView: View {
         .accessibilityLabel("Keyboard options")
         .accessibilityValue(model.orderValue)
         .accessibilityIdentifier("keyboard.options")
-    }
-
-    private func openCompanionApp(renderedMode: UUID) {
-        guard let current = boardConfigurationGuard(renderedMode), current(),
-              let url = CompanionAppRoute.settingsURL else { return }
-        let request = UUID()
-        companionOpenRequest = request
-        companionOpenFailed = false
-        openURL(url) { accepted in
-            guard companionOpenRequest == request, current() else { return }
-            companionOpenRequest = nil
-            companionOpenFailed = !accepted
-        }
     }
 
     private func sortOption(_ order: UnicodeSortOrder, identifier: String) -> some View {
@@ -1806,40 +1813,90 @@ private struct UnicodeKeyboardView: View {
         }
     }
 
+    private var selectedSymbolPage: SymbolPageID {
+        model.showFavorites ? .board(symbolBoards.activeBoardID) : .recent
+    }
+    private var symbolPages: [KeyboardSymbolPage] {
+        symbolBoards.boards.map { .init(id: .board($0.id), title: $0.name) } + [.init(id: .recent, title: "Recent")]
+    }
+    @ViewBuilder private func symbolPageContent(_ page: SymbolPageID) -> some View {
+        switch page {
+        case .board(let id):
+            if let board = symbolBoards.boards.first(where: { $0.id == id }) { savedBoardPage(board) }
+        case .recent: savedRecentKeys(legacy: false)
+        }
+    }
     private var savedContent: some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
-                savedTab(symbolBoards.activeBoard.name, icon: "star", selected: model.showFavorites) { model.showFavorites = true }
-                savedTab("Recent", icon: "clock", selected: !model.showFavorites) { model.showFavorites = false }
-                Spacer(minLength: 0)
-                Button { model.openSymbolBoardManager() } label: { Image(systemName: "slider.horizontal.3") }
-                    .accessibilityLabel("Manage symbol boards").accessibilityIdentifier("keyboard.boards.open")
-            }
-            if model.showFavorites {
-                if let issue = symbolBoards.loadIssue {
-                    Text(issue.rawValue).font(.system(size: 11)).foregroundStyle(KeyboardPalette.secondary)
-                        .accessibilityIdentifier("keyboard.boards.storageIssue")
-                }
-                if symbolBoards.hasLegacyFallback { savedRecentKeys(legacy: true) }
-                else if symbolBoards.activeBoard.keys.isEmpty {
-                    emptyState(icon: "star", title: "This board is empty", detail: "Hold a Unicode key and choose Save to select a board.")
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: savedBoardColumns, spacing: 4) {
-                            ForEach(symbolBoards.activeBoard.keys) { key in
-                                KeyboardVariantKey(text: key.text, variants: key.variants,
-                                    identifier: "keyboard.board.\(symbolBoards.activeBoard.id).key.\(key.id)",
-                                    label: symbolBoardKeyLabel(key.text), route: model.inputModeID,
-                                    enabled: model.showsUnicode, fontSize: 23,
-                                    useUnicodeFonts: model.useUnicodeFonts, showsInspection: true, showsEditing: true,
-                                    factory: { [mode = model.inputModeID, boardID = symbolBoards.activeBoard.id] in boardKeyActions(mode, boardID, key) })
-                                    .frame(height: savedKeyHeight)
-                                    .keyboardKeySurface(radius: 7)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 4) {
+                            ForEach(symbolBoards.boards) { board in
+                                savedTab(board.name, icon: board.id == SymbolBoardStore.favoritesID ? "star" : "square.grid.2x2",
+                                         selected: selectedSymbolPage == .board(board.id)) {
+                                    _ = model.selectSymbolPage(.board(board.id))
+                                }
+                                .id(SymbolPageID.board(board.id))
+                                .accessibilityIdentifier("keyboard.pages.tab.\(board.id)")
                             }
-                        }.padding(.bottom, 2)
-                    }.scrollIndicators(.hidden).keyboardUnmaskedScrollEdges().accessibilityIdentifier("keyboard.boards.keys")
+                            savedTab("Recent", icon: "clock", selected: selectedSymbolPage == .recent) {
+                                _ = model.selectSymbolPage(.recent)
+                            }
+                            .id(SymbolPageID.recent)
+                            .accessibilityIdentifier("keyboard.pages.tab.recent")
+                        }
+                    }
+                    .scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
+                    .onChange(of: selectedSymbolPage) { _, page in proxy.scrollTo(page, anchor: .center) }
+                    .onAppear { proxy.scrollTo(selectedSymbolPage, anchor: .center) }
                 }
-            } else { savedRecentKeys(legacy: false) }
+                Button { model.openSymbolBoardManager() } label: {
+                    Image(systemName: "slider.horizontal.3").frame(width: 30, height: 28)
+                }
+                .buttonStyle(KeyboardPressStyle())
+                .accessibilityLabel("Edit pages").accessibilityIdentifier("keyboard.boards.open")
+            }
+            if let issue = symbolBoards.loadIssue {
+                Text(issue.rawValue).font(.system(size: 11)).foregroundStyle(KeyboardPalette.secondary)
+                    .accessibilityIdentifier("keyboard.boards.storageIssue")
+            }
+            KeyboardSymbolPagesPager(pages: symbolPages, selection: selectedSymbolPage,
+                route: model.inputModeID, isActive: model.isShowingSymbolPages && !model.hasSymbolBoardOverlay,
+                content: { AnyView(symbolPageContent($0).tint(KeyboardPalette.accent)
+                    .environment(\.layoutDirection, .leftToRight).dynamicTypeSize(.xSmall ... .xxxLarge)) },
+                actionFactory: { [mode = model.inputModeID] in
+                    guard let current = boardConfigurationGuard(mode), current() else { return nil }
+                    return { page in current() && model.selectSymbolPage(page) }
+                })
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+    }
+    @ViewBuilder private func savedBoardPage(_ board: SymbolBoard) -> some View {
+        if symbolBoards.hasLegacyFallback && board.id == SymbolBoardStore.favoritesID {
+            savedRecentKeys(legacy: true)
+        } else if board.keys.isEmpty {
+            emptyState(icon: board.id == SymbolBoardStore.favoritesID ? "star" : "square.grid.2x2",
+                       title: "This page is empty", detail: "Hold a Unicode key and choose Save to add it to a page.")
+        } else {
+            ScrollView {
+                LazyVGrid(columns: savedBoardColumns, spacing: 4) {
+                    ForEach(board.keys) { key in
+                        KeyboardVariantKey(text: key.text, variants: key.variants,
+                            identifier: "keyboard.board.\(board.id).key.\(key.id)",
+                            label: symbolBoardKeyLabel(key.text), route: model.inputModeID,
+                            enabled: model.isShowingSymbolPages && model.showFavorites && symbolBoards.activeBoardID == board.id,
+                            fontSize: 23, useUnicodeFonts: model.useUnicodeFonts, showsInspection: true, showsEditing: true,
+                            factory: { [mode = model.inputModeID, boardID = board.id] in boardKeyActions(mode, boardID, key) })
+                            .frame(height: savedKeyHeight)
+                            .keyboardKeySurface(radius: 7)
+                            .accessibilityHidden(!model.isShowingSymbolPages || !model.showFavorites || symbolBoards.activeBoardID != board.id)
+                    }
+                }.padding(.bottom, 2)
+            }
+            .scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
+            .accessibilityIdentifier("keyboard.boards.keys")
         }
     }
     private var savedKeyHeight: CGFloat { model.typingKeyHeight }
@@ -1854,18 +1911,20 @@ private struct UnicodeKeyboardView: View {
                 ForEach(characters) { character in
                     InspectableCharacterKey(item: .character(character), favorite: false, compact: true,
                         useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID,
-                        enabled: model.showsUnicode, glyphOnly: true,
+                        enabled: model.isShowingSymbolPages && (legacy ? model.showFavorites && symbolBoards.activeBoardID == SymbolBoardStore.favoritesID : !model.showFavorites), glyphOnly: true,
                         actionFactory: { [mode = model.inputModeID] in keyActions(mode, .character(character)) })
                         .frame(maxWidth: .infinity).frame(height: savedKeyHeight)
                         .keyboardKeySurface(radius: 7)
+                        .accessibilityHidden(!model.isShowingSymbolPages || (legacy ? !model.showFavorites || symbolBoards.activeBoardID != SymbolBoardStore.favoritesID : model.showFavorites))
                 }
                 ForEach(emojis) { emoji in
                     InspectableCharacterKey(item: .emoji(emoji), favorite: false, compact: true,
                         useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID,
-                        enabled: model.showsUnicode, glyphOnly: true,
+                        enabled: model.isShowingSymbolPages && (legacy ? model.showFavorites && symbolBoards.activeBoardID == SymbolBoardStore.favoritesID : !model.showFavorites), glyphOnly: true,
                         actionFactory: { [mode = model.inputModeID] in keyActions(mode, .emoji(emoji)) })
                         .frame(maxWidth: .infinity).frame(height: savedKeyHeight)
                         .keyboardKeySurface(radius: 7)
+                        .accessibilityHidden(!model.isShowingSymbolPages || (legacy ? !model.showFavorites || symbolBoards.activeBoardID != SymbolBoardStore.favoritesID : model.showFavorites))
                 }
             }
         }.scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
@@ -1970,7 +2029,7 @@ private struct UnicodeKeyboardView: View {
                     Label("Save", systemImage: isFavorite(item) ? "star.fill" : "star")
                         .font(.system(size: 12, weight: .medium))
                 }
-                .accessibilityLabel("Save to symbol board")
+                .accessibilityLabel("Save to page")
                 .accessibilityIdentifier("keyboard.properties.favorite")
                 .disabled(!canToggleFavorite(item))
             }
@@ -2138,7 +2197,7 @@ private struct UnicodeKeyboardView: View {
         GeometryReader { geometry in
             if let plan = KeyboardFooterLayoutPolicy.plan(availableWidth: geometry.size.width,
                 hasGlobe: model.needsInputModeSwitchKey, showsCollapse: displaysCollapseKey,
-                showsPage: !model.showsUnicode, isPad: model.isPadLayout,
+                showsPage: !model.showsUnicode || model.isShowingSymbolPages, isPad: model.isPadLayout,
                 showsReturn: !usesPadFooter && (model.showsUnicode || KeyboardTypingLayoutPolicy.padPlan(availableWidth: geometry.size.width,
                     isPad: model.isPadLayout, layout: model.typingState.layout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout) == nil),
                 padTyping: usesPadFooter) {
@@ -2169,12 +2228,16 @@ private struct UnicodeKeyboardView: View {
             }
             if displaysCollapseKey && !usesPadFooter { footerCollapseKey(plan) }
             if !model.showsUnicode && !usesPadFooter { footerPageKey(plan) }
+            if model.isShowingSymbolPages {
+                RepeatingDeleteKey(action: delete, isQuery: false, route: model.inputModeID, identifier: "keyboard.pages.delete")
+                    .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface()
+            }
             KeyboardVariantKey(text: "★", variants: [], identifier: "keyboard.openFavorites",
-                label: model.isShowingFavorites ? "Back to English keyboard" : "Symbol keyboard",
-                value: model.isShowingFavorites ? "favorites" : model.modeValue,
-                symbol: model.isShowingFavorites ? "arrow.left" : "star", route: model.inputModeID,
+                label: model.isShowingSymbolPages ? "Back to English keyboard" : "Symbol keyboard",
+                value: model.isShowingSymbolPages ? "favorites" : model.modeValue,
+                symbol: model.isShowingSymbolPages ? "arrow.left" : "star", route: model.inputModeID,
                 enabled: true, fontSize: 20,
-                contentPosition: usesPadKeyPositions ? .bottomLeft : .center, holdLabel: "Manage symbol keyboards",
+                contentPosition: usesPadKeyPositions ? .bottomLeft : .center, holdLabel: "Manage pages",
                 factory: { [mode = model.inputModeID] in favoritesActions(mode) })
                 .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
             KeyboardTouchKey(title: model.isSearching ? "Search space" : "space", identifier: "keyboard.space",

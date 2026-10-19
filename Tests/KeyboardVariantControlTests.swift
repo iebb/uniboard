@@ -139,6 +139,20 @@ final class KeyboardVariantControlTests: XCTestCase {
         XCTAssertFalse(state.end(owner: owner, inside: true))
     }
 
+    func testFlickChoicesAlternateToBothSidesAndCommitOneExactCandidate() {
+        for (travel, expected) in [(CGFloat(-108), "6"), (-72, "4"), (-36, "2"), (0, "0"), (36, "1"), (72, "3"), (108, "5")] {
+            let clock = GestureClock(), route = Route(), owner = NSObject()
+            let state = KeyboardVariantInteraction(schedule: clock.schedule)
+            gestureSetup(state, route: route, up: (0...6).map(String.init))
+            XCTAssertTrue(state.begin(owner: owner))
+            state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -20))
+            state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: travel, y: -24))
+            XCTAssertTrue(state.end(owner: owner, inside: true))
+            XCTAssertEqual(route.inserted, [expected])
+            XCTAssertFalse(state.end(owner: owner, inside: true))
+        }
+    }
+
     func testVerticalContinuationAcrossPopupCellsKeepsPrimaryFlickChoice() {
         for direction: CGFloat in [-1, 1] {
             let state = KeyboardVariantInteraction(), route = Route(), owner = NSObject()
@@ -607,6 +621,40 @@ final class KeyboardVariantControlTests: XCTestCase {
         configure("1")
         XCTAssertFalse(hint.isHidden)
         XCTAssertFalse(primary.isHidden)
+    }
+
+    func testActualCenteredPopupKeepsCharacterAndCommandHitTargetsExact() throws {
+        for selected in 0..<9 {
+            let clock = Clock(), route = Route(), owner = NSObject()
+            let state = KeyboardVariantInteraction(schedule: clock.schedule)
+            let button = KeyboardVariantButton(interaction: state)
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 700, height: 400))
+            let input = UIInputView(frame: window.bounds, inputViewStyle: .keyboard)
+            window.addSubview(input); input.addSubview(button)
+            button.frame = CGRect(x: 329, y: 220, width: 42, height: 42)
+            let mode = route.context!.modeIdentifier
+            button.configure(context: mode, key: "key", text: "1", variants: (2...7).map(String.init),
+                enabled: true, font: .systemFont(ofSize: 23), showsInspection: true, showsEditing: true) {
+                route.factory(rendered: mode, inspect: true, edit: true)
+            }
+            XCTAssertTrue(button.beginPhysicalPress(owner: owner, point: CGPoint(x: 20, y: 20)))
+            clock.fire()
+            let popup = try XCTUnwrap(input.subviews.first { $0.accessibilityIdentifier == "keyboard.variants" })
+            let labels = popup.subviews.compactMap { $0 as? UILabel }
+            XCTAssertEqual(labels.count, 9)
+            XCTAssertEqual(labels.sorted { $0.frame.minX < $1.frame.minX }.compactMap(\.text),
+                           ["7", "5", "3", "1", "2", "4", "6", "Inspect", "Edit"])
+            XCTAssertEqual(popup.frame.minX + labels[0].frame.midX, button.frame.midX, accuracy: 0.001)
+            let frame = labels[selected].frame
+            let point = CGPoint(x: popup.frame.minX + frame.midX, y: popup.frame.minY + frame.midY)
+            XCTAssertEqual(button.selectedIndex(at: point), selected)
+            state.move(owner: owner, index: button.selectedIndex(at: point), movedBeforeHold: false)
+            XCTAssertTrue(state.end(owner: owner, inside: true))
+            XCTAssertEqual(route.inserted, selected < 7 ? [String(selected + 1)] : [])
+            XCTAssertEqual(route.inspected, selected == 7 ? ["1"] : [])
+            XCTAssertEqual(route.edits, selected == 8 ? 1 : 0)
+            XCTAssertFalse(state.end(owner: owner, inside: true))
+        }
     }
 
     func testActualPopupIsInsideInputViewAndRotationCancelsBeforeInsertion() throws {

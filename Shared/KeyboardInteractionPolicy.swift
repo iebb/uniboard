@@ -155,3 +155,17 @@ enum KeyboardQueryViewportPolicy {
         return min(max(0, pixelAligned(offset, scale: scale)), maximumOffset)
     }
 }
+
+/// A horizontal gesture commits at most one neighboring symbol page.
+enum KeyboardSymbolPagePolicy {
+    static let maximumPages = 17
+    static func index(offset: CGFloat, width: CGFloat, count: Int, startingAt start: Int? = nil) -> Int? {
+        guard offset.isFinite, width.isFinite, width > 0, (1...maximumPages).contains(count) else { return nil }
+        let ratio = offset / width
+        guard ratio.isFinite else { return nil }
+        let index = Int(min(CGFloat(count - 1), max(0, ratio.rounded(.toNearestOrAwayFromZero))))
+        guard let start else { return index }
+        guard (0..<count).contains(start) else { return nil }
+        return min(start + 1, max(start - 1, index))
+    }
+}

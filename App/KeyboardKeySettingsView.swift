@@ -74,7 +74,7 @@ struct KeyboardKeySettingsView: View {
         .onAppear { keys.refresh() }
         .confirmationDialog("Restore every key’s defaults?", isPresented: $resetConfirmation, titleVisibility: .visible) {
             Button("Restore all defaults", role: .destructive) { keys.resetAll() }
-        } message: { Text("Your symbol boards and favorites are kept.") }
+        } message: { Text("Your pages and favorites are kept.") }
     }
 }
 

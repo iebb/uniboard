@@ -12,7 +12,7 @@ struct SymbolBoardSaveTargetPanel: View {
     var body: some View {
         VStack(spacing: 8) {
             HStack {
-                Text("Save to symbol board").font(.system(size: 14, weight: .semibold))
+                Text("Save to page").font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Button("Cancel", action: close).accessibilityIdentifier("keyboard.boards.save.cancel")
             }
@@ -34,10 +34,10 @@ struct SymbolBoardSaveTargetPanel: View {
                                 .padding(.horizontal, 10).frame(minHeight: 36)
                         }.accessibilityIdentifier("keyboard.boards.save.\(board.id)")
                     }
-                    Text("Favorites sync with Saved in the app. Keyboard saves need Allow Full Access; otherwise they wait locally. Custom boards stay in this keyboard.")
+                    Text("Favorites sync with Saved in the app. Keyboard saves need Allow Full Access; otherwise they wait locally. Custom pages stay in this keyboard.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                     if let issue = store.loadIssue { Text(issue.rawValue).font(.system(size: 11)) }
-                    if failed { Text("This item could not be saved. The input context or board may have changed.").font(.system(size: 11)).foregroundStyle(.red) }
+                    if failed { Text("This item could not be saved. The input context or page may have changed.").font(.system(size: 11)).foregroundStyle(.red) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -67,9 +67,16 @@ struct SymbolBoardManagerPanel: View {
     @State private var entryPurpose: EntryPurpose?
     @State private var entry = ""
     @State private var uppercase = false
+    @State private var entryLayout: KeyboardTypingLayout = .letters
     @State private var error: String?
 
     private enum EntryPurpose { case create, rename(String), variant(String, String) }
+    private var entryTitle: String {
+        switch entryPurpose { case .create: return "New page"; case .rename: return "Rename page"; case .variant: return "New variant"; case nil: return "Pages" }
+    }
+    private var entryLimit: Int { if case .variant = entryPurpose { return SymbolBoardStore.maximumTextScalars }; return 32 }
+    private var entryCanSave: Bool { !entry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && store.canEdit }
+
     private var board: SymbolBoard? { store.boards.first { $0.id == editingBoardID } }
     private var key: SymbolBoardKey? {
         guard let editingBoardID, let editingKeyID else { return nil }
@@ -79,34 +86,53 @@ struct SymbolBoardManagerPanel: View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
                 if editingBoardID != nil || entryPurpose != nil {
-                    Button("Back") { entryPurpose = nil; entry = ""; if editingKeyID != nil { editingKeyID = nil } else { editingBoardID = nil } }
+                    Button("Back") {
+                        if entryPurpose != nil { entryPurpose = nil; entry = ""; error = nil }
+                        else if editingKeyID != nil { editingKeyID = nil }
+                        else { editingBoardID = nil }
+                    }
                         .frame(minWidth: 44)
                         .accessibilityIdentifier("keyboard.boards.back")
                 }
-                Text("Symbol boards").font(.system(size: 14, weight: .semibold))
+                Text(entryPurpose == nil ? "Pages" : entryTitle).font(.system(size: 15, weight: .semibold))
                     .lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
-                Button("Done", action: close).frame(minWidth: 44).accessibilityIdentifier("keyboard.boards.close")
+                if entryPurpose != nil {
+                    Button(entryTitle == "New page" ? "Add" : "Save") { saveEntry() }
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                        .frame(width: 52, height: 32)
+                        .background(KeyboardPalette.accent, in: RoundedRectangle(cornerRadius: 8))
+                        .disabled(!entryCanSave)
+                        .accessibilityIdentifier("keyboard.boards.pad.save")
+                } else {
+                    Button("Done", action: close).frame(minWidth: 44).accessibilityIdentifier("keyboard.boards.close")
+                }
             }
             .font(.system(size: 12, weight: .medium)).frame(height: 36)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("keyboard.boards.header")
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let issue = store.loadIssue { Text(issue.rawValue).font(.system(size: 12)).accessibilityIdentifier("keyboard.boards.storageIssue") }
-                    if store.syncStatus == .unavailable {
-                        Text("Favorites sync is unavailable. Local changes are kept for retry.")
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
-                    if let error { Text(error).font(.system(size: 12)).foregroundStyle(.red).accessibilityIdentifier("keyboard.boards.error") }
-                    if entryPurpose != nil { entryPanel }
-                    else if let board, let key { keyPanel(board, key) }
-                    else if let board { boardPanel(board) }
-                    else { boardList }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
+            if entryPurpose != nil {
+                entryPanel
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("keyboard.boards.entryPanel")
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let issue = store.loadIssue { Text(issue.rawValue).font(.system(size: 12)).accessibilityIdentifier("keyboard.boards.storageIssue") }
+                        if store.syncStatus == .unavailable {
+                            Text("Favorites sync is unavailable. Local changes are kept for retry.")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                        if let error { Text(error).font(.system(size: 12)).foregroundStyle(.red).accessibilityIdentifier("keyboard.boards.error") }
+                        if let board, let key { keyPanel(board, key) }
+                        else if let board { boardPanel(board) }
+                        else { boardList }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(4)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
+                .accessibilityIdentifier("keyboard.boards.scroll")
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-            .accessibilityIdentifier("keyboard.boards.scroll")
         }
         .font(.system(size: 13))
         .buttonStyle(SymbolBoardConfigurationButtonStyle(guardFactory: guardFactory))
@@ -121,12 +147,12 @@ struct SymbolBoardManagerPanel: View {
         }
     }
     private func act(_ action: () -> Bool) {
-        guard sessionIsCurrent?() == true else { error = "The input context changed. Close and reopen symbol boards."; return }
+        guard sessionIsCurrent?() == true else { error = "The input context changed. Close and reopen pages."; return }
         error = action() ? nil : "This change could not be saved. Check the item and storage limits."
     }
     private func begin(_ purpose: EntryPurpose, value: String = "") {
         guard sessionIsCurrent?() == true else { return }
-        entryPurpose = purpose; entry = value; error = nil; uppercase = false
+        entryPurpose = purpose; entry = value; error = nil; uppercase = false; entryLayout = .letters
     }
     private var boardList: some View {
         VStack(spacing: 8) {
@@ -136,16 +162,18 @@ struct SymbolBoardManagerPanel: View {
                         act { store.selectBoard(board.id) }
                         if store.activeBoardID == board.id && error == nil { close() }
                     } label: {
-                        HStack {
-                            Text(board.name).lineLimit(1)
-                            if store.preferredStarBoardID == board.id {
-                                Text("Star default").font(.system(size: 10, weight: .medium)).fixedSize()
-                                    .foregroundStyle(.secondary)
+                        HStack(spacing: 10) {
+                            Image(systemName: board.id == SymbolBoardStore.favoritesID ? "star.fill" : "square.grid.2x2")
+                                .font(.system(size: 18)).foregroundStyle(KeyboardPalette.accent).frame(width: 25)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(board.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                                Text("\(board.keys.count) keys" + (store.preferredStarBoardID == board.id ? " · Star default" : ""))
+                                    .font(.system(size: 10)).foregroundStyle(.secondary)
                                     .accessibilityIdentifier("keyboard.boards.default.\(board.id)")
                             }
-                            Spacer()
-                            if store.activeBoardID == board.id { Image(systemName: "checkmark") }
-                        }
+                            Spacer(minLength: 2)
+                            if store.activeBoardID == board.id { Image(systemName: "checkmark").foregroundStyle(KeyboardPalette.accent) }
+                        }.frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
                     }
                     .accessibilityIdentifier("keyboard.boards.select.\(board.id)")
                     .accessibilityValue(store.activeBoardID == board.id ? "Selected" : "")
@@ -156,14 +184,18 @@ struct SymbolBoardManagerPanel: View {
                     .accessibilityValue(store.preferredStarBoardID == board.id ? "Star default" : "")
                     .accessibilityIdentifier("keyboard.boards.makeDefault.\(board.id)")
                     .disabled(!store.canEdit || store.preferredStarBoardID == board.id)
-                    Button("Edit") { editingBoardID = board.id; error = nil }
+                    Button { editingBoardID = board.id; error = nil } label: { Image(systemName: "pencil").frame(width: 24, height: 32) }
+                        .accessibilityLabel("Edit \(board.name)")
                         .accessibilityIdentifier("keyboard.boards.edit.\(board.id)")
                 }.font(.system(size: 13)).padding(.horizontal, 8).frame(minHeight: 36)
                     .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
             }
-            Button("New board") { begin(.create) }.accessibilityIdentifier("keyboard.boards.create")
+            Button { begin(.create) } label: {
+                Label("Add page", systemImage: "plus").font(.system(size: 14, weight: .semibold))
+                    .frame(maxWidth: .infinity, minHeight: 38)
+            }.accessibilityIdentifier("keyboard.boards.create")
                 .disabled(!store.canEdit || store.boards.count >= SymbolBoardStore.maximumBoards)
-            Text("Tap a board to switch now. Its star sets the star-key default. Boards stay on this keyboard.")
+            Text("Swipe between pages in the symbol keyboard. A page’s star makes it the default for the Star key.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
     }
@@ -190,7 +222,7 @@ struct SymbolBoardManagerPanel: View {
                 }
             }
             if board.id != SymbolBoardStore.stockID && board.id != SymbolBoardStore.favoritesID {
-                Button("Delete board", role: .destructive) {
+                Button("Delete page", role: .destructive) {
                     act { store.deleteBoard(board.id) }
                     if error == nil { editingBoardID = nil }
                 }.accessibilityIdentifier("keyboard.boards.delete")
@@ -243,32 +275,81 @@ struct SymbolBoardManagerPanel: View {
         }
     }
     private var entryPanel: some View {
-        VStack(spacing: 6) {
-            Text(entry.isEmpty ? "Use the local keys below" : symbolBoardPreview(entry))
-                .font(.system(size: 17)).lineLimit(1).minimumScaleFactor(0.5)
-                .frame(maxWidth: .infinity, minHeight: 36)
-                .accessibilityIdentifier("keyboard.boards.entry").accessibilityValue(entry)
-            ForEach([Array("1234567890"), Array("qwertyuiop"), Array("asdfghjkl"), Array("zxcvbnm.-_")], id: \.self) { row in
-                HStack(spacing: 3) {
-                    ForEach(row, id: \.self) { key in
-                        let text = uppercase ? String(key).uppercased() : String(key)
-                        Button(text) {
-                            guard sessionIsCurrent?() == true, entry.unicodeScalars.count + text.unicodeScalars.count <= 128 else { return }
-                            entry += text
-                        }.frame(maxWidth: .infinity, minHeight: 36)
-                            .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
-                            .accessibilityIdentifier("keyboard.boards.pad.\(key)")
+        GeometryReader { geometry in
+            let height = max(18, min(KeyboardTypingLayoutPolicy.regularKeyHeight, (geometry.size.height - 58 - (error == nil ? 0 : 28)) / 4))
+            VStack(spacing: 4) {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entryTitle == "New variant" ? "VARIANT" : "PAGE NAME")
+                            .font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                        Text(entry.isEmpty ? (entryTitle == "New variant" ? "Type a character" : "e.g. Math") : symbolBoardPreview(entry))
+                            .font(.system(size: 17)).foregroundStyle(entry.isEmpty ? Color.secondary : Color.primary)
+                            .lineLimit(1).minimumScaleFactor(0.5)
+                            .accessibilityIdentifier("keyboard.boards.entry").accessibilityValue(entry)
                     }
+                    Spacer(minLength: 0)
+                    Text("\(entry.count)/\(entryLimit)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12).frame(height: 42)
+                .background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: 9))
+                if let error {
+                    Text(error).font(.system(size: 10)).foregroundStyle(.red).lineLimit(2)
+                        .accessibilityIdentifier("keyboard.boards.error")
+                }
+                ForEach(Array(entryLayout.rows.enumerated()), id: \.offset) { index, row in
+                    HStack(spacing: 4) {
+                        if index == 2 {
+                            Button {
+                                if entryLayout == .letters { uppercase.toggle() }
+                                else { entryLayout = entryLayout == .numbers ? .symbols : .numbers }
+                            } label: {
+                                Group {
+                                    if entryLayout == .letters { Image(systemName: uppercase ? "shift.fill" : "shift") }
+                                    else { Text(entryLayout == .numbers ? "#+=" : "123").font(.system(size: 12)) }
+                                }.frame(width: 38, height: height)
+                            }.accessibilityIdentifier("keyboard.boards.pad.shift")
+                                .background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: 7))
+                        }
+                        ForEach(row, id: \.self) { key in
+                            let text = entryLayout == .letters && uppercase ? key.uppercased() : key
+                            Button { appendEntry(text) } label: {
+                                Text(text).font(.system(size: 20)).foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity).frame(height: height)
+                            }
+                            .background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: 7))
+                            .accessibilityIdentifier("keyboard.boards.pad.\(key)")
+                        }
+                        if index == 2 {
+                            Button {
+                                guard sessionIsCurrent?() == true, !entry.isEmpty else { return }; entry.removeLast()
+                            } label: { Image(systemName: "delete.left").frame(width: 38, height: height) }
+                                .background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: 7))
+                                .accessibilityIdentifier("keyboard.boards.pad.delete")
+                        }
+                    }
+                    .padding(.horizontal, index == 1 && entryLayout == .letters ? 12 : 0)
+                }
+                HStack(spacing: 5) {
+                    Button { entryLayout = entryLayout == .letters ? .numbers : .letters } label: {
+                        Text(entryLayout == .letters ? "123" : "ABC").font(.system(size: 12)).frame(width: 48, height: height)
+                    }.background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: 7))
+                        .accessibilityIdentifier("keyboard.boards.pad.layout")
+                    Button { appendEntry(" ") } label: {
+                        Text("space").font(.system(size: 14)).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity).frame(height: height)
+                    }.background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: 7))
+                        .accessibilityIdentifier("keyboard.boards.pad.space")
                 }
             }
-            HStack {
-                Button(uppercase ? "abc" : "ABC") { uppercase.toggle() }.accessibilityIdentifier("keyboard.boards.pad.shift")
-                Button("Space") { if sessionIsCurrent?() == true && entry.unicodeScalars.count < 128 { entry += " " } }
-                    .frame(maxWidth: .infinity).accessibilityIdentifier("keyboard.boards.pad.space")
-                Button("Delete") { if !entry.isEmpty { entry.removeLast() } }.accessibilityIdentifier("keyboard.boards.pad.delete")
-                Button("Save") { saveEntry() }.accessibilityIdentifier("keyboard.boards.pad.save")
-            }.font(.system(size: 12))
-        }
+            .buttonStyle(SymbolBoardConfigurationButtonStyle(guardFactory: guardFactory, minimumHeight: 0, horizontalPadding: 0, fillsSurface: false))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }.clipped()
+    }
+    private func appendEntry(_ text: String) {
+        guard sessionIsCurrent?() == true, (entry + text).count <= entryLimit,
+              (entry + text).unicodeScalars.count <= (entryTitle == "New variant" ? SymbolBoardStore.maximumTextScalars : 128),
+              (entry + text).utf8.count <= 512 else { return }
+        entry += text
     }
     private func saveEntry() {
         guard let purpose = entryPurpose else { return }
@@ -290,24 +371,28 @@ struct SymbolBoardManagerPanel: View {
 private extension View {
     func symbolBoardOpaquePanel() -> some View {
         frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Color(uiColor: .systemBackground))
+            .background(KeyboardPalette.background)
             .contentShape(Rectangle())
             .clipped()
     }
 }
 
 /// The persistent editor has a document/mode lifetime, but every physical
-/// press takes a fresh strict resize-generation guard at touch-down.
+/// press takes a fresh strict interaction-generation guard at touch-down.
 private struct SymbolBoardConfigurationButtonStyle: PrimitiveButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     let guardFactory: () -> (() -> Bool)?
+    var minimumHeight: CGFloat = 32
+    var horizontalPadding: CGFloat = 8
+    var fillsSurface = true
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(.horizontal, 8)
-            .frame(minHeight: 32)
+            .padding(.horizontal, horizontalPadding)
+            .frame(minHeight: minimumHeight)
             .contentShape(Rectangle())
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+            .background(fillsSurface ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 7))
+            .opacity(isEnabled ? 1 : 0.45)
             .overlay {
                 SymbolBoardConfigurationTouchOverlay(enabled: isEnabled, guardFactory: guardFactory,
                     trigger: { configuration.trigger() })

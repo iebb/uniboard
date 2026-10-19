@@ -7,10 +7,8 @@ import XCTest
 #endif
 
 final class CompanionAppRouteTests: XCTestCase {
-    func testFixedSettingsDestinationAndCaseInsensitiveSchemeHost() throws {
-        let fixed = try XCTUnwrap(CompanionAppRoute.settingsURL)
-        XCTAssertEqual(fixed.absoluteString, "uniboard://settings")
-        for text in [fixed.absoluteString, "UNIBOARD://SETTINGS", "uniboard://settings/"] {
+    func testSettingsDestinationAndCaseInsensitiveSchemeHost() throws {
+        for text in ["uniboard://settings", "UNIBOARD://SETTINGS", "uniboard://settings/"] {
             XCTAssertTrue(CompanionAppRoute.isSettings(try XCTUnwrap(URL(string: text))))
         }
     }

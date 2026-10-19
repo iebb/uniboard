@@ -134,7 +134,17 @@ enum KeyboardVariantPolicy {
         guard deltaX.isFinite, stride.isFinite, stride > 0, count > 0, count <= maximumVariants + 1 else { return nil }
         let offset = (deltaX / stride).rounded(.toNearestOrAwayFromZero)
         guard offset.isFinite else { return nil }
-        return Int(min(CGFloat(count - 1), max(0, offset)))
+        let primary = (count - 1) / 2
+        let position = Int(min(CGFloat(count - 1), max(0, CGFloat(primary) + offset)))
+        return centerOutIndices(count: count)[position]
+    }
+
+    /// Logical choice zero stays in the middle. Subsequent choices alternate
+    /// right and left: seven choices read 7, 5, 3, 1, 2, 4, 6 on screen.
+    static func centerOutIndices(count: Int) -> [Int] {
+        guard (1...19).contains(count) else { return [] }
+        return Array((0..<count).filter { $0.isMultiple(of: 2) }.reversed())
+            + (0..<count).filter { !$0.isMultiple(of: 2) }
     }
 
     static func validText(_ text: String) -> Bool {
@@ -208,13 +218,15 @@ struct KeyboardVariantPopupLayout {
     let frame: CGRect
     let cells: [CGRect]
 
-    init?(anchor: CGRect, container: CGRect, count: Int) {
+    init?(anchor: CGRect, container: CGRect, count: Int, choiceCount: Int? = nil) {
         let values = [anchor.minX, anchor.minY, anchor.width, anchor.height,
                       container.origin.x, container.origin.y, container.width, container.height]
         guard values.allSatisfy({ $0.isFinite }), anchor.width > 0, anchor.height > 0,
               container.width >= 24, container.height >= 24,
               (container.origin.x + container.width).isFinite,
               (container.origin.y + container.height).isFinite, count > 0, count <= 19 else { return nil }
+        let choices = choiceCount ?? count
+        guard (1...count).contains(choices) else { return nil }
         let inset: CGFloat = 4
         let width = container.width - inset * 2
         let height = container.height - inset * 2
@@ -239,18 +251,26 @@ struct KeyboardVariantPopupLayout {
         let cellHeight = min(48, sideHeight / CGFloat(rows))
         let popupWidth = cellWidth * CGFloat(columns)
         let popupHeight = cellHeight * CGFloat(rows)
+        let primaryColumn = (min(choices, columns) - 1) / 2
         let x = min(container.origin.x + container.width - inset - popupWidth,
-                    max(minX, anchor.midX - popupWidth / 2))
+                    max(minX, anchor.midX - (CGFloat(primaryColumn) + 0.5) * cellWidth))
         let desiredY = useAbove ? anchor.minY - gap - popupHeight : anchor.maxY + gap
         let y = min(container.origin.y + container.height - inset - popupHeight, max(minY, desiredY))
         guard [x, y, popupWidth, popupHeight, cellWidth, cellHeight].allSatisfy({ $0.isFinite }),
               cellWidth >= 24, cellHeight >= 24,
               y + popupHeight <= anchor.minY - gap || y >= anchor.maxY + gap else { return nil }
         frame = CGRect(x: x, y: y, width: popupWidth, height: popupHeight)
-        cells = (0..<count).map { index in
-            CGRect(x: CGFloat(index % columns) * cellWidth, y: CGFloat(index / columns) * cellHeight,
-                   width: cellWidth, height: cellHeight)
+        var order: [Int] = []
+        for start in stride(from: 0, to: choices, by: columns) {
+            order += KeyboardVariantPolicy.centerOutIndices(count: min(columns, choices - start)).map { start + $0 }
         }
+        order += choices..<count // Inspect/Edit retain their logical trailing slots.
+        var arranged = Array(repeating: CGRect.zero, count: count)
+        for (position, logicalIndex) in order.enumerated() {
+            arranged[logicalIndex] = CGRect(x: CGFloat(position % columns) * cellWidth,
+                y: CGFloat(position / columns) * cellHeight, width: cellWidth, height: cellHeight)
+        }
+        cells = arranged
     }
 
     func index(at point: CGPoint) -> Int? {

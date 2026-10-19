@@ -27,6 +27,31 @@ final class UnicodeEditionSettingsTests: XCTestCase {
                                writeAtomically: { _, _ in XCTFail("Loading must never write") }).load()
     }
 
+    func testTopBarOptionsRoundTripLegacyMigrationAndRejectMalformedBooleans() throws {
+        for bar in [false, true] { for search in [false, true] {
+            var bytes = try payload("latest")
+            let settings = UnicodeEditionSettings(containerURL: { self.injectedContainer }, readPrefix: { _, _ in bytes },
+                writeAtomically: { data, _ in bytes = data })
+            let value = UnicodeEditionSettings.Snapshot(edition: .previous, showsSymbolBar: bar,
+                searchBarInsteadOfSymbols: search)
+            XCTAssertTrue(settings.save(value)); XCTAssertEqual(settings.loadSnapshot(), value)
+            var malformed = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+            for field in ["showsSymbolBar", "searchBarInsteadOfSymbols"] {
+                for invalid: Any in [0, 1, "true", NSNull(), [], [:]] {
+                    var copy = malformed; copy[field] = invalid
+                    let data = try JSONSerialization.data(withJSONObject: copy)
+                    XCTAssertEqual(UnicodeEditionSettings(containerURL: { self.injectedContainer }, readPrefix: { _, _ in data }).loadSnapshot(), .init(edition: .latest))
+                }
+            }
+            malformed["schemaVersion"] = 3
+            malformed.removeValue(forKey: "showsSymbolBar"); malformed.removeValue(forKey: "searchBarInsteadOfSymbols")
+            bytes = try JSONSerialization.data(withJSONObject: malformed)
+            let legacy = settings.loadSnapshot()
+            XCTAssertTrue(legacy.showsSymbolBar); XCTAssertFalse(legacy.searchBarInsteadOfSymbols)
+            XCTAssertEqual(legacy.edition, .previous)
+        } }
+    }
+
     func testPadPresetsAndSymbolMappingsRoundTripAndEditionChangesPreserveEverything() throws {
         for layout in KeyboardPadLayout.allCases { for mapping in KeyboardPadSymbolMapping.allCases {
             XCTAssertFalse(layout.title.isEmpty)
@@ -89,10 +114,10 @@ final class UnicodeEditionSettingsTests: XCTestCase {
         XCTAssertTrue(settings.save(.draft))
         XCTAssertEqual(observedURL, injectedContainer.appendingPathComponent(UnicodeEditionSettings.filename))
         let data = try XCTUnwrap(observedData)
-        XCTAssertLessThanOrEqual(data.count, 256)
+        XCTAssertLessThanOrEqual(data.count, UnicodeEditionSettings.maximumPayloadBytes)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual(Set(object.keys), ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping"])
-        XCTAssertEqual(object["schemaVersion"] as? Int, 3)
+        XCTAssertEqual(Set(object.keys), ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping", "showsSymbolBar", "searchBarInsteadOfSymbols"])
+        XCTAssertEqual(object["schemaVersion"] as? Int, 4)
         XCTAssertEqual(object["selectionIdentifier"] as? String, "draft")
         XCTAssertEqual(object["useUnicodeFonts"] as? Bool, false)
         XCTAssertEqual(object["showsCollapseKey"] as? Bool, false)
@@ -157,7 +182,7 @@ final class UnicodeEditionSettingsTests: XCTestCase {
         let settings = UnicodeEditionSettings(containerURL: { self.injectedContainer }, readPrefix: { url, maximum in
             reads += 1
             XCTAssertEqual(maximum, UnicodeEditionSettings.maximumPayloadBytes + 1)
-            XCTAssertEqual(maximum, 257)
+            XCTAssertEqual(maximum, UnicodeEditionSettings.maximumPayloadBytes + 1)
             XCTAssertEqual(url, self.injectedContainer.appendingPathComponent(UnicodeEditionSettings.filename))
             return bytes
         }, writeAtomically: { _, _ in XCTFail("A keyboard load cannot write") })
@@ -167,7 +192,7 @@ final class UnicodeEditionSettingsTests: XCTestCase {
 
     func testExactPayloadByteBoundaryIsAcceptedButOneExtraByteFailsClosed() throws {
         let bytes = try payload("draft")
-        let exact = bytes + Data(repeating: 0x20, count: 256 - bytes.count)
+        let exact = bytes + Data(repeating: 0x20, count: UnicodeEditionSettings.maximumPayloadBytes - bytes.count)
         XCTAssertEqual(load(exact), .draft)
         XCTAssertEqual(load(exact + Data([0x20])), .latest)
     }
@@ -179,11 +204,11 @@ final class UnicodeEditionSettingsTests: XCTestCase {
         let expected = UnicodeEditionSettings.Snapshot(edition: .previous, useUnicodeFonts: true, showsCollapseKey: true)
         XCTAssertTrue(writer.save(expected))
         let original = stored
-        stored += Data(repeating: 0x20, count: 256 - stored.count)
+        stored += Data(repeating: 0x20, count: UnicodeEditionSettings.maximumPayloadBytes - stored.count)
         XCTAssertEqual(writer.loadSnapshot(), expected)
         stored.append(0x20)
         XCTAssertEqual(writer.loadSnapshot(), .init(edition: .latest))
-        XCTAssertEqual(stored, original + Data(repeating: 0x20, count: 257 - original.count),
+        XCTAssertEqual(stored, original + Data(repeating: 0x20, count: UnicodeEditionSettings.maximumPayloadBytes + 1 - original.count),
                        "A read never repairs or truncates over-budget app settings")
     }
 

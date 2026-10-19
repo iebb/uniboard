@@ -17,15 +17,17 @@ final class KeyboardSelfSizingInputViewTests: XCTestCase {
         override func setNeedsLayout() { layoutRequests += 1; super.setNeedsLayout() }
     }
     private func makeView() -> InputProbe {
-        InputProbe(frame: CGRect(x: 0, y: 0, width: 390, height: 300), inputViewStyle: .keyboard)
+        let view = InputProbe(frame: CGRect(x: 0, y: 0, width: 390, height: 300), inputViewStyle: .keyboard)
+        _ = view.requestHeight(220)
+        return view
     }
 
     func testDefaultUsesPublicSelfSizingAndDoesNotClaimAnIntrinsicWidth() {
-        let view = makeView()
+        let view = InputProbe(frame: CGRect(x: 0, y: 0, width: 390, height: 300), inputViewStyle: .keyboard)
         XCTAssertTrue(view.allowsSelfSizing)
         XCTAssertEqual(view.inputViewStyle, .keyboard)
-        XCTAssertEqual(view.requestedHeight, 220)
-        XCTAssertEqual(view.intrinsicContentSize, CGSize(width: UIView.noIntrinsicMetric, height: 220))
+        XCTAssertEqual(view.requestedHeight, KeyboardLayoutPolicy.defaultHeight)
+        XCTAssertEqual(view.intrinsicContentSize, CGSize(width: UIView.noIntrinsicMetric, height: KeyboardLayoutPolicy.defaultHeight))
     }
 
     func testChangedFractionalHeightInvalidatesSizeAndRequestsParentLayout() {

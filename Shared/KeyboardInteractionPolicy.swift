@@ -1,152 +1,39 @@
 import Foundation
 
-/// Remote keyboard scenes can retain a stale interfaceOrientation after the
-/// host rotates. Phone layout follows the actual view width, never its height.
+/// Fixed templates have no persisted height or interactive resize state.
 enum KeyboardLayoutPolicy {
-    static let defaultPortraitBrowseHeight: CGFloat = 220
-    static let resizeHandleHeight: CGFloat = 14
+    static let defaultHeight = KeyboardTypingLayoutPolicy.regularKeyHeight * 6 + 30
     struct Metrics {
         let isCompactLayout: Bool
         let height: CGFloat
-        let portraitResizeRange: ClosedRange<CGFloat>?
         let typingKeyHeight: CGFloat
     }
-
     static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
-                        compactVertical: Bool, isSearching: Bool, isInspecting: Bool,
-                        portraitBrowseHeight: CGFloat = KeyboardLayoutPolicy.defaultPortraitBrowseHeight, portraitExpandedHeight: CGFloat = 340,
-                        isTyping: Bool = false, showsToolbar: Bool = false,
-                        isLandscape: Bool = false, padLayout: KeyboardPadLayout = .ansiNumbers) -> Metrics {
-        let edges: (short: CGFloat, long: CGFloat)?
-        if let size = displaySize,
-           size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 {
-            let width: CGFloat = size.width
-            let height: CGFloat = size.height
-            edges = (short: Swift.min(width, height), long: Swift.max(width, height))
-        } else {
-            edges = nil
+                        compactVertical: Bool, showsSymbolBar: Bool) -> Metrics {
+        let size = displaySize.flatMap { value -> CGSize? in
+            guard value.width.isFinite, value.height.isFinite, value.width > 0, value.height > 0 else { return nil }
+            return value
         }
         let compact: Bool
         if isPad { compact = false }
-        else if let edges, viewWidth.isFinite, viewWidth > 0 {
-            // Subtract instead of adding a tolerance to an extreme dimension.
-            compact = viewWidth > edges.short && viewWidth - edges.short > max(24, edges.short * 0.10)
-        } else {
-            compact = compactVertical
-        }
-        let expanded = isSearching || isInspecting
-        let browseHeight = portraitBrowseHeight.isFinite ? min(420, max(220, portraitBrowseHeight)) : defaultPortraitBrowseHeight
-        let expandedHeight = portraitExpandedHeight.isFinite ? min(420, max(340, portraitExpandedHeight)) : 340
-        let padKeyHeight = KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: viewWidth - 16, isPad: true)
-        let ansi = KeyboardTypingLayoutPolicy.usesANSI(availableWidth: viewWidth - 16, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout) && padLayout == .ansiNumbers
-        let mainRows: CGFloat = ansi ? 4 : 3
-        let padRowGaps = (mainRows - 1) * (padKeyHeight == 52 ? 6 : 4)
-        let padTypingHeight = padKeyHeight * (mainRows + 1) + padRowGaps + 18 + (showsToolbar ? 36 : 0)
-        let target: CGFloat = isPad ? (isTyping && !expanded ? padTypingHeight : expanded ? 380 : 340) : compact ? 220 : (expanded ? expandedHeight : browseHeight)
-        let effectiveHeight: CGFloat?
-        if !isPad, let edges { effectiveHeight = compact ? edges.short : edges.long }
-        else { effectiveHeight = sceneHeight }
-        let fraction: CGFloat = isPad ? 0.50 : compact ? 0.60 : 0.55
-        let cap: CGFloat? = effectiveHeight.flatMap {
-            guard $0.isFinite, $0 > 0 else { return nil }
-            let value = $0 * fraction
-            return value.isFinite && value > 0 ? value : nil
-        }
-        let height = min(target, cap ?? target)
-        let maximum = min(420, cap ?? 420)
-        let range = !isPad && !compact ? min(expanded ? 340 : 220, maximum)...maximum : nil
-        let typingKeyHeight = isPad && isTyping && !expanded
-            ? min(padKeyHeight, max(1, (height - padRowGaps - 18 - (showsToolbar ? 36 : 0)) / (mainRows + 1))) : 36
-        return Metrics(isCompactLayout: compact, height: height, portraitResizeRange: range, typingKeyHeight: typingKeyHeight)
+        else if let size, viewWidth.isFinite, viewWidth > 0 {
+            let short = min(size.width, size.height)
+            compact = viewWidth > short && viewWidth - short > max(24, short * 0.1)
+        } else { compact = compactVertical }
+        let key = KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: viewWidth - 16, isPad: isPad)
+        let spacing: CGFloat = isPad && viewWidth.isFinite && viewWidth >= 666 ? 6 : 4
+        let chrome: CGFloat = 18
+        let rows: CGFloat = showsSymbolBar ? 6 : 5
+        let target = key * rows + spacing * 3 + chrome
+        // Keep all rows and the footer equal if a host supplies a short scene.
+        let sceneCap = sceneHeight.flatMap { $0.isFinite && $0 > chrome + spacing * 3 + rows
+            ? max(chrome + spacing * 3 + rows, $0 * 0.85) : nil }
+        let height = min(target, sceneCap ?? target)
+        let actualKey = max(1, (height - chrome - spacing * 3) / rows)
+        return Metrics(isCompactLayout: compact, height: height, typingKeyHeight: min(key, actualKey))
     }
 }
 
-enum KeyboardResizePolicy {
-    static func clampedHeight(_ value: CGFloat, in range: ClosedRange<CGFloat>, rounded: Bool = true) -> CGFloat? {
-        guard value.isFinite, range.lowerBound.isFinite, range.upperBound.isFinite,
-              range.lowerBound > 0 else { return nil }
-        // A selected endpoint is exact even when the scene cap is fractional.
-        // Rounding a clamped maximum downward would leave a visible gap.
-        if value <= range.lowerBound { return range.lowerBound }
-        if value >= range.upperBound { return range.upperBound }
-        let bounded = min(range.upperBound, max(range.lowerBound, value))
-        // Round first, then clamp again: a fractional scene cap is still a
-        // strict bound even when it is narrower than one point.
-        return min(range.upperBound, max(range.lowerBound, rounded ? bounded.rounded() : bounded))
-    }
-
-
-}
-
-/// Validate the input stream independently of any coordinate compensation.
-/// Exact duplicates are harmless, but a different sample at the same time or
-/// a backward/nonfinite timestamp cannot authorize a live update or commit.
-struct KeyboardResizeSampleSequence {
-    enum Acceptance: Int {
-        case accepted, duplicate, invalid
-    }
-    private struct Sample: Equatable {
-        let point: CGPoint
-        let bounds: CGRect
-        let timestamp: TimeInterval
-
-        static func == (lhs: Sample, rhs: Sample) -> Bool {
-            lhs.point.x == rhs.point.x && lhs.point.y == rhs.point.y
-                && lhs.bounds.origin.x == rhs.bounds.origin.x && lhs.bounds.origin.y == rhs.bounds.origin.y
-                && lhs.bounds.size.width == rhs.bounds.size.width && lhs.bounds.size.height == rhs.bounds.size.height
-                && lhs.timestamp == rhs.timestamp
-        }
-    }
-    private var last: Sample?
-
-    static func isValid(point: CGPoint, bounds: CGRect, timestamp: TimeInterval) -> Bool {
-        point.x.isFinite && point.y.isFinite && timestamp.isFinite && timestamp >= 0
-            && bounds.origin.x.isFinite && bounds.origin.y.isFinite
-            && bounds.size.width.isFinite && bounds.size.height.isFinite
-            && bounds.size.width > 0 && bounds.size.height > 0
-            && (bounds.origin.x+bounds.size.width).isFinite
-            && (bounds.origin.y+bounds.size.height).isFinite
-    }
-
-    mutating func accept(point: CGPoint, bounds: CGRect, timestamp: TimeInterval) -> Acceptance {
-        guard Self.isValid(point: point, bounds: bounds, timestamp: timestamp) else { return .invalid }
-        let sample = Sample(point: point, bounds: bounds, timestamp: timestamp)
-        if let last {
-            guard timestamp >= last.timestamp else { return .invalid }
-            if timestamp == last.timestamp { return sample == last ? .duplicate : .invalid }
-        }
-        last = sample
-        return .accepted
-    }
-}
-
-/// A transient drag must not replace the user's saved height merely because
-/// the current scene caps its visible height. Only a successful finish commits.
-struct KeyboardResizeSession {
-    let startHeight: CGFloat
-    private(set) var preferredHeight: CGFloat
-    private var finished = false
-
-    init?(preferredHeight: CGFloat, visibleHeight: CGFloat?, fallbackHeight: CGFloat,
-          range: ClosedRange<CGFloat>) {
-        guard preferredHeight.isFinite, preferredHeight > 0 else { return nil }
-        let visible = visibleHeight.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? fallbackHeight
-        guard let start = KeyboardResizePolicy.clampedHeight(visible, in: range, rounded: false) else { return nil }
-        self.startHeight = start
-        self.preferredHeight = preferredHeight
-    }
-
-    mutating func finish(commitHeight: CGFloat?, range: ClosedRange<CGFloat>, rounded: Bool = true) -> CGFloat? {
-        guard !finished else { return nil }
-        finished = true
-        guard let commitHeight, let height = KeyboardResizePolicy.clampedHeight(commitHeight, in: range, rounded: rounded) else { return nil }
-        preferredHeight = height
-        return height
-    }
-}
-
-/// UTF-16 is the UIKit/Core Text boundary; edits always operate on complete
-/// Swift Characters. These helpers do not read or edit the host's document.
 enum KeyboardQueryPolicy {
     static let maximumCharacters = 100
 

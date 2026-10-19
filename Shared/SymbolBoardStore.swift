@@ -128,6 +128,13 @@ final class SymbolBoardStore: ObservableObject {
     func contains(_ text: String) -> Bool {
         boards.contains { $0.keys.contains { SymbolBoardKey.exact($0.text, text) } }
     }
+    /// An empty selected board leaves the fixed strip useful without changing
+    /// the user's preferred Star board or their active-board preference.
+    var typingBoard: SymbolBoard {
+        if activeBoard.keys.isEmpty, let stock = boards.first(where: { $0.id == Self.stockID }) { return stock }
+        return activeBoard
+    }
+
     @discardableResult func selectBoard(_ id: String) -> Bool {
         guard boards.contains(where: { $0.id == id }) else { return false }
         // Selecting the board already shown requires no persistence. This

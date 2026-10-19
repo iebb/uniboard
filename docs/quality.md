@@ -20,14 +20,14 @@ generator checks. Tests do not contact App Store Connect or send typing data.
 | Data generation | Four-edition atomic generation, rolling historical release slots, official historical emoji URLs, partial download/retry failure, malformed ranges/duplicates, edition identity, failed publication retaining prior artifacts | `Scripts/tests/test_generate_unicode.py` |
 | Local collections | Wrong preference types, negative/fractional/overflow values, surrogates, duplicate IDs, order, 60-item recents, reset scope, sandbox separation | `CharacterStoreTests` |
 | Optional font preferences | Absent/corrupt/non-Boolean values stay off; app-only selection reaches the read-only keyboard | `LocalPreferencePolicyTests`, `UnicodeFontSupportTests` |
-| Height policy | Portrait/landscape/iPad, scene caps, fractional limits, NaN/infinity, extreme dimensions, one-row swipe direction and clamping | `KeyboardInteractionPolicyTests`, `KeyboardResizeStepPolicyTests` |
+| Height policy | Fixed row count, portrait/landscape/iPad, scene caps, fractional and nonfinite dimensions | `KeyboardInteractionPolicyTests`, `KeyboardTypingLayoutPolicyTests` |
 | Query editing | Empty/start/middle/end, extreme integer offsets, whole graphemes, combining marks, ZWJ, flags, RTL, insertion limits, clipped viewport and pixel alignment | `KeyboardInteractionPolicyTests` and native query cases |
-| Query touch routing | Original physical touch and UTF-16 text, owned search activation, field/mode/resize changes, delayed callbacks, detach and fresh accessibility actions | `KeyboardQueryInteractionTests` and native query cases |
+| Query touch routing | Original physical touch and UTF-16 text, owned search activation, field/mode/bounds changes, delayed callbacks, detach and fresh accessibility actions | `KeyboardQueryInteractionTests` and native query cases |
 | English typing | QWERTY/page membership, one-shot Shift, timed Caps Lock, manual capitalization overrides, field/context capitalization, Unicode word boundaries, guarded double-Space replacement, query isolation | `KeyboardTypingPolicyTests`, `KeyboardEnglishInputPolicyTests`, native typing cases |
 | Adaptive English rows | Fixed keycap height, exact row thresholds, fractional/nonfinite and constrained dimensions, number-row validation, saved-symbol capacity | `KeyboardTypingLayoutPolicyTests` and native typing cases |
 | Symbol boards | Stock board, bounded schema and migration, independent preferred Star target defaulting to Favorites, deletion fallback, exact UTF-16 identity, malformed-data preservation, failed persistence, board CRUD/variants, save target selection, glyph-only scrolling keys, configuration without host insertion | `SymbolBoardStoreTests` plus native board cases |
 | Variant interaction | English diacritics and symbol variants, captured case/context, slide/release, cancellation, reentrant callbacks, popup geometry and accessibility | `KeyboardVariantPolicyTests`, `KeyboardVariantControlTests` plus native board/typing cases |
-| UIKit resize lifecycle | One-row up/down swipe on release, unchanged allocation during the gesture, tap/cancel/failure/detachment without saving, callback cleanup once | `KeyboardResizeHandleControlTests` |
+| Fixed keyboard template | Always-visible number row, 15% taller equal caps, one optional symbol/search bar, exact viewport containment, settings persistence | `KeyboardTypingLayoutPolicyTests`, `UnicodeEditionSettingsTests`, native fixed-layout cases |
 | Held deletion | Original query/host scope and document, pre-render mode changes, stale timers, repeated down, release/cancel/detach and callback reentrancy | `KeyboardRepeatingDeleteControlTests` |
 | Document connection | Missing or invalid early UIKit identifiers cannot crash the keyboard or authorize host edits; valid public identifiers retain their exact value | `KeyboardDocumentIdentityTests`, real extension startup |
 | Optional fonts | Default off, no global registration, actual missing-glyph outlines, native emoji preservation, malformed metadata/ranges, invalid sizes and paths | `UnicodeFontSupportTests`, `Scripts/validate_fonts.py` |
@@ -55,7 +55,6 @@ coverage gate, not proof of every possible path, OS behavior or absence of bugs.
 | `KeyboardVariantPolicy.swift` | 100% |
 | `KeyboardFooterLayoutPolicy.swift` | 100% |
 | `KeyboardInteractionPolicy.swift` | 100% |
-| `KeyboardResizeStepPolicy.swift` | 100% |
 | `KeyboardTypingPolicy.swift` | 100% |
 | `KeyboardTypingLayoutPolicy.swift` | 100% |
 | `KeyboardEnglishInputPolicy.swift` | 100% |
@@ -114,36 +113,9 @@ the key settings file; document typing and search queries never enter it.
 
 ## Native keyboard checks
 
-Keyboard UI tests require `UNIBOARD_KEYBOARD_INTEGRATION=1` and a compatible
-runtime exposing the remote keyboard's accessibility elements. Their setup
-uses the actual Settings/globe flow. Cases that require a baseline normalize
-height through the visible grip rather than modifying extension preferences.
-The iOS 27 remote keyboard currently requires manual CUA visual verification
-where accessibility elements are absent.
+Keyboard UI tests require `UNIBOARD_KEYBOARD_INTEGRATION=1` and a compatible runtime exposing the remote keyboard. Setup uses the actual Settings/globe flow on owned QA simulators. The fixed template has four character rows (one number row plus three letter rows) and a matching footer. App Settings selects an optional symbol strip or its search-bar replacement; only one top bar is mounted. Verify 41.4-point phone keys and 59.8-point wide iPad keys, full viewport containment, consistent digit/letter/footer sizes and unchanged height between the two top-bar contents. A host's genuine scene constraint may reduce all keys uniformly.
 
-Where available on iPhone in portrait, the top grip accepts two height
-gestures: swipe up adds one key row; swipe down removes one. Each accepted gesture applies one row step on release,
-clamped to the available scene and browsing limits. Short and long swipes
-must each apply only one step. Taps, cancelled gestures and invalidated
-sessions leave the height and saved preference unchanged. The query, caret,
-results and scroll position must remain intact. During dragging, an up/down triangle appears only if that direction can change the height. Outward swipes at either bound and a range with only one valid height show none; reversing inward restores feedback. There is no size
-gauge, height preview or separate height editor.
-
-The default toolbar is hidden; the bottom-left U control shows/hides it. Hiding
-it restores host typing while preserving the query and caret. A fresh portrait
-keyboard is 220 points high; saved heights remain in use. All ordinary keycaps
-are 36 points with 4-point vertical gaps. The 14-point grip has no top spacer.
-The optional collapse control is hidden by default except beside Space on eligible wide iPad. English keycaps retain
-their height as space grows. A number
-row appears when four character rows fit; saved-symbol rows appear at five.
-When the normal page has digits, the expanded number/symbol page contains no
-digits and supplies two complementary ten-symbol rows. Short layouts keep123.
-Saved-symbol widths and rounded key surfaces match the digit row exactly.
-The footer is separate from those character-row counts. Original recordings and actual layout receipts must verify those row
-thresholds, unchanged host input and release-only height application. Earlier
-live-window and height-preview trials remain historical evidence, not the
-current product contract. DEBUG-only metrics record numeric layout and
-lifecycle data. The release build contains no resize logging or metric-file writer.
+The retired resize handle, session policies, preview/triangle views, saved-height storage and dragging tests have been removed. Verify their accessibility identifiers are absent. Keep typing, literal Unicode, query-caret, settings persistence, popup, symbol-board and public UIKit fitting tests. Check that horizontal symbol scrolling never inserts, and that iOS 26 scroll-edge effects do not mask the row.
 
 Coverage and passing tests provide evidence for the checked cases. Physical
 devices, receiving apps, OS font coverage and remote UIKit behavior still need
@@ -151,7 +123,7 @@ TestFlight validation before public release.
 
 ## Flexible iPad layout acceptance
 
-On wide iPad, portrait stays at three letter rows; landscape offers stock three-row, compact ANSI three-row and ANSI four-row presets in app Settings. The four-row preset is default. Check actual window width rather than screen orientation alone: below 980 points of content width, ANSI is unavailable. All rendered rows and the footer have equal key height. Manual Shift changes ANSI punctuation; automatic capitalization and Caps Lock do not shift digits. Both symbol pages omit redundant digits in the four-row preset. Return is present exactly once on every page. Numbers/Symbols and Hide Keyboard appear after Space in both portrait and landscape.
+Wide iPad always has a number row and three letter rows; landscape offers iPad, compact ANSI and full ANSI presets in app Settings. Full ANSI is the default. Check actual window width rather than screen orientation alone: below 980 points of content width, ANSI is unavailable. All rendered rows and the footer have equal key height. Manual Shift changes ANSI punctuation; automatic capitalization and Caps Lock do not shift digits. Both symbol pages omit redundant digits in the four-row preset. Return is present exactly once on every page. Numbers/Symbols and Hide Keyboard appear after Space in both portrait and landscape.
 
 App-only swipe-down mapping offers the standard symbol page, iPad hints, macOS U.S. Option symbols and Off; per-key custom choices override all presets. Default taps and function keys remain standard; explicit tap mappings change only character keys. Verify saved layout/mapping after relaunch and a real keyboard switch with Full Access off, then rotate back to portrait.
 
@@ -170,3 +142,7 @@ Saved and the built-in Favorites board use the same store within each process. M
 Cover pending edits across relaunch, remote additions/deletions, reorder, exact composed/decomposed text, supplementary scalars, emoji, arbitrary saved text, invalid/oversized schemas, unreadable or unwritable storage, nonblocking lock contention, concurrent writers, links and non-regular files. An unavailable shared document must not overwrite original bytes or discard local favorites. The three-way baseline is persisted with local board state. Only explicit favorite text crosses the App Group boundary; recents, documents and queries do not. The file-type check uses fstat, declared with C617.1 for app/App Group metadata in both shipped manifests.
 
 Pressed overlays never receive touches or change geometry. Verify physical down/up, cancellation on scrolling, disabled/reconfigured keys, long-hold inspection, stale contexts, detach and reentrant actions. Delete repeats keep their original cadence and do not create repeat haptics. Confirm visual feedback in native controls; simulator success cannot establish physical Taptic feedback. Keep App Store v1.1 held until device acceptance.
+
+Shared settings schema 4 preserves schemas 1–3 and defaults to the symbol bar. Both top-bar switches require JSON Booleans; malformed/unknown fields fail closed. Toggling the symbol bar off retains the saved search replacement preference without displaying it. Failed writes keep previous UI/settings values. The bounded payload limit is 512 bytes.
+
+Gesture candidate resolution reserves explicit custom choices, then primary defaults, then unused alternatives. Assert exact UTF-16 uniqueness across Hold/Up/Down for every physical character key, layout, Shift state and mapping. Do not normalize composed/decomposed sequences. Stock currency holds keep their family; Q–P mapped currency hints remain distinct. Shift-origin sliding commits exactly once in its original document; cancellation, stale context, geometry changes, detachment and release over non-character controls must not type or toggle Shift.

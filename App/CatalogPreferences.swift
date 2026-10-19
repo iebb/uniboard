@@ -10,6 +10,8 @@ final class CatalogPreferences: ObservableObject {
     }
     @Published private(set) var useUnicodeFonts: Bool
     @Published private(set) var showsCollapseKey: Bool
+    @Published private(set) var showsSymbolBar: Bool
+    @Published private(set) var searchBarInsteadOfSymbols: Bool
     @Published private(set) var padLayout: KeyboardPadLayout
     @Published private(set) var padSymbolMapping: KeyboardPadSymbolMapping
     private let defaults: UserDefaults
@@ -23,6 +25,8 @@ final class CatalogPreferences: ObservableObject {
         order = defaults.string(forKey: "appUnicodeSort").flatMap(UnicodeSortOrder.init(rawValue:)) ?? .codePoint
         useUnicodeFonts = snapshot.useUnicodeFonts
         showsCollapseKey = snapshot.showsCollapseKey
+        showsSymbolBar = snapshot.showsSymbolBar
+        searchBarInsteadOfSymbols = snapshot.searchBarInsteadOfSymbols
         padLayout = snapshot.padLayout
         padSymbolMapping = snapshot.padSymbolMapping
     }
@@ -37,11 +41,13 @@ final class CatalogPreferences: ObservableObject {
     func selectCollapseKey(_ enabled: Bool) {
         edit { $0.showsCollapseKey = enabled }
     }
+    func selectSymbolBar(_ enabled: Bool) { edit { $0.showsSymbolBar = enabled } }
+    func selectSearchBarInsteadOfSymbols(_ enabled: Bool) { edit { $0.searchBarInsteadOfSymbols = enabled } }
     func selectPadLayout(_ layout: KeyboardPadLayout) { edit { $0.padLayout = layout } }
     func selectPadSymbolMapping(_ mapping: KeyboardPadSymbolMapping) { edit { $0.padSymbolMapping = mapping } }
     private func edit(_ change: (inout UnicodeEditionSettings.Snapshot) -> Void) {
         var value = UnicodeEditionSettings.Snapshot(edition: edition, useUnicodeFonts: useUnicodeFonts,
-            showsCollapseKey: showsCollapseKey, padLayout: padLayout, padSymbolMapping: padSymbolMapping)
+            showsCollapseKey: showsCollapseKey, showsSymbolBar: showsSymbolBar, searchBarInsteadOfSymbols: searchBarInsteadOfSymbols, padLayout: padLayout, padSymbolMapping: padSymbolMapping)
         change(&value)
         save(value)
     }
@@ -60,6 +66,8 @@ final class CatalogPreferences: ObservableObject {
             if !useUnicodeFonts { UnicodeFontSupport.clearCache() }
         }
         if showsCollapseKey != snapshot.showsCollapseKey { showsCollapseKey = snapshot.showsCollapseKey }
+        if showsSymbolBar != snapshot.showsSymbolBar { showsSymbolBar = snapshot.showsSymbolBar }
+        if searchBarInsteadOfSymbols != snapshot.searchBarInsteadOfSymbols { searchBarInsteadOfSymbols = snapshot.searchBarInsteadOfSymbols }
         if padLayout != snapshot.padLayout { padLayout = snapshot.padLayout }
         if padSymbolMapping != snapshot.padSymbolMapping { padSymbolMapping = snapshot.padSymbolMapping }
     }

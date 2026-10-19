@@ -18,7 +18,6 @@ MINIMUMS = {
     "KeyboardVariantPolicy.swift": 1.0,
     "KeyboardFooterLayoutPolicy.swift": 1.0,
     "KeyboardInteractionPolicy.swift": 1.0,
-    "KeyboardResizeStepPolicy.swift": 1.0,
     "KeyboardTypingPolicy.swift": 1.0,
     "KeyboardTypingLayoutPolicy.swift": 1.0,
     "KeyboardEnglishInputPolicy.swift": 1.0,

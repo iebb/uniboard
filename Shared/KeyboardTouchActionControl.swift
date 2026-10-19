@@ -16,7 +16,7 @@ struct KeyboardInputActionContext: Equatable {
 
 /// Single actions snapshot one factory at touch-down; updates never retarget a
 /// held press. Unlike repeated Delete, these keys execute only on touch-up.
-final class KeyboardTouchActionButton: UIButton {
+class KeyboardTouchActionButton: UIButton {
     var contentPosition: KeyboardKeyContentPosition = .center { didSet { setNeedsLayout() } }
     override func titleRect(forContentRect contentRect: CGRect) -> CGRect {
         contentPosition.alignedRect(super.titleRect(forContentRect: contentRect), in: contentRect)
@@ -95,6 +95,117 @@ final class KeyboardTouchActionButton: UIButton {
         return completePress(token: token)
     }
     override var intrinsicContentSize: CGSize { CGSize(width: UIView.noIntrinsicMetric, height: 34) }
+}
+
+/// System-style Shift → letter sliding is a single physical gesture. It owns
+/// the initial document and never synthesizes touches on another character key.
+final class KeyboardShiftTouchButton: KeyboardTouchActionButton {
+    var slideFactory: (() -> ((String) -> Bool)?)?
+    private var slideAction: ((String) -> Bool)?
+    private weak var owner: AnyObject?
+    private weak var originalWindow: UIWindow?
+    private var originalAnchor: CGRect = .zero
+    private var originalWindowBounds: CGRect = .zero
+    private var originalWindowFrame: CGRect = .zero
+    private var context: UUID?
+    private var token = UUID()
+    private var slideTracking = false
+    private var leftShift = false
+    private weak var selectedKey: KeyboardVariantButton?
+
+    func configureSlide(context: UUID, factory: @escaping () -> ((String) -> Bool)?) {
+        if self.context != context { cancelSlide() }
+        self.context = context
+        slideFactory = factory
+    }
+
+    @discardableResult func beginSlide(owner: AnyObject, point: CGPoint) -> Bool {
+        if slideTracking && self.owner == nil { cancelSlide() }
+        guard !slideTracking, isEnabled, isUserInteractionEnabled, let window,
+              point.x.isFinite, point.y.isFinite else { return false }
+        let anchor = convert(bounds, to: window)
+        guard !anchor.isEmpty, anchor.contains(point) else { return false }
+        slideTracking = true; self.owner = owner; originalWindow = window
+        originalAnchor = anchor; originalWindowBounds = window.bounds; originalWindowFrame = window.frame
+        let id = UUID(); token = id
+        let action = slideFactory?()
+        guard token == id, slideTracking else { return false }
+        slideAction = action
+        sendActions(for: .touchDown)
+        return token == id && slideTracking
+    }
+
+    func moveSlide(owner: AnyObject, point: CGPoint) {
+        guard slideTracking, self.owner === owner else { return }
+        guard geometryIsCurrent, point.x.isFinite, point.y.isFinite else { cancelSlide(); return }
+        if !originalAnchor.contains(point) { leftShift = true }
+        let target = leftShift ? target(at: point) : nil
+        if target !== selectedKey {
+            selectedKey?.pressFeedback.setPressed(false)
+            selectedKey = target
+            target?.pressFeedback.setPressed(true)
+        }
+    }
+
+    @discardableResult func endSlide(owner: AnyObject, point: CGPoint) -> Bool {
+        guard slideTracking, self.owner === owner else { return false }
+        moveSlide(owner: owner, point: point)
+        guard slideTracking else { return false }
+        let key = selectedKey.flatMap { characterKey($0) }
+        let action = slideAction
+        let tap = !leftShift && geometryIsCurrent && originalAnchor.contains(point)
+        let terminal = clearSlide()
+        if tap { sendActions(for: .touchUpInside); return true }
+        sendActions(for: .touchCancel)
+        guard token == terminal, !slideTracking, let key, let action else { return false }
+        return action(key)
+    }
+
+    func cancelSlide() { _ = clearSlide(); sendActions(for: .touchCancel) }
+    @discardableResult private func clearSlide() -> UUID {
+        selectedKey?.pressFeedback.setPressed(false); selectedKey = nil
+        owner = nil; originalWindow = nil; slideAction = nil; slideTracking = false; leftShift = false
+        token = UUID(); return token
+    }
+    private var geometryIsCurrent: Bool {
+        guard let window, window === originalWindow else { return false }
+        return window.bounds == originalWindowBounds && window.frame == originalWindowFrame
+            && convert(bounds, to: window) == originalAnchor && isEnabled && isUserInteractionEnabled
+    }
+    private func characterKey(_ key: KeyboardVariantButton) -> String? {
+        let prefix = "keyboard.typing.key."
+        guard let identifier = key.accessibilityIdentifier, identifier.hasPrefix(prefix),
+              key.isUserInteractionEnabled, !key.isHidden, key.alpha > 0 else { return nil }
+        let text = String(identifier.dropFirst(prefix.count))
+        return KeyboardKeySettings.identifier(forCharacter: text) == nil ? nil : text
+    }
+    private func target(at point: CGPoint) -> KeyboardVariantButton? {
+        var view = window?.hitTest(point, with: nil)
+        while let current = view {
+            if let key = current as? KeyboardVariantButton, characterKey(key) != nil { return key }
+            view = current.superview
+        }
+        return nil
+    }
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first, let window else { return }
+        _ = beginSlide(owner: touch, point: touch.location(in: window))
+    }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first(where: { $0 === owner }), let window else { return }
+        moveSlide(owner: touch, point: touch.location(in: window))
+    }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first(where: { $0 === owner }), let window else { return }
+        _ = endSlide(owner: touch, point: touch.location(in: window))
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if touches.contains(where: { $0 === owner }) { cancelSlide() }
+    }
+    override func willMove(toWindow newWindow: UIWindow?) {
+        if newWindow !== window { cancelSlide() }
+        super.willMove(toWindow: newWindow)
+    }
 }
 
 /// A configuration key is deliberately a plain UIView. UIScrollView's public

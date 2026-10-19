@@ -4,9 +4,9 @@ enum KeyboardPadLayout: String, CaseIterable {
     case stock, ansi, ansiNumbers
     var title: String {
         switch self {
-        case .stock: return "iPad · 3 rows"
-        case .ansi: return "Compact ANSI · 3 rows"
-        case .ansiNumbers: return "ANSI + numbers · 4 rows"
+        case .stock: return "iPad"
+        case .ansi: return "Compact ANSI"
+        case .ansiNumbers: return "Full ANSI"
         }
     }
 }
@@ -23,22 +23,14 @@ enum KeyboardPadSymbolMapping: String, CaseIterable {
     }
 }
 
-/// The English panel uses additional rows, rather than stretching its keycaps.
+/// Four character rows are always present: digits plus three typing rows.
 struct KeyboardTypingLayoutPlan: Equatable {
     let keyHeight: CGFloat
     let rowSpacing: CGFloat
-    /// Matches the ten-key number row, independently of vertical row spacing.
     let keySpacing: CGFloat
-    /// Bounded by three main rows, one auxiliary row and four favorite rows.
-    let rowCapacity: Int
-    /// Compatibility name: an auxiliary row, complementary to the current page.
     let numberRowCount: Int
-    let favoriteRowsCount: Int
-    let favoritesPerRow: Int
-    let favoriteKeyWidth: CGFloat
-    var mainRowsCount: Int = 3
-    var topRowsCount: Int { numberRowCount + favoriteRowsCount }
-    var rowCount: Int { mainRowsCount + topRowsCount }
+    let mainRowsCount: Int
+    var rowCount: Int { mainRowsCount + numberRowCount }
     var contentHeight: CGFloat { CGFloat(rowCount) * keyHeight + CGFloat(rowCount - 1) * rowSpacing }
 }
 
@@ -59,14 +51,10 @@ struct KeyboardPadTypingLayoutPlan: Equatable {
 }
 
 enum KeyboardTypingLayoutPolicy {
-    static let regularKeyHeight: CGFloat = 36
-    static let compactKeyHeight: CGFloat = 36
+    static let regularKeyHeight: CGFloat = 36 * 1.15
     static let rowSpacing: CGFloat = 4
-    static let maximumRows = 8
-    static let maximumFavoriteRows = 4
-    static let favoriteColumns = 10
     static func typingKeyHeight(availableWidth: CGFloat, isPad: Bool) -> CGFloat {
-        isPad && availableWidth.isFinite && availableWidth >= 650 ? 52 : regularKeyHeight
+        isPad && availableWidth.isFinite && availableWidth >= 650 ? 52 * 1.15 : regularKeyHeight
     }
     private static let digits = Array("1234567890").map(String.init)
     private static let auxiliarySymbols = ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="]
@@ -144,63 +132,22 @@ enum KeyboardTypingLayoutPolicy {
             rightShiftWidth: key * 1.5 + gap / 2, backslashWidth: key, isANSI: false, hasNumberRow: false)
     }
 
-    /// The English page can skip a redundant numeric-only entry label when its
-    /// persistent digits already fit. The destination remains the full page.
-    static func entryTitle(auxiliaryRowVisible: Bool) -> String {
-        auxiliaryRowVisible ? "#+=" : "123"
-    }
-
     /// Heights are the space inside the typing panel, excluding the shared
     /// toolbar, grip and footer. The ordinary three rows remain on every page.
     static func plan(availableHeight: CGFloat, availableWidth: CGFloat,
                      compact: Bool, layout: KeyboardTypingLayout,
-                     favoriteCount: Int, isPad: Bool = false,
-                     favoriteThreshold: Int = 5, isLandscape: Bool = false, padLayout: KeyboardPadLayout = .ansiNumbers) -> KeyboardTypingLayoutPlan? {
+                     isPad: Bool = false, isLandscape: Bool = false,
+                     padLayout: KeyboardPadLayout = .ansiNumbers) -> KeyboardTypingLayoutPlan? {
+        let spacing: CGFloat = isPad && availableWidth >= 650 ? 6 : rowSpacing
         let keySpacing: CGFloat = isPad ? 7 : 5
-        let gaps = CGFloat(favoriteColumns - 1) * keySpacing
-        // The number row has exactly ten keys. A width at or below its gap
-        // budget cannot produce positive-width keys, even with scrolling.
         guard availableHeight.isFinite, availableWidth.isFinite,
-              availableHeight > rowSpacing * 2, availableWidth > gaps else { return nil }
-        // iPad keeps three character rows. Digits and punctuation live on
-        // down-flicks rather than adding duplicate rows above the letters.
-        if isPad {
-            let ansi = usesANSI(availableWidth: availableWidth, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout) && padLayout == .ansiNumbers
-            let rows = ansi ? 4 : 3
-            let auxiliary = ansi && layout != .letters ? 1 : 0
-            let spacing: CGFloat = availableWidth >= 650 && availableHeight > 12 ? 6 : rowSpacing
-            guard availableHeight > CGFloat(rows - 1) * spacing else { return nil }
-            let height = min(typingKeyHeight(availableWidth: availableWidth, isPad: true),
-                             (availableHeight - spacing * CGFloat(rows - 1)) / CGFloat(rows))
-            return KeyboardTypingLayoutPlan(keyHeight: height, rowSpacing: spacing, keySpacing: keySpacing,
-                rowCapacity: rows, numberRowCount: auxiliary, favoriteRowsCount: 0,
-                favoritesPerRow: favoriteColumns, favoriteKeyWidth: (availableWidth - gaps) / CGFloat(favoriteColumns), mainRowsCount: rows - auxiliary)
-        }
-        let standard: CGFloat = compact ? compactKeyHeight : regularKeyHeight
-        let baselineHeight: CGFloat = standard * 3 + rowSpacing * 2
-        let keyHeight: CGFloat
-        let capacity: Int
-        if availableHeight < baselineHeight {
-            keyHeight = (availableHeight - rowSpacing * 2) / 3
-            capacity = 3
-        } else {
-            keyHeight = standard
-            // Clamp before converting to Int, including for extreme finite
-            // inputs. Normal scene sizes never approach this bound.
-            let rows: CGFloat = ((availableHeight + rowSpacing) / (standard + rowSpacing)).rounded(.down)
-            capacity = Int(Swift.min(CGFloat(maximumRows), Swift.max(3, rows)))
-        }
-        let columns = favoriteColumns
-        let favoriteWidth = (availableWidth - gaps) / CGFloat(columns)
-        let numbers = capacity >= 4 ? 1 : 0
-        let count = Swift.max(0, favoriteCount)
-        let neededRows = count / columns + (count % columns == 0 ? 0 : 1)
-        let threshold = Swift.max(5, favoriteThreshold)
-        let favorites = layout == .letters && numbers == 1 && capacity >= threshold
-            ? Swift.min(maximumFavoriteRows, Swift.min(capacity - 4, neededRows)) : 0
-        return KeyboardTypingLayoutPlan(keyHeight: keyHeight, rowSpacing: rowSpacing, keySpacing: keySpacing,
-            rowCapacity: capacity, numberRowCount: numbers, favoriteRowsCount: favorites,
-            favoritesPerRow: columns, favoriteKeyWidth: favoriteWidth)
+              availableHeight > spacing * 3, availableWidth > keySpacing * 9 else { return nil }
+        let ansiNumbers = usesANSI(availableWidth: availableWidth, isPad: isPad,
+            isLandscape: isLandscape, padLayout: padLayout) && padLayout == .ansiNumbers && layout == .letters
+        let ideal = typingKeyHeight(availableWidth: availableWidth, isPad: isPad)
+        return KeyboardTypingLayoutPlan(keyHeight: min(ideal, (availableHeight - spacing * 3) / 4),
+            rowSpacing: spacing, keySpacing: keySpacing, numberRowCount: ansiNumbers ? 0 : 1,
+            mainRowsCount: ansiNumbers ? 4 : 3)
     }
 
     /// A separate literal digit row must not broaden the current page's key

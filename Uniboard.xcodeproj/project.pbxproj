@@ -12,7 +12,6 @@
 		069E131529729AFBC285927E /* SymbolBoardStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41D3D251CE076E09EF76D3B /* SymbolBoardStore.swift */; };
 		08BA37D97BBD674CB801D9A6 /* UnicodeProperties-older.json in Resources */ = {isa = PBXBuildFile; fileRef = 89CF8BE6019E8BB46A09E2A7 /* UnicodeProperties-older.json */; };
 		0A5B060BF07F04A7587EB34F /* LocalPreferencePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5B6E9300EFF6D8D8A8BE211 /* LocalPreferencePolicy.swift */; };
-		0A965376ACE60E959E73844B /* KeyboardResizeStepPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE2F5D18F40D9E43A6A49B2B /* KeyboardResizeStepPolicy.swift */; };
 		0BD581E6FAFCC86EF0A47FA5 /* KeyboardVariantControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E46CAE98E0D3DA0F244E40B /* KeyboardVariantControlTests.swift */; };
 		0CA86A73BEE1761EFAB64A4E /* UniboardKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FADFF79503D90B10A9C8AEB2 /* UniboardKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0D9181263267F12FC090A7CB /* Blocks.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E6909BB645FA5674134A126 /* Blocks.json */; };
@@ -21,7 +20,6 @@
 		106ED12704C39D4C693646BF /* UnicodeProperties-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = 107C19BC010C3CBBC642AC42 /* UnicodeProperties-latest.json */; };
 		1262E56C314CA8FAB23F5014 /* SavedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A791C3473CB60A05B20494 /* SavedView.swift */; };
 		1459D2941080CE1C3D7A75BB /* UnicodeCatalog-latest.ucd in Resources */ = {isa = PBXBuildFile; fileRef = AAE6E346B7955C1B12E0338E /* UnicodeCatalog-latest.ucd */; };
-		151F945306914C2D7574127A /* KeyboardResizeStepPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE2F5D18F40D9E43A6A49B2B /* KeyboardResizeStepPolicy.swift */; };
 		1831564AF0E06DA9DADB5D83 /* UnicodeProperties-previous.json in Resources */ = {isa = PBXBuildFile; fileRef = 0E95919528538BFB5AA44213 /* UnicodeProperties-previous.json */; };
 		18E0F035EBA7D7EE39166431 /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC58D1BB17A9004D6E334302 /* KeyboardViewController.swift */; };
 		19CE55BFA48BB75E418F73B8 /* Blocks-older.json in Resources */ = {isa = PBXBuildFile; fileRef = 5BE250893A1CF86E89DCF238 /* Blocks-older.json */; };
@@ -66,7 +64,6 @@
 		54C1670C46CFEF6BF6731E6C /* KeyboardTouchActionControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18617D9009B85751C34705E /* KeyboardTouchActionControlTests.swift */; };
 		558C15A89A28491D471BD08A /* KeyboardInspectableInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D7608E1932AA311FBFD2CB /* KeyboardInspectableInteraction.swift */; };
 		58262731BA177C6020154261 /* KeyboardQueryField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61ADFD811C92E63E5A047EE7 /* KeyboardQueryField.swift */; };
-		5971B7E210A2AA44A9B58F7C /* KeyboardResizeHandleControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150383FB7385523FAF62E8AA /* KeyboardResizeHandleControl.swift */; };
 		59D409ACA187C9DCC496E3F0 /* KeyboardSelfSizingInputViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0268A49C773E2C94AC8838EF /* KeyboardSelfSizingInputViewTests.swift */; };
 		59F9E36BF5D5A1566884BDEE /* UnicodeCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */; };
 		5A2291389771B024DE549E33 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB8050F1485946A042EFCDF /* ContentView.swift */; };
@@ -146,9 +143,7 @@
 		DB2F0F7E8F660A51238A172D /* FavoriteSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1976A65554D1A801D23D24A /* FavoriteSync.swift */; };
 		DDB21D58556B506028B1C062 /* KeyboardQueryInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10E5756E6D891356DCF060A /* KeyboardQueryInteraction.swift */; };
 		DF66ECAE7C39F7015B73A930 /* Blocks.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E6909BB645FA5674134A126 /* Blocks.json */; };
-		E0416938AC871ED0BC30216F /* KeyboardResizeHandleControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A751D5D5826D5CAF743ED8 /* KeyboardResizeHandleControlTests.swift */; };
 		E0FACCB152A3529201D858E7 /* LocalPreferencePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA24ADEEB30AF21752C6C8E3 /* LocalPreferencePolicyTests.swift */; };
-		E16F793FA59B8DC86EA42539 /* KeyboardResizeStepPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 459CB77FEFCFC5A0DC419534 /* KeyboardResizeStepPolicyTests.swift */; };
 		E25DE401A8933C9BFAC6ABD1 /* UnicodeCatalog-latest.ucd in Resources */ = {isa = PBXBuildFile; fileRef = AAE6E346B7955C1B12E0338E /* UnicodeCatalog-latest.ucd */; };
 		E57B36AD8CA9033B6ADC4A3B /* CatalogWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E8034D4526F95C6B7DCC1E /* CatalogWorker.swift */; };
 		E9109887515306DBAFAFB05D /* KeyboardSelfSizingInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE2EED824EF59350BC7F5E4 /* KeyboardSelfSizingInputView.swift */; };
@@ -159,13 +154,11 @@
 		EC94B2B935376CC133378E97 /* KeyboardEnglishInputPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BB4C414ACEAE381B235681F /* KeyboardEnglishInputPolicyTests.swift */; };
 		EECEB364F7CCB2F3D61173B1 /* CatalogWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E8034D4526F95C6B7DCC1E /* CatalogWorker.swift */; };
 		F0FCF93DE576D58FD5C3C1CB /* KeyboardRepeatingDeleteControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC483210EFEC390B79F8B5BB /* KeyboardRepeatingDeleteControl.swift */; };
-		F4796C8CF5017D579E755C54 /* KeyboardPrimaryTouchCollectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E38778AEFD21AD19E86E6FB /* KeyboardPrimaryTouchCollectorTests.swift */; };
 		F5A017F5BA3746D69BF7C97F /* UnicodeSources.json in Resources */ = {isa = PBXBuildFile; fileRef = 8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */; };
 		F664FF3FB128A8FCDAA58ECD /* CatalogPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B30566745A73A8F9A6CDEF0 /* CatalogPreferencesTests.swift */; };
 		F78D74C0C4D7F8DB954D670C /* Blocks-previous.json in Resources */ = {isa = PBXBuildFile; fileRef = C27C2D78794CCD4530119642 /* Blocks-previous.json */; };
 		FE07DF89E53353E8E507EB1E /* EmojiCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3DCCA512819F343E378874 /* EmojiCatalog.swift */; };
 		FE1E26CC6C48E785D4F88C43 /* KeyboardTypingLayoutPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10CB5C1754BC1F8D24BDCD9C /* KeyboardTypingLayoutPolicy.swift */; };
-		FF013DFD084189ACCC303669 /* KeyboardResizeHandleControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 150383FB7385523FAF62E8AA /* KeyboardResizeHandleControl.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -213,7 +206,6 @@
 		0E95919528538BFB5AA44213 /* UnicodeProperties-previous.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "UnicodeProperties-previous.json"; sourceTree = "<group>"; };
 		107C19BC010C3CBBC642AC42 /* UnicodeProperties-latest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "UnicodeProperties-latest.json"; sourceTree = "<group>"; };
 		10CB5C1754BC1F8D24BDCD9C /* KeyboardTypingLayoutPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardTypingLayoutPolicy.swift; sourceTree = "<group>"; };
-		150383FB7385523FAF62E8AA /* KeyboardResizeHandleControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardResizeHandleControl.swift; sourceTree = "<group>"; };
 		15E8034D4526F95C6B7DCC1E /* CatalogWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogWorker.swift; sourceTree = "<group>"; };
 		199F582BE632E36D64E344F9 /* KeyboardFooterLayoutPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardFooterLayoutPolicy.swift; sourceTree = "<group>"; };
 		1B6F9FAEABD4F15AA4EDC7AD /* EmojiCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiCatalogTests.swift; sourceTree = "<group>"; };
@@ -235,7 +227,6 @@
 		4095E46165DABA2D9D7DA548 /* KeyboardVariantKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardVariantKey.swift; sourceTree = "<group>"; };
 		43C80DCCEDA13A62C9C85134 /* UnicodeCatalog-older.ucd */ = {isa = PBXFileReference; path = "UnicodeCatalog-older.ucd"; sourceTree = "<group>"; };
 		44FCD917B7BA585375F02ACA /* UnicodeFontSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeFontSupport.swift; sourceTree = "<group>"; };
-		459CB77FEFCFC5A0DC419534 /* KeyboardResizeStepPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardResizeStepPolicyTests.swift; sourceTree = "<group>"; };
 		49CC0A642A0BD0AF6C9CAD61 /* CompanionAppRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionAppRoute.swift; sourceTree = "<group>"; };
 		4B30566745A73A8F9A6CDEF0 /* CatalogPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogPreferencesTests.swift; sourceTree = "<group>"; };
 		50167B2ECEEF4DFCF3D6C893 /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
@@ -256,7 +247,6 @@
 		663AD2F7AA4B19119C73F049 /* PrivacyManifestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyManifestTests.swift; sourceTree = "<group>"; };
 		66B0D93D77F880C230230AD1 /* UnicodeFontCoverageProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeFontCoverageProbeTests.swift; sourceTree = "<group>"; };
 		6BB4C414ACEAE381B235681F /* KeyboardEnglishInputPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardEnglishInputPolicyTests.swift; sourceTree = "<group>"; };
-		6E38778AEFD21AD19E86E6FB /* KeyboardPrimaryTouchCollectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardPrimaryTouchCollectorTests.swift; sourceTree = "<group>"; };
 		6F65D9FA7FA2978537D685DD /* KeyboardFooterLayoutPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardFooterLayoutPolicyTests.swift; sourceTree = "<group>"; };
 		7608FA4CEBF79DB6D331B0E3 /* EmojiCatalog-older.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "EmojiCatalog-older.json"; sourceTree = "<group>"; };
 		7C848742463EC05B9E73E569 /* SymbolBoardStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SymbolBoardStoreTests.swift; sourceTree = "<group>"; };
@@ -279,7 +269,6 @@
 		A24745F2DC10363D8E1053AA /* UnicodeProperties.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = UnicodeProperties.json; sourceTree = "<group>"; };
 		A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeCatalog.swift; sourceTree = "<group>"; };
 		A41D3D251CE076E09EF76D3B /* SymbolBoardStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SymbolBoardStore.swift; sourceTree = "<group>"; };
-		A6A751D5D5826D5CAF743ED8 /* KeyboardResizeHandleControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardResizeHandleControlTests.swift; sourceTree = "<group>"; };
 		A728582A5FBEACA24D420EF5 /* KeyboardKeySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardKeySettingsView.swift; sourceTree = "<group>"; };
 		A751792BE65134112FCC8556 /* UniboardApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UniboardApp.swift; sourceTree = "<group>"; };
 		AAE6E346B7955C1B12E0338E /* UnicodeCatalog-latest.ucd */ = {isa = PBXFileReference; path = "UnicodeCatalog-latest.ucd"; sourceTree = "<group>"; };
@@ -288,7 +277,6 @@
 		B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */ = {isa = PBXFileReference; path = UnicodeCatalog.ucd; sourceTree = "<group>"; };
 		BB9BAA50EF4DC94FB5B03CD1 /* UniboardUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = UniboardUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BD9AE24B925558FFEF4DF2BD /* KeyboardRepeatingDeleteControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardRepeatingDeleteControlTests.swift; sourceTree = "<group>"; };
-		BE2F5D18F40D9E43A6A49B2B /* KeyboardResizeStepPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardResizeStepPolicy.swift; sourceTree = "<group>"; };
 		C0C20A0D596CCC44AB869917 /* EmojiCatalog-latest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "EmojiCatalog-latest.json"; sourceTree = "<group>"; };
 		C27C2D78794CCD4530119642 /* Blocks-previous.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Blocks-previous.json"; sourceTree = "<group>"; };
 		C2C9060C6E88FD5876C6BC49 /* AppSearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSearchField.swift; sourceTree = "<group>"; };
@@ -418,12 +406,9 @@
 				89C04A8353B7457EB1B83F0B /* KeyboardKeyGestureRegressionTests.swift */,
 				35E72DCBE969D27B17EAA639 /* KeyboardKeyPreferencesTests.swift */,
 				EE132447D384821FBF5CC7DA /* KeyboardKeySettingsTests.swift */,
-				6E38778AEFD21AD19E86E6FB /* KeyboardPrimaryTouchCollectorTests.swift */,
 				597C75D04C1D743DF5E189F1 /* KeyboardQueryControlTests.swift */,
 				2D559DDE481203E5C3779F13 /* KeyboardQueryInteractionTests.swift */,
 				BD9AE24B925558FFEF4DF2BD /* KeyboardRepeatingDeleteControlTests.swift */,
-				A6A751D5D5826D5CAF743ED8 /* KeyboardResizeHandleControlTests.swift */,
-				459CB77FEFCFC5A0DC419534 /* KeyboardResizeStepPolicyTests.swift */,
 				0268A49C773E2C94AC8838EF /* KeyboardSelfSizingInputViewTests.swift */,
 				B18617D9009B85751C34705E /* KeyboardTouchActionControlTests.swift */,
 				8E34C3DDC146150DCF5B6A32 /* KeyboardTypingLayoutPolicyTests.swift */,
@@ -472,8 +457,6 @@
 				E3A2114FE5F9FD1F7E15F2FA /* KeyboardQueryControl.swift */,
 				D10E5756E6D891356DCF060A /* KeyboardQueryInteraction.swift */,
 				CC483210EFEC390B79F8B5BB /* KeyboardRepeatingDeleteControl.swift */,
-				150383FB7385523FAF62E8AA /* KeyboardResizeHandleControl.swift */,
-				BE2F5D18F40D9E43A6A49B2B /* KeyboardResizeStepPolicy.swift */,
 				9DE2EED824EF59350BC7F5E4 /* KeyboardSelfSizingInputView.swift */,
 				D08F3EDF9E8B39B534FABD8F /* KeyboardTouchActionControl.swift */,
 				0666AECDF48DACE30590F794 /* KeyboardTouchFeedback.swift */,
@@ -713,12 +696,9 @@
 				7ED97EDEAEE79E1970CC096D /* KeyboardKeyGestureRegressionTests.swift in Sources */,
 				609E4B7B7F744C132B45FC34 /* KeyboardKeyPreferencesTests.swift in Sources */,
 				A4E7C346740D79CD01017563 /* KeyboardKeySettingsTests.swift in Sources */,
-				F4796C8CF5017D579E755C54 /* KeyboardPrimaryTouchCollectorTests.swift in Sources */,
 				3A55B0DE7A0683FB8A068503 /* KeyboardQueryControlTests.swift in Sources */,
 				BEFC7CD21B406F5B2D7C7D63 /* KeyboardQueryInteractionTests.swift in Sources */,
 				74025CC98C01E19956D82DCE /* KeyboardRepeatingDeleteControlTests.swift in Sources */,
-				E0416938AC871ED0BC30216F /* KeyboardResizeHandleControlTests.swift in Sources */,
-				E16F793FA59B8DC86EA42539 /* KeyboardResizeStepPolicyTests.swift in Sources */,
 				59D409ACA187C9DCC496E3F0 /* KeyboardSelfSizingInputViewTests.swift in Sources */,
 				54C1670C46CFEF6BF6731E6C /* KeyboardTouchActionControlTests.swift in Sources */,
 				CAF412A1FCE1CC2223054915 /* KeyboardTypingLayoutPolicyTests.swift in Sources */,
@@ -755,8 +735,6 @@
 				58262731BA177C6020154261 /* KeyboardQueryField.swift in Sources */,
 				684FEAFDBAAB8CF191567249 /* KeyboardQueryInteraction.swift in Sources */,
 				F0FCF93DE576D58FD5C3C1CB /* KeyboardRepeatingDeleteControl.swift in Sources */,
-				FF013DFD084189ACCC303669 /* KeyboardResizeHandleControl.swift in Sources */,
-				151F945306914C2D7574127A /* KeyboardResizeStepPolicy.swift in Sources */,
 				E9109887515306DBAFAFB05D /* KeyboardSelfSizingInputView.swift in Sources */,
 				309A88CDE6442977051CBBDA /* KeyboardTouchActionControl.swift in Sources */,
 				CB26E38B4993184CFBFB62AF /* KeyboardTouchFeedback.swift in Sources */,
@@ -803,8 +781,6 @@
 				D2AD7CE79F6FDC6345DD8455 /* KeyboardQueryControl.swift in Sources */,
 				DDB21D58556B506028B1C062 /* KeyboardQueryInteraction.swift in Sources */,
 				B2205CB811B3275BF3AD088C /* KeyboardRepeatingDeleteControl.swift in Sources */,
-				5971B7E210A2AA44A9B58F7C /* KeyboardResizeHandleControl.swift in Sources */,
-				0A965376ACE60E959E73844B /* KeyboardResizeStepPolicy.swift in Sources */,
 				D77F9CEEE234C375669C9A99 /* KeyboardSelfSizingInputView.swift in Sources */,
 				7E55272B18E78B677E56B22E /* KeyboardTouchActionControl.swift in Sources */,
 				EB55D6EDEF8C6500E1F38A92 /* KeyboardTouchFeedback.swift in Sources */,

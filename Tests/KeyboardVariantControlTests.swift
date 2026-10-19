@@ -139,6 +139,20 @@ final class KeyboardVariantControlTests: XCTestCase {
         XCTAssertFalse(state.end(owner: owner, inside: true))
     }
 
+    func testVerticalContinuationAcrossPopupCellsKeepsPrimaryFlickChoice() {
+        for direction: CGFloat in [-1, 1] {
+            let state = KeyboardVariantInteraction(), route = Route(), owner = NSObject()
+            gestureSetup(state, route: route, up: ["O", "Ò", "Ó", "Ô", "Ö", "Œ", "Õ", "Ø", "Ō"], down: ["£", "ˆ"])
+            XCTAssertTrue(state.begin(owner: owner))
+            state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: direction * 12))
+            for y: CGFloat in [18, 28, 40, 60] {
+                state.move(owner: owner, index: 8, movedBeforeHold: true, delta: CGPoint(x: 0, y: direction * y), directPopupIndex: direction < 0 ? 8 : 1)
+            }
+            XCTAssertTrue(state.end(owner: owner, inside: true))
+            XCTAssertEqual(route.inserted, [direction < 0 ? "O" : "£"])
+        }
+    }
+
     func testEveryWrappedFlickCandidateCanBeSelectedAndOriginalTapRemainsLiteral() {
         let state = KeyboardVariantInteraction(), route = Route(), owner = NSObject()
         let values = (0..<16).map { "choice\($0)" }
@@ -148,6 +162,7 @@ final class KeyboardVariantControlTests: XCTestCase {
         XCTAssertEqual(route.inserted, ["a"], "A custom hold must not replace a short tap")
         state.begin(owner: owner)
         state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -20))
+        state.move(owner: owner, index: 15, movedBeforeHold: true, delta: CGPoint(x: 20, y: -50), directPopupIndex: 15)
         state.move(owner: owner, index: 15, movedBeforeHold: true, delta: CGPoint(x: 0, y: -50), directPopupIndex: 15)
         XCTAssertTrue(state.end(owner: owner, inside: true))
         XCTAssertEqual(route.inserted, ["a", "choice15"])

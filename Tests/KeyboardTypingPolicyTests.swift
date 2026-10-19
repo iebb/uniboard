@@ -7,6 +7,20 @@ import XCTest
 #endif
 
 final class KeyboardTypingPolicyTests: XCTestCase {
+    func testMomentaryShiftOutputLeavesOriginalStateAndCapsLockUntouched() {
+        for caps in [false, true] {
+            var state = KeyboardTypingState()
+            if caps { state.toggleCapsLock() }
+            let original = state
+            let shifted = state.momentarilyShifted()
+            XCTAssertEqual(shifted.output(for: "q"), "Q")
+            XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "1", state: shifted, hasAuxiliaryRow: false,
+                widePad: true, ansiPad: true), "!")
+            XCTAssertEqual(state, original)
+            XCTAssertEqual(state.shift, caps ? .capsLock : .lowercase)
+        }
+    }
+
     func testAutomaticCapitalizationAndLiteralCaseFlickNeverShiftANSINumbers() {
         var state = KeyboardTypingState()
         state.synchronizeAutomaticCapitalization(true)

@@ -40,6 +40,7 @@ final class KeyboardVariantInteraction {
     private var selected: Int?
     private var inspectedIndex = 0
     private var swipeOriginX: CGFloat = 0
+    private var swipeHasLateralIntent = false
     private var popupAllowsCommands = true
     private var tapText = ""
     private var activeGesture: KeyboardKeySettings.Gesture?
@@ -177,8 +178,7 @@ final class KeyboardVariantInteraction {
         return true
     }
 
-    func move(owner: AnyObject, index: Int?, movedBeforeHold: Bool, delta: CGPoint? = nil,
-              directPopupIndex: Int? = nil) {
+    func move(owner: AnyObject, index: Int?, movedBeforeHold: Bool, delta: CGPoint? = nil, directPopupIndex: Int? = nil) {
         guard tracking, self.owner === owner, let id = token, let actions else { return }
         let current = actions.isCurrent()
         guard token == id else { return }
@@ -190,8 +190,16 @@ final class KeyboardVariantInteraction {
             return
         }
         if swipeSelecting {
-            let value = directPopupIndex.flatMap { pressOptions.indices.contains($0) ? $0 : nil }
-                ?? delta.flatMap { KeyboardVariantPolicy.horizontalChoice(deltaX: $0.x - swipeOriginX, count: pressOptions.count) }
+            // A vertical flick may cross the popup by accident. Direct cells
+            // become selectable only after deliberate sideways motion. Keep
+            // that intent so wrapped rows remain reachable on narrow screens.
+            guard let delta else { cancel(ending: false); return }
+            let horizontal = delta.x - swipeOriginX
+            guard horizontal.isFinite else { cancel(ending: false); return }
+            if abs(horizontal) >= KeyboardVariantPolicy.horizontalChoiceStride / 2 { swipeHasLateralIntent = true }
+            let direct = swipeHasLateralIntent ? directPopupIndex : nil
+            let value = direct.flatMap { pressOptions.indices.contains($0) ? $0 : nil }
+                ?? KeyboardVariantPolicy.horizontalChoice(deltaX: horizontal, count: pressOptions.count)
             guard let value else {
                 cancel(ending: false); return
             }
@@ -209,6 +217,7 @@ final class KeyboardVariantInteraction {
             swipeSelecting = true
             activeGesture = direction
             swipeOriginX = delta.x
+            swipeHasLateralIntent = false
             selected = 0
             openPopup(id: id)
             return
@@ -269,6 +278,7 @@ final class KeyboardVariantInteraction {
         popupVisible = false
         swipeSelecting = false
         swipeOriginX = 0
+        swipeHasLateralIntent = false
         popupAllowsCommands = true
         tapText = ""
         activeGesture = nil

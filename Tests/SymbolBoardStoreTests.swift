@@ -24,6 +24,20 @@ final class SymbolBoardStoreTests: XCTestCase {
         defaults.set(data, forKey: SymbolBoardStore.storageKey)
         return data
     }
+    func testEmptyBoardUsesStockStripWithoutChangingStarPreference() async throws {
+        try withDefaults { defaults in
+            let store = SymbolBoardStore(defaults: defaults)
+            XCTAssertEqual(store.typingBoard.id, SymbolBoardStore.stockID)
+            XCTAssertTrue(store.selectBoard(SymbolBoardStore.favoritesID))
+            XCTAssertEqual(store.typingBoard.id, SymbolBoardStore.stockID)
+            XCTAssertEqual(store.activeBoardID, SymbolBoardStore.favoritesID)
+            XCTAssertEqual(store.preferredStarBoardID, SymbolBoardStore.favoritesID)
+            XCTAssertNotNil(store.add(text: "☃", to: SymbolBoardStore.favoritesID))
+            XCTAssertEqual(store.typingBoard.id, SymbolBoardStore.favoritesID)
+            XCTAssertEqual(store.typingBoard.keys.map(\.text), ["☃"])
+        }
+    }
+
     func testFreshStockAndEmptyFavoritesPersistWithExactStockVariants() async throws {
         try withDefaults { defaults in
             let store = SymbolBoardStore(defaults: defaults)

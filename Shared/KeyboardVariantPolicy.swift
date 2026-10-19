@@ -31,12 +31,6 @@ enum KeyboardVariantPolicy {
         return candidates(override: [macOSOption[index], macOSShiftOption[index]], defaults: [])
     }
 
-    /// Add both macOS modifier layers without uppercasing their literal output
-    /// or changing the independent default up-flick's opposite-case behavior.
-    static func defaultLongPressVariants(for key: String, uppercase: Bool) -> [String] {
-        candidates(override: englishVariants(for: key, uppercase: uppercase) + macOSOptionCandidates(for: key), defaults: [])
-    }
-
     static func defaultSwipeUp(for key: String, state: KeyboardTypingState) -> [String] {
         guard state.layout == .letters, key.utf8.count == 1,
               let byte = key.utf8.first, (97...122).contains(byte) else { return [] }
@@ -52,7 +46,10 @@ enum KeyboardVariantPolicy {
             let symbols = KeyboardTypingLayoutPolicy.rows(for: .numbers, hasAuxiliaryRow: true)[0]
             guard symbols.indices.contains(index) else { return [] }
             let text = symbols[index]
-            return options(text: text, variants: stockVariants(for: text))
+            // A letter's secondary legend is one mapped symbol. Expanding the
+            // currency family here made U/I/O display the same chooser; those
+            // families remain available by holding the actual symbol keys.
+            return [text]
         }
         guard widePad else { return [] }
         if mapping == .macOS { return macOSOptionCandidates(for: key) }
@@ -67,6 +64,55 @@ enum KeyboardVariantPolicy {
         guard let index = keys.firstIndex(of: key) else { return [] }
         let text = values[index]
         return options(text: text, variants: stockVariants(for: text))
+    }
+
+    struct GestureCandidates {
+        let longPress: [String]
+        let swipeUp: [String]
+        let swipeDown: [String]
+    }
+
+    /// Resolve the three independent choosers together. Explicit settings win,
+    /// followed by each default's primary action, then unused alternatives.
+    /// Persistence is untouched; exact Unicode spellings remain distinct.
+    static func gestureCandidates(for key: String, original: String, state: KeyboardTypingState,
+                                  isAuxiliaryKey: Bool, widePad: Bool, ansiPad: Bool,
+                                  mapping: KeyboardPadSymbolMapping, hasNumberRow: Bool,
+                                  settings: KeyboardKeySettings.Snapshot) -> GestureCandidates {
+        let keyID = KeyboardKeySettings.identifier(forCharacter: key) ?? ""
+        let gestures: [KeyboardKeySettings.Gesture] = [.longPress, .swipeUp, .swipeDown]
+        let defaults = [
+            options(text: original, variants: englishVariants(for: key, uppercase: state.shift != .lowercase)),
+            isAuxiliaryKey ? [] : defaultSwipeUp(for: key, state: state),
+            mapping == .none ? [] : candidates(override: nil, defaults:
+                defaultSwipeDown(for: key, state: state, widePad: widePad || !isAuxiliaryKey, ansiPad: ansiPad,
+                                 mapping: mapping, hasNumberRow: hasNumberRow)
+                + macOSOptionCandidates(for: key))
+        ]
+        let overrides = gestures.map { settings.candidates(for: keyID, gesture: $0) }
+        var choices = zip(overrides, defaults).map { candidates(override: $0.0, defaults: $0.1) }
+        if KeyboardKeySettings.descriptor(for: keyID)?.kind != .letter, overrides[2] == nil {
+            // Currency/punctuation keys keep their complete stock hold family.
+            // A default Option output already in that family is not a second
+            // action on Down. Explicit Down mappings still take priority.
+            let held = choices[0]
+            choices[2].removeAll { contains($0, in: held) }
+        }
+        var seen = Set<[UInt16]>()
+        var result = [[String]](repeating: [], count: 3)
+        func append(_ text: String, to index: Int) {
+            if seen.insert(Array(text.utf16)).inserted { result[index].append(text) }
+        }
+        for index in gestures.indices where overrides[index] != nil {
+            for text in choices[index] { append(text, to: index) }
+        }
+        for index in [1, 2, 0] where overrides[index] == nil {
+            if let first = choices[index].first { append(first, to: index) }
+        }
+        for index in gestures.indices where overrides[index] == nil {
+            for text in choices[index].dropFirst() { append(text, to: index) }
+        }
+        return GestureCandidates(longPress: result[0], swipeUp: result[1], swipeDown: result[2])
     }
 
     static func candidates(override: [String]?, defaults: [String]) -> [String] {

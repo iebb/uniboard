@@ -6,6 +6,25 @@ import XCTest
 
 @MainActor
 final class CatalogPreferencesTests: XCTestCase {
+    func testTopBarSettingsPersistIndependentlyAndFailedWritesKeepPreviousValues() throws {
+        try withDefaults { defaults in
+            let storage = try SharedFile(.previous)
+            let value = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            XCTAssertTrue(value.showsSymbolBar); XCTAssertFalse(value.searchBarInsteadOfSymbols)
+            value.selectSearchBarInsteadOfSymbols(true); value.selectSymbolBar(false)
+            value.selectEdition(.draft)
+            XCTAssertFalse(storage.settings.loadSnapshot().showsSymbolBar)
+            XCTAssertTrue(storage.settings.loadSnapshot().searchBarInsteadOfSymbols)
+            storage.failWrites = true
+            value.selectSymbolBar(true); value.selectSearchBarInsteadOfSymbols(false)
+            XCTAssertFalse(value.showsSymbolBar); XCTAssertTrue(value.searchBarInsteadOfSymbols)
+            XCTAssertNotNil(value.editionSaveError)
+            storage.failWrites = false
+            let restored = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            XCTAssertFalse(restored.showsSymbolBar); XCTAssertTrue(restored.searchBarInsteadOfSymbols)
+        }
+    }
+
     func testPadSettingsPreserveOtherFieldsAcrossSavesRefreshesAndFailedWrites() throws {
         try withDefaults { defaults in
             let storage = try SharedFile(.previous)
@@ -60,7 +79,7 @@ final class CatalogPreferencesTests: XCTestCase {
         var settings: UnicodeEditionSettings {
             UnicodeEditionSettings(containerURL: { URL(fileURLWithPath: "/injected-app-edition") },
                 readPrefix: { _, maximum in
-                    XCTAssertEqual(maximum, 257)
+                    XCTAssertEqual(maximum, UnicodeEditionSettings.maximumPayloadBytes + 1)
                     guard let data = self.data else { throw Failure.unavailable }
                     return data
                 }, writeAtomically: { data, _ in

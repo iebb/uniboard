@@ -495,4 +495,99 @@ final class KeyboardConfigurationTouchViewTests: XCTestCase {
         }
     }
 }
+
+@MainActor
+final class KeyboardShiftSlideTests: XCTestCase {
+    @MainActor private final class Fixture {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 500))
+        let shift = KeyboardShiftTouchButton(frame: CGRect(x: 0, y: 150, width: 44, height: 44))
+        let key = KeyboardVariantButton()
+        let owner = NSObject()
+        let mode = UUID()
+        var taps = 0
+        var inserted = [String]()
+        var accepts = true
+        var shiftPoint: CGPoint { CGPoint(x: 22, y: 172) }
+        var keyPoint: CGPoint { CGPoint(x: 82, y: 122) }
+        init() {
+            window.isHidden = false
+            window.addSubview(shift); window.addSubview(key)
+            key.frame = CGRect(x: 60, y: 100, width: 44, height: 44)
+            key.accessibilityIdentifier = "keyboard.typing.key.q"
+            shift.configure(contextIdentifier: mode) { [unowned self] in
+                { [unowned self] in guard self.accepts else { return false }; self.taps += 1; return true }
+            }
+            shift.configureSlide(context: mode) { [unowned self] in
+                { [unowned self] text in guard self.accepts else { return false }; self.inserted.append(text); return true }
+            }
+        }
+    }
+    func testAbandonedPhysicalOwnerCannotLeaveShiftStuck() {
+        let f = Fixture()
+        defer { f.window.isHidden = true }
+        var abandoned: NSObject? = NSObject()
+        XCTAssertTrue(f.shift.beginSlide(owner: abandoned!, point: f.shiftPoint))
+        abandoned = nil
+        XCTAssertTrue(f.shift.beginSlide(owner: f.owner, point: f.shiftPoint))
+        XCTAssertTrue(f.shift.endSlide(owner: f.owner, point: f.shiftPoint))
+        XCTAssertEqual(f.taps, 1); XCTAssertTrue(f.inserted.isEmpty)
+    }
+
+    func testSlideCommitsOneSelectedCharacterOnlyOnReleaseAndClearsFeedback() {
+        let f = Fixture()
+        defer { f.window.isHidden = true }
+        XCTAssertTrue(f.shift.beginSlide(owner: f.owner, point: f.shiftPoint))
+        f.shift.moveSlide(owner: f.owner, point: f.keyPoint)
+        XCTAssertTrue(f.key.pressFeedback.isPressed)
+        XCTAssertTrue(f.inserted.isEmpty)
+        XCTAssertTrue(f.shift.endSlide(owner: f.owner, point: f.keyPoint))
+        XCTAssertEqual(f.inserted, ["q"]); XCTAssertEqual(f.taps, 0)
+        XCTAssertFalse(f.key.pressFeedback.isPressed); XCTAssertFalse(f.shift.pressFeedback.isPressed)
+        XCTAssertFalse(f.shift.endSlide(owner: f.owner, point: f.keyPoint))
+    }
+    func testStationaryLongTouchIsAnOrdinaryShiftTapAndNeverCapsLockShortcut() {
+        let f = Fixture()
+        defer { f.window.isHidden = true }
+        XCTAssertTrue(f.shift.beginSlide(owner: f.owner, point: f.shiftPoint))
+        XCTAssertTrue(f.shift.endSlide(owner: f.owner, point: f.shiftPoint))
+        XCTAssertEqual(f.taps, 1); XCTAssertTrue(f.inserted.isEmpty)
+    }
+    func testSlideCancellationStaleDocumentContextGeometryAndOutsideReleaseDoNotType() {
+        for reason in 0..<9 {
+            let f = Fixture()
+            defer { f.window.isHidden = true }
+            XCTAssertTrue(f.shift.beginSlide(owner: f.owner, point: f.shiftPoint))
+            f.shift.moveSlide(owner: f.owner, point: f.keyPoint)
+            switch reason {
+            case 0: f.shift.cancelSlide()
+            case 1: f.accepts = false
+            case 2: f.shift.configureSlide(context: UUID()) { { _ in true } }
+            case 3: f.shift.frame.origin.x += 1
+            case 4: f.window.bounds.size.width += 1
+            case 5: f.shift.removeFromSuperview()
+            case 6: f.shift.moveSlide(owner: f.owner, point: CGPoint(x: CGFloat.nan, y: 0))
+            case 7: f.shift.moveSlide(owner: f.owner, point: CGPoint(x: 300, y: 400))
+            default: f.shift.isEnabled = false
+            }
+            let release = reason == 7 ? CGPoint(x: 300, y: 400) : f.keyPoint
+            XCTAssertFalse(f.shift.endSlide(owner: f.owner, point: release))
+            XCTAssertTrue(f.inserted.isEmpty); XCTAssertEqual(f.taps, 0)
+            XCTAssertFalse(f.key.pressFeedback.isPressed)
+        }
+    }
+    func testForeignTouchNonCharacterTargetAndReturningToShiftCannotToggleOrInsert() {
+        let f = Fixture(), other = NSObject()
+        defer { f.window.isHidden = true }
+        XCTAssertFalse(f.shift.beginSlide(owner: f.owner, point: CGPoint(x: -1, y: -1)))
+        XCTAssertTrue(f.shift.beginSlide(owner: f.owner, point: f.shiftPoint))
+        XCTAssertFalse(f.shift.beginSlide(owner: other, point: f.shiftPoint))
+        f.shift.moveSlide(owner: other, point: f.keyPoint)
+        XCTAssertFalse(f.shift.endSlide(owner: other, point: f.keyPoint))
+        f.key.accessibilityIdentifier = "keyboard.return"
+        f.shift.moveSlide(owner: f.owner, point: f.keyPoint)
+        XCTAssertFalse(f.key.pressFeedback.isPressed)
+        XCTAssertFalse(f.shift.endSlide(owner: f.owner, point: f.shiftPoint))
+        XCTAssertEqual(f.taps, 0); XCTAssertTrue(f.inserted.isEmpty)
+    }
+}
 #endif

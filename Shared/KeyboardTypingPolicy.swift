@@ -40,6 +40,16 @@ struct KeyboardTypingState: Equatable {
         layout == .letters && shift != .lowercase ? key.uppercased() : key
     }
 
+    /// A Shift-origin slide changes only this key's output. It cannot become a
+    /// double tap, consume Caps Lock, or leave Shift stuck after cancellation.
+    func momentarilyShifted() -> Self {
+        var copy = self
+        copy.shift = .uppercase
+        copy.physicalSymbolShift = true
+        copy.lastShiftTap = nil
+        return copy
+    }
+
     /// Reject stale page buttons and arbitrary strings before inserting them.
     func output(for key: String) -> String? {
         guard layout.rows.contains(where: { $0.contains(key) }) else { return nil }

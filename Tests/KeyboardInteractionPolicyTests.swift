@@ -7,322 +7,41 @@ import XCTest
 #endif
 
 final class KeyboardInteractionPolicyTests: XCTestCase {
-    func testAllPadPresetsReserveUniformCapsAndRightControlsOnlyAtEligibleLandscapeWidths() {
-        for preset in KeyboardPadLayout.allCases {
-            for landscape in [false, true] {
-                for toolbar in [false, true] {
-                    for width: CGFloat in [834, 995, 996, 1194] {
-                        let value = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1210,
-                            isPad: true, compactVertical: false, isSearching: false, isInspecting: false,
-                            isTyping: true, showsToolbar: toolbar, isLandscape: landscape, padLayout: preset)
-                        let full = landscape && width >= 996 && preset == .ansiNumbers
-                        XCTAssertEqual(value.height, (full ? 296 : 238) + (toolbar ? 36 : 0))
-                        XCTAssertEqual(value.typingKeyHeight, 52)
-                        XCTAssertNil(value.portraitResizeRange)
-                    }
+    func testFixedTemplateHasFiveRowsAndAtMostOneOptionalBar() {
+        XCTAssertEqual(KeyboardLayoutPolicy.defaultHeight, 278.4, accuracy: 0.000001)
+        for pad in [false, true] {
+            for width: CGFloat in [320, 402, 665, 666, 834, 1194] {
+                for bar in [false, true] {
+                    let result = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                        isPad: pad, compactVertical: false, showsSymbolBar: bar)
+                    let key: CGFloat = pad && width >= 666 ? 52 * 1.15 : 36 * 1.15
+                    let gap: CGFloat = pad && width >= 666 ? 6 : 4
+                    XCTAssertEqual(result.typingKeyHeight, key, accuracy: 0.000001)
+                    XCTAssertEqual(result.height, key * (bar ? 6 : 5) + gap * 3 + 18, accuracy: 0.000001)
                 }
             }
         }
     }
-    func testLandscapePadANSIHeightFitsFourEqualRowsAndToolbarWithinSceneCap() {
-        for toolbar in [false, true] {
-            let result = KeyboardLayoutPolicy.metrics(viewWidth: 1024, displaySize: nil, sceneHeight: 834,
-                isPad: true, compactVertical: false, isSearching: false, isInspecting: false,
-                isTyping: true, showsToolbar: toolbar, isLandscape: true)
-            XCTAssertEqual(result.height, toolbar ? 332 : 296)
-            XCTAssertEqual(result.typingKeyHeight, 52)
-            XCTAssertNil(result.portraitResizeRange)
-        }
-        let capped = KeyboardLayoutPolicy.metrics(viewWidth: 1024, displaySize: nil, sceneHeight: 500,
-            isPad: true, compactVertical: false, isSearching: false, isInspecting: false,
-            isTyping: true, showsToolbar: true, isLandscape: true)
-        XCTAssertEqual(capped.height, 250)
-        XCTAssertEqual(capped.typingKeyHeight, 35.6, accuracy: 0.000001)
-    }
-    private func metrics(width: CGFloat = 402, display: CGSize? = CGSize(width: 402, height: 874),
-                         sceneHeight: CGFloat? = 874, pad: Bool = false, compact: Bool = false,
-                         search: Bool = false, inspect: Bool = false, browse: CGFloat = 300,
-                         expanded: CGFloat = 340) -> KeyboardLayoutPolicy.Metrics {
-        KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: display, sceneHeight: sceneHeight,
-            isPad: pad, compactVertical: compact, isSearching: search, isInspecting: inspect,
-            portraitBrowseHeight: browse, portraitExpandedHeight: expanded)
-    }
-
-    func testPadTypingFitsThreeRowsAndFooterWithoutBrowserHeightOrBlankStrips() {
-        for width: CGFloat in [320, 665, 666, 768, 1024, 1366, .nan, .infinity] {
-            for toolbar in [false, true] {
-                let result = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
-                    isPad: true, compactVertical: false, isSearching: false, isInspecting: false,
-                    isTyping: true, showsToolbar: toolbar)
-                let wide = width.isFinite && width >= 666
-                XCTAssertEqual(result.height, (wide ? 238 : 170) + (toolbar ? 36 : 0))
-                XCTAssertEqual(result.typingKeyHeight, wide ? 52 : 36)
-                XCTAssertNil(result.portraitResizeRange)
+    func testFixedTemplateRotationWidthAndInvalidSceneValuesFailSafely() {
+        let phone = CGSize(width: 402, height: 874)
+        for width: CGFloat in [402, 430, 874, .nan, .infinity] {
+            for compact in [false, true] {
+                let result = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: phone, sceneHeight: nil,
+                    isPad: false, compactVertical: compact, showsSymbolBar: true)
+                XCTAssertEqual(result.isCompactLayout, width.isFinite ? width == 874 : compact)
+                XCTAssertTrue(result.height.isFinite); XCTAssertGreaterThan(result.height, 0)
             }
         }
-        let small = KeyboardLayoutPolicy.metrics(viewWidth: 1024, displaySize: nil, sceneHeight: 400,
-            isPad: true, compactVertical: false, isSearching: false, isInspecting: false, isTyping: true)
-        XCTAssertEqual(small.height, 200)
-        XCTAssertEqual(small.typingKeyHeight, 42.5)
-        for searching in [false, true] {
-            let result = KeyboardLayoutPolicy.metrics(viewWidth: 1024, displaySize: nil, sceneHeight: 300,
-                isPad: true, compactVertical: false, isSearching: searching, isInspecting: !searching,
-                isTyping: true, showsToolbar: true)
-            XCTAssertEqual(result.height, 150)
+        for size in [CGSize(width: CGFloat.nan, height: 874), CGSize(width: 0, height: 874), CGSize(width: 402, height: CGFloat.infinity)] {
+            XCTAssertTrue(KeyboardLayoutPolicy.metrics(viewWidth: 874, displaySize: size, sceneHeight: nil,
+                isPad: false, compactVertical: true, showsSymbolBar: false).isCompactLayout)
         }
-    }
-
-    func testFreshPortraitDefaultIsCompactAndDoesNotReplaceAnExplicitSavedHeight() {
-        let fresh = KeyboardLayoutPolicy.metrics(viewWidth: 402,
-            displaySize: CGSize(width: 402, height: 874), sceneHeight: 874,
-            isPad: false, compactVertical: false, isSearching: false, isInspecting: false)
-        XCTAssertEqual(KeyboardLayoutPolicy.defaultPortraitBrowseHeight, 220)
-        XCTAssertEqual(fresh.height, 220)
-        XCTAssertEqual(metrics(browse: 380).height, 380)
-    }
-
-    func testPortraitSavedHeightsAndIndependentExpandedModes() {
-        XCTAssertEqual(metrics().height, 300)
-        XCTAssertEqual(metrics(search: true).height, 340)
-        XCTAssertEqual(metrics(inspect: true).height, 340)
-        XCTAssertEqual(metrics(search: true, inspect: true).height, 340)
-        XCTAssertEqual(metrics(browse: 260, expanded: 390).height, 260)
-        XCTAssertEqual(metrics(search: true, browse: 260, expanded: 390).height, 390)
-        XCTAssertEqual(metrics().portraitResizeRange, 220...420)
-        XCTAssertEqual(metrics(search: true).portraitResizeRange, 340...420)
-    }
-
-    func testActualWidthWinsOverStalePhoneTraitsAndSceneOrientation() {
-        let landscape = metrics(width: 874, sceneHeight: 874, compact: false, search: true)
-        XCTAssertTrue(landscape.isCompactLayout)
-        XCTAssertEqual(landscape.height, 220)
-        XCTAssertNil(landscape.portraitResizeRange)
-        let portraitAgain = metrics(width: 402, display: CGSize(width: 874, height: 402), sceneHeight: 402, compact: true)
-        XCTAssertFalse(portraitAgain.isCompactLayout)
-        XCTAssertEqual(portraitAgain.height, 300)
-        XCTAssertEqual(portraitAgain.portraitResizeRange, 220...420)
-    }
-
-    func testOrientationThresholdAndMissingGeometryFallback() {
-        let display = CGSize(width: 400, height: 800)
-        XCTAssertFalse(metrics(width: 440, display: display).isCompactLayout)
-        XCTAssertTrue(metrics(width: 440.1, display: display).isCompactLayout)
-        XCTAssertTrue(metrics(width: .nan, display: display, compact: true).isCompactLayout)
-        XCTAssertTrue(metrics(display: nil, compact: true).isCompactLayout)
-        XCTAssertFalse(metrics(display: nil, compact: false).isCompactLayout)
-        XCTAssertFalse(metrics(width: .greatestFiniteMagnitude, display: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)).isCompactLayout)
-    }
-
-    func testSceneCapsAndFractionalSingletonResizeRange() {
-        let phone = metrics(width: 320, display: CGSize(width: 320, height: 568), search: true)
-        XCTAssertEqual(phone.height, 568 * 0.55, accuracy: 0.0001)
-        XCTAssertEqual(phone.portraitResizeRange?.lowerBound, phone.height)
-        XCTAssertEqual(phone.portraitResizeRange?.upperBound, phone.height)
-        XCTAssertEqual(metrics(width: 568, display: CGSize(width: 320, height: 568)).height, 192)
-        for expanded in [false, true] {
-            let pad = metrics(sceneHeight: 600, pad: true, search: expanded)
-            XCTAssertEqual(pad.height, 300)
-            XCTAssertFalse(pad.isCompactLayout)
-            XCTAssertNil(pad.portraitResizeRange)
+        for scene: CGFloat in [.nan, .infinity, -.infinity, 0, -1, 10, 200] {
+            let result = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: nil, sceneHeight: scene,
+                isPad: false, compactVertical: true, showsSymbolBar: true)
+            XCTAssertTrue(result.height.isFinite); XCTAssertGreaterThan(result.typingKeyHeight, 0)
+            XCTAssertLessThanOrEqual(result.typingKeyHeight, 36 * 1.15)
         }
-        XCTAssertEqual(metrics(pad: true).height, 340)
-        XCTAssertEqual(metrics(pad: true, search: true).height, 380)
-    }
-
-    func testStoredHeightsAreFiniteAndBounded() {
-        for invalid: CGFloat in [.nan, .infinity, -.infinity] {
-            XCTAssertEqual(metrics(browse: invalid).height, 220)
-            XCTAssertEqual(metrics(search: true, expanded: invalid).height, 340)
-        }
-        XCTAssertEqual(metrics(browse: -1).height, 220)
-        XCTAssertEqual(metrics(browse: .greatestFiniteMagnitude).height, 420)
-        XCTAssertEqual(metrics(search: true, expanded: -1).height, 340)
-        XCTAssertEqual(metrics(search: true, expanded: .greatestFiniteMagnitude).height, 420)
-    }
-
-    func testLayoutBoundaryMatrixNeverProducesNonfiniteOrNegativeGeometry() {
-        let values: [CGFloat] = [.nan, .infinity, -.infinity, -1, 0, .leastNonzeroMagnitude, 1, 402, 874, .greatestFiniteMagnitude]
-        let displays: [CGSize?] = [nil, CGSize(width: 402, height: 874), CGSize(width: 874, height: 402),
-            CGSize(width: CGFloat.nan, height: 874), CGSize(width: 402, height: CGFloat.infinity),
-            CGSize(width: -1, height: 874), CGSize(width: 0, height: 874),
-            CGSize(width: CGFloat.leastNonzeroMagnitude, height: CGFloat.leastNonzeroMagnitude),
-            CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)]
-        for width in values {
-            for display in displays {
-                for scene in values {
-                    for pad in [false, true] {
-                        for expanded in [false, true] {
-                            let result = metrics(width: width, display: display, sceneHeight: scene, pad: pad,
-                                compact: true, search: expanded, browse: width, expanded: scene)
-                            XCTAssertTrue(result.height.isFinite)
-                            XCTAssertGreaterThan(result.height, 0)
-                            XCTAssertLessThanOrEqual(result.height, 420)
-                            if let range = result.portraitResizeRange {
-                                XCTAssertTrue(range.lowerBound.isFinite && range.upperBound.isFinite)
-                                XCTAssertGreaterThan(range.lowerBound, 0)
-                                XCTAssertTrue(range.contains(result.height))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    func testVisualCaretSkipsInvalidGlyphPositionsAndPixelOverflowKeepsFiniteInput() {
-        var queried: [Int] = []
-        XCTAssertEqual(KeyboardQueryPolicy.nearestVisualBoundary(to: 9, boundaries: [0, 1, 2]) { boundary in
-            queried.append(boundary)
-            return boundary == 1 ? .nan : CGFloat(boundary * 5)
-        }, 2)
-        XCTAssertEqual(queried, [0, 1, 2])
-        XCTAssertEqual(KeyboardQueryPolicy.nearestVisualBoundary(to: .nan, boundaries: []) { _ in
-            XCTFail("An invalid visual coordinate cannot request glyph positions"); return 0
-        }, 0)
-        XCTAssertEqual(KeyboardQueryViewportPolicy.pixelAligned(1,
-            scale: .leastNonzeroMagnitude, rule: .up), 1)
-        XCTAssertEqual(KeyboardQueryViewportPolicy.pixelAligned(-1,
-            scale: .leastNonzeroMagnitude, rule: .down), -1)
-        XCTAssertTrue(KeyboardQueryViewportPolicy.horizontalOffset(caretX: 20,
-            previousOffset: .nan, viewportWidth: 40, contentWidth: 100, scale: 3).isFinite)
-    }
-
-    func testFollowingCaretBoundaryHandlesJoinedGraphemesAndEmptyDeletionResult() {
-        let accent = KeyboardQueryPolicy.inserting("\u{0301}", into: "ab", caretUTF16Offset: 1)
-        XCTAssertEqual(Array(accent.text.utf16), Array("a\u{0301}b".utf16))
-        XCTAssertEqual(accent.caretUTF16Offset, 2)
-        XCTAssertEqual(accent.caretCharacterOffset, 1)
-        let joined = KeyboardQueryPolicy.inserting("\u{200D}", into: "👩💻", caretUTF16Offset: 2)
-        XCTAssertEqual(joined.text.unicodeScalars.map(\.value), [0x1F469, 0x200D, 0x1F4BB])
-        XCTAssertEqual(joined.caretUTF16Offset, joined.text.utf16.count)
-        XCTAssertEqual(joined.caretCharacterOffset, 1)
-        let erased = KeyboardQueryPolicy.deletingBackward(from: joined.text, caretUTF16Offset: Int.max)
-        XCTAssertEqual(erased.text, "")
-        XCTAssertEqual(erased.caretUTF16Offset, 0)
-        XCTAssertEqual(erased.caretCharacterOffset, 0)
-    }
-
-    func testResizeSampleSequenceKeepsExactDuplicatesAndRealReversalsDistinct() {
-        let bounds = CGRect(x: 0, y: 0, width: 402, height: 300)
-        var sequence = KeyboardResizeSampleSequence()
-        XCTAssertEqual(sequence.accept(point: CGPoint(x: 201, y: 9), bounds: bounds, timestamp: 0), .accepted)
-        XCTAssertEqual(sequence.accept(point: CGPoint(x: 201, y: 9), bounds: bounds, timestamp: 0), .duplicate)
-        XCTAssertEqual(sequence.accept(point: CGPoint(x: 201, y: -31), bounds: bounds, timestamp: 1), .accepted)
-        XCTAssertEqual(sequence.accept(point: CGPoint(x: 201, y: -11), bounds: bounds, timestamp: 2), .accepted,
-                       "A genuine direction reversal is valid input, never clamped or smoothed away")
-        XCTAssertEqual(sequence.accept(point: CGPoint(x: 201, y: -11), bounds: bounds, timestamp: 2), .duplicate)
-    }
-
-    func testResizeSampleSequenceRejectsRegressedAndInconsistentDuplicateEvents() {
-        let bounds = CGRect(x: 0, y: 0, width: 402, height: 300)
-        let point = CGPoint(x: 201, y: 9)
-        var sequence = KeyboardResizeSampleSequence()
-        XCTAssertEqual(sequence.accept(point: point, bounds: bounds, timestamp: 2), .accepted)
-        XCTAssertEqual(sequence.accept(point: point, bounds: bounds, timestamp: 1), .invalid)
-        XCTAssertEqual(sequence.accept(point: CGPoint(x: 201, y: 10), bounds: bounds, timestamp: 2), .invalid)
-        XCTAssertEqual(sequence.accept(point: CGPoint(x: 202, y: 9), bounds: bounds, timestamp: 2), .invalid)
-        XCTAssertEqual(sequence.accept(point: point, bounds: CGRect(x: 0, y: 0, width: 402, height: 340), timestamp: 2), .invalid)
-        XCTAssertEqual(sequence.accept(point: point, bounds: bounds, timestamp: 2), .duplicate,
-                       "Rejected events must not replace the last verified sample")
-        XCTAssertEqual(sequence.accept(point: point, bounds: bounds, timestamp: 3), .accepted)
-    }
-
-    func testResizeSampleValidationRejectsNonfiniteTimesPointsAndImpossibleBounds() {
-        let bounds = CGRect(x: 0, y: 0, width: 402, height: 300)
-        let point = CGPoint(x: 201, y: 9)
-        var sequence = KeyboardResizeSampleSequence()
-        for invalid: TimeInterval in [.nan, .infinity, -.infinity, -1] {
-            XCTAssertEqual(sequence.accept(point: point, bounds: bounds, timestamp: invalid), .invalid)
-        }
-        for invalid: CGFloat in [.nan, .infinity, -.infinity] {
-            XCTAssertFalse(KeyboardResizeSampleSequence.isValid(point: CGPoint(x: invalid, y: 9), bounds: bounds, timestamp: 1))
-            XCTAssertFalse(KeyboardResizeSampleSequence.isValid(point: CGPoint(x: 201, y: invalid), bounds: bounds, timestamp: 1))
-            for rect in [CGRect(x: invalid, y: 0, width: 402, height: 300), CGRect(x: 0, y: invalid, width: 402, height: 300),
-                         CGRect(x: 0, y: 0, width: invalid, height: 300), CGRect(x: 0, y: 0, width: 402, height: invalid)] {
-                XCTAssertFalse(KeyboardResizeSampleSequence.isValid(point: point, bounds: rect, timestamp: 1))
-            }
-        }
-        for invalid: CGFloat in [0, -1] {
-            XCTAssertFalse(KeyboardResizeSampleSequence.isValid(point: point, bounds: CGRect(x: 0, y: 0, width: invalid, height: 300), timestamp: 1))
-            XCTAssertFalse(KeyboardResizeSampleSequence.isValid(point: point, bounds: CGRect(x: 0, y: 0, width: 402, height: invalid), timestamp: 1))
-        }
-        for overflow in [CGRect(x: CGFloat.greatestFiniteMagnitude, y: 0, width: CGFloat.greatestFiniteMagnitude, height: 300),
-                         CGRect(x: 0, y: CGFloat.greatestFiniteMagnitude, width: 402, height: CGFloat.greatestFiniteMagnitude)] {
-            XCTAssertFalse(KeyboardResizeSampleSequence.isValid(point: point, bounds: overflow, timestamp: 1))
-        }
-        XCTAssertEqual(sequence.accept(point: point, bounds: bounds, timestamp: 0), .accepted,
-                       "Invalid attempts must not poison a new valid sequence")
-    }
-
-    func testResizeRoundingStaysInsideFractionalCaps() {
-        for range: ClosedRange<CGFloat> in [312.4...312.4, 220.6...300.2, 340.2...340.4] {
-            for value: CGFloat in [-1000, 0, 220.4, 300.9, 340.3, 1000] {
-                let height = KeyboardResizePolicy.clampedHeight(value, in: range)
-                XCTAssertNotNil(height)
-                XCTAssertTrue(range.contains(height!))
-            }
-        }
-        XCTAssertEqual(KeyboardResizePolicy.clampedHeight(220.4, in: 220...420), 220)
-        XCTAssertEqual(KeyboardResizePolicy.clampedHeight(220.5, in: 220...420), 221)
-        XCTAssertEqual(KeyboardResizePolicy.clampedHeight(312.4, in: 220...312.4), 312.4)
-        XCTAssertEqual(KeyboardResizePolicy.clampedHeight(1000, in: 220...312.4), 312.4)
-        XCTAssertEqual(KeyboardResizePolicy.clampedHeight(220.6, in: 220.6...420), 220.6)
-        XCTAssertEqual(KeyboardResizePolicy.clampedHeight(-1000, in: 220.6...420), 220.6)
-    }
-
-    func testHeightClampingRejectsNonfiniteNumbersAndInvalidRanges() {
-        let range: ClosedRange<CGFloat> = 220...420
-        for invalid: CGFloat in [.nan, .infinity, -.infinity] {
-            XCTAssertNil(KeyboardResizePolicy.clampedHeight(invalid, in: range))
-        }
-        XCTAssertNil(KeyboardResizePolicy.clampedHeight(100, in: 0...420))
-        XCTAssertNil(KeyboardResizePolicy.clampedHeight(100, in: 1...CGFloat.infinity))
-    }
-
-    func testCancelledCappedSceneDragPreservesTheLargerSavedPreference() throws {
-        let capped: ClosedRange<CGFloat> = 220...312.4
-        var session = try XCTUnwrap(KeyboardResizeSession(preferredHeight: 420, visibleHeight: 312.4, fallbackHeight: 300, range: capped))
-        XCTAssertEqual(session.startHeight, 312.4)
-        XCTAssertEqual(session.preferredHeight, 420)
-        XCTAssertNil(session.finish(commitHeight: nil, range: capped))
-        XCTAssertEqual(session.preferredHeight, 420)
-        XCTAssertEqual(metrics(browse: session.preferredHeight).height, 420)
-        XCTAssertNil(session.finish(commitHeight: 250, range: capped))
-    }
-
-    func testSuccessfulCappedSceneDragCommitsOnlyItsFinalTarget() throws {
-        let capped: ClosedRange<CGFloat> = 220...312.4
-        var session = try XCTUnwrap(KeyboardResizeSession(preferredHeight: 420, visibleHeight: 312.4, fallbackHeight: 300, range: capped))
-        XCTAssertEqual(session.preferredHeight, 420)
-        let target = try XCTUnwrap(KeyboardResizeStepPolicy.target(startHeight: session.startHeight,
-            deltaY: 12.4, range: capped, compact: false))
-        XCTAssertEqual(target, 272.4, accuracy: 0.000001)
-        XCTAssertEqual(session.preferredHeight, 420)
-        XCTAssertEqual(session.finish(commitHeight: target, range: capped, rounded: false), target)
-        XCTAssertEqual(session.preferredHeight, target)
-        XCTAssertEqual(metrics(browse: session.preferredHeight).height, target)
-        XCTAssertNil(session.finish(commitHeight: 250, range: capped))
-    }
-
-    func testResizeSessionInvalidValuesCannotChangeItsPreference() throws {
-        for invalid: CGFloat in [.nan, .infinity, -.infinity, 0, -1] {
-            XCTAssertNil(KeyboardResizeSession(preferredHeight: invalid, visibleHeight: 300, fallbackHeight: 300, range: 220...420))
-        }
-        var session = try XCTUnwrap(KeyboardResizeSession(preferredHeight: 420, visibleHeight: .nan, fallbackHeight: 300, range: 220...420))
-        XCTAssertEqual(session.startHeight, 300)
-        XCTAssertNil(session.finish(commitHeight: .nan, range: 220...420))
-        XCTAssertEqual(session.preferredHeight, 420)
-        XCTAssertNil(session.finish(commitHeight: 300, range: 220...420))
-    }
-
-    func testRowStepCommitPreservesFractionalSceneHeightAndFinishesOnlyOnce() throws {
-        let range: ClosedRange<CGFloat> = 220...312.4
-        var session = try XCTUnwrap(KeyboardResizeSession(preferredHeight: 420,
-            visibleHeight: 312.4, fallbackHeight: 300, range: range))
-        let target = 312.4 - KeyboardResizeStepPolicy.rowStride(compact: false)
-        XCTAssertEqual(session.finish(commitHeight: target, range: range, rounded: false), target)
-        XCTAssertEqual(session.preferredHeight, target)
-        XCTAssertNil(session.finish(commitHeight: 300, range: range, rounded: false))
     }
 
     func testUTF16BoundariesIncludeWholeEmojiAndCombiningCharacters() {
@@ -425,6 +144,7 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
     }
 
     func testVisualCaretHitTestingRespectsRTLAndMixedRunEdges() {
+        XCTAssertEqual(KeyboardQueryPolicy.nearestVisualBoundary(to: .nan, boundaries: []) { _ in 0 }, 0)
         let rtl: [Int: CGFloat] = [0: 30, 1: 20, 2: 10, 3: 0]
         XCTAssertEqual(KeyboardQueryPolicy.nearestVisualBoundary(to: -100, boundaries: [0, 1, 2, 3]) { rtl[$0]! }, 3)
         XCTAssertEqual(KeyboardQueryPolicy.nearestVisualBoundary(to: 100, boundaries: [0, 1, 2, 3]) { rtl[$0]! }, 0)

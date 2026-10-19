@@ -13,11 +13,13 @@ struct UnicodeEditionSettings {
         var edition: UnicodeEdition
         var useUnicodeFonts = false
         var showsCollapseKey = false
+        var showsSymbolBar = true
+        var searchBarInsteadOfSymbols = false
         var padLayout: KeyboardPadLayout = .ansiNumbers
         var padSymbolMapping: KeyboardPadSymbolMapping = .standard
     }
     static let groupIdentifier = "group.ad.neko.uniboard"
-    static let maximumPayloadBytes = 256
+    static let maximumPayloadBytes = 512
     static let filename = "unicode-edition-v1.json"
     static let shared = UnicodeEditionSettings()
 
@@ -61,12 +63,20 @@ struct UnicodeEditionSettings {
            Set(dictionary.keys) == ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey"] {
             return Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse)
         }
-        guard schema == NSNumber(value: 3),
-              Set(dictionary.keys) == ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping"],
+        let legacyKeys: Set<String> = ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping"]
+        let modernKeys = legacyKeys.union(["showsSymbolBar", "searchBarInsteadOfSymbols"])
+        guard (schema == NSNumber(value: 3) && Set(dictionary.keys) == legacyKeys)
+                || (schema == NSNumber(value: 4) && Set(dictionary.keys) == modernKeys),
               let layout = dictionary["padLayout"] as? String, let pad = KeyboardPadLayout(rawValue: layout),
               let mapping = dictionary["padSymbolMapping"] as? String, let symbols = KeyboardPadSymbolMapping(rawValue: mapping) else { return Snapshot(edition: .latest) }
-        return Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse,
+        var value = Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse,
             padLayout: pad, padSymbolMapping: symbols)
+        if schema == NSNumber(value: 4) {
+            guard let bar = Self.strictBoolean(dictionary["showsSymbolBar"]),
+                  let search = Self.strictBoolean(dictionary["searchBarInsteadOfSymbols"]) else { return Snapshot(edition: .latest) }
+            value.showsSymbolBar = bar; value.searchBarInsteadOfSymbols = search
+        }
+        return value
     }
 
     /// Only the containing app calls this method. A failure is reported to the
@@ -83,8 +93,9 @@ struct UnicodeEditionSettings {
         guard UnicodeEdition.resolve(selectionIdentifier: identifier) == snapshot.edition,
               let container = containerURL(), container.isFileURL,
               let data = try? JSONSerialization.data(withJSONObject: [
-                "schemaVersion": 3, "selectionIdentifier": identifier,
+                "schemaVersion": 4, "selectionIdentifier": identifier,
                 "useUnicodeFonts": snapshot.useUnicodeFonts, "showsCollapseKey": snapshot.showsCollapseKey,
+                "showsSymbolBar": snapshot.showsSymbolBar, "searchBarInsteadOfSymbols": snapshot.searchBarInsteadOfSymbols,
                 "padLayout": snapshot.padLayout.rawValue, "padSymbolMapping": snapshot.padSymbolMapping.rawValue
               ], options: [.sortedKeys]), data.count <= Self.maximumPayloadBytes else { return false }
         do {

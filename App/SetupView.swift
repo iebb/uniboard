@@ -32,18 +32,30 @@ struct SetupView: View {
                     }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
                 }.accessibilityIdentifier("keyboardKeySettings")
 
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Keyboard layout").font(.headline).foregroundStyle(Palette.ink)
+                    Toggle("Show symbol bar", isOn: Binding(get: { preferences.showsSymbolBar }, set: { preferences.selectSymbolBar($0) }))
+                        .accessibilityIdentifier("showsSymbolBar")
+                    if preferences.showsSymbolBar {
+                        Toggle("Show search bar instead", isOn: Binding(get: { preferences.searchBarInsteadOfSymbols }, set: { preferences.selectSearchBarInsteadOfSymbols($0) }))
+                            .accessibilityIdentifier("searchBarInsteadOfSymbols")
+                    }
+                    Text("A fixed layout with a number row and larger keys. The optional top row shows symbols or Unicode search.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+
                 if UIDevice.current.userInterfaceIdiom == .pad {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("iPad keyboard").font(.headline).foregroundStyle(Palette.ink)
                     Picker("Landscape layout", selection: Binding(get: { preferences.padLayout }, set: { preferences.selectPadLayout($0) })) {
                         ForEach(KeyboardPadLayout.allCases, id: \.rawValue) { Text($0.title).tag($0).accessibilityIdentifier("padLayout.option.\($0.rawValue)") }
                     }.pickerStyle(.menu).accessibilityIdentifier("padLayout").accessibilityValue(preferences.padLayout.rawValue)
-                    Text("Portrait keeps three letter rows. On a wide landscape iPad, choose the stock layout, compact ANSI punctuation, or ANSI with a number row. In both orientations, symbol switching and Hide Keyboard sit to the right of Space.")
+                    Text("The number row is always present. On a wide landscape iPad, choose iPad styling, compact ANSI punctuation, or a full ANSI number row. In both orientations, symbol switching and Hide Keyboard sit to the right of Space.")
                         .font(.caption).foregroundStyle(Palette.muted)
                     Picker("Swipe-down symbols", selection: Binding(get: { preferences.padSymbolMapping }, set: { preferences.selectPadSymbolMapping($0) })) {
                         ForEach(KeyboardPadSymbolMapping.allCases, id: \.rawValue) { Text($0.title).tag($0).accessibilityIdentifier("padSymbolMapping.option.\($0.rawValue)") }
                     }.pickerStyle(.menu).accessibilityIdentifier("padSymbolMapping").accessibilityValue(preferences.padSymbolMapping.rawValue)
-                    Text("Choose standard, iPad or macOS U.S. Option symbols. macOS mapping offers Option first and Shift–Option next; a visible digit row keeps its complementary Q–P symbols. Both Option variants are also long-press choices. Customize individual gestures above. Reopen the keyboard to apply; Full Access is not required.")
+                    Text("Choose standard, iPad or macOS U.S. Option symbols. macOS mapping offers Option first and Shift–Option next; a visible digit row keeps its complementary Q–P symbols. Hold shows accents, Up shows opposite-case letters, and Down offers unused Option symbols. Customize individual gestures above. Reopen the keyboard to apply; Full Access is not required.")
                         .font(.caption).foregroundStyle(Palette.muted)
                 }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
                 }

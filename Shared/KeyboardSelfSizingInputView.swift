@@ -5,7 +5,7 @@ import UIKit
 /// UIKit still owns actual remote bounds and required fitting constraints.
 /// This class makes no promise about remote input-coordinate synchronization.
 class KeyboardSelfSizingInputView: UIInputView {
-    private(set) var requestedHeight: CGFloat = KeyboardLayoutPolicy.defaultPortraitBrowseHeight
+    private(set) var requestedHeight: CGFloat = KeyboardLayoutPolicy.defaultHeight
     private var requestedHeightConstraint: NSLayoutConstraint!
 #if DEBUG
     private var defaultFittingCalls = 0

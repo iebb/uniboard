@@ -28,21 +28,21 @@ final class KeyboardFooterLayoutPolicyTests: XCTestCase {
         }
         XCTAssertEqual(KeyboardKeyContentPosition.bottomLeft.alignedRect(CGRect(x: 0, y: 0, width: CGFloat.nan, height: 16), in: bounds), .zero)
     }
-    func testLandscapePadReservesComfortableTrailingKeysAndASmallerSpace() throws {
-        for width: CGFloat in [980, 1008, 1180, 1350] {
+    func testWidePadReservesComfortableTrailingKeysAndASmallerSpaceInBothOrientations() throws {
+        for width: CGFloat in [650, 752, 818, 980, 1008, 1180, 1350] {
             for globe in [false, true] {
                 let plan = try XCTUnwrap(KeyboardFooterLayoutPolicy.plan(availableWidth: width, hasGlobe: globe,
-                    showsCollapse: true, showsPage: true, isPad: true, showsReturn: false, landscapeTyping: true))
+                    showsCollapse: true, showsPage: true, isPad: true, showsReturn: false, padTyping: true))
                 let count = CGFloat(4 + (globe ? 1 : 0))
                 XCTAssertEqual(plan.returnWidth, 0)
                 XCTAssertEqual(plan.keyWidth * count + plan.spaceWidth + plan.spacing * count, width, accuracy: 0.00001)
-                XCTAssertGreaterThan(plan.keyWidth, 80)
+                XCTAssertGreaterThan(plan.keyWidth, 60)
                 XCTAssertGreaterThan(plan.spaceWidth, 44)
                 XCTAssertLessThan(plan.spaceWidth, width * 0.65)
             }
         }
-        let fallback = try XCTUnwrap(KeyboardFooterLayoutPolicy.plan(availableWidth: 752, hasGlobe: true,
-            showsCollapse: true, showsPage: true, isPad: true, showsReturn: false, landscapeTyping: true))
+        let fallback = try XCTUnwrap(KeyboardFooterLayoutPolicy.plan(availableWidth: 649, hasGlobe: true,
+            showsCollapse: true, showsPage: true, isPad: true, showsReturn: false, padTyping: true))
         XCTAssertEqual(fallback.keyWidth, 36)
     }
     func testInlinePadReturnReleasesItsFooterWidthAndSpacingWithoutDuplicatingAnInvisibleKey() throws {

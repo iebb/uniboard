@@ -1,12 +1,12 @@
-Uniboard 1.1 beta: English, configurable keys and offline Unicode. Public App Store release awaits device approval.
+Uniboard 1.1 beta. Public release awaits device approval.
 
 IPAD LAYOUTS
-Portrait keeps three letter rows. App Settings > iPad keyboard selects wide-landscape stock three-row, compact ANSI three-row, or ANSI with dedicated digits (default). Narrow/floating panes retain compact keys. Check equal key heights, staggered punctuation, gray corner-aligned modifiers and one blue Return on every page. Numbers/Symbols and Hide Keyboard sit right of Space; U/Globe/Star sit left. Test actual hide/reopen and both rotations without text changes.
+Portrait keeps three letter rows. App Settings > iPad keyboard selects wide-landscape stock three-row, compact ANSI three-row, or ANSI with dedicated digits (default). Narrow/floating panes retain compact keys. Check equal keys, punctuation, gray corner labels and one blue Return per page. In both rotations, Numbers/Symbols and Hide sit right of Space; U/Globe/Star sit left. Test hide/reopen and rotation without text changes.
 
-Manual Shift changes ANSI digits/punctuation (1 to !, [ to {). Caps Lock and automatic sentence capitals must keep digits literal. In four-row mode, both symbol pages replace repeated digits with complementary symbols. App-only swipe-down mapping offers the standard symbol page, iPad hints or Off. Per-key overrides win; default taps stay QWERTY. Relaunch and reopen with Full Access OFF to verify each preset.
+Manual Shift changes ANSI digits/punctuation (1 to !, [ to {). Caps Lock and automatic sentence capitals must keep digits literal. In four-row mode, both symbol pages replace repeated digits with complementary symbols. App-only swipe-down mapping offers the standard, iPad, macOS Option or Off. Hold Q for œ/Œ; macOS down-flick A offers å/Å. Dead-key accents insert spacing forms. Per-key overrides win; default taps stay QWERTY. Reopen with Full Access OFF for each preset.
 
 TYPING AND CUSTOM KEYS
-QWERTY starts with the toolbar hidden. U toggles it without losing the query/caret. Check Shift/Caps, automatic capitalization, double-Space, URL/email, Return and held Backspace. Hold letters for accents. Up selects the opposite case and accents without consuming Shift; slide sideways before lifting.
+QWERTY starts with the toolbar hidden. U toggles it without losing the query/caret. Check Shift/Caps, automatic capitalization, double-Space, URL/email, Return and held Backspace. Hold letters for accents and Option/Shift–Option choices. Up selects the opposite case and accents without consuming Shift; slide sideways before lifting.
 
 App Settings > Customize keyboard keys: independent Tap, Shifted tap, Long press, Up, Down. Tap has one output; gestures have16 choices. Default Shift uppercases one remapped letter; custom Shifted tap is exact. Test Off without losing other gestures, emoji and decomposed text. Reopen with Full Access OFF. Cancel/rotate/resize mid-press: no stale insertion.
 
@@ -15,15 +15,15 @@ Phone keys stay36pt; four character rows add1–0 and #+=, five add a scrolling 
 
 Star opens Favorites; back returns to QWERTY. Hold to switch/manage boards or choose Star’s preferred target. Temporary selection does not change it. Create/rename/reorder/delete a board, make it preferred, relaunch and delete it: Star falls back to Favorites. Symbols is included; saving asks for a board.
 
-Hold board keys for variants, Inspect or Edit. The opaque editor stays within the keyboard. Add a Unicode variant, cancel once, then save. Editing and navigation preserve host text and queries. Test supplementary scalars, combining sequences and ZWJ emoji.
+Hold board keys for variants, Inspect or Edit. The editor stays within the keyboard. Add a Unicode variant, cancel once, then save. Editing and navigation preserve host text and queries. Test supplementary scalars, combining sequences and ZWJ emoji.
 
 RESIZE, SEARCH, SETTINGS
 Phone portrait grip up/down changes one row on release within limits. Check fast/slow, reversals and bounds. Only available steps show ▲/▼. Taps/cancels retain height; no numeric preview.
 
 U > Unicode > Search uses local query keys. Move the cursor into text, insert and delete in the middle. Check long queries, light/dark and Reduce Transparency for sharp text. Done returns to English; reopening retains query/cursor/results. Inspection never inserts.
 
-Only app Settings selects Unicode, fonts and optional collapse. Unicode18 release is default;17/16 previous,19 DRAFT. Fonts/collapse default off except landscape iPad Hide. Test all editions without Full Access: U+10940 from17, U+0558 from18. Keyboard … has only Order/Open companion app, with guidance if opening fails.
+Only app Settings selects Unicode, fonts and optional collapse. Unicode18 release is default;17/16 previous,19 DRAFT. Fonts/collapse default off except wide iPad Hide. Test all editions without Full Access: U+10940 from17, U+0558 from18. Keyboard … has only Order/Open companion app, with guidance if opening fails.
 
 Ascending code points and whole-word matches lead by default; saved sort persists. Search names, descriptions, blocks, hex/decimal and literals. Suzhou numerals finds U+3021 HANGZHOU NUMERAL ONE and its naming note. Unsupported glyphs keep descriptions. Emoji head shaking horizontally inserts U+1F642 U+200D U+2194 U+FE0F intact.
 
-Enable in iOS keyboard Settings; app Settings > Try your keyboard supplies a host. No collection/network/account/Full Access. Shared files contain only app settings/key choices. Receiving apps choose fonts.
+Enable in iOS keyboard Settings; app Settings > Try your keyboard supplies a host. No collection/network/account/Full Access. Shared files hold app settings/key choices.

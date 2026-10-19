@@ -166,6 +166,10 @@ private struct KeyboardGestureSettingsView: View {
                         Text("Selects the opposite case first, followed by its accented choices. The keyboard’s Shift state stays unchanged.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    if gesture == .longPress {
+                        Text("Includes familiar accents plus the macOS U.S. Option and Shift–Option characters for this key. Dead-key accents insert their literal spacing form; they do not start composition. Custom choices replace these defaults.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if gesture == .swipeDown {
                         Text("On a wide iPad keyboard, swipe down to type the small character printed above a key. Choose the default symbol mapping in iPad keyboard settings. Custom choices replace the hint; Off hides it.")
                             .font(.caption).foregroundStyle(.secondary)

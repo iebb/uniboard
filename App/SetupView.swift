@@ -38,12 +38,12 @@ struct SetupView: View {
                     Picker("Landscape layout", selection: Binding(get: { preferences.padLayout }, set: { preferences.selectPadLayout($0) })) {
                         ForEach(KeyboardPadLayout.allCases, id: \.rawValue) { Text($0.title).tag($0).accessibilityIdentifier("padLayout.option.\($0.rawValue)") }
                     }.pickerStyle(.menu).accessibilityIdentifier("padLayout").accessibilityValue(preferences.padLayout.rawValue)
-                    Text("Portrait keeps three letter rows. On a wide landscape iPad, choose the stock layout, compact ANSI punctuation, or ANSI with a number row. Symbol switching and Hide Keyboard sit to the right of Space.")
+                    Text("Portrait keeps three letter rows. On a wide landscape iPad, choose the stock layout, compact ANSI punctuation, or ANSI with a number row. In both orientations, symbol switching and Hide Keyboard sit to the right of Space.")
                         .font(.caption).foregroundStyle(Palette.muted)
                     Picker("Swipe-down symbols", selection: Binding(get: { preferences.padSymbolMapping }, set: { preferences.selectPadSymbolMapping($0) })) {
                         ForEach(KeyboardPadSymbolMapping.allCases, id: \.rawValue) { Text($0.title).tag($0).accessibilityIdentifier("padSymbolMapping.option.\($0.rawValue)") }
                     }.pickerStyle(.menu).accessibilityIdentifier("padSymbolMapping").accessibilityValue(preferences.padSymbolMapping.rawValue)
-                    Text("Use the standard symbol page or iPad-style hints. Customize individual long-press and swipe choices above. Reopen the keyboard to apply settings; Full Access is not required.")
+                    Text("Choose standard, iPad or macOS U.S. Option symbols. macOS mapping offers Option first and Shift–Option next; a visible digit row keeps its complementary Q–P symbols. Both Option variants are also long-press choices. Customize individual gestures above. Reopen the keyboard to apply; Full Access is not required.")
                         .font(.caption).foregroundStyle(Palette.muted)
                 }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
                 }
@@ -104,7 +104,7 @@ struct SetupView: View {
                     Toggle("Show keyboard collapse key", isOn: Binding(get: { preferences.showsCollapseKey }, set: { preferences.selectCollapseKey($0) }))
                         .font(.headline).foregroundStyle(Palette.ink)
                         .accessibilityIdentifier("showKeyboardCollapseKey")
-                    Text("Off by default on phones and portrait iPad. Wide landscape iPad always includes Hide Keyboard beside Space.")
+                    Text("Off by default on phones and narrow iPad layouts. Wide iPad always includes Hide Keyboard to the right of Space.")
                         .font(.caption).foregroundStyle(Palette.muted)
                 }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
 

@@ -133,7 +133,7 @@ The default toolbar is hidden; the bottom-left U control shows/hides it. Hiding
 it restores host typing while preserving the query and caret. A fresh portrait
 keyboard is 220 points high; saved heights remain in use. All ordinary keycaps
 are 36 points with 4-point vertical gaps. The 14-point grip has no top spacer.
-The optional collapse control is hidden by default except beside Space on eligible landscape iPad. English keycaps retain
+The optional collapse control is hidden by default except beside Space on eligible wide iPad. English keycaps retain
 their height as space grows. A number
 row appears when four character rows fit; saved-symbol rows appear at five.
 When the normal page has digits, the expanded number/symbol page contains no
@@ -151,12 +151,14 @@ TestFlight validation before public release.
 
 ## Flexible iPad layout acceptance
 
-On wide iPad, portrait stays at three letter rows; landscape offers stock three-row, compact ANSI three-row and ANSI four-row presets in app Settings. The four-row preset is default. Check actual window width rather than screen orientation alone: below 980 points of content width, ANSI is unavailable. All rendered rows and the footer have equal key height. Manual Shift changes ANSI punctuation; automatic capitalization and Caps Lock do not shift digits. Both symbol pages omit redundant digits in the four-row preset. Return is present exactly once on every page. Numbers/Symbols and Hide Keyboard appear after Space in all eligible landscape presets.
+On wide iPad, portrait stays at three letter rows; landscape offers stock three-row, compact ANSI three-row and ANSI four-row presets in app Settings. The four-row preset is default. Check actual window width rather than screen orientation alone: below 980 points of content width, ANSI is unavailable. All rendered rows and the footer have equal key height. Manual Shift changes ANSI punctuation; automatic capitalization and Caps Lock do not shift digits. Both symbol pages omit redundant digits in the four-row preset. Return is present exactly once on every page. Numbers/Symbols and Hide Keyboard appear after Space in both portrait and landscape.
 
-App-only swipe-down mapping offers the standard symbol page, iPad hints and Off; per-key custom choices override all presets. Default taps and function keys remain standard; explicit tap mappings change only character keys. Verify saved layout/mapping after relaunch and a real keyboard switch with Full Access off, then rotate back to portrait.
+App-only swipe-down mapping offers the standard symbol page, iPad hints, macOS U.S. Option symbols and Off; per-key custom choices override all presets. Default taps and function keys remain standard; explicit tap mappings change only character keys. Verify saved layout/mapping after relaunch and a real keyboard switch with Full Access off, then rotate back to portrait.
 
 The owned iPadOS 18.5 QA fixture may opt into `UNIBOARD_IPAD_LAST_KEYBOARD=ad.neko.uniboard.keyboard` only after recording its exact enabled order: English US, Emoji, Uniboard. This handles a native picker whose visible rows are absent from remote accessibility. The fixture selects the last row relative to the actual onscreen Globe frame, then still requires real, hittable U/Star/Space controls and unchanged host text. Normal CI and other devices do not opt in. Never change global keyboard preferences to manufacture a pass.
 
 Tap-map schema 2 reads schema-1 gesture files without changing their contents. Version 1 cannot smuggle new tap fields, including nulls. Tap and shifted tap each accept one exact output or Off; long press/up/down remain independent. Default shifted single letters uppercase the remapped letter, bounded to 64 scalars; snippets and symbols stay literal. Explicit Shifted tap is exact. Physical IDs persist across pages and ANSI Shift. Disabled tap must not insert an original letter, and its independent gestures must still work. A visible number row replaces Q–P default down-flick digits with the same ten symbols used by the expanded symbol page; explicit overrides and iPad mapping Off win.
 
 iPad modifier content positions are tested separately from hit targets: finite corner geometry and clamped insets, actual UIButton title rectangles, unchanged actions, and native light/dark screenshots. Left and right Shift/Delete use stock-style text while accessibility identifiers and repeat deletion stay intact.
+
+The macOS preset and long-press candidates use Apple’s U.S. ANSI Option and Shift–Option layers. A macOS core test independently compares all 47 physical keys and their shifted aliases to the installed `com.apple.keylayout.US` through `UCKeyTranslate`; no input-source selection is changed. Dead keys are literal spacing accents, exact duplicates are removed, and private-use outputs remain exact. Native tests check limits, accents, independent case flicks, per-key overrides and visible-digit-row priority. Keyboard integration exercises both Option-Q variants, case up-flicks and the app-only preset.

@@ -562,7 +562,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(search.waitUntilValueEquals("u+1f680"))
         XCTAssertTrue(app.buttons["keyboard.typing.shift"].waitUntilValueEquals("lowercase"))
         chooseHeldKeyboardOption(app.buttons["keyboard.typing.key.e"].firstMatch,
-                                 optionCount: 8, selectedIndex: 2, extraActions: 0)
+                                 optionCount: 9, selectedIndex: 2, extraActions: 0)
         XCTAssertTrue(input.waitUntilValueEquals(expected + "é"))
         XCTAssertEqual((input.value as? String)?.unicodeScalars.map(\.value), expected.unicodeScalars.map(\.value) + [0xE9])
         app.buttons["keyboard.typing.delete"].tap()
@@ -615,6 +615,7 @@ final class UniboardUITests: XCTestCase {
             XCTAssertEqual(tab.frame.midY, app.buttons["keyboard.typing.key.q"].firstMatch.frame.midY, accuracy: 1)
             XCTAssertEqual(caps.frame.midY, app.buttons["keyboard.return"].firstMatch.frame.midY, accuracy: 1)
             XCTAssertLessThan(app.buttons["keyboard.return"].firstMatch.frame.maxY, app.buttons["keyboard.space"].firstMatch.frame.minY)
+            assertPadFooter(pageID: "keyboard.typing.numbers")
         }
         geometry()
         tab.tap()
@@ -650,7 +651,13 @@ final class UniboardUITests: XCTestCase {
         app.buttons["keyboard.typing.numbers"].tap()
         XCTAssertTrue(app.buttons["keyboard.typing.letters"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons.matching(identifier: "keyboard.return").count, 1)
+        XCTAssertTrue(app.buttons["keyboard.return"].firstMatch.isHittable)
+        assertPadFooter(pageID: "keyboard.typing.letters")
         XCTAssertEqual(app.buttons["keyboard.typing.key.1"].firstMatch.frame.height, 52, accuracy: 1)
+        app.buttons["keyboard.typing.symbols"].tap()
+        XCTAssertEqual(app.buttons.matching(identifier: "keyboard.return").count, 1)
+        XCTAssertTrue(app.buttons["keyboard.return"].firstMatch.isHittable)
+        assertPadFooter(pageID: "keyboard.typing.letters")
         app.buttons["keyboard.typing.letters"].tap()
         geometry()
         app.buttons["keyboard.toggleUnicodeToolbar"].tap()
@@ -704,7 +711,7 @@ final class UniboardUITests: XCTestCase {
         try requireKeyboardIntegration()
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "iPad settings require the owned iPad QA device")
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
-        for (layout, mapping, down) in [("stock", "iPad", "@"), ("ansi", "none", ""), ("ansiNumbers", "standard", "-")] {
+        for (layout, mapping, down) in [("stock", "iPad", "@"), ("ansi", "none", ""), ("ansiNumbers", "standard", "-"), ("stock", "macOS", "å")] {
             XCUIDevice.shared.orientation = .portrait
             configurePadSettings(layout: layout, mapping: mapping)
             let input = openSystemKeyboardHost(unicodeBrowse: false)
@@ -726,6 +733,49 @@ final class UniboardUITests: XCTestCase {
             restoreEnglishKeyboard()
         }
         configurePadSettings(layout: "ansiNumbers", mapping: "standard")
+    }
+
+    func testSystemKeyboardMacOptionCandidatesKeepCaseFlicksIndependent() throws {
+        try requireKeyboardIntegration()
+        if UIDevice.current.userInterfaceIdiom == .pad { configurePadSettings(layout: "stock", mapping: "macOS") }
+        let input = openSystemKeyboardHost(unicodeBrowse: false)
+        defer { restoreEnglishKeyboard() }
+        let q = app.buttons["keyboard.typing.key.q"].firstMatch
+        chooseHeldKeyboardOption(q, optionCount: 3, selectedIndex: 1, extraActions: 0)
+        XCTAssertTrue(input.waitUntilValueEquals("œ"))
+        chooseHeldKeyboardOption(q, optionCount: 3, selectedIndex: 2, extraActions: 0)
+        XCTAssertTrue(input.waitUntilValueEquals("œŒ"), "Shift–Option stays literal, independent of Shift state")
+        flickMainKey(q, up: true)
+        XCTAssertTrue(input.waitUntilValueEquals("œŒQ"), "Default up-flick still changes case")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            flickMainKey(app.buttons["keyboard.typing.key.a"].firstMatch, up: false)
+            XCTAssertTrue(input.waitUntilValueEquals("œŒQå"))
+            assertPadFooter(pageID: "keyboard.typing.numbers")
+        }
+        attachScreenshot("macOS Option and Shift Option candidates retain independent case flicks")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            restoreEnglishKeyboard()
+            configurePadSettings(layout: "ansiNumbers", mapping: "standard")
+        }
+    }
+
+    private func assertPadFooter(pageID: String, file: StaticString = #filePath, line: UInt = #line) {
+        let space = app.buttons["keyboard.space"].firstMatch
+        let page = app.buttons[pageID].firstMatch
+        let hide = app.buttons["keyboard.collapse"].firstMatch
+        for id in ["keyboard.toggleUnicodeToolbar", "keyboard.openFavorites"] {
+            let key = app.buttons[id].firstMatch
+            XCTAssertTrue(key.isHittable, id, file: file, line: line)
+            XCTAssertLessThan(key.frame.maxX, space.frame.minX, file: file, line: line)
+        }
+        for key in [page, hide] {
+            XCTAssertTrue(key.isHittable, file: file, line: line)
+            XCTAssertGreaterThan(key.frame.minX, space.frame.maxX, file: file, line: line)
+            XCTAssertEqual(key.frame.height, 52, accuracy: 1, file: file, line: line)
+            XCTAssertGreaterThan(key.frame.width, 60, file: file, line: line)
+            XCTAssertEqual(key.frame.midY, space.frame.midY, accuracy: 1, file: file, line: line)
+        }
+        XCTAssertGreaterThan(hide.frame.minX, page.frame.maxX, file: file, line: line)
     }
 
     private func configurePadSettings(layout: String, mapping: String) {
@@ -3480,7 +3530,9 @@ final class UniboardUITests: XCTestCase {
             }
             XCTAssertFalse(hiddenQueryMatches.firstMatch.exists)
             XCTAssertFalse(app.buttons["keyboard.options"].firstMatch.exists)
-            XCTAssertFalse(app.buttons["keyboard.collapse"].firstMatch.exists, "The collapse key is disabled by default")
+            let widePad = UIDevice.current.userInterfaceIdiom == .pad && app.buttons["keyboard.typing.tab"].firstMatch.exists
+            XCTAssertEqual(app.buttons["keyboard.collapse"].firstMatch.exists, widePad,
+                "Wide iPad keeps Hide beside Space; compact layouts default to no collapse key")
             attachScreenshot("Default compact English keyboard keeps the Unicode toolbar hidden")
         }
         // Inspect/clear retained data through the real U control, then restore

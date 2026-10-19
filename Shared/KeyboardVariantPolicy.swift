@@ -17,6 +17,26 @@ enum KeyboardVariantPolicy {
         return Dictionary(uniqueKeysWithValues: zip(keys, top + home + bottom))
     }()
 
+    // Snapshot of Apple's com.apple.keylayout.US, ANSI keyboard type 40.
+    // Option dead keys use their literal spacing forms, never composition.
+    // Keep Shift–Option outputs exact: e.g. Option-S = ß, Shift–Option-S = Í.
+    private static let macOSKeys = Array("`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./").map(String.init)
+    private static let macOSShiftedKeys = Array("~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?").map(String.init)
+    private static let macOSOption = Array("`¡™£¢∞§¶•ªº–≠œ∑´®†¥¨ˆøπ“‘«åß∂ƒ©˙∆˚¬…æΩ≈ç√∫˜µ≤≥÷").map(String.init)
+    private static let macOSShiftOption = Array("`⁄€‹›ﬁﬂ‡°·‚—±Œ„´‰ˇÁ¨ˆØ∏”’»ÅÍÎÏ˝ÓÔ\u{F8FF}ÒÚÆ¸˛Ç◊ı˜Â¯˘¿").map(String.init)
+
+    static func macOSOptionCandidates(for key: String) -> [String] {
+        guard let index = macOSKeys.firstIndex(of: key) ?? macOSShiftedKeys.firstIndex(of: key),
+              macOSOption.indices.contains(index), macOSShiftOption.indices.contains(index) else { return [] }
+        return candidates(override: [macOSOption[index], macOSShiftOption[index]], defaults: [])
+    }
+
+    /// Add both macOS modifier layers without uppercasing their literal output
+    /// or changing the independent default up-flick's opposite-case behavior.
+    static func defaultLongPressVariants(for key: String, uppercase: Bool) -> [String] {
+        candidates(override: englishVariants(for: key, uppercase: uppercase) + macOSOptionCandidates(for: key), defaults: [])
+    }
+
     static func defaultSwipeUp(for key: String, state: KeyboardTypingState) -> [String] {
         guard state.layout == .letters, key.utf8.count == 1,
               let byte = key.utf8.first, (97...122).contains(byte) else { return [] }
@@ -35,6 +55,7 @@ enum KeyboardVariantPolicy {
             return options(text: text, variants: stockVariants(for: text))
         }
         guard widePad else { return [] }
+        if mapping == .macOS { return macOSOptionCandidates(for: key) }
         if ansiPad, let text = KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: key, state: state) {
             return options(text: text, variants: stockVariants(for: text))
         }

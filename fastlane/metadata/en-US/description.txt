@@ -1,11 +1,11 @@
 Literal English typing, accents, symbols and whole emoji in one keyboard. Uniboard combines QWERTY, custom symbol boards and Unicode search for iPhone and iPad.
 
 YOUR EVERYDAY KEYBOARD
-Keep your words as typed, without autocorrect or predictions. Use Shift, Caps Lock, number/symbol pages and long-press accented letters. Capitalization follows the receiving field; double Space after a word adds a period and space. URL/email fields retain literal input.
+Keep your words as typed, without autocorrect or predictions. Use Shift, Caps Lock, symbols and holds for accents plus macOS Option/Shift–Option. Capitalization follows the receiving field; double Space after a word adds a period and space. URL/email fields retain literal input.
 
 U toggles the initially hidden Unicode toolbar. On iPhone, four rows add digits; five add a saved-symbol strip. Swipe the portrait grip up/down to add/remove one row on release; ▲/▼ shows an available step.
 
-iPad portrait keeps three letter rows. In app Settings, choose stock, compact ANSI or ANSI with digits for wide landscape. Gray modifiers, blue Return and two controls beside Space keep keys familiar. Choose standard/iPad down-flick symbols or Off; individual overrides win.
+iPad portrait keeps three letter rows. In app Settings, choose stock, compact ANSI or ANSI with digits for wide landscape. Gray modifiers, blue Return; symbols/hide sit right of Space in both orientations. Standard/iPad/macOS Option down-flicks or Off; overrides win.
 
 SYMBOLS, YOUR WAY
 The star beside Space opens Favorites by default; its back arrow returns to QWERTY. Hold it to switch/manage boards or choose its default target. Symbols is included. Save characters or emoji to your chosen board.

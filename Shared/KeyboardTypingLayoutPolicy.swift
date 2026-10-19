@@ -12,11 +12,12 @@ enum KeyboardPadLayout: String, CaseIterable {
 }
 
 enum KeyboardPadSymbolMapping: String, CaseIterable {
-    case standard, iPad, none
+    case standard, iPad, macOS, none
     var title: String {
         switch self {
         case .standard: return "Standard symbol page"
         case .iPad: return "iPad symbols"
+        case .macOS: return "macOS Option symbols"
         case .none: return "Off"
         }
     }

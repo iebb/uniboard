@@ -1,6 +1,9 @@
 import Foundation
 import CoreGraphics
 import XCTest
+#if os(macOS)
+import Carbon
+#endif
 #if canImport(UniboardCore)
 @testable import UniboardCore
 #else
@@ -8,6 +11,79 @@ import XCTest
 #endif
 
 final class KeyboardVariantPolicyTests: XCTestCase {
+    #if os(macOS)
+    func testEveryMacOptionCandidateMatchesApplesUSLayoutForAll47ANSIKeys() throws {
+        let filter = [kTISPropertyInputSourceID: "com.apple.keylayout.US"] as CFDictionary
+        let sources = TISCreateInputSourceList(filter, true).takeRetainedValue() as! [TISInputSource]
+        XCTAssertEqual(sources.count, 1)
+        let source = try XCTUnwrap(sources.first)
+        let property = try XCTUnwrap(TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData))
+        let data = Unmanaged<CFData>.fromOpaque(property).takeUnretainedValue()
+        let layout = UnsafeRawPointer(CFDataGetBytePtr(data)!).assumingMemoryBound(to: UCKeyboardLayout.self)
+        let codes: [UInt16] = [50,18,19,20,21,23,22,26,28,25,29,27,24,12,13,14,15,17,16,32,34,31,35,33,30,42,0,1,2,3,5,4,38,40,37,41,39,6,7,8,9,11,45,46,43,47,44]
+        for code in codes {
+            var outputs = [String]()
+            for modifiers in [0, shiftKey, optionKey, optionKey | shiftKey] {
+                var dead: UInt32 = 0, length = 0
+                var buffer = [UniChar](repeating: 0, count: 64)
+                XCTAssertEqual(UCKeyTranslate(layout, code, UInt16(kUCKeyActionDown), UInt32(modifiers >> 8), 40,
+                    OptionBits(kUCKeyTranslateNoDeadKeysMask), &dead, buffer.count, &length, &buffer), noErr)
+                XCTAssertEqual(dead, 0)
+                XCTAssertGreaterThan(length, 0)
+                outputs.append(String(utf16CodeUnits: buffer, count: length))
+            }
+            let expected = outputs[2].utf16.elementsEqual(outputs[3].utf16) ? [outputs[2]] : Array(outputs[2...3])
+            for key in outputs.prefix(2) {
+                XCTAssertEqual(KeyboardVariantPolicy.macOSOptionCandidates(for: key), expected, key)
+            }
+        }
+    }
+    #endif
+
+    func testMacOptionCandidatesPreserveBothLiteralLayersAndSpacingDeadKeys() {
+        for (key, expected) in [("q", ["œ", "Œ"]), ("Q", ["œ", "Œ"]), ("s", ["ß", "Í"]),
+            ("1", ["¡", "⁄"]), ("!", ["¡", "⁄"]), ("k", ["˚", "\u{F8FF}"]),
+            ("-", ["–", "—"]), ("_", ["–", "—"]), ("e", ["´"]), ("u", ["¨"]),
+            ("i", ["ˆ"]), ("n", ["˜"]), ("`", ["`"]), ("~", ["`"])] {
+            XCTAssertEqual(KeyboardVariantPolicy.macOSOptionCandidates(for: key), expected)
+        }
+        for invalid in ["", "qq", "é", "e\u{301}", "👩‍💻", " ", "\n", "\t"] {
+            XCTAssertEqual(KeyboardVariantPolicy.macOSOptionCandidates(for: invalid), [])
+        }
+        for key in KeyboardKeySettings.descriptors.map(\.title) {
+            for upper in [false, true] {
+                let variants = KeyboardVariantPolicy.defaultLongPressVariants(for: key, uppercase: upper)
+                XCTAssertLessThanOrEqual(variants.count, 16)
+                XCTAssertTrue(variants.allSatisfy(KeyboardVariantPolicy.validText))
+                XCTAssertEqual(variants.count, Set(variants.map { Array($0.utf16) }).count)
+            }
+        }
+        let lower = KeyboardVariantPolicy.defaultLongPressVariants(for: "a", uppercase: false)
+        XCTAssertEqual(Array(lower.prefix(8)), KeyboardVariantPolicy.englishVariants(for: "a", uppercase: false))
+        XCTAssertEqual(lower.filter { $0 == "å" }.count, 1)
+        XCTAssertTrue(lower.contains("Å"))
+        XCTAssertEqual(Array(KeyboardVariantPolicy.defaultLongPressVariants(for: "s", uppercase: true).suffix(2)), ["ß", "Í"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultLongPressVariants(for: "q", uppercase: true), ["œ", "Œ"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "q", state: .init()), ["Q"])
+    }
+
+    func testMacMappingKeepsGestureOverridesAndVisibleDigitRowPriority() {
+        var state = KeyboardTypingState()
+        for ansi in [false, true] {
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state, widePad: true, ansiPad: ansi, mapping: .macOS), ["å", "Å"])
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true, ansiPad: ansi, mapping: .macOS), ["œ", "Œ"])
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true, ansiPad: ansi, mapping: .macOS, hasNumberRow: true).first, "_")
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "1", state: state, widePad: true, ansiPad: ansi, mapping: .macOS), ["¡", "⁄"])
+        }
+        let defaults = KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state, widePad: true, mapping: .macOS)
+        XCTAssertEqual(KeyboardVariantPolicy.candidates(override: ["custom"], defaults: defaults), ["custom"])
+        XCTAssertEqual(KeyboardVariantPolicy.candidates(override: [], defaults: defaults), [])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state, widePad: false, mapping: .macOS), [])
+        state.pressShift(at: 1)
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "s", state: state, widePad: true, mapping: .macOS), ["ß", "Í"])
+        state.selectLayout(.numbers)
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state, widePad: true, mapping: .macOS), [])
+    }
     func testVisibleDigitRowReplacesEveryQToPDownFlickWithItsComplementarySymbolPageKey() {
         var state = KeyboardTypingState()
         let keys = KeyboardTypingLayout.letters.rows[0]

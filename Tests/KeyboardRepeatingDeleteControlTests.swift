@@ -61,6 +61,7 @@ final class KeyboardRepeatingDeleteControlTests: XCTestCase {
         configure(button, route: route, renderedIsQuery: true)
         button.sendActions(for: .touchDown)
         XCTAssertEqual(route.queryDeletes, 1)
+        XCTAssertTrue(button.pressFeedback.isPressed)
         XCTAssertEqual(route.factories, 1)
         XCTAssertEqual(clock.jobs[0].interval, 0.4)
         XCTAssertFalse(clock.jobs[0].repeats)
@@ -75,6 +76,7 @@ final class KeyboardRepeatingDeleteControlTests: XCTestCase {
         XCTAssertEqual(route.factories, 1)
         button.sendActions(for: .touchUpInside)
         XCTAssertFalse(clock.jobs[1].timer.isValid)
+        XCTAssertFalse(button.pressFeedback.isPressed)
     }
 
     func testHiddenHeaderDeleteIsAbsentFromAccessibilityAndCannotResumeItsHeldStream() {

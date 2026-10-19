@@ -29,7 +29,8 @@ final class PrivacyManifestTests: XCTestCase {
         let entries = try XCTUnwrap(manifest["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
         for (category, reason) in [
             ("NSPrivacyAccessedAPICategoryUserDefaults", "CA92.1"),
-            ("NSPrivacyAccessedAPICategorySystemBootTime", "35F9.1")
+            ("NSPrivacyAccessedAPICategorySystemBootTime", "35F9.1"),
+            ("NSPrivacyAccessedAPICategoryFileTimestamp", "C617.1")
         ] {
             let matching = entries.filter { $0["NSPrivacyAccessedAPIType"] as? String == category }
             XCTAssertEqual(matching.count, 1, "Each required category must have one declaration", file: file, line: line)

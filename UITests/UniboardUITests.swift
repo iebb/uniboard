@@ -1190,6 +1190,81 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(space.isHittable, file: file, line: line)
     }
 
+    func testSystemKeyboardFavoritesSyncWithSavedAndKeepHostLiteral() throws {
+        try requirePhonePortraitResizeIntegration()
+        setKeyboardFullAccess(false)
+        var input = openSystemKeyboardHost(initialText: "Sync test.", unicodeBrowse: false)
+        defer { restoreEnglishKeyboard(); setKeyboardFullAccess(false); app.activate() }
+        restoreEnglishKeyboard()
+        app.navigationBars["Try Uniboard"].buttons["Settings"].tap()
+        appTab("Explore").tap()
+        searchUnicode("u+2603")
+        assertCharacterVisible("U+2603").tap()
+        let favorite = app.buttons["toggleFavorite"].firstMatch
+        revealByScrolling(favorite, in: app)
+        XCTAssertEqual(favorite.label, "Add to favorites")
+        favorite.tap()
+        XCTAssertTrue(favorite.waitUntilLabelEquals("Remove from favorites"))
+        app.buttons["Done"].tap()
+        appTab("Saved").tap()
+        XCTAssertTrue(app.otherElements["savedFavorites"].buttons["character-U+2603"].firstMatch.waitForExistence(timeout: 5))
+        func reopenHost() -> XCUIElement {
+            appTab("Settings").tap()
+            let tryKeyboard = app.descendants(matching: .any)["tryKeyboard"].firstMatch
+            revealByScrolling(tryKeyboard, in: app); tryKeyboard.tap()
+            let host = app.textViews["keyboardTestInput"].firstMatch
+            XCTAssertTrue(host.waitForExistence(timeout: 5)); host.tap()
+            selectUniboardKeyboard(input: host, expectedHost: "")
+            return host
+        }
+        input = reopenHost()
+        selectSymbolBoard("migrated-favorites", input: input, context: "")
+        let snowman = symbolBoardKey("☃")
+        XCTAssertTrue(snowman.waitForExistence(timeout: 5), "App Saved must reach the actual extension without Full Access")
+        snowman.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("☃"))
+        attachScreenshot("App Saved favorite appears in the real keyboard with Full Access off")
+        restoreEnglishKeyboard()
+        app.navigationBars["Try Uniboard"].buttons["Settings"].tap()
+        appTab("Saved").tap()
+        app.otherElements["savedFavorites"].buttons["character-U+2603"].firstMatch.tap()
+        revealByScrolling(favorite, in: app); favorite.tap()
+        XCTAssertTrue(favorite.waitUntilLabelEquals("Add to favorites"))
+        app.buttons["Done"].tap()
+        input = reopenHost()
+        selectSymbolBoard("migrated-favorites", input: input, context: "")
+        XCTAssertFalse(symbolBoardKey("☃").exists, "App removal must not be resurrected by the extension cache")
+        setKeyboardFullAccess(true)
+        app.activate()
+        // iOS may restart both processes when this permission changes. Reopen
+        // through real navigation rather than retaining an invalid editor AX.
+        input = reopenHost()
+        saveKeyboardFavoriteFixture(section: "symbols", query: "u+2665", identifier: "keyboard.character.U+2665", input: input, context: "")
+        restoreEnglishKeyboard()
+        app.navigationBars["Try Uniboard"].buttons["Settings"].tap()
+        appTab("Saved").tap()
+        XCTAssertTrue(app.otherElements["savedFavorites"].buttons["character-U+2665"].firstMatch.waitForExistence(timeout: 5),
+                      "Keyboard save must reach Saved when Full Access permits shared writes")
+        attachScreenshot("Keyboard favorite returns to companion Saved with Full Access on")
+    }
+
+    private func setKeyboardFullAccess(_ enabled: Bool) {
+        enableUniboardInSettings()
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+        let row = settings.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Uniboard")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5)); row.tap()
+        let access = settings.switches["Allow Full Access"].firstMatch
+        XCTAssertTrue(access.waitForExistence(timeout: 5))
+        if (access.value as? String == "1") != enabled {
+            access.tap()
+            if enabled {
+                let allow = settings.alerts.buttons["Allow"].firstMatch
+                if allow.waitForExistence(timeout: 3) { allow.tap() }
+            }
+        }
+        XCTAssertTrue(access.waitUntilValueEquals(enabled ? "1" : "0"))
+    }
+
     func testSystemKeyboardFixedKeycapsAdaptRowsAndFavoriteInsertion() throws {
         try requirePhonePortraitResizeIntegration()
         let context = "Fixed keycaps preserve this host."

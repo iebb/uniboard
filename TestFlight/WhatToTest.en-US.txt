@@ -1,29 +1,30 @@
 Uniboard 1.1 beta. Public release awaits device approval.
 
-IPAD LAYOUTS
-Portrait keeps three letter rows. App Settings > iPad keyboard selects wide-landscape stock three-row, compact ANSI three-row, or ANSI with dedicated digits (default). Narrow/floating panes retain compact keys. Check equal keys, punctuation, gray corner labels and one blue Return per page. In both rotations, Numbers/Symbols and Hide sit right of Space; U/Globe/Star sit left. Test hide/reopen and rotation without text changes.
+NEW: TOUCH FEEDBACK & FAVORITES
+Keys highlight while held. Release, scroll, resize, rotate and cancel must clear feedback without unwanted insertion. On supported iPhones with Full Access, expect a light haptic on key-down, not each held-Delete repeat. Verify haptics on a physical iPhone.
 
-Manual Shift changes ANSI digits/punctuation (1 to !, [ to {). Caps Lock and automatic sentence capitals must keep digits literal. In four-row mode, both symbol pages replace repeated digits with complementary symbols. App-only swipe-down mapping offers the standard, iPad, macOS Option or Off. Hold Q for œ/Œ; macOS down-flick A offers å/Å. Dead-key accents insert spacing forms. Per-key overrides win; default taps stay QWERTY. Reopen with Full Access OFF for each preset.
+Saved uses the built-in Favorites board. Existing collections merge; custom boards stay local. Save/delete in the app, reopen the keyboard with Full Access OFF and check Favorites. Keyboard edits wait locally with access off; enable optional Full Access and reopen to sync them back to Saved. Test both directions, relaunch, removals, emoji and combining text. No network or typed-text sharing. A sync failure must keep local data and show a notice.
+
+IPAD LAYOUTS
+Portrait keeps three letter rows. App Settings > iPad keyboard selects landscape stock three-row, compact ANSI three-row, or ANSI with digits (default). Narrow/floating panes keep compact keys. Check equal keys, punctuation, gray corner labels and one blue Return per page. In both rotations, Numbers/Symbols and Hide sit right of Space; U/Globe/Star sit left. Test hide/reopen and rotation without text changes.
+
+Manual Shift changes ANSI digits/punctuation (1 to !, [ to {). Caps Lock and sentence capitals keep digits literal. With a digit row, symbol pages replace duplicate digits. App-only swipe-down mapping offers standard, iPad, macOS Option or Off. Hold Q for œ/Œ; macOS down-flick A offers å/Å. Dead keys insert spacing accents. Per-key overrides win. Test presets with Full Access OFF.
 
 TYPING AND CUSTOM KEYS
-QWERTY starts with the toolbar hidden. U toggles it without losing the query/caret. Check Shift/Caps, automatic capitalization, double-Space, URL/email, Return and held Backspace. Hold letters for accents and Option/Shift–Option choices. Up selects the opposite case and accents without consuming Shift; slide sideways before lifting.
+QWERTY starts with the toolbar hidden. U toggles it without losing query/caret. Check Shift/Caps, sentence capitals, double-Space, URL/email, Return and held Backspace. Hold letters for accents and Option/Shift–Option choices. Up selects opposite case without consuming Shift; slide sideways to choose.
 
-App Settings > Customize keyboard keys: independent Tap, Shifted tap, Long press, Up, Down. Tap has one output; gestures have16 choices. Default Shift uppercases one remapped letter; custom Shifted tap is exact. Test Off without losing other gestures, emoji and decomposed text. Reopen with Full Access OFF. Cancel/rotate/resize mid-press: no stale insertion.
+App Settings > Customize keyboard keys: independent Tap, Shifted tap, Long press, Up, Down. Taps have one output; gestures have 16 choices. Test Off without losing other gestures, emoji and decomposed text. Reopen with Full Access OFF. Cancel/rotate/resize mid-press: no stale insertion.
 
 PHONE ROWS AND BOARDS
-Phone keys stay36pt; four character rows add1–0 and #+=, five add a scrolling saved strip. The expanded symbol page omits digits. Short123 pages retain digits. With a number row, Q–P down-flicks use ten replacement symbols; overrides win. Saved/Recent keys match digit widths, spacing and rounded surfaces without code-point captions. Scrolling must not insert.
+Phone keys stay 36pt; four character rows add digits and #+=, five add a scrolling saved strip. With digits, Q–P down-flicks use replacement symbols; overrides win. Saved/Recent keys match digit widths and rounded surfaces, without code-point captions. Scrolling must not insert.
 
-Star opens Favorites; back returns to QWERTY. Hold to switch/manage boards or choose Star’s preferred target. Temporary selection does not change it. Create/rename/reorder/delete a board, make it preferred, relaunch and delete it: Star falls back to Favorites. Symbols is included; saving asks for a board.
-
-Hold board keys for variants, Inspect or Edit. The editor stays within the keyboard. Add a Unicode variant, cancel once, then save. Editing and navigation preserve host text and queries. Test supplementary scalars, combining sequences and ZWJ emoji.
+Star opens its preferred board and returns to QWERTY. Hold to switch/manage boards. Temporary selection keeps the preferred target. Create/rename/reorder/delete boards. Deleting a preferred board falls back to Favorites. Symbols is included; saving asks for a board. Hold board keys for variants, Inspect or Edit. Add/cancel/save a Unicode variant; editing preserves host text and queries.
 
 RESIZE, SEARCH, SETTINGS
-Phone portrait grip up/down changes one row on release within limits. Check fast/slow, reversals and bounds. Only available steps show ▲/▼. Taps/cancels retain height; no numeric preview.
+Phone grip up/down changes one row on release. Only available steps show ▲/▼; no numeric preview. Taps/cancels retain height.
 
-U > Unicode > Search uses local query keys. Move the cursor into text, insert and delete in the middle. Check long queries, light/dark and Reduce Transparency for sharp text. Done returns to English; reopening retains query/cursor/results. Inspection never inserts.
+U > Unicode > Search uses local query keys. Move the cursor, insert and delete in the middle. Check long queries, light/dark and Reduce Transparency for sharp text. Done restores English; reopening retains query/cursor/results. Inspection never inserts.
 
-Only app Settings selects Unicode, fonts and optional collapse. Unicode18 release is default;17/16 previous,19 DRAFT. Fonts/collapse default off except wide iPad Hide. Test all editions without Full Access: U+10940 from17, U+0558 from18. Keyboard … has only Order/Open companion app, with guidance if opening fails.
+Only app Settings selects Unicode, fonts and collapse. Unicode 18 release is default; 17/16 previous, 19 DRAFT. Fonts/collapse start off except wide iPad Hide. Keyboard … has only Order/Open companion app.
 
-Ascending code points and whole-word matches lead by default; saved sort persists. Search names, descriptions, blocks, hex/decimal and literals. Suzhou numerals finds U+3021 HANGZHOU NUMERAL ONE and its naming note. Unsupported glyphs keep descriptions. Emoji head shaking horizontally inserts U+1F642 U+200D U+2194 U+FE0F intact.
-
-Enable in iOS keyboard Settings; app Settings > Try your keyboard supplies a host. No collection/network/account/Full Access. Shared files hold app settings/key choices.
+Ascending code points and whole words lead by default. Search names, descriptions, blocks, hex/decimal and literals. Suzhou numerals finds U+3021 HANGZHOU NUMERAL ONE and its naming note. Unsupported glyphs retain descriptions. Emoji sequences insert intact.

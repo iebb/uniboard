@@ -398,8 +398,9 @@ final class KeyboardVariantButton: UIControl {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override var intrinsicContentSize: CGSize { CGSize(width: UIView.noIntrinsicMetric, height: KeyboardTypingLayoutPolicy.regularKeyHeight) }
+    private(set) lazy var pressFeedback = KeyboardTouchFeedback.attach(to: self)
     override var isHighlighted: Bool {
-        didSet { title.alpha = isHighlighted ? 0.55 : 1; image.alpha = isHighlighted ? 0.55 : 1 }
+        didSet { pressFeedback.setPressed(isHighlighted) }
     }
     override func layoutSubviews() {
         super.layoutSubviews()

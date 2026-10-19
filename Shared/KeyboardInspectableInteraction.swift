@@ -11,6 +11,7 @@ final class KeyboardInspectableInteraction {
     }
     typealias ActionFactory = () -> Actions?
     typealias TimerScheduler = (TimeInterval, @escaping () -> Void) -> Timer
+    var activityChanged: ((Bool) -> Void)?
     private let scheduleTimer: TimerScheduler
     private var renderedContext: UUID?
     private var renderedItem: String?
@@ -53,6 +54,7 @@ final class KeyboardInspectableInteraction {
         guard pressToken == token else { return nil }
         guard let actions else { clearPress(ending: false); return nil }
         pressActions = actions
+        activityChanged?(true)
         return token
     }
     @discardableResult
@@ -74,6 +76,7 @@ final class KeyboardInspectableInteraction {
         pressToken = nil
         pressActions = nil
         endHover()
+        activityChanged?(false)
         // Clear the old action before reentrant inspection can change scope.
         // Keep the physical-down latch until its terminal event arrives.
         return action()
@@ -118,6 +121,7 @@ final class KeyboardInspectableInteraction {
         pressToken = nil
         pressActions = nil
         suppressInsert = true
+        activityChanged?(false)
     }
     deinit { hoverTimer?.invalidate() }
 }

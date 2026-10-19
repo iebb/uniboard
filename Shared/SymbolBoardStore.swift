@@ -31,11 +31,11 @@ struct SymbolBoardPickerTarget: Equatable {
     let keyID: String?
 }
 
-/// Extension-local configuration. This never uses the App Group or requests
-/// Full Access; the app's unrelated favorite collection remains unchanged.
+/// Custom boards stay local. The built-in Favorites board shares only explicit
+/// saved symbols through the App Group, with a local three-way merge baseline.
 @MainActor
 final class SymbolBoardStore: ObservableObject {
-    static let shared = SymbolBoardStore()
+    static let shared = SymbolBoardStore(sync: .shared, sharedWriteAllowed: Bundle.main.bundleURL.pathExtension != "appex")
     static let storageKey = "keyboard.symbolBoards.v1"
     static let stockID = "stock-symbols"
     static let favoritesID = "migrated-favorites"
@@ -58,6 +58,7 @@ final class SymbolBoardStore: ObservableObject {
         var activeBoardID: String
         var preferredStarBoardID: String?
         var boards: [SymbolBoard]
+        var favoriteBaseline: [String]? = nil
     }
     @Published private(set) var boards: [SymbolBoard]
     @Published private(set) var activeBoardID: String
@@ -65,6 +66,12 @@ final class SymbolBoardStore: ObservableObject {
     @Published private(set) var loadIssue: LoadIssue?
     /// One complete Data value is persisted before adopting any in-memory
     /// fields. An injected writer must leave prior bytes untouched on failure.
+    enum SyncStatus { case local, current, fullAccessRequired, unavailable }
+    @Published private(set) var syncStatus: SyncStatus = .local
+    private let sync: FavoriteSync?
+    private var sharedWriteAllowed: Bool
+    private var favoriteBaseline: [String] = []
+    private var syncing = false
     private let persist: (Data) -> Bool
     var activeBoard: SymbolBoard { Self.selectedBoard(in: boards, activeBoardID: activeBoardID) }
     var preferredStarBoard: SymbolBoard { Self.selectedBoard(in: boards, activeBoardID: preferredStarBoardID) }
@@ -78,7 +85,11 @@ final class SymbolBoardStore: ObservableObject {
     var hasLegacyFallback: Bool { loadIssue == .legacyTooLarge }
     var canEdit: Bool { loadIssue == nil }
 
-    init(defaults: UserDefaults = .standard, persist: ((Data) -> Bool)? = nil) {
+    init(defaults: UserDefaults = .standard, persist: ((Data) -> Bool)? = nil,
+         sync: FavoriteSync? = nil, sharedWriteAllowed: Bool = false) {
+        self.sync = sync
+        self.sharedWriteAllowed = sharedWriteAllowed
+        defer { refreshFavorites() }
         self.persist = persist ?? { data in
             defaults.set(data, forKey: SymbolBoardStore.storageKey)
             // UserDefaults offers no durable-disk acknowledgement. Readback
@@ -96,7 +107,8 @@ final class SymbolBoardStore: ObservableObject {
             // Read migration never overwrites the original v1 payload. Its
             // first successful mutation writes v2 with this explicit choice.
             if state.version == 1 { state.preferredStarBoardID = Self.favoritesID }
-            guard let preferred = state.preferredStarBoardID, Self.valid(state) else { loadIssue = .unreadable; return }
+            guard state.favoriteBaseline.map(FavoriteSync.valid) ?? true, let preferred = state.preferredStarBoardID, Self.valid(state) else { loadIssue = .unreadable; return }
+            favoriteBaseline = state.favoriteBaseline ?? []
             boards = state.boards
             activeBoardID = state.activeBoardID
             preferredStarBoardID = preferred
@@ -156,6 +168,7 @@ final class SymbolBoardStore: ObservableObject {
         return commit(next)
     }
     @discardableResult func add(text: String, to boardID: String) -> String? {
+        if boardID == Self.favoritesID { refreshFavorites() }
         guard canEdit, Self.validText(text), let index = boards.firstIndex(where: { $0.id == boardID }) else { return nil }
         if let existing = boards[index].keys.first(where: { SymbolBoardKey.exact($0.text, text) }) { return existing.id }
         guard boards[index].keys.count < Self.keyLimit(boardID) else { return nil }
@@ -196,13 +209,46 @@ final class SymbolBoardStore: ObservableObject {
         guard canEdit else { return false }
         let selectedPreferred = preferred ?? preferredStarBoardID
         let state = State(version: 2, activeBoardID: active ?? activeBoardID,
-                          preferredStarBoardID: selectedPreferred, boards: next)
+                          preferredStarBoardID: selectedPreferred, boards: next, favoriteBaseline: sync == nil ? nil : favoriteBaseline)
         guard let data = Self.encoded(state), persist(data) else { return false }
+        let favoritesChanged = boards.first { $0.id == Self.favoritesID }?.keys != next.first { $0.id == Self.favoritesID }?.keys
         boards = next
         activeBoardID = state.activeBoardID
         preferredStarBoardID = selectedPreferred
+        if !syncing && favoritesChanged { refreshFavorites() }
         return true
     }
+    var favoriteTexts: [String] { boards.filter { $0.id == Self.favoritesID }.flatMap(\.keys).map(\.text) }
+
+    /// Called on presentation and foregrounding; never on each layout or key tap.
+    func refreshFavorites(canWrite: Bool? = nil) {
+        if let canWrite { sharedWriteAllowed = canWrite }
+        guard let sync, canEdit, !syncing else { return }
+        syncing = true
+        defer { syncing = false }
+        do {
+            let result = try sync.synchronize(base: favoriteBaseline, local: favoriteTexts, canWrite: sharedWriteAllowed)
+            let baseline = result.baseline
+            var next = boards
+            guard let index = next.firstIndex(where: { $0.id == Self.favoritesID }) else { return }
+            let old = Dictionary(uniqueKeysWithValues: next[index].keys.map { (Array($0.text.utf16), $0) })
+            next[index].keys = result.texts.map { old[Array($0.utf16)] ?? SymbolBoardKey(id: UUID().uuidString.lowercased(), text: $0, variants: []) }
+            let state = State(version: 2, activeBoardID: activeBoardID, preferredStarBoardID: preferredStarBoardID,
+                              boards: next, favoriteBaseline: baseline)
+            guard let data = Self.encoded(state), persist(data) else { syncStatus = .unavailable; return }
+            favoriteBaseline = baseline
+            if boards != next { boards = next }
+            syncStatus = result.written ? .current : .fullAccessRequired
+        } catch { syncStatus = .unavailable }
+    }
+
+    @discardableResult func clearFavorites() -> Bool {
+        var next = boards
+        guard let index = next.firstIndex(where: { $0.id == Self.favoritesID }) else { return false }
+        next[index].keys = []
+        return commit(next)
+    }
+
     private static func keyLimit(_ id: String) -> Int { id == favoritesID ? maximumMigratedFavorites : maximumKeys }
     private static func validText(_ text: String) -> Bool { !text.isEmpty && text.unicodeScalars.prefix(maximumTextScalars + 1).count <= maximumTextScalars }
     private static func validName(_ name: String) -> String? {
@@ -217,7 +263,7 @@ final class SymbolBoardStore: ObservableObject {
         }
     }
     private static func valid(_ state: State) -> Bool {
-        guard let preferred = state.preferredStarBoardID,
+        guard state.favoriteBaseline.map(FavoriteSync.valid) ?? true, let preferred = state.preferredStarBoardID,
               (2...maximumBoards).contains(state.boards.count),
               state.boards.contains(where: { $0.id == stockID }), state.boards.contains(where: { $0.id == favoritesID }),
               state.boards.contains(where: { $0.id == state.activeBoardID }),

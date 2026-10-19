@@ -30,12 +30,12 @@ Japanese storefront copy is useful for a Japanese-speaking audience looking for 
 | Search names, aliases, informative notes, block names, hex/decimal code points and literal characters | `Shared/UnicodeCatalog.swift`; app search in `App/ContentView.swift` |
 | Browse the complete block list and scroll through assigned characters | `App/BlocksView.swift`, keyboard block view and catalog pagination |
 | Insert the original scalar or full emoji sequence at the host cursor; hold or sustained pointer hover opens a scrollable properties panel without insertion; top-right repeating backspace | `Keyboard/KeyboardViewController.swift` |
-| Favorites, recents and edition/order preferences stay local to the app or keyboard | `Shared/CharacterStore.swift`, `App/CatalogPreferences.swift`, `App/SavedView.swift`, keyboard model |
+| Favorites share on-device with optional Full Access for keyboard writes; recents and custom boards stay local | `Shared/CharacterStore.swift`, `App/CatalogPreferences.swift`, `App/SavedView.swift`, keyboard model |
 | Copy characters or complete emoji, combine text in a scratchpad and inspect code points, names, ages, properties and encoding details | `App/CharacterDetailView.swift`, `App/EmojisView.swift` |
 | Browse official fully qualified emoji; preserve ZWJ, variation selectors, flags, keycaps and skin-tone sequences | `Shared/EmojiCatalog.swift`, both `EmojiCatalog-*.json` resources, `App/EmojisView.swift`, keyboard emoji grid |
-| Default to newest Unicode Age across all assigned characters; offer oldest/code-point order; order emoji by Emoji introduction version | `Shared/UnicodeCatalog.swift` ordered ranges/search and `Shared/EmojiCatalog.swift` |
-| Switch offline between Unicode 18 latest release and Unicode 19 draft, remembering choices separately | `UnicodeEdition`, both resource sets, `App/CatalogPreferences.swift`, keyboard model |
-| Offline catalog; no account or Full Access needed | `Keyboard/Info.plist` has `RequestsOpenAccess=false`; no networking SDK/runtime requests; `App/SetupView.swift` |
+| Default to ascending code points and prefer whole-word search matches; offer Unicode/Emoji introduction version ordering | `Shared/UnicodeCatalog.swift` ordered ranges/search and `Shared/EmojiCatalog.swift` |
+| Select Unicode 16/17/18 release or 19 draft only in app Settings; the keyboard reads that choice | `UnicodeEdition`, both resource sets, `App/CatalogPreferences.swift`, keyboard model |
+| Offline catalog; no account or Full Access needed | `RequestsOpenAccess=true` permits optional local Favorites writes and haptics; typing/search work with access off; no networking SDK/runtime requests; `App/SetupView.swift` |
 | No typing sent to a server | App/keyboard runtime is local; `Shared/PrivacyInfo.xcprivacy` declares no collected data and no tracking |
 | Latest official release and draft at build time; names/assignments and iOS font support may differ | `Scripts/generate_unicode.py`, `Shared/Resources/UnicodeSources.json`, `App/SetupView.swift` |
 

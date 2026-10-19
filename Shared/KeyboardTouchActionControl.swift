@@ -26,6 +26,8 @@ final class KeyboardTouchActionButton: UIButton {
     }
     typealias Action = () -> Bool
     typealias ActionFactory = () -> Action
+    private(set) lazy var pressFeedback = KeyboardTouchFeedback.attach(to: self)
+    var pressedStateChanged: ((Bool) -> Void)?
     private var contextIdentifier: UUID?
     private var actionFactory: ActionFactory?
     private var pressAction: Action?
@@ -57,6 +59,8 @@ final class KeyboardTouchActionButton: UIButton {
         let action = actionFactory()
         guard pressToken == token else { return nil }
         pressAction = action
+        pressFeedback.setPressed(true)
+        pressedStateChanged?(true)
         return token
     }
 
@@ -78,6 +82,8 @@ final class KeyboardTouchActionButton: UIButton {
         if ending { trackingPress = false }
         pressToken = nil
         pressAction = nil
+        pressFeedback.setPressed(false)
+        pressedStateChanged?(false)
     }
     override func willMove(toWindow newWindow: UIWindow?) {
         if newWindow !== window { endPress() }
@@ -98,6 +104,7 @@ final class KeyboardTouchActionButton: UIButton {
 final class KeyboardConfigurationTouchView: UIView {
     typealias ActionFactory = KeyboardTouchActionButton.ActionFactory
     private let actionEngine = KeyboardTouchActionButton()
+    private(set) lazy var pressFeedback = KeyboardTouchFeedback.attach(to: self)
     private var contextIdentifier: UUID?
     private var configurationRevision = UUID()
     private weak var primaryOwner: AnyObject?
@@ -129,6 +136,7 @@ final class KeyboardConfigurationTouchView: UIView {
         isUserInteractionEnabled = false
         isAccessibilityElement = false
         accessibilityElementsHidden = true
+        actionEngine.pressedStateChanged = { [weak self] in self?.pressFeedback.setPressed($0) }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 

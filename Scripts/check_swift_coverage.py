@@ -14,6 +14,7 @@ MINIMUMS = {
     "EmojiCatalog.swift": 1.0,
     "CharacterStore.swift": 1.0,
     "SymbolBoardStore.swift": 1.0,
+    "FavoriteSync.swift": 1.0,
     "KeyboardVariantPolicy.swift": 1.0,
     "KeyboardFooterLayoutPolicy.swift": 1.0,
     "KeyboardInteractionPolicy.swift": 1.0,

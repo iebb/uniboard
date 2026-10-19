@@ -102,7 +102,7 @@ writes it. Edition and Boolean font/collapse preferences use one bounded file;
 explicitly configured per-key gesture choices use a separate bounded file.
 Version-1 edition-only files default both flags off; v1/v2 files default to ANSI-with-numbers and standard symbol mapping. Version 3 validates all six keys and preserves every field when another preference changes; malformed snapshots
 fall back safely. Only app Settings changes these choices. The keyboard … menu
-contains Order and Open companion app; sort and collections remain separate. An unavailable or malformed setting falls back
+contains Order and Open companion app; sort, recents and custom boards remain local. Explicit Favorites share a separate bounded file. An unavailable or malformed setting falls back
 to the latest release; tests must distinguish that fallback from successful
 non-default app-to-keyboard delivery. Settings labels and preference resolution
 read only bounded small manifests, not all four full catalogs.
@@ -162,3 +162,11 @@ Tap-map schema 2 reads schema-1 gesture files without changing their contents. V
 iPad modifier content positions are tested separately from hit targets: finite corner geometry and clamped insets, actual UIButton title rectangles, unchanged actions, and native light/dark screenshots. Left and right Shift/Delete use stock-style text while accessibility identifiers and repeat deletion stay intact.
 
 The macOS preset and long-press candidates use Apple’s U.S. ANSI Option and Shift–Option layers. A macOS core test independently compares all 47 physical keys and their shifted aliases to the installed `com.apple.keylayout.US` through `UCKeyTranslate`; no input-source selection is changed. Dead keys are literal spacing accents, exact duplicates are removed, and private-use outputs remain exact. Native tests check limits, accents, independent case flicks, per-key overrides and visible-digit-row priority. Keyboard integration exercises both Option-Q variants, case up-flicks and the app-only preset.
+
+## Favorites sync and touch feedback
+
+Saved and the built-in Favorites board use the same store within each process. Migrate the union of the two sandboxes without dropping exact scalar sequences, custom boards, key variants or preferred Star target. Shared writes require Full Access only in the extension; test app-to-keyboard delivery with it OFF and reverse delivery with it ON. Granting/revoking this permission may restart the app and extension, so reacquire the editor through real navigation. Restore OFF on the owned QA simulator after testing.
+
+Cover pending edits across relaunch, remote additions/deletions, reorder, exact composed/decomposed text, supplementary scalars, emoji, arbitrary saved text, invalid/oversized schemas, unreadable or unwritable storage, nonblocking lock contention, concurrent writers, links and non-regular files. An unavailable shared document must not overwrite original bytes or discard local favorites. The three-way baseline is persisted with local board state. Only explicit favorite text crosses the App Group boundary; recents, documents and queries do not. The file-type check uses fstat, declared with C617.1 for app/App Group metadata in both shipped manifests.
+
+Pressed overlays never receive touches or change geometry. Verify physical down/up, cancellation on scrolling, disabled/reconfigured keys, long-hold inspection, stale contexts, detach and reentrant actions. Delete repeats keep their original cadence and do not create repeat haptics. Confirm visual feedback in native controls; simulator success cannot establish physical Taptic feedback. Keep App Store v1.1 held until device acceptance.

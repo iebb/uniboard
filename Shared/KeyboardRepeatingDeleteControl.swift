@@ -64,7 +64,7 @@ final class RepeatingDeleteButton: UIButton {
         accessibilityLabel = isQuery ? "Delete search character" : "Delete backward"
     }
 
-    override var isHighlighted: Bool { didSet { backgroundColor = isHighlighted ? UIColor.tertiarySystemFill : .clear } }
+    private(set) lazy var pressFeedback = KeyboardTouchFeedback.attach(to: self)
 
     override func accessibilityActivate() -> Bool {
         stopDeleting()
@@ -93,6 +93,7 @@ final class RepeatingDeleteButton: UIButton {
         guard pressToken == token else { return }
         pressAction = action
         guard performDelete(token: token) else { return }
+        pressFeedback.setPressed(true)
         delayTimer = scheduleTimer(0.4, false) { [weak self] _ in
             guard let self, self.pressToken == token else { return }
             self.delayTimer = nil
@@ -122,6 +123,7 @@ final class RepeatingDeleteButton: UIButton {
         if endingPress { isTrackingPress = false }
         pressToken = nil
         pressAction = nil
+        pressFeedback.setPressed(false)
         delayTimer?.invalidate()
         repeatTimer?.invalidate()
         delayTimer = nil

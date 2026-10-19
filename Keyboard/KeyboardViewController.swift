@@ -259,6 +259,8 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         model.refreshEditionFromAppSettings()
+        SymbolBoardStore.shared.refreshFavorites(canWrite: hasFullAccess)
+        KeyboardTouchFeedback.hapticsAllowed = hasFullAccess
         synchronizeHostTraits()
         updateKeyboardHeight()
     }
@@ -1842,7 +1844,6 @@ enum KeyboardPalette {
             ? UIColor(red: 0.27, green: 0.29, blue: 0.33, alpha: 1)
             : UIColor(red: 0.68, green: 0.70, blue: 0.74, alpha: 1)
     }
-    static let pressedUI = UIColor.systemGray5
     static let borderUI = UIColor { traits in
         UIColor.separator.resolvedColor(with: traits).withAlphaComponent(traits.accessibilityContrast == .high ? 0.65 : 0.16)
     }
@@ -3124,6 +3125,7 @@ private final class InspectableKeyButton: UIControl {
     private var codeHeight: NSLayoutConstraint!
     private var usesExternalKeySurface = false
     private let interaction = KeyboardInspectableInteraction()
+    private lazy var pressFeedback = KeyboardTouchFeedback.attach(to: self)
     private lazy var hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
 
     init() {
@@ -3170,6 +3172,7 @@ private final class InspectableKeyButton: UIControl {
             star.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             star.topAnchor.constraint(equalTo: topAnchor, constant: 4)
         ])
+        interaction.activityChanged = { [weak self] in self?.isHighlighted = $0 }
         hold.minimumPressDuration = 0.4
         hold.allowableMovement = 10
         hold.cancelsTouchesInView = true
@@ -3188,7 +3191,7 @@ private final class InspectableKeyButton: UIControl {
         usesExternalKeySurface ? CGSize(width: UIView.noIntrinsicMetric, height: 36) : CGSize(width: 58, height: 56)
     }
     override var isHighlighted: Bool {
-        didSet { backgroundColor = isHighlighted ? KeyboardPalette.pressedUI : usesExternalKeySurface ? .clear : KeyboardPalette.keyUI }
+        didSet { pressFeedback.setPressed(isHighlighted) }
     }
     func configure(item: KeyboardItem, favorite: Bool, compact: Bool, useUnicodeFonts: Bool, glyphOnly: Bool,
                    route: UUID, enabled: Bool, actionFactory: @escaping KeyboardInspectableInteraction.ActionFactory) {
@@ -3196,7 +3199,7 @@ private final class InspectableKeyButton: UIControl {
             usesExternalKeySurface = glyphOnly
             invalidateIntrinsicContentSize()
         }
-        backgroundColor = isHighlighted ? KeyboardPalette.pressedUI : glyphOnly ? .clear : KeyboardPalette.keyUI
+        backgroundColor = glyphOnly ? .clear : KeyboardPalette.keyUI
         layer.borderWidth = glyphOnly ? 0 : 0.4
         interaction.configure(contextIdentifier: route, itemIdentifier: item.keyIdentifier,
             enabled: enabled, actionFactory: actionFactory)
@@ -3227,14 +3230,15 @@ private final class InspectableKeyButton: UIControl {
     }
     override func accessibilityActivate() -> Bool { interaction.activateInsert() }
     @objc private func touchBegan() { interaction.beginPress() }
-    @objc private func tapped() { _ = interaction.endPress() }
-    @objc private func cancelledPress() { interaction.cancelPress() }
+    @objc private func tapped() { isHighlighted = false; _ = interaction.endPress() }
+    @objc private func cancelledPress() { interaction.cancelPress(); isHighlighted = false }
     @objc private func cancelledTouch() {
+        isHighlighted = false
         interaction.cancelPress(preserveInspection: hold.state == .began || hold.state == .changed)
     }
     @objc private func held(_ gesture: UILongPressGestureRecognizer) {
         switch gesture.state {
-        case .began: _ = interaction.inspectHeldPress()
+        case .began: isHighlighted = false; _ = interaction.inspectHeldPress()
         case .ended, .cancelled, .failed: interaction.cancelPress()
         default: break
         }
@@ -3247,7 +3251,7 @@ private final class InspectableKeyButton: UIControl {
         }
     }
     override func willMove(toWindow newWindow: UIWindow?) {
-        if newWindow !== window { interaction.cancelAll() }
+        if newWindow !== window { isHighlighted = false; interaction.cancelAll() }
         super.willMove(toWindow: newWindow)
     }
 }
@@ -3283,6 +3287,12 @@ private struct InputModeSwitchKey: UIViewRepresentable {
 }
 
 private final class KeyboardGlobeButton: UIButton {
+    private lazy var pressFeedback = KeyboardTouchFeedback.attach(to: self)
+    override var isHighlighted: Bool { didSet { pressFeedback.setPressed(isHighlighted) } }
+    override func willMove(toWindow newWindow: UIWindow?) {
+        if newWindow !== window { isHighlighted = false }
+        super.willMove(toWindow: newWindow)
+    }
     var contentPosition: KeyboardKeyContentPosition = .center { didSet { setNeedsLayout() } }
     override func imageRect(forContentRect contentRect: CGRect) -> CGRect {
         contentPosition.alignedRect(super.imageRect(forContentRect: contentRect), in: contentRect)

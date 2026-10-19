@@ -1,4 +1,4 @@
-Uniboard is an offline English and Unicode keyboard for iPhone/iPad. No account/network/Full Access. Interface is English.
+Uniboard is an offline English and Unicode keyboard for iPhone/iPad. No account/network. Typing and search need no Full Access. Interface is English.
 
 1. Add Uniboard in iOS Settings > General > Keyboard > Keyboards > Add New Keyboard. In Uniboard > Settings > Try your keyboard, focus the editor and hold the globe to select Uniboard.
 
@@ -18,4 +18,4 @@ Uniboard is an offline English and Unicode keyboard for iPhone/iPad. No account/
 
 9. Search suzhou numerals and inspect U+3021 HANGZHOU NUMERAL ONE; notes explain the naming issue. Emoji head shaking horizontally inserts U+1F642 U+200D U+2194 U+FE0F intact. Emoji ages differ from component Unicode ages. Ascending code points is default; whole-word matches precede mid-word. Saved sort persists. Unsupported glyphs retain properties; preview markers are never inserted.
 
-The keyboard … menu contains only Order and Open companion app, with explicit Home Screen guidance if iOS rejects opening. No collection or remote typing/search. Boards, favorites, recents and scratchpad stay on-device. Shared files contain only app-authored settings/key choices, never document typing or queries. Receiving apps handle inserted text. iOS uses its keyboard in secure/phone fields; some apps disable custom keyboards.
+The keyboard … menu contains only Order and Open companion app, with explicit Home Screen guidance if iOS rejects opening. No collection or remote typing/search. Boards, favorites, recents and scratchpad stay on-device. Shared files contain app settings/key choices and explicit Favorites, never document typing or queries. Allow Full Access is optional: it permits keyboard Favorites writes back to Saved and light haptics. With it off, app favorites reach the keyboard; keyboard edits wait locally. Custom boards/recents stay separate. Receiving apps handle inserted text. iOS uses its keyboard in secure/phone fields; some apps disable custom keyboards.

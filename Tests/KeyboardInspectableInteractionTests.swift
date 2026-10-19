@@ -42,6 +42,32 @@ final class KeyboardInspectableInteractionTests: XCTestCase {
         }
     }
 
+    func testFeedbackFollowsPhysicalPressHoldContextInvalidationAndRelease() {
+        let interaction = KeyboardInspectableInteraction()
+        var down = false
+        interaction.activityChanged = { down = $0 }
+        let route = UUID()
+        interaction.configure(contextIdentifier: route, itemIdentifier: "a", enabled: true) {
+            .init(insert: { true }, inspect: { true })
+        }
+        XCTAssertNotNil(interaction.beginPress())
+        XCTAssertTrue(down)
+        XCTAssertTrue(interaction.inspectHeldPress())
+        XCTAssertFalse(down)
+        interaction.cancelPress()
+        XCTAssertNotNil(interaction.beginPress())
+        XCTAssertTrue(down)
+        interaction.configure(contextIdentifier: UUID(), itemIdentifier: "a", enabled: true) {
+            .init(insert: { true }, inspect: { true })
+        }
+        XCTAssertFalse(down)
+        XCTAssertFalse(interaction.endPress())
+        XCTAssertNotNil(interaction.beginPress())
+        XCTAssertTrue(down)
+        XCTAssertTrue(interaction.endPress())
+        XCTAssertFalse(down)
+    }
+
     func testVisibleHoverInspectsExactlyOnceAndNeverInserts() {
         let clock = Clock(), route = Route(), state = KeyboardInspectableInteraction(scheduleTimer: clock.schedule)
         configure(state, route: route)

@@ -545,6 +545,7 @@ final class KeyboardVariantControlTests: XCTestCase {
             button.configure(context: mode, key: "key", text: "a", variants: ["à"], enabled: true, font: .systemFont(ofSize: 23)) { route.factory(rendered: mode) }
             XCTAssertTrue(button.beginPhysicalPress(owner: owner, point: CGPoint(x: 20, y: 20)))
             XCTAssertTrue(button.isHighlighted)
+            XCTAssertTrue(button.pressFeedback.isPressed)
             switch kind {
             case 0: button.removeFromSuperview()
             case 1: button.cancelForAdditionalTouch()
@@ -552,6 +553,7 @@ final class KeyboardVariantControlTests: XCTestCase {
             }
             clock.fire()
             XCTAssertFalse(button.isHighlighted)
+            XCTAssertFalse(button.pressFeedback.isPressed)
             XCTAssertFalse(state.end(owner: owner, inside: true))
             XCTAssertTrue(route.inserted.isEmpty)
             XCTAssertNil(input.subviews.first { $0.accessibilityIdentifier == "keyboard.variants" })

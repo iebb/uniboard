@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct UniboardApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = CharacterStore.shared
     @StateObject private var preferences = CatalogPreferences.shared
 
@@ -34,5 +35,7 @@ struct UniboardApp: App {
             .environmentObject(store)
             .environmentObject(preferences)
             .tint(Palette.accent)
+            .onAppear { store.refreshFavorites() }
+            .onChange(of: scenePhase) { _, phase in if phase == .active { store.refreshFavorites() } }
     }
 }

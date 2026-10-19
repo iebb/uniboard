@@ -83,6 +83,14 @@ struct SetupView: View {
                 }.accessibilityIdentifier("tryKeyboard")
 
                 VStack(alignment: .leading, spacing: 12) {
+                    Label("Favorites & touch feedback", systemImage: "hand.tap").font(.headline)
+                    Text("Saved and the keyboard’s Favorites board share your explicit favorites on this device. Allow Full Access in iOS keyboard settings to sync saves and removals from the keyboard back to the app. With it off, app favorites reach the keyboard, while keyboard changes wait locally. Custom boards and Recently used stay separate.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                    Text("Keys highlight while touched. Light haptics are available on supported iPhones with Full Access. No typing, searches or favorites are sent to a server, even with Full Access enabled.")
+                        .font(.caption).foregroundStyle(Palette.muted)
+                }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+
+                VStack(alignment: .leading, spacing: 12) {
                     Toggle("Extra Unicode fonts", isOn: Binding(get: { preferences.useUnicodeFonts }, set: { preferences.selectUnicodeFonts($0) }))
                         .font(.headline).foregroundStyle(Palette.ink)
                         .accessibilityIdentifier("extraUnicodeFonts")

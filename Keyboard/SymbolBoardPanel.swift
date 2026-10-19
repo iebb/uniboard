@@ -34,6 +34,8 @@ struct SymbolBoardSaveTargetPanel: View {
                                 .padding(.horizontal, 10).frame(minHeight: 36)
                         }.accessibilityIdentifier("keyboard.boards.save.\(board.id)")
                     }
+                    Text("Favorites sync with Saved in the app. Keyboard saves need Allow Full Access; otherwise they wait locally. Custom boards stay in this keyboard.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
                     if let issue = store.loadIssue { Text(issue.rawValue).font(.system(size: 11)) }
                     if failed { Text("This item could not be saved. The input context or board may have changed.").font(.system(size: 11)).foregroundStyle(.red) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -91,6 +93,10 @@ struct SymbolBoardManagerPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     if let issue = store.loadIssue { Text(issue.rawValue).font(.system(size: 12)).accessibilityIdentifier("keyboard.boards.storageIssue") }
+                    if store.syncStatus == .unavailable {
+                        Text("Favorites sync is unavailable. Local changes are kept for retry.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
                     if let error { Text(error).font(.system(size: 12)).foregroundStyle(.red).accessibilityIdentifier("keyboard.boards.error") }
                     if entryPurpose != nil { entryPanel }
                     else if let board, let key { keyPanel(board, key) }

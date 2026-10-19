@@ -25,6 +25,29 @@ final class KeyboardTouchActionControlTests: XCTestCase {
         button.sendActions(for: .touchUpInside)
     }
 
+    func testVisibleFeedbackClearsOnReleaseCancellationContextChangeAndDetach() {
+        let button = KeyboardTouchActionButton(), route = Route()
+        configure(button, route: route)
+        XCTAssertFalse(button.pressFeedback.isPressed)
+        for terminal in [UIControl.Event.touchUpInside, .touchCancel, .touchDragExit, .touchUpOutside] {
+            button.sendActions(for: .touchDown)
+            XCTAssertTrue(button.pressFeedback.isPressed)
+            XCTAssertFalse(button.pressFeedback.isUserInteractionEnabled)
+            button.sendActions(for: terminal)
+            XCTAssertFalse(button.pressFeedback.isPressed)
+        }
+        button.sendActions(for: .touchDown)
+        button.configure(contextIdentifier: UUID()) { { true } }
+        XCTAssertFalse(button.pressFeedback.isPressed)
+        button.sendActions(for: .touchCancel)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 600))
+        window.addSubview(button)
+        button.sendActions(for: .touchDown)
+        XCTAssertTrue(button.pressFeedback.isPressed)
+        button.removeFromSuperview()
+        XCTAssertFalse(button.pressFeedback.isPressed)
+    }
+
     func testExecutesOnReleaseWithOneFactoryDespiteDuplicateDownAndUpdatedFactory() {
         let route = Route(), button = KeyboardTouchActionButton()
         configure(button, route: route)
@@ -228,6 +251,18 @@ final class KeyboardConfigurationTouchViewTests: XCTestCase {
         return (window, scroll, view, view.convert(CGPoint(x: 30, y: 18), to: window))
     }
 
+    func testConfigurationFeedbackCancelsAsSoonAsScrollingStarts() {
+        let (window, _, view, point) = fixture()
+        let owner = NSObject()
+        view.configure(contextIdentifier: UUID()) { { true } }
+        XCTAssertTrue(view.beginPhysicalPress(owner: owner, at: point))
+        XCTAssertTrue(view.pressFeedback.isPressed)
+        view.movePhysicalPress(owner: owner, at: CGPoint(x: point.x + 11, y: point.y))
+        XCTAssertFalse(view.pressFeedback.isPressed)
+        view.endPhysicalPress(owner: owner, at: point)
+        XCTAssertFalse(view.pressFeedback.isPressed)
+        withExtendedLifetime(window) {}
+    }
     func testPlainConfigurationSurfaceAllowsThePublicScrollCancellationContract() {
         let (window, scroll, view, _) = fixture()
         withExtendedLifetime(window) {

@@ -184,6 +184,8 @@ struct SymbolBoardManagerPanel: View {
                     .accessibilityValue(store.preferredStarBoardID == board.id ? "Star default" : "")
                     .accessibilityIdentifier("keyboard.boards.makeDefault.\(board.id)")
                     .disabled(!store.canEdit || store.preferredStarBoardID == board.id)
+                    pageOrderButton(board, offset: -1)
+                    pageOrderButton(board, offset: 1)
                     Button { editingBoardID = board.id; error = nil } label: { Image(systemName: "pencil").frame(width: 24, height: 32) }
                         .accessibilityLabel("Edit \(board.name)")
                         .accessibilityIdentifier("keyboard.boards.edit.\(board.id)")
@@ -195,17 +197,27 @@ struct SymbolBoardManagerPanel: View {
                     .frame(maxWidth: .infinity, minHeight: 38)
             }.accessibilityIdentifier("keyboard.boards.create")
                 .disabled(!store.canEdit || store.boards.count >= SymbolBoardStore.maximumBoards)
-            Text("Swipe between pages in the symbol keyboard. A page’s star makes it the default for the Star key.")
+            Text("Use the arrows to reorder pages. Swipe between them in the symbol keyboard. A page’s star makes it the default for the Star key.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
+    }
+    private func pageOrderButton(_ board: SymbolBoard, offset: Int) -> some View {
+        Button { act { store.moveBoard(board.id, by: offset) } } label: {
+            Image(systemName: offset < 0 ? "chevron.up" : "chevron.down").frame(width: 28, height: 42)
+        }
+        .accessibilityLabel("Move \(board.name) \(offset < 0 ? "earlier" : "later")")
+        .accessibilityIdentifier("keyboard.boards.\(offset < 0 ? "earlier" : "later").\(board.id)")
+        .disabled(!store.canMoveBoard(board.id, by: offset))
     }
     private func boardPanel(_ board: SymbolBoard) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(board.name).font(.system(size: 15, weight: .semibold)).lineLimit(2)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 6)], alignment: .leading, spacing: 6) {
                 Button("Rename") { begin(.rename(board.id), value: board.name) }.accessibilityIdentifier("keyboard.boards.rename")
-                Button("Move up") { act { store.moveBoard(board.id, by: -1) } }.accessibilityIdentifier("keyboard.boards.moveUp")
-                Button("Move down") { act { store.moveBoard(board.id, by: 1) } }.accessibilityIdentifier("keyboard.boards.moveDown")
+                Button("Move earlier") { act { store.moveBoard(board.id, by: -1) } }
+                    .disabled(!store.canMoveBoard(board.id, by: -1)).accessibilityIdentifier("keyboard.boards.moveUp")
+                Button("Move later") { act { store.moveBoard(board.id, by: 1) } }
+                    .disabled(!store.canMoveBoard(board.id, by: 1)).accessibilityIdentifier("keyboard.boards.moveDown")
             }.font(.system(size: 11))
             Button("Add from Unicode") {
                 guard sessionIsCurrent?() == true, store.boards.contains(where: { $0.id == board.id }) else { return }

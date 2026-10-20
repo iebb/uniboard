@@ -290,6 +290,37 @@ final class SymbolBoardStoreTests: XCTestCase {
             XCTAssertEqual(SymbolBoardStore(defaults: defaults).boards, store.boards)
         }
     }
+    func testPageReorderingIncludesBuiltInsPreservesSelectionAndStarAndPersists() async throws {
+        try withDefaults { defaults in
+            let store = SymbolBoardStore(defaults: defaults)
+            let custom = try XCTUnwrap(store.createBoard(named: "Work"))
+            XCTAssertTrue(store.setPreferredStarBoard(custom))
+            let original = store.boards
+            for invalid in [Int.min, -2, 0, 2, Int.max] {
+                XCTAssertFalse(store.canMoveBoard(custom, by: invalid))
+                XCTAssertFalse(store.moveBoard(custom, by: invalid))
+            }
+            XCTAssertFalse(store.canMoveBoard("missing", by: -1))
+            XCTAssertFalse(store.moveBoard("missing", by: 1))
+            XCTAssertFalse(store.canMoveBoard(SymbolBoardStore.stockID, by: -1))
+            XCTAssertFalse(store.canMoveBoard(custom, by: 1))
+            XCTAssertEqual(store.boards, original)
+            XCTAssertTrue(store.canMoveBoard(custom, by: -1))
+            XCTAssertTrue(store.moveBoard(custom, by: -1))
+            XCTAssertTrue(store.moveBoard(custom, by: -1))
+            XCTAssertEqual(store.boards.map(\.id), [custom, SymbolBoardStore.stockID, SymbolBoardStore.favoritesID])
+            XCTAssertFalse(store.canMoveBoard(custom, by: -1))
+            XCTAssertTrue(store.canMoveBoard(SymbolBoardStore.stockID, by: 1))
+            XCTAssertTrue(store.moveBoard(SymbolBoardStore.stockID, by: 1))
+            XCTAssertEqual(store.boards.map(\.id), [custom, SymbolBoardStore.favoritesID, SymbolBoardStore.stockID])
+            XCTAssertEqual(store.activeBoardID, custom)
+            XCTAssertEqual(store.preferredStarBoardID, custom)
+            let restored = SymbolBoardStore(defaults: defaults)
+            XCTAssertEqual(restored.boards, store.boards)
+            XCTAssertEqual(restored.activeBoardID, custom)
+            XCTAssertEqual(restored.preferredStarBoardID, custom)
+        }
+    }
     func testExactNFCAndNFDKeysAndVariantsRemainDistinct() async throws {
         try withDefaults { defaults in
             let store = SymbolBoardStore(defaults: defaults)
@@ -449,6 +480,7 @@ final class SymbolBoardStoreTests: XCTestCase {
                 XCTAssertNil(store.add(text: "!", to: SymbolBoardStore.stockID), "A duplicate cannot report a successful save in read-only recovery")
                 XCTAssertNil(store.add(text: "☃", to: SymbolBoardStore.stockID))
                 XCTAssertFalse(store.renameBoard(SymbolBoardStore.stockID, to: "Changed"))
+                XCTAssertFalse(store.canMoveBoard(SymbolBoardStore.stockID, by: 1))
                 XCTAssertFalse(store.moveBoard(SymbolBoardStore.stockID, by: 1))
                 XCTAssertFalse(store.deleteBoard("missing"))
                 let key = store.activeBoard.keys[0]

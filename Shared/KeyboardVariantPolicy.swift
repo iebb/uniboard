@@ -31,7 +31,7 @@ enum KeyboardVariantPolicy {
         return candidates(override: [macOSOption[index], macOSShiftOption[index]], defaults: [])
     }
 
-    static func defaultSwipeUp(for key: String, state: KeyboardTypingState) -> [String] {
+    static func defaultSwipeDown(for key: String, state: KeyboardTypingState) -> [String] {
         guard state.layout == .letters, key.utf8.count == 1,
               let byte = key.utf8.first, (97...122).contains(byte) else { return [] }
         let uppercase = state.shift == .lowercase
@@ -39,7 +39,7 @@ enum KeyboardVariantPolicy {
         return options(text: original, variants: englishVariants(for: key, uppercase: uppercase))
     }
 
-    static func defaultSwipeDown(for key: String, state: KeyboardTypingState, widePad: Bool, ansiPad: Bool = false,
+    static func defaultSwipeUp(for key: String, state: KeyboardTypingState, widePad: Bool, ansiPad: Bool = false,
                                  mapping: KeyboardPadSymbolMapping = .iPad, hasNumberRow: Bool = false) -> [String] {
         guard (widePad || hasNumberRow), state.layout == .letters, (!widePad || mapping != .none) else { return [] }
         if hasNumberRow, let index = KeyboardTypingLayout.letters.rows[0].firstIndex(of: key) {
@@ -83,20 +83,20 @@ enum KeyboardVariantPolicy {
         let gestures: [KeyboardKeySettings.Gesture] = [.longPress, .swipeUp, .swipeDown]
         let defaults = [
             options(text: original, variants: englishVariants(for: key, uppercase: state.shift != .lowercase)),
-            isAuxiliaryKey ? [] : defaultSwipeUp(for: key, state: state),
             mapping == .none ? [] : candidates(override: nil, defaults:
-                defaultSwipeDown(for: key, state: state, widePad: widePad || !isAuxiliaryKey, ansiPad: ansiPad,
+                defaultSwipeUp(for: key, state: state, widePad: widePad || !isAuxiliaryKey, ansiPad: ansiPad,
                                  mapping: mapping, hasNumberRow: hasNumberRow)
-                + macOSOptionCandidates(for: key))
+                + macOSOptionCandidates(for: key)),
+            isAuxiliaryKey ? [] : defaultSwipeDown(for: key, state: state)
         ]
         let overrides = gestures.map { settings.candidates(for: keyID, gesture: $0) }
         var choices = zip(overrides, defaults).map { candidates(override: $0.0, defaults: $0.1) }
-        if KeyboardKeySettings.descriptor(for: keyID)?.kind != .letter, overrides[2] == nil {
+        if KeyboardKeySettings.descriptor(for: keyID)?.kind != .letter, overrides[1] == nil {
             // Currency/punctuation keys keep their complete stock hold family.
             // A default Option output already in that family is not a second
-            // action on Down. Explicit Down mappings still take priority.
+            // action on Up. Explicit Up mappings still take priority.
             let held = choices[0]
-            choices[2].removeAll { contains($0, in: held) }
+            choices[1].removeAll { contains($0, in: held) }
         }
         var seen = Set<[UInt16]>()
         var result = [[String]](repeating: [], count: 3)
@@ -106,10 +106,12 @@ enum KeyboardVariantPolicy {
         for index in gestures.indices where overrides[index] != nil {
             for text in choices[index] { append(text, to: index) }
         }
-        for index in [1, 2, 0] where overrides[index] == nil {
+        for index in [2, 1, 0] where overrides[index] == nil {
             if let first = choices[index].first { append(first, to: index) }
         }
-        for index in gestures.indices where overrides[index] == nil {
+        // Preserve chooser ownership when swapping the default directions:
+        // current-case hold, opposite-case Down, then symbol Up alternatives.
+        for index in [0, 2, 1] where overrides[index] == nil {
             for text in choices[index].dropFirst() { append(text, to: index) }
         }
         return GestureCandidates(longPress: result[0], swipeUp: result[1], swipeDown: result[2])

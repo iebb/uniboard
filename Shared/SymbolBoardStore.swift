@@ -166,10 +166,14 @@ final class SymbolBoardStore: ObservableObject {
         return commit(boards.filter { $0.id != id }, active: activeBoardID == id ? Self.stockID : activeBoardID,
                       preferred: preferredStarBoardID == id ? Self.favoritesID : preferredStarBoardID)
     }
+    func canMoveBoard(_ id: String, by offset: Int) -> Bool {
+        guard canEdit, offset == -1 || offset == 1,
+              let index = boards.firstIndex(where: { $0.id == id }) else { return false }
+        return boards.indices.contains(index + offset)
+    }
     @discardableResult func moveBoard(_ id: String, by offset: Int) -> Bool {
-        guard let index = boards.firstIndex(where: { $0.id == id }), offset == -1 || offset == 1 else { return false }
+        guard canMoveBoard(id, by: offset), let index = boards.firstIndex(where: { $0.id == id }) else { return false }
         let target = index + offset
-        guard boards.indices.contains(target) else { return false }
         var next = boards
         next.swapAt(index, target)
         return commit(next)

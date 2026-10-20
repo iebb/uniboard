@@ -263,13 +263,24 @@ final class KeyboardViewController: UIInputViewController {
     private func updateKeyboardHeight() {
         let pad = traitCollection.userInterfaceIdiom == .pad
         let scene = view.window?.windowScene
-        let sceneSize = scene?.coordinateSpace.bounds.size
-        let landscapePad = pad && sceneSize.map { $0.width.isFinite && $0.height.isFinite && $0.width > $0.height } == true
+        let sceneSize: CGSize?
+        let landscape: Bool
+        if #available(iOS 26.0, *) {
+            let geometry = scene?.effectiveGeometry
+            sceneSize = geometry?.coordinateSpace.bounds.size
+            landscape = geometry?.interfaceOrientation.isLandscape == true
+        } else {
+            sceneSize = scene?.coordinateSpace.bounds.size
+            landscape = scene?.interfaceOrientation.isLandscape == true
+        }
+        let landscapePad = pad && KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: view.bounds.width,
+            sceneSize: sceneSize, displaySize: scene?.screen.bounds.size ?? view.window?.screen.bounds.size,
+            orientationIsLandscape: landscape)
             && KeyboardTypingLayoutPolicy.usesANSI(availableWidth: view.bounds.width - 16, isPad: pad, isLandscape: true)
         if model.isLandscapePadLayout != landscapePad { model.isLandscapePadLayout = landscapePad }
         let metrics = KeyboardLayoutPolicy.metrics(
             viewWidth: view.bounds.width, displaySize: scene?.screen.bounds.size,
-            sceneHeight: scene?.coordinateSpace.bounds.height, isPad: pad,
+            sceneHeight: sceneSize?.height, isPad: pad,
             compactVertical: traitCollection.verticalSizeClass == .compact,
             showsSymbolBar: model.showsSymbolBar)
         if model.isCompactLayout != metrics.isCompactLayout { model.isCompactLayout = metrics.isCompactLayout }
@@ -872,6 +883,9 @@ private final class KeyboardModel: ObservableObject {
 
     var showsUnicode: Bool { panel == .unicode || isSearching || inspection != nil || symbolBoardInspectionText != nil || symbolBoardManagerPresented }
     var hasSymbolBoardOverlay: Bool { symbolBoardManagerPresented || symbolBoardSaveText != nil }
+    var showsCharacterOrder: Bool {
+        showsUnicode && !isShowingSymbolPages && inspection == nil && symbolBoardInspectionText == nil && !hasSymbolBoardOverlay
+    }
     var isShowingSymbolPages: Bool { panel == .unicode && section == .saved && !isSearching }
     var modeValue: String { inspection != nil || symbolBoardInspectionText != nil ? "inspection" : isSearching ? "query" : panel == .typing ? "typing" : "unicode" }
     var typingLayoutValue: String {
@@ -1564,7 +1578,7 @@ private struct UnicodeKeyboardView: View {
 
             panelButton
             if model.showsUnicode { sectionMenu }
-            optionsMenu
+            if model.showsCharacterOrder { optionsMenu }
             // A single fixed trailing key in search, browsing and inspection.
             RepeatingDeleteKey(action: delete, isQuery: model.isSearching, route: model.inputModeID,
                 enabled: model.showsUnicodeToolbar && !model.hasSymbolBoardOverlay)
@@ -2311,8 +2325,8 @@ private struct KeyboardTypingView: View {
                 VStack(spacing: plan.rowSpacing) {
                     if plan.numberRowCount > 0 { numberRow(height: plan.keyHeight, ansiPad: ansiStyle) }
                     if let pad {
-                        if pad.isANSI { ansiRows(pad, height: plan.keyHeight) }
-                        else { padRows(pad, height: plan.keyHeight) }
+                        if pad.isANSI { ansiRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0) }
+                        else { padRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0) }
                     } else {
                         ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: typing.state.layout, hasAuxiliaryRow: plan.numberRowCount > 0, ansiPad: ansiStyle, padLayout: padLayout).enumerated()), id: \.offset) { index, keys in
                             HStack(spacing: isPad ? 7 : 5) {
@@ -2343,7 +2357,7 @@ private struct KeyboardTypingView: View {
         }
     }
 
-    private func padRows(_ pad: KeyboardPadTypingLayoutPlan, height: CGFloat) -> some View {
+    private func padRows(_ pad: KeyboardPadTypingLayoutPlan, height: CGFloat, hasAuxiliaryRow: Bool) -> some View {
         ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: .letters, hasAuxiliaryRow: false, widePad: true).enumerated()), id: \.offset) { row, keys in
             HStack(spacing: pad.keySpacing) {
                 if row == 0 {
@@ -2360,7 +2374,7 @@ private struct KeyboardTypingView: View {
                     padShift(width: pad.shiftWidth, height: height, right: false)
                 }
                 ForEach(keys, id: \.self) { key in
-                    typingCharacterKey(key, hasAuxiliaryRow: false, isAuxiliaryKey: false, widePad: true,
+                    typingCharacterKey(key, hasAuxiliaryRow: hasAuxiliaryRow, isAuxiliaryKey: false, widePad: true,
                         identifier: "keyboard.typing.key.\(key)", fontSize: 23)
                         .frame(width: pad.characterWidth, height: height).keyboardKeySurface(radius: 7)
                 }
@@ -2376,7 +2390,7 @@ private struct KeyboardTypingView: View {
         }
     }
 
-    private func ansiRows(_ pad: KeyboardPadTypingLayoutPlan, height: CGFloat) -> some View {
+    private func ansiRows(_ pad: KeyboardPadTypingLayoutPlan, height: CGFloat, hasAuxiliaryRow: Bool) -> some View {
         let rows = pad.hasNumberRow ? KeyboardTypingLayoutPolicy.ansiRows : KeyboardTypingLayoutPolicy.compactANSIRows
         let offset = pad.hasNumberRow ? 1 : 0
         return ForEach(Array(rows.enumerated()), id: \.offset) { row, keys in
@@ -2392,7 +2406,7 @@ private struct KeyboardTypingView: View {
                         .frame(width: pad.capsWidth, height: height).keyboardKeySurface(radius: 7, modifier: true)
                 } else if row == offset + 2 { padShift(width: pad.shiftWidth, height: height, right: false) }
                 ForEach(keys, id: \.self) { key in
-                    typingCharacterKey(key, hasAuxiliaryRow: false, isAuxiliaryKey: false, widePad: true, ansiPad: true,
+                    typingCharacterKey(key, hasAuxiliaryRow: hasAuxiliaryRow, isAuxiliaryKey: false, widePad: true, ansiPad: true,
                         identifier: "keyboard.typing.key.\(key)", fontSize: 23)
                         .frame(width: pad.hasNumberRow && row == 1 && key == "\\" ? pad.backslashWidth : pad.characterWidth, height: height)
                         .keyboardKeySurface(radius: 7)
@@ -2453,7 +2467,7 @@ private struct KeyboardTypingView: View {
             hint: text == nil ? "Tap is off. Hold or swipe for configured choices." : nil,
             preservesPressAcrossTextChanges: true,
             longPressOptions: gestures.longPress, swipeUp: gestures.swipeUp, swipeDown: gestures.swipeDown,
-            secondaryText: widePad || hasNumberRow ? gestures.swipeDown.first.map(symbolBoardPreview) : nil,
+            secondaryText: widePad || hasNumberRow ? gestures.swipeUp.first.map(symbolBoardPreview) : nil,
             factory: { [mode = mode] in variants(mode, key, hasAuxiliaryRow, isAuxiliaryKey, widePad, ansiPad) })
     }
 

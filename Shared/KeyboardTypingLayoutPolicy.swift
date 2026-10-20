@@ -53,6 +53,22 @@ struct KeyboardPadTypingLayoutPlan: Equatable {
 enum KeyboardTypingLayoutPolicy {
     static let regularKeyHeight: CGFloat = 36 * 1.15
     static let rowSpacing: CGFloat = 4
+    /// Remote input windows can lack a scene or retain its portrait geometry.
+    /// When the rendered keyboard is wider, use its own display's portrait
+    /// edge. Never use the process-wide main screen for this fallback.
+    static func isLandscapeContext(viewWidth: CGFloat, sceneSize: CGSize?, displaySize: CGSize?,
+                                   orientationIsLandscape: Bool = false) -> Bool {
+        guard viewWidth.isFinite, viewWidth > 0 else { return false }
+        if orientationIsLandscape { return true }
+        if let sceneSize, sceneSize.width.isFinite, sceneSize.height.isFinite,
+           sceneSize.width > 0, sceneSize.height > 0, viewWidth <= sceneSize.width + 1 {
+            return sceneSize.width > sceneSize.height
+        }
+        guard let displaySize, displaySize.width.isFinite, displaySize.height.isFinite,
+              displaySize.width > 0, displaySize.height > 0 else { return false }
+        return viewWidth > min(displaySize.width, displaySize.height) + 1
+            && viewWidth <= max(displaySize.width, displaySize.height) + 1
+    }
     static func typingKeyHeight(availableWidth: CGFloat, isPad: Bool) -> CGFloat {
         isPad && availableWidth.isFinite && availableWidth >= 650 ? 52 * 1.15 : regularKeyHeight
     }

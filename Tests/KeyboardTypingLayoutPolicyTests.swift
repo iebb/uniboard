@@ -7,6 +7,37 @@ import XCTest
 #endif
 
 final class KeyboardTypingLayoutPolicyTests: XCTestCase {
+    func testLandscapeContextUsesSceneGeometryAndFallsBackToTheInputWindowsDisplay() {
+        let portrait = CGSize(width: 1032, height: 1376), landscape = CGSize(width: 1376, height: 1032)
+        XCTAssertTrue(KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: 1376, sceneSize: portrait,
+            displaySize: nil, orientationIsLandscape: true))
+        XCTAssertTrue(KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: 1000, sceneSize: landscape, displaySize: nil))
+        XCTAssertFalse(KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: 1032, sceneSize: portrait, displaySize: landscape))
+        XCTAssertTrue(KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: 1376, sceneSize: portrait, displaySize: landscape),
+                      "A stale portrait scene must not override the rendered landscape keyboard width")
+        for display in [portrait, landscape] {
+            for (width, expected) in [(CGFloat(1032), false), (1033, false), (CGFloat(1033).nextUp, true),
+                                      (1376, true), (1377, true), (CGFloat(1377).nextUp, false)] {
+                XCTAssertEqual(KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: width, sceneSize: nil,
+                    displaySize: display), expected)
+            }
+        }
+    }
+
+    func testLandscapeContextRejectsInvalidGeometryAndDoesNotInventAnOrientation() {
+        let display = CGSize(width: 1032, height: 1376)
+        let invalid: [CGFloat] = [0, -1, .nan, .infinity, -.infinity]
+        for value in invalid {
+            XCTAssertFalse(KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: value, sceneSize: display,
+                displaySize: display, orientationIsLandscape: true))
+            for size in [CGSize(width: value, height: 1376), CGSize(width: 1032, height: value)] {
+                XCTAssertTrue(KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: 1376, sceneSize: size, displaySize: display))
+                XCTAssertFalse(KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: 1376, sceneSize: nil, displaySize: size))
+            }
+        }
+        XCTAssertFalse(KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: 1376, sceneSize: nil, displaySize: nil))
+    }
+
     func testShiftedTapFollowsLettersAndManualANSIShiftButNeverSentenceDigitsOrOtherPages() {
         var state = KeyboardTypingState()
         XCTAssertFalse(KeyboardTypingLayoutPolicy.usesShiftedTap(for: "q", state: state, ansiPad: true))

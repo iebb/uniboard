@@ -167,6 +167,142 @@ final class KeyboardVariantControlTests: XCTestCase {
         }
     }
 
+    func testLongPressCanSwitchUpDownUpBeforeOneExactRelease() {
+        let clock = GestureClock(), route = Route(), owner = NSObject()
+        let state = KeyboardVariantInteraction(schedule: clock.schedule)
+        let composed = "é", decomposed = "e\u{301}"
+        gestureSetup(state, route: route, long: ["a", "à"], up: [composed, decomposed], down: ["A", "À"])
+        var shown: [[String]] = []
+        state.show = { values, inspect, edit in
+            XCTAssertFalse(inspect || edit); shown.append(values); return true
+        }
+        XCTAssertTrue(state.begin(owner: owner)); clock.fire(0)
+        XCTAssertEqual(shown.last, ["a", "à"])
+        state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -24))
+        state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -60))
+        state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -49))
+        XCTAssertEqual(shown.count, 2, "Sub-threshold reversal keeps the current group")
+        state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -48))
+        XCTAssertEqual(shown.last, ["A", "À"], "Down switches while still above the original key")
+        state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -20))
+        state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -32))
+        XCTAssertEqual(shown.last?.map { Array($0.utf16) }, [composed, decomposed].map { Array($0.utf16) })
+        state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 36, y: -32))
+        XCTAssertTrue(route.inserted.isEmpty)
+        clock.fire(0) // A previously queued hold cannot restore its old group.
+        XCTAssertTrue(state.end(owner: owner, inside: true))
+        XCTAssertEqual(route.inserted.map { Array($0.utf16) }, [Array(decomposed.utf16)])
+        XCTAssertFalse(state.end(owner: owner, inside: true))
+    }
+
+    func testDirectFlickCanReverseAfterSidewaysSelectionWithoutCrossingOriginalKey() {
+        let state = KeyboardVariantInteraction(), route = Route(), owner = NSObject()
+        gestureSetup(state, route: route, up: ["u0", "u1"], down: ["d0", "d1"])
+        var shown: [[String]] = []
+        state.show = { values, _, _ in shown.append(values); return true }
+        XCTAssertTrue(state.begin(owner: owner))
+        for point in [CGPoint(x: 0, y: -20), CGPoint(x: 36, y: -20), CGPoint(x: 36, y: -8),
+                      CGPoint(x: 36, y: 20), CGPoint(x: 36, y: 8), CGPoint(x: 72, y: 8)] {
+            state.move(owner: owner, index: nil, movedBeforeHold: true, delta: point)
+        }
+        XCTAssertEqual(shown, [["u0", "u1"], ["d0", "d1"], ["u0", "u1"]])
+        XCTAssertTrue(state.end(owner: owner, inside: true))
+        XCTAssertEqual(route.inserted, ["u1"])
+    }
+
+    func testUnavailableFlickGroupDoesNotDismissOrRetargetAnOpenHold() {
+        for unavailable: [String]? in [nil, [], [""]] {
+            let clock = GestureClock(), route = Route(), owner = NSObject()
+            let state = KeyboardVariantInteraction(schedule: clock.schedule)
+            gestureSetup(state, route: route, long: ["h0", "h1"], up: unavailable)
+            var shown = 0
+            state.show = { _, _, _ in shown += 1; return true }
+            XCTAssertTrue(state.begin(owner: owner)); clock.fire(0)
+            state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -24))
+            XCTAssertTrue(state.popupVisible); XCTAssertEqual(shown, 1)
+            state.move(owner: owner, index: 1, movedBeforeHold: false)
+            XCTAssertTrue(state.end(owner: owner, inside: true))
+            XCTAssertEqual(route.inserted, ["h1"])
+        }
+    }
+
+    func testDiagonalHoldChoiceKeepsAccentGroupWhileVerticalMotionCanSwitchIt() {
+        let clock = GestureClock(), route = Route(), owner = NSObject()
+        let state = KeyboardVariantInteraction(schedule: clock.schedule)
+        gestureSetup(state, route: route, long: ["i", "ì"], up: ["£"], down: ["I"])
+        var shown: [[String]] = []
+        state.show = { values, _, _ in shown.append(values); return true }
+        XCTAssertTrue(state.begin(owner: owner)); clock.fire(0)
+        for point in [CGPoint(x: -4, y: -12), CGPoint(x: -8, y: -24), CGPoint(x: -15, y: -50)] {
+            state.move(owner: owner, index: 1, movedBeforeHold: true, delta: point, directPopupIndex: 1)
+        }
+        XCTAssertEqual(shown, [["i", "ì"]])
+        XCTAssertTrue(state.end(owner: owner, inside: true))
+        XCTAssertEqual(route.inserted, ["ì"])
+    }
+
+    func testUnmappedVerticalMovementStillSelectsInspectAndEditFromAnOpenPageKey() {
+        for command in 0..<2 {
+            let clock = GestureClock(), route = Route(), owner = NSObject()
+            let state = KeyboardVariantInteraction(schedule: clock.schedule)
+            setup(state, route: route, variants: [], edit: true)
+            XCTAssertTrue(state.begin(owner: owner)); clock.fire(0)
+            state.move(owner: owner, index: command + 1, movedBeforeHold: true,
+                       delta: CGPoint(x: 0, y: -40), directPopupIndex: command + 1)
+            XCTAssertTrue(state.end(owner: owner, inside: true))
+            XCTAssertEqual(route.edits, command == 1 ? 1 : 0)
+            XCTAssertEqual(route.inspected, command == 0 ? ["a"] : [])
+            XCTAssertTrue(route.inserted.isEmpty)
+        }
+    }
+
+    func testGroupSwitchRejectsFailedPresentationStaleContextAndReentrantDismissal() {
+        for failure in 0..<3 {
+            let clock = GestureClock(), route = Route(), owner = NSObject()
+            let state = KeyboardVariantInteraction(schedule: clock.schedule)
+            gestureSetup(state, route: route, long: ["h"], up: ["u"])
+            var shows = 0, hides = 0
+            state.show = { _, _, _ in shows += 1; return failure != 0 || shows == 1 }
+            state.hide = { [weak state] in hides += 1; if failure == 2 { state?.cancel() } }
+            XCTAssertTrue(state.begin(owner: owner)); clock.fire(0)
+            if failure == 1 { route.context = nil }
+            state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -24))
+            XCTAssertFalse(state.popupVisible); XCTAssertNil(state.token)
+            XCTAssertFalse(state.end(owner: owner, inside: true)); XCTAssertTrue(route.inserted.isEmpty)
+            XCTAssertEqual(shows, failure == 0 ? 2 : 1)
+            XCTAssertEqual(hides, failure == 0 ? 2 : 1)
+        }
+    }
+
+    func testNativeGroupReplacementKeepsOnlyOneBoundedPopupAndRemovesItOnCancel() throws {
+        let clock = GestureClock(), state = KeyboardVariantInteraction(schedule: clock.schedule)
+        let button = KeyboardVariantButton(interaction: state), owner = NSObject()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 300))
+        let input = UIInputView(frame: window.bounds, inputViewStyle: .keyboard)
+        window.addSubview(input); input.addSubview(button)
+        button.frame = CGRect(x: 110, y: 180, width: 42, height: 41.4)
+        button.configure(context: UUID(), key: "letter.a", text: "a", variants: [], enabled: true,
+                         font: .systemFont(ofSize: 23), longPressOptions: ["a", "à"], swipeUp: ["@", "å"], swipeDown: ["A"]) {
+            .init(isCurrent: { true }, insert: { _ in XCTFail("Switching alone must not insert"); return false },
+                  longPressOptions: ["a", "à"], swipeUp: ["@", "å"], swipeDown: ["A"])
+        }
+        XCTAssertTrue(button.beginPhysicalPress(owner: owner, point: CGPoint(x: 21, y: 20)))
+        clock.fire(0)
+        var previous = try XCTUnwrap(input.subviews.first { $0.accessibilityIdentifier == "keyboard.variants" })
+        for y: CGFloat in [-24, -12, -24, -12] {
+            state.move(owner: owner, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: y))
+            XCTAssertNil(previous.superview)
+            let popups = input.subviews.filter { $0.accessibilityIdentifier == "keyboard.variants" }
+            XCTAssertEqual(popups.count, 1)
+            previous = try XCTUnwrap(popups.first)
+            XCTAssertTrue(input.bounds.contains(previous.frame))
+            XCTAssertEqual(previous.subviews.compactMap { ($0 as? UILabel)?.text }, y == -24 ? ["@", "å"] : ["A"])
+        }
+        state.cancel()
+        XCTAssertNil(previous.superview)
+        XCTAssertFalse(input.subviews.contains { $0.accessibilityIdentifier == "keyboard.variants" })
+    }
+
     func testEveryWrappedFlickCandidateCanBeSelectedAndOriginalTapRemainsLiteral() {
         let state = KeyboardVariantInteraction(), route = Route(), owner = NSObject()
         let values = (0..<16).map { "choice\($0)" }

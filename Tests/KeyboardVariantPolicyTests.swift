@@ -50,67 +50,67 @@ final class KeyboardVariantPolicyTests: XCTestCase {
         for invalid in ["", "qq", "é", "e\u{301}", "👩‍💻", " ", "\n", "\t"] {
             XCTAssertEqual(KeyboardVariantPolicy.macOSOptionCandidates(for: invalid), [])
         }
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "q", state: .init()), ["Q"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: .init()), ["Q"])
     }
 
     func testMacMappingKeepsGestureOverridesAndVisibleDigitRowPriority() {
         var state = KeyboardTypingState()
         for ansi in [false, true] {
-            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state, widePad: true, ansiPad: ansi, mapping: .macOS), ["å", "Å"])
-            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true, ansiPad: ansi, mapping: .macOS), ["œ", "Œ"])
-            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true, ansiPad: ansi, mapping: .macOS, hasNumberRow: true).first, "_")
-            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "1", state: state, widePad: true, ansiPad: ansi, mapping: .macOS), ["¡", "⁄"])
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "a", state: state, widePad: true, ansiPad: ansi, mapping: .macOS), ["å", "Å"])
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "q", state: state, widePad: true, ansiPad: ansi, mapping: .macOS), ["œ", "Œ"])
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "q", state: state, widePad: true, ansiPad: ansi, mapping: .macOS, hasNumberRow: true).first, "_")
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "1", state: state, widePad: true, ansiPad: ansi, mapping: .macOS), ["¡", "⁄"])
         }
-        let defaults = KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state, widePad: true, mapping: .macOS)
+        let defaults = KeyboardVariantPolicy.defaultSwipeUp(for: "a", state: state, widePad: true, mapping: .macOS)
         XCTAssertEqual(KeyboardVariantPolicy.candidates(override: ["custom"], defaults: defaults), ["custom"])
         XCTAssertEqual(KeyboardVariantPolicy.candidates(override: [], defaults: defaults), [])
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state, widePad: false, mapping: .macOS), [])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "a", state: state, widePad: false, mapping: .macOS), [])
         state.pressShift(at: 1)
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "s", state: state, widePad: true, mapping: .macOS), ["ß", "Í"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "s", state: state, widePad: true, mapping: .macOS), ["ß", "Í"])
         state.selectLayout(.numbers)
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state, widePad: true, mapping: .macOS), [])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "a", state: state, widePad: true, mapping: .macOS), [])
     }
-    func testVisibleDigitRowReplacesEveryQToPDownFlickWithItsComplementarySymbolPageKey() {
+    func testVisibleDigitRowReplacesEveryQToPUpFlickWithItsComplementarySymbolPageKey() {
         var state = KeyboardTypingState()
         let keys = KeyboardTypingLayout.letters.rows[0]
         let expected = KeyboardTypingLayoutPolicy.rows(for: .numbers, hasAuxiliaryRow: true)[0]
         for wide in [false, true] {
             for (key, text) in zip(keys, expected) {
-                let defaults = KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state, widePad: wide, hasNumberRow: true)
+                let defaults = KeyboardVariantPolicy.defaultSwipeUp(for: key, state: state, widePad: wide, hasNumberRow: true)
                 XCTAssertEqual(defaults.first, text)
                 XCTAssertEqual(KeyboardVariantPolicy.candidates(override: ["custom"], defaults: defaults), ["custom"])
             }
         }
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state, widePad: false, hasNumberRow: true), [])
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true, mapping: .none, hasNumberRow: true), [])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "a", state: state, widePad: false, hasNumberRow: true), [])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "q", state: state, widePad: true, mapping: .none, hasNumberRow: true), [])
         state.selectLayout(.numbers)
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true, hasNumberRow: true), [])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "q", state: state, widePad: true, hasNumberRow: true), [])
     }
     func testStandardPageMappingAndOffPresetRemainOverrideable() {
         let state = KeyboardTypingState()
         for (key, expected) in [("q", "1"), ("p", "0"), ("a", "-"), ("l", "@"), ("z", "."), ("n", "\""), ("m", "[")] {
-            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state, widePad: true, mapping: .standard).first, expected)
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: key, state: state, widePad: true, mapping: .standard).first, expected)
         }
         for mapping in KeyboardPadSymbolMapping.allCases {
             for key in ["q", "[", "1", "", "qq"] {
-                let values = KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state, widePad: true, ansiPad: true, mapping: mapping)
+                let values = KeyboardVariantPolicy.defaultSwipeUp(for: key, state: state, widePad: true, ansiPad: true, mapping: mapping)
                 if mapping == .none { XCTAssertEqual(values, []) }
                 XCTAssertEqual(KeyboardVariantPolicy.candidates(override: ["custom"], defaults: values), ["custom"])
                 XCTAssertEqual(KeyboardVariantPolicy.candidates(override: [], defaults: values), [])
             }
         }
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: ",", state: state, widePad: true, mapping: .standard).first, "!")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: ",", state: state, widePad: true, mapping: .standard).first, "!")
     }
-    func testANSIDownFlickUsesOppositeSymbolWhileLettersKeepStockDigits() {
+    func testANSIUpFlickUsesOppositeSymbolWhileLettersKeepStockDigits() {
         var state = KeyboardTypingState()
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "1", state: state, widePad: true, ansiPad: true).first, "!")
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "[", state: state, widePad: true, ansiPad: true).first, "{")
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true, ansiPad: true).first, "1")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "1", state: state, widePad: true, ansiPad: true).first, "!")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "[", state: state, widePad: true, ansiPad: true).first, "{")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "q", state: state, widePad: true, ansiPad: true).first, "1")
         state.pressShift(at: 1)
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "1", state: state, widePad: true, ansiPad: true).first, "1")
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "1", state: state, widePad: false, ansiPad: true), [])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "1", state: state, widePad: true, ansiPad: true).first, "1")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "1", state: state, widePad: false, ansiPad: true), [])
     }
-    func testPadDownFlicksMatchAllPrintedHintsAndRespectDisabledAndCustomChoices() {
+    func testPadUpFlicksMatchAllPrintedHintsAndRespectDisabledAndCustomChoices() {
         let keys = Array("qwertyuiopasdfghjklzxcvbnm,.").map(String.init)
         let values = Array("1234567890@#¥&*()'\"%-+=/;:!?").map(String.init)
         XCTAssertEqual(keys.count, 28)
@@ -121,21 +121,21 @@ final class KeyboardVariantPolicyTests: XCTestCase {
             if shift == .uppercase { state.pressShift(at: 1) }
             if shift == .capsLock { state.toggleCapsLock() }
             for (key, expected) in zip(keys, values) {
-                let choices = KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state, widePad: true)
+                let choices = KeyboardVariantPolicy.defaultSwipeUp(for: key, state: state, widePad: true)
                 XCTAssertEqual(choices.first, expected)
                 XCTAssertEqual(Set(choices).count, choices.count)
                 XCTAssertEqual(choices, KeyboardVariantPolicy.options(text: expected, variants: KeyboardVariantPolicy.stockVariants(for: expected)))
-                XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state, widePad: false), [])
+                XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: key, state: state, widePad: false), [])
                 XCTAssertEqual(KeyboardVariantPolicy.candidates(override: [], defaults: choices), [])
                 XCTAssertEqual(KeyboardVariantPolicy.candidates(override: ["abc"], defaults: choices), ["abc"])
             }
         }
         for invalid in ["", "Q", "é", "qq", "1", "\t", "utility.space"] {
-            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: invalid, state: state, widePad: true), [])
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: invalid, state: state, widePad: true), [])
         }
         for layout in [KeyboardTypingLayout.numbers, .symbols] {
             state.selectLayout(layout)
-            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: state, widePad: true), [])
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "q", state: state, widePad: true), [])
         }
     }
 
@@ -147,19 +147,19 @@ final class KeyboardVariantPolicyTests: XCTestCase {
                 for mapping in KeyboardPadSymbolMapping.allCases {
                     for wide in [false, true] {
                         for numbers in [false, true] {
-                            for key in KeyboardKeySettings.descriptors.map(\.title) {
+                            for key in KeyboardKeySettings.descriptors.compactMap(\.text) {
                                 for auxiliary in [false, true] {
                                     let value = KeyboardVariantPolicy.gestureCandidates(for: key, original: state.label(for: key), state: state,
                                         isAuxiliaryKey: auxiliary, widePad: wide, ansiPad: wide, mapping: mapping,
                                         hasNumberRow: numbers, settings: .defaults)
-                                    let all = value.longPress + value.swipeUp + value.swipeDown
+                                    let all = value.longPress + value.swipeDown + value.swipeUp
                                     XCTAssertEqual(Set(all.map { Array($0.utf16) }).count, all.count, key)
                                     XCTAssertTrue(all.allSatisfy(KeyboardVariantPolicy.validText))
                                     XCTAssertLessThanOrEqual(value.longPress.count, 17)
-                                    XCTAssertLessThanOrEqual(value.swipeUp.count, 16)
                                     XCTAssertLessThanOrEqual(value.swipeDown.count, 16)
-                                    if auxiliary { XCTAssertTrue(value.swipeUp.isEmpty) }
-                                    if mapping == .none { XCTAssertTrue(value.swipeDown.isEmpty) }
+                                    XCTAssertLessThanOrEqual(value.swipeUp.count, 16)
+                                    if auxiliary { XCTAssertTrue(value.swipeDown.isEmpty) }
+                                    if mapping == .none { XCTAssertTrue(value.swipeUp.isEmpty) }
                                 }
                             }
                         }
@@ -175,16 +175,16 @@ final class KeyboardVariantPolicyTests: XCTestCase {
             let value = KeyboardVariantPolicy.gestureCandidates(for: key, original: key, state: state,
                 isAuxiliaryKey: false, widePad: false, ansiPad: false, mapping: .iPad,
                 hasNumberRow: true, settings: .defaults)
-            XCTAssertEqual(value.swipeDown, key == "i" ? [currency, "ˆ"] : key == "u" ? [currency, "¨"] : [currency])
-            XCTAssertEqual(value.swipeUp.first, key.uppercased())
+            XCTAssertEqual(value.swipeUp, key == "i" ? [currency, "ˆ"] : key == "u" ? [currency, "¨"] : [currency])
+            XCTAssertEqual(value.swipeDown.first, key.uppercased())
             XCTAssertTrue(KeyboardVariantPolicy.englishVariants(for: key, uppercase: false).allSatisfy { value.longPress.contains($0) })
             XCTAssertFalse(value.longPress.contains(currency))
-            XCTAssertFalse(value.swipeUp.contains(currency))
+            XCTAssertFalse(value.swipeDown.contains(currency))
         }
         XCTAssertTrue(KeyboardVariantPolicy.stockVariants(for: "£").contains("¥"), "Actual currency keys retain their currency family")
     }
 
-    func testActualCurrencyKeysKeepCompleteHoldFamiliesAndOnlyUnusedDownChoices() {
+    func testActualCurrencyKeysKeepCompleteHoldFamiliesAndOnlyUnusedUpChoices() {
         var state = KeyboardTypingState(); state.selectLayout(.symbols)
         for key in ["$", "€", "£", "¥"] {
             let value = KeyboardVariantPolicy.gestureCandidates(for: key, original: key, state: state,
@@ -192,8 +192,8 @@ final class KeyboardVariantPolicyTests: XCTestCase {
                 hasNumberRow: true, settings: .defaults)
             let family = KeyboardVariantPolicy.options(text: key, variants: KeyboardVariantPolicy.stockVariants(for: key))
             XCTAssertEqual(value.longPress, family)
-            XCTAssertTrue(value.swipeUp.isEmpty)
-            XCTAssertTrue(value.swipeDown.allSatisfy { !KeyboardVariantPolicy.contains($0, in: family) })
+            XCTAssertTrue(value.swipeDown.isEmpty)
+            XCTAssertTrue(value.swipeUp.allSatisfy { !KeyboardVariantPolicy.contains($0, in: family) })
         }
     }
 
@@ -285,33 +285,33 @@ final class KeyboardVariantPolicyTests: XCTestCase {
         XCTAssertNil(KeyboardVariantPolicy.horizontalChoice(deltaX: .greatestFiniteMagnitude, count: 2, stride: .leastNonzeroMagnitude))
     }
 
-    func testDefaultSwipeUpOffersOppositeCaseAndDiacriticsWithoutChangingTypingState() {
+    func testDefaultSwipeDownOffersOppositeCaseAndDiacriticsWithoutChangingTypingState() {
         var lower = KeyboardTypingState()
         let beforeLower = lower
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "q", state: lower), ["Q"])
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "a", state: lower), ["A", "À", "Á", "Â", "Ä", "Æ", "Ã", "Å", "Ā"])
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "s", state: lower), ["S", "ẞ", "Ś", "Š"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "q", state: lower), ["Q"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: lower), ["A", "À", "Á", "Â", "Ä", "Æ", "Ã", "Å", "Ā"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "s", state: lower), ["S", "ẞ", "Ś", "Š"])
         XCTAssertEqual(lower, beforeLower)
         lower.pressShift(at: 1)
         let beforeUpper = lower
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "a", state: lower), ["a", "à", "á", "â", "ä", "æ", "ã", "å", "ā"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: lower), ["a", "à", "á", "â", "ä", "æ", "ã", "å", "ā"])
         XCTAssertEqual(lower, beforeUpper)
         lower.pressShift(at: 1.1)
         XCTAssertEqual(lower.shift, .capsLock)
         let beforeCaps = lower
-        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "s", state: lower), ["s", "ß", "ś", "š"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "s", state: lower), ["s", "ß", "ś", "š"])
         XCTAssertEqual(lower, beforeCaps)
     }
 
-    func testDefaultSwipeUpAppliesOnlyToBaseASCIILetterKeysOnTheLettersPage() {
+    func testDefaultSwipeDownAppliesOnlyToBaseASCIILetterKeysOnTheLettersPage() {
         var state = KeyboardTypingState()
         for key in ["", "A", "ab", "é", "e\u{301}", "0", "$", "👩‍💻", " "] {
-            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: key, state: state), [])
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: key, state: state), [])
         }
         for layout in [KeyboardTypingLayout.numbers, .symbols] {
             state.selectLayout(layout)
-            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "a", state: state), [])
-            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "0", state: state), [])
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: state), [])
+            XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "0", state: state), [])
         }
     }
 

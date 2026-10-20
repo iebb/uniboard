@@ -41,6 +41,8 @@ final class KeyboardVariantInteraction {
     private var inspectedIndex = 0
     private var swipeOriginX: CGFloat = 0
     private var swipeHasLateralIntent = false
+    private var gestureAnchor = CGPoint.zero
+    private var previousGestureDelta = CGPoint.zero
     private var popupAllowsCommands = true
     private var tapText = ""
     private var activeGesture: KeyboardKeySettings.Gesture?
@@ -160,6 +162,11 @@ final class KeyboardVariantInteraction {
 
     private func openPopup(id: UUID) {
         guard token == id, let actions else { return }
+        if popupVisible {
+            popupVisible = false
+            hide?()
+            guard token == id else { return }
+        }
         popupVisible = true
         guard show?(pressOptions, popupAllowsCommands && actions.inspect != nil,
                     popupAllowsCommands && actions.edit != nil) == true else {
@@ -178,6 +185,30 @@ final class KeyboardVariantInteraction {
         return true
     }
 
+    /// Reversing a continuous vertical drag changes groups after a deliberate
+    /// movement, without requiring a return past the original key.
+    /// Sideways selection starts a new vertical reference and keeps its group.
+    private func gestureDirection(at delta: CGPoint) -> KeyboardKeySettings.Gesture? {
+        let step = CGPoint(x: delta.x - previousGestureDelta.x, y: delta.y - previousGestureDelta.y)
+        previousGestureDelta = delta
+        guard step.x.isFinite, step.y.isFinite else { cancel(ending: false); return nil }
+        guard popupVisible else { return KeyboardVariantPolicy.swipeDirection(delta: delta) }
+        if abs(step.x) > abs(step.y) {
+            gestureAnchor = delta
+            return nil
+        }
+        if swipeSelecting, (activeGesture == .swipeUp && delta.y < gestureAnchor.y
+            || activeGesture == .swipeDown && delta.y > gestureAnchor.y) {
+            gestureAnchor = delta
+            return nil
+        }
+        let travel = CGPoint(x: delta.x - gestureAnchor.x, y: delta.y - gestureAnchor.y)
+        // A diagonal slide into the open accent row remains a hold choice.
+        // Changing its group requires a clearly vertical gesture instead.
+        if activeGesture == .longPress, abs(travel.x) > abs(travel.y) / 4 { return nil }
+        return KeyboardVariantPolicy.swipeDirection(delta: travel)
+    }
+
     func move(owner: AnyObject, index: Int?, movedBeforeHold: Bool, delta: CGPoint? = nil, directPopupIndex: Int? = nil) {
         guard tracking, self.owner === owner, let id = token, let actions else { return }
         let current = actions.isCurrent()
@@ -189,6 +220,31 @@ final class KeyboardVariantInteraction {
             if movedBeforeHold { cancel(ending: false) }
             return
         }
+        if let delta, let direction = gestureDirection(at: delta), direction != activeGesture {
+            let configured = direction == .swipeUp ? actions.swipeUp : actions.swipeDown
+            let choices = configured.map { KeyboardVariantPolicy.candidates(override: $0, defaults: []) } ?? []
+            if choices.isEmpty {
+                if !popupVisible { cancel(ending: false); return }
+                gestureAnchor = delta
+                if swipeSelecting { return }
+                // Pages may offer Inspect/Edit without any swipe mapping.
+                // Keep their existing direct hold-choice selection usable.
+            } else {
+                timer?.invalidate(); timer = nil
+                pressOptions = choices
+                popupAllowsCommands = false
+                swipeSelecting = true
+                activeGesture = direction
+                gestureAnchor = delta
+                swipeOriginX = delta.x
+                swipeHasLateralIntent = false
+                selected = 0
+                inspectedIndex = 0
+                openPopup(id: id)
+                return
+            }
+        }
+        guard token == id else { return }
         if swipeSelecting {
             // A vertical flick may cross the popup by accident. Direct cells
             // become selectable only after deliberate sideways motion. Keep
@@ -204,22 +260,6 @@ final class KeyboardVariantInteraction {
                 cancel(ending: false); return
             }
             if selected != value { selected = value; highlight?(value) }
-            return
-        }
-        if !popupVisible, let delta, let direction = KeyboardVariantPolicy.swipeDirection(delta: delta) {
-            let configured = direction == .swipeUp ? actions.swipeUp : actions.swipeDown
-            guard let configured else { cancel(ending: false); return }
-            let choices = KeyboardVariantPolicy.candidates(override: configured, defaults: [])
-            guard !choices.isEmpty else { cancel(ending: false); return }
-            timer?.invalidate(); timer = nil
-            pressOptions = choices
-            popupAllowsCommands = false
-            swipeSelecting = true
-            activeGesture = direction
-            swipeOriginX = delta.x
-            swipeHasLateralIntent = false
-            selected = 0
-            openPopup(id: id)
             return
         }
         if !popupVisible {
@@ -279,6 +319,8 @@ final class KeyboardVariantInteraction {
         swipeSelecting = false
         swipeOriginX = 0
         swipeHasLateralIntent = false
+        gestureAnchor = .zero
+        previousGestureDelta = .zero
         popupAllowsCommands = true
         tapText = ""
         activeGesture = nil

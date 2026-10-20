@@ -1,7 +1,7 @@
 Uniboard 1.1 beta. Public App Store release awaits device approval.
 
 SEARCH AND SAVE TOUCH FIXES
-Search uses four rows of normal-height query keys. Portrait results scroll horizontally above the keys; iPad and landscape put results beside them. No result or empty-state message should squeeze the keys. Check 41.4pt phone/narrow keys and 59.8pt wide iPad keys, rotations and visible host content.
+Search uses four rows of normal-height query keys. Portrait results scroll horizontally above the keys; iPad and landscape put results beside them. Result keycaps stay fully clear at scroll edges; no result or empty-state message should squeeze the keys. Check 41.4pt phone/narrow keys and 59.8pt wide iPad keys, rotations and visible host content.
 
 Both Delete keys edit before the local search caret. Test empty/start/middle/end, repeated taps, held Delete, releasing outside, cancelling, inspecting a result and returning, Done and reopening. Query deletion must never alter the receiving app. Done restores host typing and host Delete while keeping the query. A cancelled touch must stop repeats and permit the next tap.
 

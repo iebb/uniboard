@@ -2405,6 +2405,31 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("Search result keys scroll horizontally without shrinking query keys or inserting")
     }
 
+    func testSystemKeyboardLandscapeScalarAndEmojiResultsStayClear() throws {
+        try requireKeyboardIntegration()
+        let context = "Keep this host unchanged."
+        let input = openSystemKeyboardHost(initialText: context)
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        enterKeyboardQuery("u+1f680")
+        settleKeyboardOrientation(.landscapeLeft)
+        let scalar = app.buttons["keyboard.character.U+1F680"].firstMatch
+        XCTAssertTrue(scalar.waitForExistence(timeout: 10))
+        XCTAssertTrue(scalar.isHittable)
+        XCTAssertTrue(app.frame.contains(scalar.frame))
+        XCTAssertGreaterThanOrEqual(app.buttons["keyboard.query.q"].firstMatch.frame.height, 41)
+        XCTAssertEqual(input.value as? String, context)
+        attachScreenshot("Landscape scalar results have fully visible unmasked keycaps")
+        closeKeyboardSearch()
+        selectKeyboardSection("emojis")
+        reopenKeyboardSearch(expectedQuery: "u+1f680")
+        let emoji = app.buttons["keyboard.emoji.1F680"].firstMatch
+        XCTAssertTrue(emoji.waitForExistence(timeout: 10))
+        XCTAssertTrue(emoji.isHittable)
+        XCTAssertTrue(app.frame.contains(emoji.frame))
+        XCTAssertEqual(input.value as? String, context)
+        attachScreenshot("Landscape emoji results have fully visible unmasked keycaps")
+    }
+
     func testSystemKeyboardHeldDeleteKeepsQueryAndHostScopesSeparate() throws {
         try requireKeyboardIntegration()
         let context = "Retain this host context."

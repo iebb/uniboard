@@ -1981,11 +1981,11 @@ private struct UnicodeKeyboardView: View {
 
     private func characterGrid(_ characters: [UnicodeCharacter], pagination: (() -> Void)? = nil) -> some View {
         ScrollView { characterTiles(characters, pagination: pagination).padding(.bottom, 2) }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
     }
     private func emojiGrid(_ emojis: [UnicodeEmojiEntry], pagination: (() -> Void)? = nil) -> some View {
         ScrollView { emojiTiles(emojis, pagination: pagination).padding(.bottom, 2) }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
     }
     private func characterTiles(_ characters: [UnicodeCharacter], pagination: (() -> Void)? = nil) -> some View {
         return LazyVGrid(columns: columns, spacing: 6) {

@@ -282,7 +282,7 @@ final class KeyboardViewController: UIInputViewController {
             viewWidth: view.bounds.width, displaySize: scene?.screen.bounds.size,
             sceneHeight: sceneSize?.height, isPad: pad,
             compactVertical: traitCollection.verticalSizeClass == .compact,
-            showsSymbolBar: model.showsSymbolBar)
+            showsSymbolBar: model.showsSymbolBar, searching: model.isSearching)
         if model.isCompactLayout != metrics.isCompactLayout { model.isCompactLayout = metrics.isCompactLayout }
         if model.isPadLayout != pad { model.isPadLayout = pad }
         let typingHeight = metrics.typingKeyHeight
@@ -1717,35 +1717,59 @@ private struct UnicodeKeyboardView: View {
         }
     }
 
-    /// Short, wide scenes put results beside the query keys. Narrow scenes keep
-    /// a complete result key visible by fitting only the query row heights.
+    /// The local query keyboard uses the same key height as ordinary typing.
+    /// Search gets its own row budget; results never squeeze the input keys.
     private var searchContent: some View {
         GeometryReader { geometry in
             let width = geometry.size.width.isFinite ? max(0, geometry.size.width) : 0
             let height = geometry.size.height.isFinite ? max(0, geometry.size.height) : 0
-            if model.isCompactLayout || (model.isPadLayout && width >= 520 && height < keyHeight + 154) {
+            if KeyboardLayoutPolicy.searchUsesSideResults(availableWidth: width, isPad: model.isPadLayout, isCompact: model.isCompactLayout) {
                 let available = max(2, width - 12)
                 let resultsWidth = available * 0.35
                 HStack(spacing: 12) {
                     searchResults
                         .frame(width: resultsWidth, height: height)
-                    queryKeys(rowHeight: max(16, min(model.isCompactLayout ? 28 : 34, (height - 12) / 4)))
+                    queryKeys(rowHeight: model.typingKeyHeight)
                         .frame(width: available - resultsWidth, height: height)
                 }
                 .frame(width: width, height: height)
             } else {
-                let rowHeight = max(16, min(34, (height - keyHeight - 18) / 4))
-                let queryHeight = rowHeight * 4 + 12
-                VStack(spacing: 6) {
-                    searchResults
-                        .frame(width: width, height: max(0, height - queryHeight - 6))
-                    queryKeys(rowHeight: rowHeight)
+                let queryHeight = model.typingKeyHeight * 4 + 12
+                VStack(spacing: 4) {
+                    searchResultStrip
+                        .frame(width: width, height: max(0, height - queryHeight - 4))
+                    queryKeys(rowHeight: model.typingKeyHeight)
                         .frame(width: width, height: queryHeight)
                 }
                 .frame(width: width, height: height)
             }
         }
         .clipped()
+    }
+
+    @ViewBuilder private var searchResultStrip: some View {
+        if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Text(model.section == .emojis ? "Search emoji names or sequences" : "Search names, blocks or U+code points")
+                .font(.system(size: 12)).foregroundStyle(KeyboardPalette.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if model.searchInProgress {
+            ProgressView("Searching…").font(.system(size: 12))
+        } else if model.section == .emojis ? model.emojiResults.isEmpty : model.results.isEmpty {
+            Text("No results. Try a shorter name or code point.")
+                .font(.system(size: 12)).foregroundStyle(KeyboardPalette.secondary)
+        } else {
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 5) {
+                    ForEach(model.section == .emojis ? model.emojiResults.map(KeyboardItem.emoji) : model.results.map(KeyboardItem.character), id: \.keyIdentifier) { item in
+                        InspectableCharacterKey(item: item, favorite: isFavorite(item), compact: true,
+                            useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.isSearching,
+                            actionFactory: { [mode = model.inputModeID] in keyActions(mode, item) })
+                            .frame(width: 58, height: model.typingKeyHeight)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
+        }
     }
 
     private var emptySearchSuggestions: some View {
@@ -1987,12 +2011,6 @@ private struct UnicodeKeyboardView: View {
     private func isFavorite(_ item: KeyboardItem) -> Bool {
         symbolBoards.contains(originalText(item))
     }
-    private func toggleFavorite(_ item: KeyboardItem) {
-        model.beginSymbolBoardSave(originalText(item))
-    }
-    private func canToggleFavorite(_ item: KeyboardItem) -> Bool {
-        symbolBoards.canEdit
-    }
     private func originalText(_ item: KeyboardItem) -> String {
         switch item {
         case .character(let character): return character.text
@@ -2005,11 +2023,7 @@ private struct UnicodeKeyboardView: View {
         else if let emoji = model.emojiCatalog.entries.first(where: { SymbolBoardKey.exact($0.text, text) }) { inspectionPanel(.emoji(emoji)) }
         else {
             VStack(spacing: 6) {
-                HStack {
-                    Button("Back") { model.closeSymbolBoardInspection() }.accessibilityIdentifier("keyboard.properties.close")
-                    Spacer(); Text("Unicode sequence").font(.system(size: 13, weight: .semibold)); Spacer()
-                    Button("Save") { model.beginSymbolBoardSave(text) }.accessibilityIdentifier("keyboard.properties.favorite")
-                }.frame(height: 30)
+                inspectionHeader(title: "Unicode sequence", text: text, saved: symbolBoards.contains(text))
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(symbolBoardPreview(text)).font(.system(size: 32)).frame(maxWidth: .infinity)
@@ -2027,27 +2041,7 @@ private struct UnicodeKeyboardView: View {
 
     private func inspectionPanel(_ item: KeyboardItem) -> some View {
         VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Button {
-                    if model.symbolBoardInspectionText != nil { model.closeSymbolBoardInspection() }
-                    else { model.closeInspection() }
-                } label: { Label("Back", systemImage: "chevron.left").font(.system(size: 12, weight: .semibold)) }
-                    .accessibilityLabel("Close Unicode properties")
-                    .accessibilityIdentifier("keyboard.properties.close")
-                Spacer(minLength: 0)
-                Text("Unicode properties").font(.system(size: 12, weight: .semibold))
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("keyboard.properties")
-                Spacer(minLength: 0)
-                Button { toggleFavorite(item) } label: {
-                    Label("Save", systemImage: isFavorite(item) ? "star.fill" : "star")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .accessibilityLabel("Save to page")
-                .accessibilityIdentifier("keyboard.properties.favorite")
-                .disabled(!canToggleFavorite(item))
-            }
-            .frame(height: 36)
+            inspectionHeader(title: "Unicode properties", text: originalText(item), saved: isFavorite(item))
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .top, spacing: 10) {
@@ -2070,6 +2064,38 @@ private struct UnicodeKeyboardView: View {
             .scrollIndicators(.visible)
             .keyboardKeySurface(radius: 14)
         }
+    }
+
+    private func inspectionHeader(title: String, text: String, saved: Bool) -> some View {
+        HStack(spacing: 4) {
+            Button {
+                if model.symbolBoardInspectionText != nil { model.closeSymbolBoardInspection() }
+                else { model.closeInspection() }
+            } label: {
+                Label("Back", systemImage: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 68, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(KeyboardPressStyle())
+            .accessibilityLabel("Close Unicode properties")
+            .accessibilityIdentifier("keyboard.properties.close")
+            Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity).accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("keyboard.properties")
+            KeyboardTouchKey(title: "Save", symbol: saved ? "star.fill" : "star",
+                identifier: "keyboard.properties.favorite", label: "Save to page", fontSize: 13, tinted: true,
+                route: model.inputModeID, factory: { [mode = model.inputModeID] in
+                    guard let current = boardConfigurationGuard(mode) else { return { false } }
+                    return {
+                        guard current(), symbolBoards.canEdit, !model.hasSymbolBoardOverlay else { return false }
+                        model.beginSymbolBoardSave(text)
+                        return true
+                    }
+                })
+                .frame(width: 76, height: 44).keyboardKeySurface(radius: 9)
+                .disabled(!symbolBoards.canEdit)
+        }
+        .frame(height: 44)
     }
 
     @ViewBuilder private func inspectionProperties(_ item: KeyboardItem) -> some View {
@@ -2188,7 +2214,7 @@ private struct UnicodeKeyboardView: View {
             ForEach(keys, id: \.self) { key in
                 KeyboardTouchKey(title: key, identifier: "keyboard.query.\(key)",
                     label: key == "+" ? "Plus" : key == ":" ? "Colon" : key == "-" ? "Hyphen" : key,
-                    fontSize: model.isCompactLayout ? 16 : 18,
+                    fontSize: 22,
                     route: model.inputModeID,
                     factory: { [mode = model.inputModeID] in action(mode, .query(key)) })
                     .frame(maxWidth: .infinity).frame(height: rowHeight)

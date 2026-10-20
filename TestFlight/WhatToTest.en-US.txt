@@ -1,28 +1,26 @@
-Uniboard 1.1 beta. Public release awaits device approval.
+Uniboard 1.1 beta. Public App Store release awaits device approval.
 
-FIXED KEYBOARD TEMPLATE
-The number row is always present in normal typing. Phone/narrow keys are 41.4pt; wide iPad keys are 59.8pt (+15%). Digits, letters and footer share one height. There is no resize grip, dragging, saved height, triangle or preview.
+SEARCH AND SAVE TOUCH FIXES
+Search uses four rows of normal-height query keys. Portrait results scroll horizontally above the keys; iPad and landscape put results beside them. No result or empty-state message should squeeze the keys. Check 41.4pt phone/narrow keys and 59.8pt wide iPad keys, rotations and visible host content.
 
-App Settings > Keyboard layout: Show symbol bar; Show search bar instead. The second switch appears only while the first is on. Replacing symbols with search keeps the same height. Check a fully visible, opaque symbol strip with rounded keycaps and horizontal scrolling. Scrolling must not insert. Empty selected pages use the stock strip without changing the preferred Star page. Test both switches, relaunch and Full Access OFF.
+Both Delete keys edit before the local search caret. Test empty/start/middle/end, repeated taps, held Delete, releasing outside, cancelling, inspecting a result and returning, Done and reopening. Query deletion must never alter the receiving app. Done restores host typing and host Delete while keeping the query. A cancelled touch must stop repeats and permit the next tap.
 
-LETTER GESTURES AND SHIFT
-Hold: accents in the current case. Up: mapped digit/symbol plus unused macOS Option outputs. Down: opposite case first, then accented forms. Each default candidate belongs to only one group per key. With digits visible, I and O start with £ and ¥, without repeating currency families; actual currency-key holds keep their family.
+Properties has a native 76x44pt Save key. Tap its center and corners: each should open Save to page once. Cancel and save to a page; preserve query, caret and receiving text. Hold a result to inspect without inserting. Check unsupported glyphs and complete emoji sequences.
 
-Keep pressing to switch Hold > Up > Down > Up; reversing direction changes groups without crossing the original key. Slide left/right for choices; lift inserts once. Choices surround the primary: 7,5,3,1,2,4,6. Test I/O, screen edges, Shift, cancellation, rotation and exact composed/decomposed text.
+FIXED DAILY KEYBOARD
+The number row is always present. Digits, letters and footer share one height (+15%). No resize grip, dragging, triangle or preview. App Settings > Keyboard layout controls Show symbol bar and Show search bar instead. At most one optional top bar; rounded keycaps stay fully visible. The U key toggles the toolbar. Fonts, Unicode version, layouts and key mappings are app-only. Keyboard ... contains Order only while the Unicode picker is available.
 
-Shift: tap for one capital, double-tap for Caps Lock, or touch Shift and slide to a letter for one capital. Stationary holds act as one Shift tap. A cancelled/outside slide must neither insert nor leave Shift stuck. Test one insertion per release, normal taps afterward and remapped Shifted tap outputs.
+GESTURES AND SHIFT
+Hold: current-case accents. Up: mapped symbols plus unused macOS Option outputs. Down: opposite case then its accents. Defaults are unique across groups, including I/O currency choices. Keep pressing to switch Hold > Up > Down > Up, then slide sideways; release inserts once. Choices surround the primary: 7,5,3,1,2,4,6. Test edge keys, exact combining text and cancellation.
+
+Shift matches normal typing: tap for one capital, double-tap for Caps Lock, touch Shift then slide to a letter for one capital. A stationary hold is one Shift tap. Cancelled/outside slides must not insert or leave Shift stuck.
 
 IPAD AND CUSTOM KEYS
-Check portrait and landscape number rows, stock-style Tab/Caps/Shift, gray modifiers, one blue Return and two controls right of Space. Landscape presets: iPad, compact ANSI and full ANSI. Manual Shift changes ANSI punctuation; Caps Lock and sentence capitals keep digits literal. Symbol pages avoid repeated digits. App-only mapping: standard, iPad, macOS Option or Off.
+Check portrait/landscape, Tab/Caps/both Shift keys, gray modifiers, one blue Return and two controls right of Space. Landscape presets: iPad, compact ANSI, full ANSI. Manual Shift changes punctuation; Caps Lock and automatic capitals keep digits literal. Symbol pages avoid duplicate digits. Mappings: standard, iPad, macOS Option, Off. Customize Tap, Shifted tap, Hold, Up and Down independently. Test literal emoji, combining text, Off, failed saves and Full Access OFF.
 
-Customize keyboard keys: independent Tap, Shifted tap, Hold, Up, Down. Test literal emoji, combining text, Off, failed saves and Full Access OFF. Explicit candidates take priority; stored mappings are not rewritten. Query editing never reaches the host.
+PAGES, FAVORITES AND PRIVACY
+Star opens the preferred page and returns to QWERTY. Swipe across ALL pages and Recent, one page at a time, preserving U visibility. Hold Star to create, rename, reorder or delete pages and choose a preferred target. Recent and saved symbols use plain keycaps. Editors stay inside an opaque bounded keyboard panel.
 
-PAGES, FAVORITES AND FEEDBACK
-Star opens the preferred page and returns to QWERTY. Swipe horizontally across ALL pages and Recent, one page per swipe. Opening pages preserves U/search visibility. Hold Star to edit pages; New page has local keycaps and Add inside the keyboard. Test create/rename/reorder/delete, visible-page deletion, empty pages, preferred target and exact variants. Saved/Recent show rounded keycaps without code-point captions. Editor controls must remain in a bounded opaque panel.
+Saved shares built-in Favorites. App edits reach the keyboard with Full Access OFF; keyboard edits wait locally until optional Full Access permits writing back. Test both directions, removal, concurrent edits, relaunch and unavailable storage without data loss. Custom pages and Recent stay local. No typing or other data is sent over a network. Check visual touch feedback; physical iPhone haptics require Full Access.
 
-Saved shares built-in Favorites. App edits reach the keyboard with Full Access OFF. Keyboard edits wait locally until optional Full Access permits writing back. Test both directions, removal, concurrent saves, relaunch and unavailable storage; failures must keep local data. Custom pages and Recent remain local. Nothing is sent over a network.
-
-Keys highlight on touch and clear on release/cancel/scroll/rotation. On a supported physical iPhone with Full Access, verify light key-down haptics, without a held-Delete repeat stream.
-
-UNICODE SEARCH
-U opens Unicode browsing. Test query cursor positioning, middle insertion/deletion, sharp text in light/dark and Reduce Transparency, retained results and exact whole-emoji insertion. Unicode 18 release is default; 16/17 are previous releases and 19 is DRAFT. Fonts/version/collapse are app-only. Keyboard … shows Order only with the Unicode picker. App search uses the in-keyboard Done key; no floating accessory confirmation. Search names, blocks, descriptions, code points and Suzhou numerals. Inspect unsupported glyphs without inserting.
+Unicode 18 release is default, with 16/17 previous releases and 19 DRAFT. Search names, blocks, descriptions, code points and Suzhou numerals. Verify exact whole-emoji insertion and sharp search text in light/dark and Reduce Transparency.

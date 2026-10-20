@@ -55,6 +55,30 @@ final class KeyboardRepeatingDeleteControlTests: XCTestCase {
         button.configure(isQuery: renderedIsQuery) { route.action(renderedMode: renderedMode, renderedIsQuery: renderedIsQuery) }
     }
 
+    func testRawTouchCompletionReleasesLatchAndRejectsQueuedRepeatsWithoutControlEvent() {
+        for query in [false, true] {
+            for cancelled in [false, true] {
+                let clock = Clock(), route = Route(isQuery: query)
+                let button = RepeatingDeleteButton(scheduleTimer: clock.schedule)
+                configure(button, route: route, renderedIsQuery: query)
+                button.sendActions(for: .touchDown)
+                clock.deliver(0)
+                XCTAssertEqual(route.queryDeletes + route.hostDeletes, 2)
+                if cancelled { button.touchesCancelled([], with: nil) }
+                else { button.touchesEnded([], with: nil) }
+                XCTAssertFalse(button.pressFeedback.isPressed)
+                clock.deliver(0); clock.deliver(1)
+                XCTAssertEqual(route.queryDeletes + route.hostDeletes, 2)
+                button.sendActions(for: .touchDown)
+                XCTAssertEqual(route.queryDeletes + route.hostDeletes, 3, "The next physical tap must not remain latched off")
+                button.sendActions(for: .touchUpInside)
+                clock.deliver(2)
+                XCTAssertEqual(route.queryDeletes + route.hostDeletes, 3)
+                XCTAssertEqual(query ? route.hostDeletes : route.queryDeletes, 0)
+            }
+        }
+    }
+
     func testNormalHoldUsesOneFactoryAndKeepsRepeatCadence() {
         let clock = Clock(), route = Route(isQuery: true)
         let button = RepeatingDeleteButton(scheduleTimer: clock.schedule)

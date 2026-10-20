@@ -417,16 +417,7 @@ final class UniboardUITests: XCTestCase {
         let input = openSystemKeyboardHost(unicodeBrowse: false)
         defer { restoreEnglishKeyboard() }
         XCTAssertTrue(app.buttons["keyboard.toggleUnicodeToolbar"].waitUntilValueEquals("off"))
-        guard let initialHeight = measuredKeyboardHeight() else { XCTFail("Expected the actual persisted keyboard height"); return }
-        XCTAssertTrue((220...420).contains(initialHeight), "An explicit saved height remains valid before visible normalization")
         XCTAssertFalse(app.buttons["keyboard.collapse"].exists)
-        ensureUnicodeToolbarVisible()
-
-        app.buttons["keyboard.toggleUnicodeToolbar"].tap()
-        XCTAssertTrue(app.buttons["keyboard.toggleUnicodeToolbar"].waitUntilValueEquals("off"))
-        XCTAssertEqual(measuredKeyboardHeight(), 220, "Real downward row steps reach the compact daily layout")
-        XCTAssertEqual(input.value as? String, "")
-        attachScreenshot("Visible row-step normalization reaches four English rows with the Unicode toolbar hidden")
         ensureUnicodeToolbarVisible()
         let shift = app.buttons["keyboard.typing.shift"].firstMatch
         let space = app.buttons["keyboard.space"].firstMatch
@@ -2294,6 +2285,126 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("ABC refreshes sentence capitalization after number-page period and Space")
     }
 
+    func testSystemKeyboardSearchKeysKeepTypingHeightAndBothDeletesEditTheLocalCaret() throws {
+        try requireKeyboardIntegration()
+        let context = "Keep the receiving document."
+        let input = openSystemKeyboardHost(initialText: context)
+        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        enterKeyboardQuery("cat")
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
+        let upper = app.buttons["keyboard.delete"].firstMatch
+        let lower = app.buttons["keyboard.query.delete"].firstMatch
+        let digit = app.buttons["keyboard.query.1"].firstMatch
+        let letter = app.buttons["keyboard.query.q"].firstMatch
+        for key in [digit, letter, lower] {
+            XCTAssertTrue(key.waitForExistence(timeout: 5))
+            XCTAssertGreaterThanOrEqual(key.frame.height, 41)
+            XCTAssertEqual(key.frame.height, upper.frame.height, accuracy: 1)
+            XCTAssertTrue(app.frame.contains(key.frame))
+        }
+        search.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 36, dy: search.frame.height / 2)).tap()
+        typeKeyboardQueryKeys("arrow ")
+        XCTAssertTrue(search.waitUntilValueEquals("arrow cat"))
+        lower.tap()
+        XCTAssertTrue(search.waitUntilValueEquals("arrowcat"), "The lower Delete removes before the local middle caret")
+        upper.tap()
+        XCTAssertTrue(search.waitUntilValueEquals("arrocat"), "The header Delete uses the same local caret")
+        typeKeyboardQueryKeys("w ")
+        XCTAssertTrue(search.waitUntilValueEquals("arrow cat"))
+        XCTAssertEqual(input.value as? String, context)
+        // Repeated discrete taps must not leave either native key latched off.
+        for expected in ["arrowcat", "arrocat", "arrcat", "arcat", "acat", "cat"] {
+            lower.tap()
+            XCTAssertTrue(search.waitUntilValueEquals(expected))
+        }
+        upper.tap()
+        XCTAssertTrue(search.waitUntilValueEquals("cat"), "At the beginning, Delete must not fall through to the host")
+        typeKeyboardQueryKeys("u+2603")
+        XCTAssertTrue(search.waitUntilValueEquals("u+2603cat"))
+        XCTAssertEqual(input.value as? String, context)
+        enterKeyboardQuery("u+2603")
+        let snowman = app.buttons["keyboard.character.U+2603"].firstMatch
+        XCTAssertTrue(snowman.waitForExistence(timeout: 10))
+        snowman.press(forDuration: 0.8)
+        app.buttons["keyboard.properties.close"].tap()
+        lower.tap()
+        XCTAssertTrue(search.waitUntilValueEquals("u+260"), "Returning from properties must leave query deletion usable")
+        typeKeyboardQueryKeys("3")
+        lower.press(forDuration: 0.8)
+        let remaining = search.value as? String ?? ""
+        XCTAssertTrue("u+2603".hasPrefix(remaining == "No query" ? "" : remaining))
+        XCTAssertLessThan(remaining == "No query" ? 0 : remaining.count, 5)
+        assertValueRemainsAfterRelease(search, equals: remaining)
+        XCTAssertEqual(input.value as? String, context)
+        attachScreenshot("Full-height search keys and two local Delete controls")
+        closeKeyboardSearch()
+        ensureUnicodeToolbarVisible()
+        upper.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(String(context.dropLast())), "Returning to English restores host Delete")
+        XCTAssertTrue(search.waitUntilValueEquals(remaining))
+    }
+
+    func testSystemKeyboardInspectorSaveAcceptsCornerTapsAndPreservesQueryAndHost() throws {
+        try requireKeyboardIntegration()
+        let context = "Save never inserts text."
+        let input = openSystemKeyboardHost(initialText: context)
+        defer { restoreEnglishKeyboard() }
+        enterKeyboardQuery("u+0021")
+        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
+        let key = app.buttons["keyboard.character.U+0021"].firstMatch
+        XCTAssertTrue(key.waitForExistence(timeout: 10))
+        key.press(forDuration: 0.8)
+        assertKeyboardProperties(codepoints: "U+0021", nameContaining: "exclamation mark")
+        let save = app.buttons["keyboard.properties.favorite"].firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(save.frame.width, 76)
+        XCTAssertGreaterThanOrEqual(save.frame.height, 44)
+        XCTAssertTrue(app.frame.contains(save.frame))
+        for offset in [CGVector(dx: 4, dy: 4), CGVector(dx: 72, dy: 40), CGVector(dx: 38, dy: 22)] {
+            save.coordinate(withNormalizedOffset: .zero).withOffset(offset).tap()
+            let target = app.descendants(matching: .any)["keyboard.boards.saveTarget"].firstMatch
+            XCTAssertTrue(target.waitForExistence(timeout: 5), "The entire Save keycap must respond, including its corners")
+            XCTAssertEqual(input.value as? String, context)
+            app.buttons["keyboard.boards.save.cancel"].tap()
+            XCTAssertTrue(target.waitUntilAbsent())
+            XCTAssertTrue(search.waitUntilValueEquals("u+0021"))
+        }
+        saveInspectedKeyToBoard("stock-symbols", input: input, context: context)
+        attachScreenshot("Save has a bounded 76 by 44 point native touch target")
+        app.buttons["keyboard.properties.close"].tap()
+        app.buttons["keyboard.query.delete"].tap()
+        XCTAssertTrue(search.waitUntilValueEquals("u+002"))
+        XCTAssertEqual(input.value as? String, context)
+    }
+
+    func testSystemKeyboardQueryResultStripScrollsWithoutInserting() throws {
+        try requirePhoneKeyboardIntegration()
+        let context = "Scrolling does not type."
+        let input = openSystemKeyboardHost(initialText: context)
+        defer { restoreEnglishKeyboard() }
+        enterKeyboardQuery("arrow")
+        let results = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "keyboard.character."))
+        let first = results.firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        let original = first.frame
+        let originalKey = app.buttons[first.identifier].firstMatch
+        XCTAssertTrue(app.frame.contains(original))
+        let visible = results.allElementsBoundByIndex.filter { self.app.frame.contains($0.frame) && $0.frame.width > 0 }
+        XCTAssertGreaterThan(visible.count, 3)
+        guard let last = visible.last else { return XCTFail("Expected visible search result keys") }
+        let start = last.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = first.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
+        let moved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !originalKey.exists || originalKey.frame.minX < original.minX - 20
+        }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [moved], timeout: 5), .completed, "Drag must actually scroll the result strip")
+        XCTAssertEqual(input.value as? String, context, "Scrolling from a character key must never insert it")
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("arrow"))
+        XCTAssertGreaterThanOrEqual(app.buttons["keyboard.query.q"].firstMatch.frame.height, 41)
+        attachScreenshot("Search result keys scroll horizontally without shrinking query keys or inserting")
+    }
+
     func testSystemKeyboardHeldDeleteKeepsQueryAndHostScopesSeparate() throws {
         try requireKeyboardIntegration()
         let context = "Retain this host context."
@@ -2317,6 +2428,7 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("Held query delete stops on release without changing host text")
 
         closeKeyboardSearch()
+        ensureUnicodeToolbarVisible()
         XCTAssertTrue(search.waitUntilValueEquals(remainingQuery))
         delete.press(forDuration: 0.75)
         let remainingHost = input.value as? String ?? ""
@@ -2648,7 +2760,8 @@ final class UniboardUITests: XCTestCase {
         let candidates = measuredKeyboardSurfaceFrame().map { [$0] } ?? []
         let pad = UIDevice.current.userInterfaceIdiom == .pad
         let effectiveExpected = expectedSurfaceHeight
-        let maximum: CGFloat = effectiveExpected ?? (pad ? 396 : 280)
+        let portraitSearch = app.frame.height > app.frame.width && (searching || inspecting)
+        let maximum: CGFloat = effectiveExpected ?? (pad ? 396 : portraitSearch ? 324 : 280)
         XCTAssertFalse(candidates.isEmpty, "Expected the actual keyboard surface ancestor", file: file, line: line)
         if let surface = candidates.first {
             XCTAssertLessThanOrEqual(surface.height, maximum + 1, "Keyboard must leave host space instead of reverting to tall chrome", file: file, line: line)
@@ -2770,6 +2883,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["keyboard.character.U+1F680"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertEqual(input.value as? String, "🚀")
         closeKeyboardSearch()
+        ensureUnicodeToolbarVisible()
         app.buttons["keyboard.space"].tap()
         XCTAssertTrue(input.waitUntilValueEquals("🚀 "))
         app.buttons["keyboard.delete"].tap()
@@ -2801,6 +2915,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(input.waitUntilValueEquals("🚀"))
         attachScreenshot("Compact landscape search preserves Unicode host insertion")
         closeKeyboardSearch()
+        ensureUnicodeToolbarVisible()
         app.buttons["keyboard.delete"].tap()
         XCTAssertTrue(input.waitUntilValueEquals(""))
     }

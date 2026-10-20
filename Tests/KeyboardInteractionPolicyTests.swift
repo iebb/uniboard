@@ -7,6 +7,38 @@ import XCTest
 #endif
 
 final class KeyboardInteractionPolicyTests: XCTestCase {
+    func testSearchKeepsNormalKeyHeightAndReservesResultsInsteadOfSqueezingKeys() {
+        for pad in [false, true] {
+            for width: CGFloat in [320, 402, 535, 536, 665, 666, 1032, 1376] {
+                for compact in [false, true] {
+                    for bar in [false, true] {
+                        let metrics = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1400,
+                            isPad: pad, compactVertical: compact, showsSymbolBar: bar, searching: true)
+                        let side = KeyboardLayoutPolicy.searchUsesSideResults(availableWidth: width - 16, isPad: pad, isCompact: metrics.isCompactLayout)
+                        let key = KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: width - 16, isPad: pad)
+                        XCTAssertEqual(metrics.typingKeyHeight, key, accuracy: 0.000001)
+                        XCTAssertEqual(metrics.height, key * (side ? 6 : 7) + (side ? 30 : 34), accuracy: 0.000001)
+                    }
+                }
+            }
+        }
+        for width: CGFloat in [.nan, .infinity, -.infinity, -1, 0, 519, 520] {
+            XCTAssertEqual(KeyboardLayoutPolicy.searchUsesSideResults(availableWidth: width, isPad: true, isCompact: false), width == 520)
+            XCTAssertFalse(KeyboardLayoutPolicy.searchUsesSideResults(availableWidth: width, isPad: false, isCompact: false))
+            XCTAssertTrue(KeyboardLayoutPolicy.searchUsesSideResults(availableWidth: width, isPad: false, isCompact: true))
+            for scene: CGFloat in [.nan, .infinity, -.infinity, -1, 0, 10, 200] {
+                let result = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: scene,
+                    isPad: true, compactVertical: false, showsSymbolBar: false, searching: true)
+                XCTAssertTrue(result.height.isFinite); XCTAssertGreaterThan(result.height, 0)
+                XCTAssertTrue(result.typingKeyHeight.isFinite); XCTAssertGreaterThan(result.typingKeyHeight, 0)
+            }
+        }
+        let capped = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: nil, sceneHeight: 200,
+            isPad: false, compactVertical: false, showsSymbolBar: false, searching: true)
+        XCTAssertEqual(capped.height, 170)
+        XCTAssertEqual(capped.typingKeyHeight * 7 + 34, capped.height, accuracy: 0.000001)
+    }
+
     func testFixedTemplateHasFiveRowsAndAtMostOneOptionalBar() {
         XCTAssertEqual(KeyboardLayoutPolicy.defaultHeight, 278.4, accuracy: 0.000001)
         for pad in [false, true] {

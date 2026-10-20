@@ -119,6 +119,19 @@ final class RepeatingDeleteButton: UIButton {
         cancelRepeating(endingPress: true)
     }
 
+    // Remote keyboard hosts can cancel the raw touch without delivering a
+    // UIControl terminal event. Always release the press latch and timers so
+    // the next tap can start; never let a queued repeat outlive that touch.
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        stopDeleting()
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        stopDeleting()
+    }
+
     private func cancelRepeating(endingPress: Bool) {
         if endingPress { isTrackingPress = false }
         pressToken = nil

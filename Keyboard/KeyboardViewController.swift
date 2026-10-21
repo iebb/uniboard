@@ -98,6 +98,11 @@ final class KeyboardViewController: UIInputViewController {
         updateKeyboardHeight()
     }
 
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        UnicodeFontSupport.clearCache()
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         synchronizeHostTraits()
@@ -1124,6 +1129,7 @@ private final class KeyboardModel: ObservableObject {
     }
 
     func refreshEditionFromAppSettings() {
+        if UnicodeFontSupport.refreshDownloadedFonts(force: true) { invalidateInputMode() }
         let selected = UnicodeEditionSettings.shared.loadSnapshot()
         if edition != selected.edition { edition = selected.edition }
         if useUnicodeFonts != selected.useUnicodeFonts { useUnicodeFonts = selected.useUnicodeFonts }
@@ -1643,7 +1649,7 @@ private struct UnicodeKeyboardView: View {
     private var typingContent: some View {
         return KeyboardTypingView(typing: model.typing, mode: model.inputModeID,
             isPad: model.isPadLayout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout, symbolMapping: model.padSymbolMapping, compact: model.isCompactLayout,
-            enabled: !model.showsUnicode,
+            enabled: !model.showsUnicode, useUnicodeFonts: model.useUnicodeFonts,
             delete: delete, variants: typingVariantActions,
             keySettings: model.keySettings, returnTitle: model.returnTitle, action: action, shiftSlide: shiftSlide)
     }
@@ -2329,6 +2335,7 @@ private struct KeyboardTypingView: View {
     let symbolMapping: KeyboardPadSymbolMapping
     let compact: Bool
     let enabled: Bool
+    let useUnicodeFonts: Bool
     let delete: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
     let variants: (UUID, String, Bool, Bool, Bool, Bool) -> KeyboardVariantActions?
     let keySettings: KeyboardKeySettings.Snapshot
@@ -2491,6 +2498,7 @@ private struct KeyboardTypingView: View {
             identifier: identifier, value: layoutValue, route: mode, enabled: enabled, fontSize: fontSize,
             foreground: text == nil ? .secondaryLabel : .label,
             hint: text == nil ? "Tap is off. Hold or swipe for configured choices." : nil,
+            useUnicodeFonts: useUnicodeFonts,
             preservesPressAcrossTextChanges: true,
             longPressOptions: gestures.longPress, swipeUp: gestures.swipeUp, swipeDown: gestures.swipeDown,
             secondaryText: widePad || hasNumberRow ? gestures.swipeUp.first.map(symbolBoardPreview) : nil,

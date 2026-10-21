@@ -19,8 +19,8 @@ final class UnicodeFontSupportTests: XCTestCase {
     }
 
     func testEveryBundledFaceAndLicenseIsUsable() throws {
-        XCTAssertEqual(UnicodeFontSupport.assets.count, 3)
-        for asset in UnicodeFontSupport.assets {
+        XCTAssertEqual(UnicodeFontSupport.bundledAssets.count, 4)
+        for asset in UnicodeFontSupport.bundledAssets {
             let url = try XCTUnwrap(UnicodeFontSupport.resourceURL(asset.filename))
             let provider = try XCTUnwrap(CGDataProvider(url: url as CFURL))
             let graphics = try XCTUnwrap(CGFont(provider))
@@ -44,7 +44,7 @@ final class UnicodeFontSupportTests: XCTestCase {
         guard !missingBefore.isEmpty else { throw XCTSkip("This iOS runtime already renders the fixture; coverage probe records it separately.") }
         let fallback = UnicodeFontSupport.font(for: text, size: 32, enabled: true)
         XCTAssertNotNil(UnicodeFontSupport.sourceName(for: text, size: 32, enabled: true))
-        XCTAssertTrue(fallback.fontName.lowercased().contains("unifont"))
+        XCTAssertNotEqual(fallback.fontName, system.fontName)
         XCTAssertTrue(UnicodeFontSupport.missingCodePoints(in: text, font: fallback).isEmpty)
         var characters = Array(text.utf16)
         var glyphs = [CGGlyph](repeating: 0, count: characters.count)

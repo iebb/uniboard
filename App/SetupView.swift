@@ -106,10 +106,15 @@ struct SetupView: View {
                     Toggle("Extra Unicode fonts", isOn: Binding(get: { preferences.useUnicodeFonts }, set: { preferences.selectUnicodeFonts($0) }))
                         .font(.headline).foregroundStyle(Palette.ink)
                         .accessibilityIdentifier("extraUnicodeFonts")
-                    Text("Off by default. Use bundled fonts for some missing character previews. Emoji and interface text keep iOS fonts; other apps use their own fonts. New draft coverage is limited.")
+                    Text("Off by default. Use bundled fonts or optional font downloads for missing character previews. Emoji and interface text keep iOS fonts; other apps use their own fonts. New draft coverage is limited.")
                         .font(.caption).foregroundStyle(Palette.muted)
                     Text("This setting applies to both the app and keyboard. It does not require Full Access.")
                         .font(.caption).foregroundStyle(Palette.muted)
+                    NavigationLink {
+                        FontPackDownloadsView()
+                    } label: {
+                        Label("Optional font downloads", systemImage: "arrow.down.circle")
+                    }.accessibilityIdentifier("fontDownloads")
                     NavigationLink {
                         FontLicenseView()
                     } label: {

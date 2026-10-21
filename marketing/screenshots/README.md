@@ -10,15 +10,15 @@ Place the complete, unmodified screenshot under `source/iphone/` or `source/ipad
 
 | Filename | What the real capture should show |
 | --- | --- |
-| `00-explore.png` | The default Explore screen, newest Unicode ages first, with the selected catalog visible. |
-| `01-keyboard.png` | The installed system keyboard with the single top-right delete key and verified character insertion in the host. |
+| `00-explore.png` | The Explore screen with newest-first selected, with the selected catalog visible. |
+| `01-keyboard.png` | The daily English system keyboard with its permanent number row, rounded keys and document Delete. |
 | `02-search.png` | A real name or codepoint query and its character results. |
 | `03-blocks.png` | A Unicode block and its actual character grid. |
 | `04-details.png` | Character name, description and Unicode properties; a new glyph may be unavailable in the device font. |
 | `05-saved.png` | Saved characters or complete emoji sequences. |
 | `06-private.png` | The app's offline-search and keyboard setup information. |
 | `07-emoji.png` | A complete emoji sequence, its codepoints, or verified ZWJ/variation-selector insertion. |
-| `08-editions.png` | The catalog selector showing Unicode 18 latest release and Unicode 19 development draft. |
+| `08-editions.png` | The app-only catalog selector showing release and draft choices. |
 | `09-properties.png` | The real keyboard inspector showing names, descriptions and properties, with the host unchanged; further properties remain reachable by scrolling. |
 
 The current official Unicode 19 development data can have the same assigned characters and emoji as Unicode 18. The artwork describes the available catalogs and does not claim that the draft has invented extra assignments. Emoji introduction versions and the ages of individual Unicode scalars can differ.
@@ -102,3 +102,7 @@ All three revised iPad cases passed in `build/QA/Revision-iPad-2.xcresult` on `U
 ## Final export verification
 
 The final manifest contains 12 reviewed exports: eight iPhone screenshots, including the optional keyboard-properties capture, and four iPad screenshots. Each locale receives the same real English UI captures in four explicit locale/device upload sets. Source/original byte equality, source/export/icon SHA-256, accepted dimensions, complete screen composition, RGB mode and PNG opacity were verified. The contact sheet and representative full-size keyboard, emoji and iPad exports were reviewed for readability and clipping. Preview artwork remains outside Git under ignored `build/QA/Artwork-White-Preview/`.
+
+## v1.1 submission refresh, 22 October 2026
+
+The two active iPhone keyboard slots use complete unmodified iOS 27 captures from the passing `Final-Captures-iOS27.xcresult` cases. Originals and selected Apple attachment metadata are retained under `source/v1-1-fonts-attachments/`. The daily English layout shows the permanent number row with the optional toolbar disabled; the inspector shows the bounded native Save key and readable code point. Host text is synthetic sample copy entered through the actual keyboard. `capture-manifest.json` records the exact test, attachment and raw SHA-256. Other slots retain the earlier app captures. Newest-first in the historical Explore artwork is an available selected sort, not the current default (code point).

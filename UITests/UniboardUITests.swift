@@ -24,6 +24,106 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [portrait], timeout: 5), .completed)
     }
 
+    func testOptionalFontDownloadCatalogIsOnlyInAppSettings() {
+        openAppSettings()
+        let link = app.buttons["fontDownloads"].firstMatch
+        revealByScrolling(link, in: app)
+        link.tap()
+        XCTAssertTrue(app.navigationBars["Optional font downloads"].firstMatch.waitForExistence(timeout: 5))
+        for id in ["historic-symbols", "han-supplementary", "han-latest"] {
+            let pack = app.descendants(matching: .any)["fontDownloads.pack.\(id)"].firstMatch
+            revealByScrolling(pack, in: app)
+            XCTAssertTrue(pack.exists)
+        }
+        attachScreenshot("Optional font packs show explicit sizes, offline use and app-only controls")
+    }
+
+    func testSystemKeyboardDownloadedNotoFontAndResumableDownloadWithFullAccessOff() throws {
+        try requireKeyboardIntegration()
+        guard ProcessInfo.processInfo.environment["UNIBOARD_FONT_DOWNLOAD_INTEGRATION"] == "1" else {
+            throw XCTSkip("Live optional-font download acceptance is opt-in")
+        }
+        setKeyboardFullAccess(false)
+        app.activate()
+        selectAppEdition("latest")
+        setAppUnicodeFonts(true)
+        openAppSettings()
+        let link = app.buttons["fontDownloads"].firstMatch
+        revealByScrolling(link, in: app)
+        link.tap()
+        let remove = app.buttons["fontDownloads.remove.historic-symbols"].firstMatch
+        if remove.exists { remove.tap() }
+        let download = app.buttons["fontDownloads.download.historic-symbols"].firstMatch
+        XCTAssertTrue(download.waitForExistence(timeout: 5))
+        download.tap()
+        let cancel = app.buttons["Cancel download"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        cancel.tap()
+        let message = app.staticTexts["fontDownloads.message"].firstMatch
+        let cancelled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "cancelled"), object: message)
+        XCTAssertEqual(XCTWaiter.wait(for: [cancelled], timeout: 15), .completed)
+        XCTAssertTrue(download.waitForExistence(timeout: 5))
+        download.tap()
+        // Leaving and reopening must observe the same app-wide operation.
+        app.navigationBars["Optional font downloads"].buttons.firstMatch.tap()
+        revealByScrolling(link, in: app)
+        link.tap()
+        let pack = app.descendants(matching: .any)["fontDownloads.pack.historic-symbols"].firstMatch
+        let ready = pack.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Available offline")).firstMatch
+        XCTAssertTrue(ready.waitForExistence(timeout: 180))
+        XCTAssertFalse(app.buttons["fontDownloads.download.historic-symbols"].exists)
+        attachScreenshot("Noto-first downloads complete, survive navigation and are available offline")
+        for id in ["han-supplementary", "han-latest"] {
+            let pack = app.descendants(matching: .any)["fontDownloads.pack.\(id)"].firstMatch
+            revealByScrolling(pack, in: app)
+            let remove = app.buttons["fontDownloads.remove.\(id)"].firstMatch
+            if remove.exists { remove.tap() }
+            let download = app.buttons["fontDownloads.download.\(id)"].firstMatch
+            revealByScrolling(download, in: app)
+            XCTAssertTrue(download.waitForExistence(timeout: 5))
+            download.tap()
+            let ready = pack.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Available offline")).firstMatch
+            XCTAssertTrue(ready.waitForExistence(timeout: 180), "The large Han pack must complete through the real bounded downloader")
+        }
+        attachScreenshot("All three independently removable font packs are available offline")
+        app.navigationBars["Optional font downloads"].buttons.firstMatch.tap()
+        app.launchArguments = []
+        let input = openSystemKeyboardHost()
+        defer {
+            if app.buttons["keyboard.properties.close"].firstMatch.exists { app.buttons["keyboard.properties.close"].firstMatch.tap() }
+            if app.buttons["keyboard.query.u"].firstMatch.exists { closeKeyboardSearch() }
+            restoreEnglishKeyboard()
+        }
+        enterKeyboardQuery("u+16a70")
+        let tangsa = app.buttons["keyboard.character.U+16A70"].firstMatch
+        XCTAssertTrue(tangsa.waitUntilValueEquals("Preview font: Noto Sans Tangsa (preview subset)"))
+        XCTAssertEqual(input.value as? String, "")
+        tangsa.press(forDuration: 1)
+        let source = app.staticTexts["keyboard.properties.fontSource"].firstMatch
+        XCTAssertTrue(source.waitForExistence(timeout: 5))
+        XCTAssertEqual(accessibleText(source), "Noto Sans Tangsa (preview subset)")
+        XCTAssertEqual(input.value as? String, "", "Downloading and inspecting never inserts text")
+        app.buttons["keyboard.properties.close"].firstMatch.tap()
+        app.buttons["keyboard.character.U+16A70"].firstMatch.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\u{16A70}"))
+        attachScreenshot("Downloaded Noto font reaches the keyboard with Full Access off and inserts the original scalar")
+        var expected = "\u{16A70}"
+        for (point, family) in [("20001", "Jigmo2"), ("30000", "Jigmo3"), ("20001", "Jigmo2")] {
+            enterKeyboardQuery("u+" + point)
+            let key = app.buttons["keyboard.character.U+\(point)"].firstMatch
+            XCTAssertTrue(key.waitUntilValueEquals("Preview font: \(family) (preview subset)"))
+            key.press(forDuration: 0.8)
+            XCTAssertTrue(source.waitForExistence(timeout: 5))
+            XCTAssertEqual(accessibleText(source), "\(family) (preview subset)")
+            XCTAssertEqual(input.value as? String, expected, "Large font previews must preserve document text")
+            app.buttons["keyboard.properties.close"].firstMatch.tap()
+            key.tap()
+            expected += String(Unicode.Scalar(UInt32(point, radix: 16)!)!)
+            XCTAssertTrue(input.waitUntilValueEquals(expected), "Switching large Han fonts must keep the real extension responsive and insert once")
+        }
+        attachScreenshot("Both large Han subsets remain responsive in the keyboard and preserve original supplementary scalars")
+    }
+
     func testSearchByCharacterNameAndLiteral() {
         searchUnicode("snowman")
         assertCharacterVisible("U+2603")
@@ -2346,7 +2446,7 @@ final class UniboardUITests: XCTestCase {
 
     func testSystemKeyboardInspectorSaveAcceptsCornerTapsAndPreservesQueryAndHost() throws {
         try requireKeyboardIntegration()
-        let context = "Save never inserts text."
+        let context = "Words, symbols, and everything between."
         let input = openSystemKeyboardHost(initialText: context)
         defer { restoreEnglishKeyboard() }
         enterKeyboardQuery("u+0021")
@@ -2407,9 +2507,17 @@ final class UniboardUITests: XCTestCase {
 
     func testSystemKeyboardLandscapeScalarAndEmojiResultsStayClear() throws {
         try requireKeyboardIntegration()
-        let context = "Keep this host unchanged."
-        let input = openSystemKeyboardHost(initialText: context)
-        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
+        let context = "Every character belongs here."
+        configureTopBar(symbols: false, search: false)
+        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
+        defer {
+            XCUIDevice.shared.orientation = .portrait
+            restoreEnglishKeyboard()
+            configureTopBar(symbols: true, search: false)
+        }
+        XCTAssertTrue(app.buttons["keyboard.typing.key.q"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(input.value as? String, context)
+        attachScreenshot("Daily English keyboard with the fixed number row and no optional toolbar")
         enterKeyboardQuery("u+1f680")
         settleKeyboardOrientation(.landscapeLeft)
         let scalar = app.buttons["keyboard.character.U+1F680"].firstMatch

@@ -6,49 +6,7 @@ import CoreText
 /// the process or installed systemwide, so turning this off restores iOS fonts.
 @MainActor
 enum UnicodeFontSupport {
-    struct Asset: Decodable {
-        let filename: String
-        let displayName: String
-        let postScriptName: String
-        let sha256: String
-        let sourceURL: String
-        let licenseFilename: String
-        let ranges: [[UInt32]]
-
-        var isValid: Bool {
-            guard Self.isResourceFilename(filename), Self.isResourceFilename(licenseFilename),
-                  !displayName.isEmpty, !postScriptName.isEmpty,
-                  sha256.count == 64, sha256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
-                  let source = URL(string: sourceURL), source.scheme == "https", source.host != nil,
-                  !ranges.isEmpty else { return false }
-            var previous: UInt32?
-            for range in ranges {
-                guard range.count == 2, range[0] <= range[1], range[1] <= 0x10FFFF,
-                      !(range[0] <= 0xDFFF && range[1] >= 0xD800),
-                      previous.map({ $0 < range[0] }) ?? true else { return false }
-                previous = range[1]
-            }
-            return true
-        }
-
-        fileprivate static func isResourceFilename(_ value: String) -> Bool {
-            !value.isEmpty && value != "." && value != ".." && !value.contains("/")
-                && !value.contains("\\") && !value.contains("\0")
-        }
-
-        func contains(_ point: UInt32) -> Bool {
-            var lower = 0, upper = ranges.count
-            while lower < upper {
-                let middle = (lower + upper) / 2
-                let range = ranges[middle]
-                guard range.count == 2 else { return false }
-                if point < range[0] { upper = middle }
-                else if point > range[1] { lower = middle + 1 }
-                else { return true }
-            }
-            return false
-        }
-    }
+    typealias Asset = UnicodeFontAsset
 
     private struct Manifest: Decodable { let fonts: [Asset] }
     private static let choices: NSCache<NSString, NSNumber> = {
@@ -57,9 +15,13 @@ enum UnicodeFontSupport {
         return cache
     }()
     private static var graphicsFonts: [Int: CGFont] = [:]
+    private static var fontRecency: [Int] = []
+    static let maximumLoadedFonts = 4
+    private static var downloadRevision = ""
+    private static var lastRevisionCheck = -Double.infinity
     private static let systemChoice = -1
 
-    static let assets: [Asset] = {
+    static let bundledAssets: [Asset] = {
         guard let url = resourceURL("manifest.json"),
               let data = try? Data(contentsOf: url),
               let manifest = try? JSONDecoder().decode(Manifest.self, from: data),
@@ -69,22 +31,48 @@ enum UnicodeFontSupport {
         return manifest.fonts
     }()
 
+    static let assets: [Asset] = {
+        let downloads = UnicodeFontPackCatalog.bundled.packs.flatMap(\.fonts).map(\.asset)
+        let noto = downloads.filter { $0.displayName.hasPrefix("Noto") }
+        let other = downloads.filter { !$0.displayName.hasPrefix("Noto") }
+        let bundledNoto = bundledAssets.filter { $0.displayName.hasPrefix("Noto") }
+        return noto + bundledNoto + other + bundledAssets.filter { !$0.displayName.hasPrefix("Noto") }
+    }()
+    private static let downloadable = Dictionary(uniqueKeysWithValues:
+        UnicodeFontPackCatalog.bundled.packs.flatMap(\.fonts).map { ($0.asset.filename, $0) })
+
     static var loadedFontCount: Int { graphicsFonts.count }
+
+    @discardableResult
+    static func refreshDownloadedFonts(force: Bool = false) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard force || now - lastRevisionCheck >= 0.5 else { return false }
+        lastRevisionCheck = now
+        let revision = UnicodeFontDownloadStore.shared.revision
+        guard revision != downloadRevision else { return false }
+        downloadRevision = revision
+        clearCache()
+        return true
+    }
 
     static func resourceURL(_ filename: String) -> URL? {
         guard Asset.isResourceFilename(filename) else { return nil }
-        return Bundle.main.url(forResource: filename, withExtension: nil, subdirectory: "Fonts")
+        if let bundled = Bundle.main.url(forResource: filename, withExtension: nil, subdirectory: "Fonts") { return bundled }
+        guard let font = downloadable[filename] else { return nil }
+        return UnicodeFontDownloadStore.shared.installedURL(for: font)
     }
 
     static func clearCache() {
         choices.removeAllObjects()
         graphicsFonts.removeAll()
+        fontRecency.removeAll()
     }
 
     static func font(for text: String, size: CGFloat, enabled: Bool) -> UIFont {
         let size = normalizedPointSize(size)
         let system = UIFont.systemFont(ofSize: size)
         guard enabled, !text.isEmpty, !preservesEmoji(text) else { return system }
+        refreshDownloadedFonts()
         let index = choice(for: text, system: system)
         guard index != systemChoice, let graphics = graphicsFont(at: index) else { return system }
         return CTFontCreateWithGraphicsFont(graphics, size, nil, nil) as UIFont
@@ -92,6 +80,7 @@ enum UnicodeFontSupport {
 
     static func sourceName(for text: String, size: CGFloat, enabled: Bool) -> String? {
         guard enabled, !text.isEmpty, !preservesEmoji(text) else { return nil }
+        refreshDownloadedFonts()
         let index = choice(for: text, system: .systemFont(ofSize: normalizedPointSize(size)))
         return assets.indices.contains(index) ? assets[index].displayName : nil
     }
@@ -130,11 +119,19 @@ enum UnicodeFontSupport {
     }
 
     private static func graphicsFont(at index: Int) -> CGFont? {
-        if let cached = graphicsFonts[index] { return cached }
+        if let cached = graphicsFonts[index] {
+            fontRecency.removeAll { $0 == index }
+            fontRecency.append(index)
+            return cached
+        }
         guard assets.indices.contains(index), let url = resourceURL(assets[index].filename),
               let provider = CGDataProvider(url: url as CFURL), let font = CGFont(provider),
               font.postScriptName as String? == assets[index].postScriptName else { return nil }
         graphicsFonts[index] = font
+        fontRecency.append(index)
+        while fontRecency.count > maximumLoadedFonts {
+            graphicsFonts.removeValue(forKey: fontRecency.removeFirst())
+        }
         return font
     }
 
@@ -188,7 +185,7 @@ enum UnicodeFontSupport {
 
     static var licenseText: String {
         guard !assets.isEmpty else { return "Bundled font license information is unavailable." }
-        let heading = "Extra Unicode fonts\n\nThese unmodified fonts are bundled for offline previews and used only when Extra Unicode fonts is enabled. They do not change fonts in other apps.\n\n"
+        let heading = "Extra Unicode fonts\n\nBundled fonts and optional downloaded subsets are used only when Extra Unicode fonts is enabled. Downloads are managed in the app and work offline afterwards. They do not change fonts in other apps.\n\n"
         let names = assets.map { "\($0.displayName)\nSource: \($0.sourceURL)" }.joined(separator: "\n\n")
         let filenames = Array(Set(assets.map(\.licenseFilename))).sorted()
         let licenses = filenames.compactMap { filename -> String? in

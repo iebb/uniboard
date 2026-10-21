@@ -1,12 +1,15 @@
-A daily English keyboard with full Unicode close at hand.
+Uniboard 1.1 brings everyday English typing and a more personal Unicode keyboard.
 
-- Literal QWERTY with Shift/Caps Lock, accented-letter long presses, number/symbol pages and repeating Backspace.
-- Custom symbol boards, a stock Symbols board, glyph-only keycaps, configurable long-press variants and a board chooser when saving.
-- Favorites-first Star/back-arrow switching, with a configurable preferred board. Compact, equal key heights without blank space; U shows/hides the toolbar. A number row at four rows and a horizontally scrolling symbol strip at five.
-- Clearer search text and cursor editing anywhere. Ascending code points by default, with whole-word matches before mid-word matches; saved sort choices persist.
-- Portrait swipes add/remove one row on release, with simple ▲/▼ feedback and corrected height negotiation.
-- Unicode 18 latest release by default, previous releases 17/16 and optional 19 DRAFT, selected only in app Settings. All four work offline in the keyboard without Full Access.
-- Edition, optional preview fonts and the optional collapse key are controlled only in app Settings. The keyboard menu offers order and Open companion app.
-- Matching rounded symbol keycaps; expanded symbol pages replace redundant digits with common symbols.
-- Independent Tap, Shifted tap, Long press, Up and Down mappings for character keys. One tap output or ordered gesture choices; function keys stay standard. With digits visible, Q–P down-flicks use ten complementary symbols.
-- iPad portrait keeps three rows. App-only landscape presets offer stock, compact ANSI or ANSI with digits; Numbers/Symbols and Hide Keyboard sit right of Space in both orientations. Choose standard/iPad/macOS Option swipe-down symbols or Off. Holds include Option and Shift–Option candidates. Manual Shift handles ANSI punctuation; Caps Lock and automatic capitals keep digits literal.
+- Literal QWERTY with a permanent number row, taller keys, Shift/Caps Lock, accents, symbol layouts and repeating Backspace.
+- One optional symbol bar or search bar, controlled in app Settings. U shows or hides Unicode controls. The old resize handle and height preview are removed.
+- Full-height search keys, clear text and precise cursor editing. Both Backspace controls edit the search query while search is focused. Returning to typing preserves the query and results.
+- Larger, more reliable Save controls in Unicode properties, and fully visible result keycaps without edge fading.
+- Favorites-first Star switching and horizontally swipeable symbol pages, including every saved page and Recent. Create, rename, reorder and edit pages inside the keyboard. Saved and Recent use matching keycaps without code-point labels.
+- Independent Tap, Shifted tap, Hold, Up and Down mappings for character keys. Default Up offers symbols, Down changes case, and Hold offers accents. Switch groups and select sideways without lifting; default candidates are unique.
+- iPad modifier keys and configurable landscape ANSI layouts, with Numbers/Symbols and Hide Keyboard to the right of Space.
+- Local Favorites sharing between the app and keyboard. Optional Full Access allows keyboard Favorites to sync back and enables light iPhone haptics; typing and searches are never collected.
+- Optional Noto-first font downloads for historic scripts, symbols and rare Han, measured on iOS 27. A tiny bundled font fixes dotted-circle combining previews. Download only in the app; verified fonts work offline in the keyboard without Full Access.
+- Unicode 18 release by default, previous releases 17/16 and optional Unicode 19 DRAFT. Edition and optional fonts are set only in the app.
+- Ascending code points by default, whole-word search priority, block-name search and "Suzhou numerals" aliases.
+
+No account, autocorrect or word predictions. All Unicode catalogs and search work offline.

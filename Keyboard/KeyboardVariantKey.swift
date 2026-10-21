@@ -28,7 +28,7 @@ struct KeyboardVariantKey: UIViewRepresentable {
 
     func makeUIView(context: Context) -> KeyboardVariantButton { KeyboardVariantButton() }
     func updateUIView(_ view: KeyboardVariantButton, context: Context) {
-        let font = UnicodeFontSupport.font(for: text, size: fontSize, enabled: useUnicodeFonts)
+        let font = UnicodeFontSupport.font(for: symbolBoardPreview(text), size: fontSize, enabled: useUnicodeFonts)
         view.configure(context: route, key: identifier, text: text, variants: variants,
             enabled: enabled, font: font, symbol: symbol, foreground: foreground,
             preservesPressAcrossTextChanges: preservesPressAcrossTextChanges,

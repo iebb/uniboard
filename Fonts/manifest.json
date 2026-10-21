@@ -631,6 +631,109 @@
       ]
     },
     {
+      "filename": "UniboardCombiningPreviews-Regular.ttf",
+      "displayName": "Noto & Unifont combining previews",
+      "postScriptName": "UniboardCombiningPreviews-Regular",
+      "sha256": "dc0b5d2f84c74ab5415fd9f09d1d0da878085f8f196d661d23ddee79c134c92d",
+      "bytes": 27528,
+      "sourceURL": "https://github.com/iebb/uniboard/blob/master/docs/font-audit/combining-preview-inputs.json",
+      "licenseFilename": "CombiningPreviews-OFL.txt",
+      "ranges": [
+        [
+          68969,
+          68973
+        ],
+        [
+          69370,
+          69372
+        ],
+        [
+          70584,
+          70592
+        ],
+        [
+          70594,
+          70594
+        ],
+        [
+          70597,
+          70597
+        ],
+        [
+          70599,
+          70602
+        ],
+        [
+          70604,
+          70608
+        ],
+        [
+          70610,
+          70610
+        ],
+        [
+          70625,
+          70626
+        ],
+        [
+          71995,
+          71996
+        ],
+        [
+          72544,
+          72551
+        ],
+        [
+          73562,
+          73562
+        ],
+        [
+          78912,
+          78912
+        ],
+        [
+          78919,
+          78933
+        ],
+        [
+          90398,
+          90415
+        ],
+        [
+          94180,
+          94180
+        ],
+        [
+          94192,
+          94193
+        ],
+        [
+          124398,
+          124399
+        ],
+        [
+          124643,
+          124643
+        ],
+        [
+          124646,
+          124646
+        ],
+        [
+          124654,
+          124655
+        ],
+        [
+          124661,
+          124661
+        ]
+      ],
+      "rangeCount": 22,
+      "usefulScalarCount": 86,
+      "modified": true,
+      "coverageNote": "Genuine isolated combining-mark previews with an explicit dotted-circle glyph; not a complex-script word font."
+    },
+    {
       "filename": "unifont-18.0.01.otf",
       "displayName": "GNU Unifont",
       "postScriptName": "Unifont",

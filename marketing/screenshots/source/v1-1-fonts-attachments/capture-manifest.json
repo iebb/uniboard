@@ -1,0 +1,39 @@
+{
+  "version": "1.1",
+  "capturedAt": "2026-10-22",
+  "runtime": "iOS 27.0 (24A5390f)",
+  "resultBundle": "build/QA/FontAudit/Final-Captures-iOS27.xcresult",
+  "note": "Both native UI cases passed. Full unmodified PNG captures; final font additions do not alter the English/default key layout or this inspector. The source commit includes these exact captures and tested code. No UI relabeling.",
+  "captures": [
+    {
+      "slot": "09-properties.png",
+      "original": "1BB53D56-01E0-4114-A8A7-C6BBCE0EF1FD.png",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardInspectorSaveAcceptsCornerTapsAndPreservesQueryAndHost()",
+      "attachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "16A1D5B8-DCFF-4C88-9C86-3A5E671960EF",
+        "deviceName": "Uniboard 1.1 QA Modern",
+        "exportedFileName": "1BB53D56-01E0-4114-A8A7-C6BBCE0EF1FD.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Save has a bounded 76 by 44 point native touch target_0_B03E5E45-9F41-407D-9D77-25322A4159E0.png",
+        "timestamp": 1792614848.611
+      },
+      "sha256": "a34f9164cf026753a1fb72f9ff38ccfa9169e98948e64b1c9dbaa26dabaf196d"
+    },
+    {
+      "slot": "01-keyboard.png",
+      "original": "45D5ADC2-7764-4641-9AA1-D6A2445BF586.png",
+      "testIdentifier": "UniboardUITests/testSystemKeyboardLandscapeScalarAndEmojiResultsStayClear()",
+      "attachment": {
+        "configurationName": "Test Scheme Action",
+        "deviceId": "16A1D5B8-DCFF-4C88-9C86-3A5E671960EF",
+        "deviceName": "Uniboard 1.1 QA Modern",
+        "exportedFileName": "45D5ADC2-7764-4641-9AA1-D6A2445BF586.png",
+        "isAssociatedWithFailure": false,
+        "suggestedHumanReadableName": "Daily English keyboard with the fixed number row and no optional toolbar_0_507B813E-680C-480D-AD99-FBAD42FA1F49.png",
+        "timestamp": 1792614948.237
+      },
+      "sha256": "1526227e652ece60e425edad87b71f5794af5b4ae0d0aa8ab6ec18ff41d78f74"
+    }
+  ]
+}

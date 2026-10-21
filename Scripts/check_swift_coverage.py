@@ -9,6 +9,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 MINIMUMS = {
     "CompanionAppRoute.swift": 1.0,
     "UnicodeCatalog.swift": 1.0,
+    "UnicodeFontAssets.swift": 1.0,
     "UnicodeEditionSettings.swift": 1.0,
     "KeyboardKeySettings.swift": 1.0,
     "EmojiCatalog.swift": 1.0,

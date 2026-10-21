@@ -1,0 +1,379 @@
+{
+  "schemaVersion": 1,
+  "fontToolsVersion": "4.62.1",
+  "unicodeVersion": "18.0.0",
+  "purpose": "Genuine isolated combining-mark previews with an explicit dotted-circle glyph; not a complex-script word font.",
+  "dotSource": "9b0f186fea27f311018800fb3a01d44d59331dbcccf518d2dadcae894eb017c0",
+  "sources": [
+    {
+      "kind": "bundled",
+      "path": "Fonts/unifont_upper-18.0.01.otf",
+      "sourceURL": "https://unifoundry.com/pub/unifont/unifont-18.0.01/font-builds/unifont_upper-18.0.01.otf",
+      "sourceFontSha256": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391",
+      "family": "GNU Unifont Upper"
+    },
+    {
+      "kind": "remote",
+      "path": null,
+      "sourceURL": "https://raw.githubusercontent.com/notofonts/notofonts.github.io/ccd96e1c95d1142fe8ea2247042cb80a351b01ea/fonts/NotoSerifKhitanSmallScript/unhinted/ttf/NotoSerifKhitanSmallScript-Regular.ttf",
+      "sourceFontSha256": "53434afa8313ffb127235c1b0b9a9eb396b8f831a75bcf111e8887eff20ebf57",
+      "sourceDownloadSha256": "53434afa8313ffb127235c1b0b9a9eb396b8f831a75bcf111e8887eff20ebf57",
+      "sourceExtension": ".ttf",
+      "archiveEntry": null,
+      "family": "Noto Serif Khitan Small Script"
+    },
+    {
+      "kind": "bundled",
+      "path": "Fonts/NotoSansSymbols2-Regular.otf",
+      "sourceURL": "https://github.com/notofonts/symbols/releases/download/NotoSansSymbols2-v2.008/NotoSansSymbols2-v2.008.zip",
+      "sourceFontSha256": "9b0f186fea27f311018800fb3a01d44d59331dbcccf518d2dadcae894eb017c0",
+      "family": "Noto Sans Symbols 2"
+    }
+  ],
+  "marks": [
+    {
+      "point": 68969,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 68970,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 68971,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 68972,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 68973,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 69370,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 69371,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 69372,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70584,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70585,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70586,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70587,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70588,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70589,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70590,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70591,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70592,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70594,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70597,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70599,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70600,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70601,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70602,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70604,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70605,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70606,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70607,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70608,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70610,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70625,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 70626,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 71995,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 71996,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 72544,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 72545,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 72546,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 72547,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 72548,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 72549,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 72550,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 72551,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 73562,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78912,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78919,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78920,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78921,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78922,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78923,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78924,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78925,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78926,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78927,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78928,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78929,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78930,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78931,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78932,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 78933,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90398,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90399,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90400,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90401,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90402,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90403,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90404,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90405,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90406,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90407,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90408,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90409,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90410,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90411,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90412,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90413,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90414,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 90415,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 94180,
+      "source": "53434afa8313ffb127235c1b0b9a9eb396b8f831a75bcf111e8887eff20ebf57"
+    },
+    {
+      "point": 94192,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 94193,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 124398,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 124399,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 124643,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 124646,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 124654,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 124655,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    },
+    {
+      "point": 124661,
+      "source": "472201e45a050bff4c7658208b8c73e34ebce3764b287a5a46c7774038ef9391"
+    }
+  ]
+}

@@ -459,7 +459,8 @@ final class KeyboardVariantButton: UIControl {
         title.frame = bounds.insetBy(dx: 3, dy: 2)
         if !secondaryTitle.isHidden {
             let compact = bounds.height < 44
-            secondaryTitle.font = .systemFont(ofSize: compact ? 9 : 12)
+            let size: CGFloat = compact ? 9 : 12
+            secondaryTitle.font = secondaryTitle.text.flatMap { popupFont?($0) }?.withSize(size) ?? .systemFont(ofSize: size)
             secondaryTitle.frame = CGRect(x: 3, y: compact ? 1 : 3, width: max(0, bounds.width - 6), height: compact ? 10 : 15)
             title.frame = CGRect(x: 3, y: compact ? 11 : 17, width: max(0, bounds.width - 6), height: max(0, bounds.height - (compact ? 12 : 19)))
         }

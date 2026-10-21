@@ -5,6 +5,21 @@ import XCTest
 
 @MainActor
 final class KeyboardVariantControlTests: XCTestCase {
+    func testSecondaryUnicodeHintKeepsItsFallbackFontWhenTheKeyChangesSize() throws {
+        let preview = "\u{25CC}\u{10D69}"
+        let button = KeyboardVariantButton()
+        button.configure(context: UUID(), key: "q", text: "q", variants: [], enabled: true,
+            font: .systemFont(ofSize: 23), secondaryText: preview,
+            popupFont: { UnicodeFontSupport.font(for: $0, size: 23, enabled: true) }, factory: { nil })
+        for height: CGFloat in [41.4, 59.8, 41.4] {
+            button.frame = CGRect(x: 0, y: 0, width: 64, height: height)
+            button.setNeedsLayout(); button.layoutIfNeeded()
+            let hint = try XCTUnwrap(button.subviews.compactMap { $0 as? UILabel }.first { $0.text == preview })
+            XCTAssertEqual(hint.font.pointSize, height < 44 ? 9 : 12)
+            XCTAssertTrue(UnicodeFontSupport.missingCodePoints(in: preview, font: hint.font).isEmpty)
+        }
+    }
+
     func testPadModifierButtonTextUsesTheRequestedBottomCornerWithoutChangingActions() {
         let button = KeyboardTouchActionButton(frame: CGRect(x: 0, y: 0, width: 100, height: 52))
         button.setTitle("tab", for: .normal)

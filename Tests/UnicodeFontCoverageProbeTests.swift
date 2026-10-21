@@ -45,6 +45,8 @@ private enum UnicodeFontCoverageProbe {
     }
 
     static let fixtures: [Fixture] = [
+        .init(id: "garay-mark-preview", text: "\u{25CC}\u{10D69}", purpose: "Supplementary mark and dotted-circle must stay in one preview face"),
+        .init(id: "tulu-mark-preview", text: "\u{25CC}\u{113B8}", purpose: "Spacing mark specimen must not fall back as a mixed cluster"),
         .init(id: "native-latin", text: "A", purpose: "Existing native letter control"),
         .init(id: "native-omega", text: "Ω", purpose: "Existing native symbol control"),
         .init(id: "znamenny-1CF00-preview", text: "\u{25CC}\u{1CF00}", purpose: "Complete supplementary combining-mark preview must also retain the dotted circle"),
@@ -167,7 +169,7 @@ final class UnicodeFontCoverageProbeTests: XCTestCase {
             }
             if !missing.isEmpty {
                 XCTAssertNotEqual(after.requestedFontName, before.requestedFontName)
-                XCTAssertTrue(after.requestedFontName.lowercased().contains("unifont"))
+                XCTAssertNotNil(UnicodeFontSupport.sourceName(for: after.fixture.text, size: 56, enabled: true))
                 XCTAssertFalse(after.runs.isEmpty)
                 XCTAssertTrue(after.runs.allSatisfy { !$0.hasZeroGlyph && !$0.hasLastResortFont },
                               "Enabled preview must produce genuine shaped glyphs, not a LastResort hex box")
@@ -182,7 +184,7 @@ final class UnicodeFontCoverageProbeTests: XCTestCase {
             }
         }
 
-        for id in ["hebrew-05C8-preview", "combining-1AD3-preview", "znamenny-1CF00-preview"] {
+        for id in ["garay-mark-preview", "tulu-mark-preview", "hebrew-05C8-preview", "combining-1AD3-preview", "znamenny-1CF00-preview"] {
             let after = try observation(id, enabled: true, in: report)
             let selected = UnicodeFontSupport.sourceName(for: after.fixture.text, size: 56, enabled: true)
             if selected != nil {

@@ -1,38 +1,37 @@
-Literal English typing, accents, symbols and whole emoji in one keyboard. Uniboard combines QWERTY, custom symbol boards and Unicode search for iPhone and iPad.
+English typing and the full Unicode catalog, together. Combine a literal QWERTY keyboard, personal symbol pages and offline character search for iPhone and iPad.
 
 YOUR EVERYDAY KEYBOARD
-Keep your words as typed, without autocorrect or predictions. Use Shift, Caps Lock, symbols and holds for accents plus macOS Option/Shift–Option. Capitalization follows the receiving field; double Space after a word adds a period and space. URL/email fields retain literal input.
+Type without autocorrect or word predictions. Use Shift, Caps Lock, accented-letter holds, repeating Backspace and number/symbol pages. Double Space after a word adds a period and space; URL and email fields keep literal input.
 
-U toggles the initially hidden Unicode toolbar. On iPhone, four rows add digits; five add a saved-symbol strip. Swipe the portrait grip up/down to add/remove one row on release; ▲/▼ shows an available step.
+A fixed number row sits above three letter rows, with taller, matching keycaps. U shows or hides the Unicode toolbar. In app Settings, enable one optional symbol bar or replace it with the search bar. iPad adds stock-style modifiers and compact or full ANSI landscape layouts, with Numbers/Symbols and Hide Keyboard to the right of Space.
 
-iPad portrait keeps three letter rows. In app Settings, choose stock, compact ANSI or ANSI with digits for wide landscape. Gray modifiers, blue Return; symbols/hide sit right of Space in both orientations. Standard/iPad/macOS Option down-flicks or Off; overrides win.
+PERSONAL SYMBOL PAGES
+The star beside Space opens Favorites by default and returns to QWERTY. Hold it to choose another preferred page or manage your pages. A stock Symbols page is included. Swipe horizontally through every page and Recent. Create, reorder and edit pages in the keyboard; choose a page when saving.
 
-SYMBOLS, YOUR WAY
-The star beside Space opens Favorites by default; its back arrow returns to QWERTY. Hold it to switch/manage boards or choose its default target. Symbols is included. Save characters or emoji to your chosen board.
+Saved and Recent symbols look like ordinary rounded keys, without code-point captions. Hold a key for variants, properties or editing.
 
-Saved and Recent symbols use rounded keycaps without code-point captions. Hold a key for variants, properties or editing. Keep punctuation, currencies, mathematics and phonetic marks close.
+MAKE EACH CHARACTER KEY YOURS
+In app Settings, configure Tap, Shifted tap, Hold, Up and Down independently for letters, digits and symbols. Set one tap output or ordered gesture candidates. Preserve combining sequences and emoji; disable or reset actions. Function keys stay standard.
 
-In app Settings, remap each key’s taps, shifted taps, holds and up/down swipes independently. Tap has one output; gestures have ordered choices. Shift capitalizes one remapped letter; custom Shifted tap is exact. Disable or reset each action. Function keys stay standard. With digits visible, Q–P down-flicks offer ten complementary symbols.
+By default, swipe up for mapped symbols and macOS Option choices, swipe down for opposite-case letters, and hold for current-case accents. Move up or down while holding to switch groups, then slide sideways to select a candidate. The visible number row leaves Q–P with ten complementary symbols.
 
 FIND ANY CHARACTER
-- Search official names, aliases, descriptions and block names. Try "arrow", "heart" or "Greek". Whole-word matches come before mid-word matches.
+- Search official names, aliases, descriptions and block names. Try "arrow", "heart" or "Greek". Whole words rank before partial matches.
 - Look up U+1F680, 0x1F680, 1F680 or decimal:128640. In the app, paste a character to identify it.
-- Browse every Unicode block and assigned character. Fresh defaults use ascending code points; newest/oldest sorting is also available.
-- Search "Suzhou numerals" to find characters officially named "Hangzhou numeral". Details retain official names and distinguish corrections, annotations, aliases and related characters.
+- Browse Unicode blocks and assigned characters. The default is ascending code points; newest and oldest sorting are also available.
+- Search "Suzhou numerals" to find characters officially named "Hangzhou numeral". Official names and naming notes remain available.
 
-Tap Unicode to browse, then edit its local search query separately from your document. Return to English and keep the query, results and cursor position. Hold or hover over a browse tile to read its properties without inserting.
+Search has its own cursor and full-height keys. Search and document text stay separate. Return to English while retaining your query and results. Hold or hover over a result to inspect it without inserting. Unsupported glyphs retain readable properties.
 
-COMPLETE EMOJI AND DETAILS
-Find joined emoji, skin tones, flags and keycaps. Insert/copy whole sequences intact. Read names, descriptions, age, block, category, script, combining/bidirectional classes, decomposition, numeric/case properties and encodings. Emoji introduction versions differ from component Unicode ages.
+WHOLE EMOJI AND PROPERTIES
+Find joined emoji, skin tones, flags and keycaps. Insert or copy complete sequences intact. Read names, age, block, category, script, combining/bidirectional classes, decomposition, numeric/case properties and encodings. Emoji introduction versions differ from component Unicode ages.
 
 FOUR OFFLINE EDITIONS
-Choose in app Settings: Unicode 18 release (default), previous releases 17/16, or Unicode 19 DRAFT. All four character/property and emoji catalogs work offline. The keyboard reads your choice without Full Access. Fonts and the optional collapse key are also app settings. The keyboard’s … menu contains order and Open companion app.
+Choose only in app Settings: Unicode 18 release by default, previous releases 17 and 16, or Unicode 19 DRAFT. All four character, property and emoji catalogs work offline. Optional fonts default off. Download Noto-first preview packs only in app Settings; they work offline in the app and keyboard without Full Access. Other apps choose their own fonts. Some glyphs remain unsupported. Draft assignments may change.
 
 PRIVATE AND OFFLINE
-No account, ads, analytics SDK or Full Access. Typing and searches are not sent to a server. Boards, favorites, recents and scratchpad stay on-device. Only app-authored preferences and key choices pass one-way locally to the keyboard.
+No account, ads or analytics. Typing and searches are never sent to a server. Full Access is not required. App settings and Favorites reach the keyboard locally. Optional Full Access lets explicit keyboard Favorites sync back to the app and enables light iPhone haptics. It does not enable network collection. Pages, recents and scratchpad stay on-device.
 
-Optional fonts improve some missing previews and default off. Receiving apps choose their own fonts. Settings includes a keyboard test and font licenses.
+Add Uniboard in iOS Settings > General > Keyboard > Keyboards > Add New Keyboard, then hold the globe to choose it.
 
-Add Uniboard in iOS Settings > General > Keyboard > Keyboards > Add New Keyboard, then hold the globe while typing to select it.
-
-Draft assignments may change. Missing glyphs retain readable names/properties. The interface and Unicode names/descriptions are English. iOS uses its own keyboard in secure/phone fields; some apps disable custom keyboards. Requires iOS 17 or later.
+The interface and Unicode names/descriptions are English. iOS uses its own keyboard in secure and phone fields; some apps disable custom keyboards. Requires iOS 17 or later.

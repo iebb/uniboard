@@ -8,18 +8,27 @@ struct CharacterDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
     @State private var added = false
+    @State private var copiedForm: String?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    Text(character.displayText)
-                        .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts)))
-                        .accessibilityIdentifier("characterGlyph")
-                        .minimumScaleFactor(0.5).lineLimit(1)
-                        .padding(24)
-                        .frame(maxWidth: .infinity).frame(height: 196)
-                        .background(Color.previewSurface(missing: glyphMissing), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    if let forms = character.presentationForms {
+                        // Unicode defines both presentations; show them side by side.
+                        HStack(spacing: 12) {
+                            presentationTile(forms.text, title: "Text", identifier: "characterGlyph")
+                            presentationTile(forms.emoji, title: "Emoji", identifier: "characterGlyph.emoji")
+                        }
+                    } else {
+                        Text(character.displayText)
+                            .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts)))
+                            .accessibilityIdentifier("characterGlyph")
+                            .minimumScaleFactor(0.5).lineLimit(1)
+                            .padding(24)
+                            .frame(maxWidth: .infinity).frame(height: 196)
+                            .background(Color.previewSurface(missing: glyphMissing), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
 
                     VStack(spacing: 4) {
                         Text(character.name)
@@ -71,6 +80,32 @@ struct CharacterDetailView: View {
         .presentationDragIndicator(.visible)
     }
 
+    private func presentationTile(_ form: String, title: String, identifier: String) -> some View {
+        Text(form)
+            .font(Font(UnicodeFontSupport.font(for: form, size: 84, enabled: preferences.useUnicodeFonts)))
+            .minimumScaleFactor(0.5).lineLimit(1)
+            .accessibilityIdentifier(identifier)
+            .padding(12)
+        .frame(maxWidth: .infinity).frame(height: 196)
+        .background(Color.previewSurface(missing: glyphMissing), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title) presentation")
+    }
+
+    /// Copies one presentation sequence exactly, selector included.
+    private func copyFormButton(_ form: String, title: String, identifier: String) -> some View {
+        Button {
+            UIPasteboard.general.string = form
+            store.recordUse(character.codePoint)
+            copiedForm = form
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            Label(copiedForm == form ? "Copied" : title, systemImage: copiedForm == form ? "checkmark" : "doc.on.doc")
+                .frame(maxWidth: .infinity)
+        }
+        .accessibilityIdentifier(identifier)
+    }
+
     private var actions: some View {
         VStack(spacing: 10) {
             Button {
@@ -84,6 +119,14 @@ struct CharacterDetailView: View {
             }
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier("copyCharacter")
+
+            if let forms = character.presentationForms {
+                HStack(spacing: 10) {
+                    copyFormButton(forms.text, title: "Copy Text", identifier: "copyTextPresentation")
+                    copyFormButton(forms.emoji, title: "Copy Emoji", identifier: "copyEmojiPresentation")
+                }
+                .buttonStyle(.bordered)
+            }
 
             HStack(spacing: 10) {
                 Button {

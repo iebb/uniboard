@@ -31,8 +31,6 @@ struct PagesView: View {
                     let ids = offsets.map { boards.boards[$0].id }.filter(Self.removable)
                     failed = !ids.allSatisfy { boards.deleteBoard($0) }
                 }
-            } footer: {
-                Text("The keyboard shows its pages in this order. ★ in the keyboard opens the page marked ★; hold ★ to open any page.")
             }
             if failed {
                 Text("This change could not be saved. Check the page name and storage limits.")
@@ -70,15 +68,16 @@ private struct PageRow: View {
     var body: some View {
         let favorites = board.id == SymbolBoardStore.favoritesID
         Label {
-            VStack(alignment: .leading, spacing: 2) {
+            HStack {
                 Text(board.name)
-                Text(opensWithStar ? "\(keyCount(board.keys.count)) · Opens with ★" : keyCount(board.keys.count))
-                    .font(.footnote).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                if opensWithStar { Text("★").foregroundStyle(.secondary).accessibilityHidden(true) }
             }
         } icon: {
             Image(systemName: favorites ? "star.fill" : "square.grid.2x2")
                 .foregroundStyle(favorites ? Color.yellow : Color.accentColor)
         }
+        .accessibilityValue(opensWithStar ? "Opens with ★" : "")
     }
 }
 
@@ -100,12 +99,8 @@ struct PageEditorView: View {
         List {
             if let board {
                 Section {
-                    NavigationLink { PageArrangeView(boardID: boardID) } label: {
-                        LabeledContent("Arrange Keys", value: board.layout == nil ? "Rows of ten" : "Custom rows")
-                    }
-                    .accessibilityIdentifier("page.arrange")
-                } footer: {
-                    Text("Place keys in rows with half-width and full-width gaps, as the keyboard shows them.")
+                    NavigationLink("Arrange Keys") { PageArrangeView(boardID: boardID) }
+                        .accessibilityIdentifier("page.arrange")
                 }
                 Section {
                     ForEach(Array(board.keys.enumerated()), id: \.element.id) { index, key in
@@ -123,16 +118,12 @@ struct PageEditorView: View {
                         .accessibilityIdentifier("page.addText")
                 } header: {
                     Text("Keys")
-                } footer: {
-                    Text("Keys fill the page's rows in this order. Open a key to give it variants, which the keyboard offers when you hold it.")
                 }
                 Section {
                     Toggle("Opens with ★", isOn: Binding(get: { boards.preferredStarBoardID == boardID }, set: { on in
                         failed = !boards.setPreferredStarBoard(on ? boardID : SymbolBoardStore.favoritesID)
                     }))
                     .accessibilityIdentifier("page.star")
-                } footer: {
-                    Text("Tapping ★ in the keyboard opens this page instead of Favorites.")
                 }
             }
             if failed {
@@ -245,7 +236,6 @@ struct KeyVariantsView: View {
     }
 }
 
-func keyCount(_ count: Int) -> String { count == 1 ? "1 key" : "\(count) keys" }
 
 /// Spaces, controls and lone combining marks need a visible stand-in.
 func symbolKeyPreview(_ text: String) -> String {

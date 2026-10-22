@@ -193,12 +193,18 @@ struct UnicodeCharacter: Identifiable, Hashable, Sendable {
     let simpleUppercase: UInt32?
     let simpleLowercase: UInt32?
     let simpleTitlecase: UInt32?
+    /// True when Unicode defines both a text and an emoji presentation sequence.
+    let hasPresentationForms: Bool
     private let invisible: Bool
 
     var id: UInt32 { codePoint }
     var text: String { Unicode.Scalar(codePoint).map { String($0) } ?? "" }
     var codePointLabel: String { String(format: "U+%04X", codePoint) }
     var isInvisible: Bool { invisible }
+    /// The text (VS15) and emoji (VS16) presentation sequences, when Unicode defines both.
+    var presentationForms: (text: String, emoji: String)? {
+        hasPresentationForms ? (text + "\u{FE0E}", text + "\u{FE0F}") : nil
+    }
     var categoryName: String { UnicodeCatalog.categoryDescriptions[category] ?? category }
     var displayText: String {
         switch codePoint {
@@ -209,7 +215,8 @@ struct UnicodeCharacter: Identifiable, Hashable, Sendable {
             if invisible { return "◌" }
             if category.hasPrefix("M") { return "◌" + text }
             if category == "Cn" { return "◇" }
-            return text
+            // Charts show a character that also has an emoji form as text.
+            return presentationForms?.text ?? text
         }
     }
 
@@ -221,7 +228,9 @@ struct UnicodeCharacter: Identifiable, Hashable, Sendable {
          namesListSection: String? = nil, sectionAnnotations: [String] = [],
          crossReferences: [UnicodeCrossReference] = [], unicode1Name: String? = nil,
          numericValue: String? = nil, numericType: String? = nil,
-         simpleUppercase: UInt32? = nil, simpleLowercase: UInt32? = nil, simpleTitlecase: UInt32? = nil) {
+         simpleUppercase: UInt32? = nil, simpleLowercase: UInt32? = nil, simpleTitlecase: UInt32? = nil,
+         hasPresentationForms: Bool = false) {
+        self.hasPresentationForms = hasPresentationForms
         self.codePoint = codePoint
         self.name = name
         self.detail = detail
@@ -732,10 +741,20 @@ final class UnicodeCatalog: @unchecked Sendable {
                                 crossReferences: metadata?.references ?? [], unicode1Name: metadata?.unicode1Name,
                                 numericValue: metadata?.numericValue, numericType: metadata?.numericType,
                                 simpleUppercase: metadata?.simpleUppercase, simpleLowercase: metadata?.simpleLowercase,
-                                simpleTitlecase: metadata?.simpleTitlecase)
+                                simpleTitlecase: metadata?.simpleTitlecase,
+                                hasPresentationForms: hasPresentationForms(Self.u32(bytes, record)))
     }
 
     private func age(at cp: UInt32) -> String? { property(at: cp, in: properties.ages) }
+    private func hasPresentationForms(_ cp: UInt32) -> Bool {
+        guard let bases = properties.presentationSequences else { return false }
+        var low = 0, high = bases.count
+        while low < high {
+            let mid = (low + high) / 2
+            if bases[mid] < cp { low = mid + 1 } else { high = mid }
+        }
+        return low < bases.count && bases[low] == cp
+    }
     private func script(at cp: UInt32) -> String? {
         properties.unicodeVersion.isEmpty ? nil : property(at: cp, in: properties.scripts) ?? "Unknown"
     }
@@ -997,6 +1016,8 @@ private struct UnicodePropertyData: Decodable {
     let scripts: [UnicodePropertyRange]
     let assignedSpans: [UnicodeAssignedSpan]
     let decompositions: [UnicodeDecomposition]
+    /// Characters with both a text (VS15) and an emoji (VS16) presentation sequence.
+    var presentationSequences: [UInt32]? = nil
     static let empty = UnicodePropertyData(unicodeVersion: "", ages: [], scripts: [], assignedSpans: [], decompositions: [])
     var isValid: Bool {
         func validRanges(_ ranges: [UnicodePropertyRange]) -> Bool {
@@ -1015,5 +1036,7 @@ private struct UnicodePropertyData: Decodable {
             && zip(assignedSpans, assignedSpans.dropFirst()).allSatisfy { $0.end < $1.start }
             && decompositions.allSatisfy { Unicode.Scalar($0.codePoint) != nil }
             && zip(decompositions, decompositions.dropFirst()).allSatisfy { $0.codePoint < $1.codePoint }
+            && (presentationSequences ?? []).allSatisfy { Unicode.Scalar($0) != nil }
+            && zip(presentationSequences ?? [], (presentationSequences ?? []).dropFirst()).allSatisfy { $0 < $1 }
     }
 }

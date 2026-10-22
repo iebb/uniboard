@@ -92,6 +92,10 @@ An unsigned test host can cover unavailable-container fallbacks, but cannot
 prove successful shared-setting delivery. Do not weaken save-error handling
 or enable Full Access to conceal a missing QA entitlement.
 
+## Text and emoji presentation
+
+Each edition's `emoji-variation-sequences.txt` supplies the characters with both a text (U+FE0E) and an emoji (U+FE0F) presentation sequence; the generator rejects malformed, duplicate or unassigned entries and stores the sorted bases as `presentationSequences` in the edition's properties. An unsorted or invalid list rejects the properties; files from before this field have no forms. Charts and keyboard Unicode keys draw these characters with VS15, but copying, Favorites and insertion keep the bare scalar. Details show both forms and copy each exactly. The picker offers each form as a separate choice, and a page stores them as distinct keys that insert their exact sequences; holding a page key for such a character adds its other form after the key's own variants.
+
 ## Edition and privacy boundaries
 
 The Unicode edition selector exists only in the app’s Settings tab. Latest

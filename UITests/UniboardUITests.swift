@@ -379,7 +379,7 @@ final class UniboardUITests: XCTestCase {
     }
 
     func testBrowseUnicodeBlockAndOpenCharacter() {
-        appTab("Blocks").tap()
+        selectAppTab("Blocks")
         let blockSearch = app.descendants(matching: .any)["blockSearch"].firstMatch
         XCTAssertTrue(blockSearch.waitForExistence(timeout: 5))
         blockSearch.tap()
@@ -425,7 +425,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
         openAppSettings()
         assertControlValue("unicodeEdition", equals: "previous")
-        appTab("Explore").tap()
+        selectAppTab("Explore")
         assertAppCatalogScalar("U+10940", assigned: true, age: "17.0")
         assertAppCatalogScalar("U+0558", assigned: false)
         attachScreenshot("Historical Unicode17 selection persists after ordinary relaunch")
@@ -462,7 +462,7 @@ final class UniboardUITests: XCTestCase {
     }
 
     func testEmojiDetailsAndScratchpadPreserveWholeZWJSequence() {
-        appTab("Emoji").tap()
+        selectAppTab("Emoji")
         search("woman technologist", fieldIdentifier: "emojiSearch")
         dismissAppSearchKeyboard()
         let emoji = app.buttons["emoji-1F469-200D-1F4BB"].firstMatch
@@ -478,7 +478,7 @@ final class UniboardUITests: XCTestCase {
         revealByScrolling(add, in: app)
         add.tap()
         app.buttons["Done"].tap()
-        appTab("Explore").tap()
+        selectAppTab("Explore")
         let scratchpad = app.buttons["openScratchpad"].firstMatch
         revealByScrolling(scratchpad, in: app)
         scratchpad.tap()
@@ -510,7 +510,7 @@ final class UniboardUITests: XCTestCase {
         setAppUnicodeFonts(false)
         let fonts = appUnicodeFontsSwitch()
         XCTAssertTrue(fonts.waitUntilValueEquals("0"), "The visible App Settings choice must be off before testing native previews")
-        appTab("Explore").tap()
+        selectAppTab("Explore")
         searchUnicode("U+0558")
         dismissAppSearchKeyboard()
         assertCharacterVisible("U+0558").tap()
@@ -523,7 +523,7 @@ final class UniboardUITests: XCTestCase {
         app.buttons["Done"].tap()
 
         setAppUnicodeFonts(true)
-        appTab("Explore").tap()
+        selectAppTab("Explore")
         searchUnicode("U+0558")
         dismissAppSearchKeyboard()
         assertCharacterVisible("U+0558").tap()
@@ -1377,13 +1377,13 @@ final class UniboardUITests: XCTestCase {
         deleteAppPages(named: "qaone")
         addTeardownBlock { @MainActor [self] in deleteAppPages(named: "qaone") }
         let page = createAppPage("qaone")
-        addAppPageKey(query: "snowman", codepoint: "U+2603")
+        addAppPageKey(query: "infinity", codepoint: "U+221E")
         let key = app.buttons["page.key.0"].firstMatch
         XCTAssertTrue(key.waitForExistence(timeout: 5))
-        XCTAssertTrue(key.label.contains("U+2603"))
+        XCTAssertTrue(key.label.contains("U+221E"))
         key.tap()
         app.buttons["variants.addUnicode"].tap()
-        pickAppUnicode(query: "comet", codepoint: "U+2604")
+        pickAppUnicode(query: "almost equal to", codepoint: "U+2248")
         XCTAssertTrue(app.staticTexts["variants.item.0"].waitForExistence(timeout: 5))
         attachScreenshot("A page key's variants are edited in the app")
         app.navigationBars.buttons.firstMatch.tap()
@@ -1393,54 +1393,116 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(star.waitUntilValueEquals("1"))
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(page.waitForExistence(timeout: 5))
-        XCTAssertTrue(page.label.contains("Opens with ★"), page.label)
+        XCTAssertTrue(page.waitUntilValueEquals("Opens with ★"), "\(String(describing: page.value))")
         attachScreenshot("Pages lists Favorites, Symbols and custom pages in keyboard order")
         deleteAppPage(page)
         let favorites = app.buttons["pages.page.migrated-favorites"].firstMatch
-        XCTAssertTrue(favorites.label.contains("Opens with ★"), "Deleting the Star page returns ★ to Favorites")
+        XCTAssertTrue(favorites.waitUntilValueEquals("Opens with ★"), "Deleting the Star page returns ★ to Favorites")
     }
 
     func testPagesArrangeKeysIntoRowsWithHalfAndFullGaps() {
         deleteAppPages(named: "qarows")
         addTeardownBlock { @MainActor [self] in deleteAppPages(named: "qarows") }
         _ = createAppPage("qarows")
-        for (query, codepoint) in [("snowman", "U+2603"), ("comet", "U+2604"), ("umbrella", "U+2602")] {
+        for (query, codepoint) in [("infinity", "U+221E"), ("almost equal to", "U+2248"), ("n-ary summation", "U+2211")] {
             addAppPageKey(query: query, codepoint: codepoint)
         }
         openArrange()
         let tile = { (row: Int, index: Int) in self.app.buttons["arrange.\(row).\(index)"].firstMatch }
-        XCTAssertEqual(tile(0, 2).label, "Key ☂", "Without rows of its own a page fills rows of ten")
+        XCTAssertEqual(tile(0, 2).label, "Key ∑", "Without rows of its own a page fills rows of ten")
         tile(0, 0).tap()
         XCTAssertFalse(app.buttons["arrange.newRow"].isEnabled, "A row cannot break before its first key")
         tile(0, 1).tap()
         app.buttons["arrange.newRow"].tap()
         XCTAssertTrue(tile(1, 0).waitForExistence(timeout: 5))
-        XCTAssertEqual(tile(1, 0).label, "Key ☄")
+        XCTAssertEqual(tile(1, 0).label, "Key ≈")
         app.buttons["arrange.halfGap"].tap()
         XCTAssertTrue(tile(1, 0).waitUntilLabelEquals("Half-width gap"))
-        XCTAssertEqual(tile(1, 1).label, "Key ☄")
+        XCTAssertEqual(tile(1, 1).label, "Key ≈")
         tile(1, 2).tap()
         app.buttons["arrange.gap"].tap()
         XCTAssertTrue(tile(1, 2).waitUntilLabelEquals("Full-width gap"))
-        XCTAssertEqual(tile(1, 3).label, "Key ☂")
+        XCTAssertEqual(tile(1, 3).label, "Key ∑")
         app.buttons["arrange.left"].tap()
         XCTAssertTrue(tile(1, 1).waitUntilLabelEquals("Full-width gap"), "A selected gap moves left past a key")
-        XCTAssertEqual(tile(1, 2).label, "Key ☄")
+        XCTAssertEqual(tile(1, 2).label, "Key ≈")
         app.buttons["arrange.remove"].tap()
-        XCTAssertTrue(tile(1, 1).waitUntilLabelEquals("Key ☄"))
+        XCTAssertTrue(tile(1, 1).waitUntilLabelEquals("Key ≈"))
         tile(1, 2).tap()
         app.buttons["arrange.up"].tap()
-        XCTAssertTrue(tile(0, 1).waitUntilLabelEquals("Key ☂"), "Moving a key up takes it to the row above")
+        XCTAssertTrue(tile(0, 1).waitUntilLabelEquals("Key ∑"), "Moving a key up takes it to the row above")
         attachScreenshot("A page arranged into rows with a half-width gap")
         app.navigationBars.buttons.firstMatch.tap()
         let arrange = app.buttons["page.arrange"].firstMatch
         XCTAssertTrue(arrange.waitForExistence(timeout: 5))
-        XCTAssertTrue(arrange.label.contains("Custom rows"), arrange.label)
-        XCTAssertTrue(app.buttons["page.key.1"].firstMatch.label.contains("U+2602"), "Keys keep the order their places give them")
+        XCTAssertTrue(app.buttons["page.key.1"].firstMatch.label.contains("U+2211"), "Keys keep the order their places give them")
         openArrange()
         app.buttons["arrange.reset"].tap()
-        XCTAssertTrue(tile(0, 2).waitUntilLabelEquals("Key ☄"))
+        XCTAssertTrue(tile(0, 2).waitUntilLabelEquals("Key ≈"))
         XCTAssertFalse(tile(1, 0).exists)
+    }
+
+    func testTextAndEmojiFormsShowSideBySideAndJoinAPageSeparately() {
+        searchUnicode("snowman")
+        assertCharacterVisible("U+2603").tap()
+        XCTAssertTrue(app.descendants(matching: .any)["characterGlyph"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["characterGlyph.emoji"].firstMatch.exists, "Both presentations show")
+        XCTAssertTrue(app.buttons["copyTextPresentation"].exists)
+        XCTAssertTrue(app.buttons["copyEmojiPresentation"].exists)
+        attachScreenshot("Snowman text and emoji presentations side by side")
+        app.buttons["Done"].tap()
+        deleteAppPages(named: "qaforms")
+        addTeardownBlock { @MainActor [self] in deleteAppPages(named: "qaforms") }
+        _ = createAppPage("qaforms")
+        addSnowmanPresentations()
+        XCTAssertTrue(app.buttons["page.key.0"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["page.key.0"].firstMatch.label.contains("U+2603 U+FE0E"))
+        XCTAssertTrue(app.buttons["page.key.1"].firstMatch.label.contains("U+2603 U+FE0F"), "Both forms are separate keys")
+        attachScreenshot("A page holds the text and emoji snowman as two keys")
+    }
+
+    /// Adds the text, then the emoji snowman to the open page from the picker.
+    private func addSnowmanPresentations() {
+        for (form, points) in [("text", "U+2603 U+FE0E"), ("emoji", "U+2603 U+FE0F")] {
+            let add = app.buttons["page.addUnicode"].firstMatch
+            XCTAssertTrue(add.waitForExistence(timeout: 5))
+            add.tap()
+            let field = app.searchFields.firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap()
+            field.typeText("snowman")
+            let row = app.buttons["picker.\(form).U+2603"].firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 10), "The picker offers the \(form) form on its own")
+            XCTAssertTrue(row.label.contains(points), row.label)
+            row.tap()
+            XCTAssertTrue(field.waitUntilAbsent())
+        }
+    }
+
+    func testSystemKeyboardPageInsertsTextAndEmojiFormsExactly() throws {
+        try requirePhoneKeyboardIntegration()
+        deleteAppPages(named: "qaforms")
+        addTeardownBlock { @MainActor [self] in restoreEnglishKeyboard(); deleteAppPages(named: "qaforms") }
+        _ = createAppPage("qaforms")
+        addSnowmanPresentations()
+        let star = app.switches["page.star"].firstMatch
+        revealByScrolling(star, in: app)
+        tapSwitch(star)
+        XCTAssertTrue(star.waitUntilValueEquals("1"))
+        let input = openSystemKeyboardHost(unicodeBrowse: false)
+        app.buttons["keyboard.openFavorites"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["qaforms"].firstMatch.waitUntilSelected())
+        let text = symbolBoardKey("☃\u{FE0E}"), emoji = symbolBoardKey("☃\u{FE0F}")
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        XCTAssertTrue(emoji.exists, "Both forms are keys of their own")
+        text.tap()
+        emoji.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("☃\u{FE0E}☃\u{FE0F}"))
+        XCTAssertEqual((input.value as? String)?.unicodeScalars.map(\.value), [0x2603, 0xFE0E, 0x2603, 0xFE0F],
+                       "Each key inserts its exact presentation sequence")
+        chooseHeldKeyboardOption(text, optionCount: 2, selectedIndex: 1)
+        XCTAssertTrue(input.waitUntilValueEquals("☃\u{FE0E}☃\u{FE0F}☃\u{FE0F}"), "Holding a text-form key offers the emoji form")
+        attachScreenshot("The keyboard page holds the text and emoji snowman")
     }
 
     private func openArrange() {
@@ -1455,7 +1517,7 @@ final class UniboardUITests: XCTestCase {
         deleteAppPages(named: "qarows")
         addTeardownBlock { @MainActor [self] in restoreEnglishKeyboard(); deleteAppPages(named: "qarows") }
         _ = createAppPage("qarows")
-        for (query, codepoint) in [("snowman", "U+2603"), ("comet", "U+2604"), ("umbrella", "U+2602")] {
+        for (query, codepoint) in [("infinity", "U+221E"), ("almost equal to", "U+2248"), ("n-ary summation", "U+2211")] {
             addAppPageKey(query: query, codepoint: codepoint)
         }
         let star = app.switches["page.star"].firstMatch
@@ -1470,13 +1532,13 @@ final class UniboardUITests: XCTestCase {
         _ = openSystemKeyboardHost(initialText: "Rows ", unicodeBrowse: false)
         app.buttons["keyboard.openFavorites"].firstMatch.tap()
         XCTAssertTrue(app.buttons["qarows"].firstMatch.waitUntilSelected(), "★ opens the arranged page")
-        let snowman = symbolBoardKey("☃"), comet = symbolBoardKey("☄"), umbrella = symbolBoardKey("☂")
-        XCTAssertTrue(comet.waitForExistence(timeout: 5))
-        XCTAssertGreaterThan(comet.frame.minY, snowman.frame.maxY, "The second key starts the next row")
-        XCTAssertEqual(comet.frame.minX - snowman.frame.minX, (snowman.frame.width + 5) / 2, accuracy: 1,
+        let infinity = symbolBoardKey("∞"), almostEqual = symbolBoardKey("≈"), sum = symbolBoardKey("∑")
+        XCTAssertTrue(almostEqual.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(almostEqual.frame.minY, infinity.frame.maxY, "The second key starts the next row")
+        XCTAssertEqual(almostEqual.frame.minX - infinity.frame.minX, (infinity.frame.width + 5) / 2, accuracy: 1,
                        "A half-width gap indents the row by half a key")
-        XCTAssertEqual(umbrella.frame.minY, comet.frame.minY, accuracy: 1)
-        XCTAssertEqual(comet.frame.width, snowman.frame.width, accuracy: 0.5)
+        XCTAssertEqual(sum.frame.minY, almostEqual.frame.minY, accuracy: 1)
+        XCTAssertEqual(almostEqual.frame.width, infinity.frame.width, accuracy: 0.5)
         attachScreenshot("The keyboard draws the page's rows and half-width gap")
     }
 
@@ -1484,10 +1546,10 @@ final class UniboardUITests: XCTestCase {
         try requirePhoneKeyboardIntegration()
         deleteAppPages(named: "qaone")
         let page = createAppPage("qaone")
-        addAppPageKey(query: "snowman", codepoint: "U+2603")
+        addAppPageKey(query: "infinity", codepoint: "U+221E")
         app.buttons["page.key.0"].firstMatch.tap()
         app.buttons["variants.addUnicode"].tap()
-        pickAppUnicode(query: "comet", codepoint: "U+2604")
+        pickAppUnicode(query: "almost equal to", codepoint: "U+2248")
         app.navigationBars.buttons.firstMatch.tap()
         let star = app.switches["page.star"].firstMatch
         tapSwitch(star)
@@ -1499,10 +1561,10 @@ final class UniboardUITests: XCTestCase {
         let starKey = app.buttons["keyboard.openFavorites"].firstMatch
         starKey.tap()
         XCTAssertTrue(app.buttons["qaone"].firstMatch.waitUntilSelected(), "★ opens the page the app marked")
-        let snowman = symbolBoardKey("☃")
-        XCTAssertTrue(snowman.waitForExistence(timeout: 5))
-        chooseHeldKeyboardOption(snowman, optionCount: 2, selectedIndex: 1)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "☄"), "Holding a page key offers its app-configured variants")
+        let infinity = symbolBoardKey("∞")
+        XCTAssertTrue(infinity.waitForExistence(timeout: 5))
+        chooseHeldKeyboardOption(infinity, optionCount: 2, selectedIndex: 1)
+        XCTAssertTrue(input.waitUntilValueEquals(context + "≈"), "Holding a page key offers its app-configured variants")
         starKey.press(forDuration: 1)
         let list = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
         XCTAssertTrue(list.waitForExistence(timeout: 5))
@@ -1518,7 +1580,7 @@ final class UniboardUITests: XCTestCase {
         assertHostTypingPanel()
         starKey.tap()
         XCTAssertTrue(app.buttons["qaone"].firstMatch.waitUntilSelected(), "Opening another page keeps the Star page")
-        XCTAssertEqual(input.value as? String, context + "☄")
+        XCTAssertEqual(input.value as? String, context + "≈")
     }
 
     func testSystemKeyboardFavoritesKeyPreservesQueryCaretAndExactHost() throws {
@@ -1714,7 +1776,7 @@ final class UniboardUITests: XCTestCase {
         defer { restoreEnglishKeyboard(); setKeyboardFullAccess(false); app.activate() }
         restoreEnglishKeyboard()
         app.navigationBars["Try Uniboard"].buttons["Settings"].tap()
-        appTab("Explore").tap()
+        selectAppTab("Explore")
         searchUnicode("u+2603")
         assertCharacterVisible("U+2603").tap()
         let favorite = app.buttons["toggleFavorite"].firstMatch
@@ -1726,7 +1788,7 @@ final class UniboardUITests: XCTestCase {
         openAppFavorites()
         XCTAssertTrue(app.otherElements["savedFavorites"].buttons["character-U+2603"].firstMatch.waitForExistence(timeout: 5))
         func reopenHost() -> XCUIElement {
-            appTab("Settings").tap()
+            selectAppTab("Settings")
             let tryKeyboard = app.descendants(matching: .any)["tryKeyboard"].firstMatch
             revealByScrolling(tryKeyboard, in: app); tryKeyboard.tap()
             let host = app.textViews["keyboardTestInput"].firstMatch
@@ -1915,7 +1977,7 @@ final class UniboardUITests: XCTestCase {
         _ = openSystemKeyboardHost(unicodeBrowse: false)
         restoreEnglishKeyboard()
         app.terminate(); app.launch()
-        appTab("Explore").tap()
+        selectAppTab("Explore")
         searchUnicode("snow")
         let field = app.textFields["unicodeSearch"].firstMatch
         XCTAssertTrue(field.waitUntilValueEquals("snow"))
@@ -2898,9 +2960,7 @@ final class UniboardUITests: XCTestCase {
             back.tap()
         }
         dismissAppSearchKeyboard()
-        let tab = appTab("Pages")
-        XCTAssertTrue(tab.waitForExistence(timeout: 5))
-        tab.tap()
+        selectAppTab("Pages")
         for _ in 0..<3 {
             let back = app.navigationBars.buttons["Pages"].firstMatch
             guard back.exists else { break }
@@ -2945,8 +3005,11 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
         field.typeText(query)
-        let result = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", codepoint)).firstMatch
+        // Results reload while typing; wait for the exact row to settle.
+        let result = app.buttons["picker.\(codepoint)"].firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 10), "Expected \(codepoint) for \(query)")
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: result)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed)
         result.tap()
         XCTAssertTrue(field.waitUntilAbsent())
     }
@@ -2967,6 +3030,20 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(delete.waitForExistence(timeout: 5))
         delete.tap()
         XCTAssertTrue(row.waitUntilAbsent())
+    }
+
+    /// Right after launch the floating tab bar can still be settling and drop
+    /// or misdirect a tap, so tap until the tab is selected or its page shows.
+    private func selectAppTab(_ title: String) {
+        let tab = appTab(title)
+        XCTAssertTrue(tab.waitForExistence(timeout: 5), "Missing the \(title) tab")
+        for _ in 0..<4 {
+            tab.tap()
+            let selected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                self.appTab(title).isSelected || self.app.navigationBars[title].exists
+            }, object: app)
+            if XCTWaiter.wait(for: [selected], timeout: 2) == .completed { return }
+        }
     }
 
     private func appTab(_ title: String) -> XCUIElement {
@@ -3460,17 +3537,8 @@ final class UniboardUITests: XCTestCase {
             back.tap()
         }
         dismissAppSearchKeyboard()
-        let settings = appTab("Settings")
-        XCTAssertTrue(settings.waitForExistence(timeout: 5))
-        XCTAssertTrue(settings.isHittable)
-        // Right after launch the floating tab bar can still be settling, and
-        // a tap may land on its neighbour; tap again until Settings opens.
-        let page = app.navigationBars["Settings"].firstMatch
-        for _ in 0..<3 {
-            settings.tap()
-            if page.waitForExistence(timeout: 2) { break }
-        }
-        XCTAssertTrue(page.waitForExistence(timeout: 5))
+        selectAppTab("Settings")
+        XCTAssertTrue(app.navigationBars["Settings"].firstMatch.waitForExistence(timeout: 5))
     }
 
     /// App Settings is a native Form, exposed as a collection view.
@@ -3502,7 +3570,7 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("Settings is the only catalog selector and offers four bundled versions")
         option.tap()
         assertControlValue("unicodeEdition", equals: edition)
-        appTab("Explore").tap()
+        selectAppTab("Explore")
         XCTAssertFalse(app.descendants(matching: .any)["unicodeEdition"].firstMatch.exists)
     }
 

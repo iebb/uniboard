@@ -67,6 +67,11 @@
       "sourceDate": "2026-06-29, 15:25:26 GMT",
       "declaredVersion": "18.0.0"
     },
+    "emoji/emoji-variation-sequences.txt": {
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/emoji/emoji-variation-sequences.txt",
+      "sha256": "ff1707564aa1f1b2fcf4ec92d609d4cb26940bc0d4dcf07f5328ad6879e84da3",
+      "sourceDate": "2026-01-09, 12:44:43 GMT"
+    },
     "emoji/emoji-test.txt": {
       "url": "https://www.unicode.org/Public/18.0.0/emoji/emoji-test.txt",
       "sha256": "8f3735cda1f92a779d78af67cf86066bb1f07143dc22f2ac29394d9bc57ab21a",

@@ -33,9 +33,6 @@ struct SymbolPageListPanel: View {
                         }
                     }
                     .background(KeyboardPalette.key, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    Text("Create, order and edit pages in the Uniboard app.")
-                        .font(.system(size: 12)).foregroundStyle(KeyboardPalette.secondary)
-                        .padding(.horizontal, 4)
                     if let issue = store.loadIssue {
                         Text(issue.rawValue).font(.system(size: 12)).foregroundStyle(KeyboardPalette.secondary)
                             .accessibilityIdentifier("keyboard.boards.storageIssue")
@@ -54,18 +51,17 @@ struct SymbolPageListPanel: View {
 
     private func row(_ board: SymbolBoard) -> some View {
         let favorites = board.id == SymbolBoardStore.favoritesID
-        let keys = board.keys.count == 1 ? "1 key" : "\(board.keys.count) keys"
-        let detail = board.id == store.preferredStarBoardID ? keys + " · Opens with ★" : keys
+        let opensWithStar = board.id == store.preferredStarBoardID
         return HStack(spacing: 12) {
             Image(systemName: favorites ? "star.fill" : "square.grid.2x2")
                 .font(.system(size: 17))
                 .foregroundStyle(favorites ? Color.yellow : KeyboardPalette.accent)
                 .frame(width: 22)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(board.name).font(.system(size: 16)).foregroundStyle(.primary).lineLimit(1)
-                Text(detail).font(.system(size: 12)).foregroundStyle(KeyboardPalette.secondary).lineLimit(1)
-            }
+            Text(board.name).font(.system(size: 16)).foregroundStyle(.primary).lineLimit(1)
             Spacer(minLength: 8)
+            if opensWithStar && !favorites {
+                Text("★").font(.system(size: 14)).foregroundStyle(KeyboardPalette.secondary).accessibilityLabel("Opens with star")
+            }
             if board.id == store.activeBoardID {
                 Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(KeyboardPalette.accent)
             }

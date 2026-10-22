@@ -5,10 +5,10 @@
   "edition": "draft",
   "source": "draft",
   "sourceLastModified": "2026-09-25, 10:46:42 GMT",
-  "refreshedAt": "2026-10-18T14:06:15Z",
+  "refreshedAt": "2026-10-22T09:35:32Z",
   "sourceKind": "unicode-development-draft",
-  "sourceCommit": "4fd8eca90b30aa4c72543ccddb4c15d05becdf8d",
-  "sourceCommitDate": "2026-10-16T01:25:51Z",
+  "sourceCommit": "578f6c0516f5f268292ebda50b51848407a06478",
+  "sourceCommitDate": "2026-10-18T16:12:27Z",
   "sourceRepository": "https://github.com/unicode-org/unicodetools",
   "formatVersion": 3,
   "blocks": 353,
@@ -21,57 +21,62 @@
   "assignedScalarsWithPendingDraftAge": 0,
   "sources": {
     "ReadMe.txt": {
-      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/ucd/dev/ReadMe.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/ucd/dev/ReadMe.txt",
       "sha256": "75a1ce9e5b14164a22d35b2a56fb5a8f927de323a08c43791c6fb050901f84f8"
     },
     "UnicodeData.txt": {
-      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/ucd/dev/UnicodeData.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/ucd/dev/UnicodeData.txt",
       "sha256": "0736451de439ae7baf1425136617da495e09ee5afbe6e394374db7009ea08950"
     },
     "Blocks.txt": {
-      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/ucd/dev/Blocks.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/ucd/dev/Blocks.txt",
       "sha256": "f2fcb9fe1bc18c6b0298eead6d6cdec34021080d6ce85ee74387e3e4a03fab8e",
       "sourceDate": "2026-09-23, 23:47:29 GMT",
       "declaredVersion": "19.0.0"
     },
     "NamesList.txt": {
-      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/ucd/dev/NamesList.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/ucd/dev/NamesList.txt",
       "sha256": "437388f4710d55db0fd19462ab3af9bc33e53b1f37e468b989752d15f3dffa6a",
       "sourceDate": "2026-09-25, 10:46:42 GMT",
       "declaredVersion": "19.0.0"
     },
     "NameAliases.txt": {
-      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/ucd/dev/NameAliases.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/ucd/dev/NameAliases.txt",
       "sha256": "3d5cf5e468901b080cd99adf2230061b748083705fe633db43ac8b73ec7a13da",
       "sourceDate": "2026-02-03",
       "declaredVersion": "18.0.0"
     },
     "extracted/DerivedName.txt": {
-      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/ucd/dev/extracted/DerivedName.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/ucd/dev/extracted/DerivedName.txt",
       "sha256": "ac6cf808ea4ee29323031d5ba9449de13da51398a3f5ce401546d8fceb976df7",
       "sourceDate": "2026-06-29, 15:25:03 GMT",
       "declaredVersion": "18.0.0"
     },
     "DerivedCoreProperties.txt": {
-      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/ucd/dev/DerivedCoreProperties.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/ucd/dev/DerivedCoreProperties.txt",
       "sha256": "09c928886a178fcafd93c29e4bd59073a058e5a100b716d425cb563ab50f68c9",
       "sourceDate": "2026-08-07, 16:19:42 GMT",
       "declaredVersion": "18.0.0"
     },
     "DerivedAge.txt": {
-      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/ucd/dev/DerivedAge.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/ucd/dev/DerivedAge.txt",
       "sha256": "58b04334e3a31f9612694bbc3f6bff4a302b7d424565bca9c47e30aa74f8dbac",
       "sourceDate": "2026-06-29, 15:24:58 GMT",
       "declaredVersion": "18.0.0"
     },
     "Scripts.txt": {
-      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/ucd/dev/Scripts.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/ucd/dev/Scripts.txt",
       "sha256": "0071fd81b6aeae25f6e8bce8efec3066a6476a91b49bdb2f52dc76e817862a6a",
       "sourceDate": "2026-06-29, 15:25:26 GMT",
       "declaredVersion": "18.0.0"
     },
+    "emoji/emoji-variation-sequences.txt": {
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/ucd/dev/emoji/emoji-variation-sequences.txt",
+      "sha256": "b242fe265fc74c2aed2a7f5416b8600bccb4cfdafc0e627e22e7e0fc122a3208",
+      "sourceDate": "2026-09-21, 22:55:19 GMT"
+    },
     "emoji/emoji-test.txt": {
-      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/emoji/dev/emoji-test.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/unicodetools/578f6c0516f5f268292ebda50b51848407a06478/unicodetools/data/emoji/dev/emoji-test.txt",
       "sha256": "c079d7daee39ba5222b2130a9e8266dd887dcd774ede8ba1fd2a5068dcd305ea",
       "sourceDate": "2026-09-21, 23:28:47 GMT"
     }

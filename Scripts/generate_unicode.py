@@ -27,7 +27,8 @@ import urllib.request
 from pathlib import Path
 
 FILES = ["ReadMe.txt", "UnicodeData.txt", "Blocks.txt", "NamesList.txt", "NameAliases.txt",
-         "extracted/DerivedName.txt", "DerivedCoreProperties.txt", "DerivedAge.txt", "Scripts.txt"]
+         "extracted/DerivedName.txt", "DerivedCoreProperties.txt", "DerivedAge.txt", "Scripts.txt",
+         "emoji/emoji-variation-sequences.txt"]
 CATEGORIES = "Lu Ll Lt Lm Lo Mn Mc Me Nd Nl No Pc Pd Ps Pe Pi Pf Po Sm Sc Sk So Zs Zl Zp Cc Cf Cs Co Cn".split()
 BIDI_CLASSES = "L R AL EN ES ET AN CS NSM BN B S WS ON LRE LRO RLE RLO PDF LRI RLI FSI PDI".split()
 ROOT = Path(__file__).resolve().parent.parent
@@ -125,6 +126,28 @@ def emoji_source_base(base: str, provenance: dict) -> str:
     if int(match[1]) <= 16:
         return f"https://www.unicode.org/Public/emoji/{match[1]}.{match[2]}/"
     return base.removesuffix("ucd/") + "emoji/"
+
+
+def presentation_sequences(lines, assigned) -> list:
+    """Characters with both a text (VS15) and an emoji (VS16) presentation sequence."""
+    styles = {}
+    for line in lines:
+        data = line.split("#", 1)[0].strip()
+        if not data:
+            continue
+        match = re.fullmatch(r"([0-9A-F]{4,6}) (FE0E|FE0F)\s*;\s*(text|emoji) style\s*;", data)
+        if match is None or (match[2] == "FE0E") != (match[3] == "text"):
+            raise ValueError(f"Invalid emoji variation sequence: {line}")
+        cp = int(match[1], 16)
+        if not assigned(cp):
+            raise ValueError(f"Emoji variation sequence has an unassigned base: {line}")
+        if match[3] in styles.setdefault(cp, set()):
+            raise ValueError(f"Duplicate emoji variation sequence: {line}")
+        styles[cp].add(match[3])
+    bases = sorted(cp for cp, found in styles.items() if found == {"text", "emoji"})
+    if not bases:
+        raise ValueError("No emoji variation sequences")
+    return bases
 
 
 def fold(value: str) -> str:
@@ -695,6 +718,9 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool, *, slot: st
                                   "group": group, "subgroup": subgroup})
     if not emoji_entries or len({entry["id"] for entry in emoji_entries}) != len(emoji_entries):
         raise ValueError("Emoji catalog is empty or has duplicate fully-qualified sequences")
+    properties["presentationSequences"] = presentation_sequences(
+        lines("emoji/emoji-variation-sequences.txt"),
+        lambda cp: cp in records or any(start <= cp <= end for start, end, *_ in ranges))
     emoji = {"version": emoji_version + (" draft" if is_draft else ""), "edition": slot,
              "unicodeVersion": version_label, "entries": emoji_entries}
     source_dates = [value["sourceDate"] for value in sources.values() if "sourceDate" in value]

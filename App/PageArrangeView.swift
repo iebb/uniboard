@@ -27,8 +27,6 @@ struct PageArrangeView: View {
                     } else {
                         canvas
                     }
-                    Text("Select a key or gap, then move it or add a gap or new row before it. You can also drag a key onto another place. New keys take a place at the end.")
-                        .font(.footnote).foregroundStyle(.secondary)
                     if failed {
                         Text("This arrangement could not be saved.").font(.footnote).foregroundStyle(.red)
                             .accessibilityIdentifier("arrange.error")

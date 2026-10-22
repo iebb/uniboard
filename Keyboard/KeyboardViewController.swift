@@ -463,7 +463,7 @@ final class KeyboardViewController: UIInputViewController {
     private func makeSymbolBoardActions(renderedMode: UUID, boardID: String, key: SymbolBoardKey) -> KeyboardVariantActions? {
         guard let current = makeBoardConfigurationGuard(renderedMode: renderedMode) else { return nil }
         let activeBoardID = SymbolBoardStore.shared.activeBoardID
-        let choices = KeyboardVariantPolicy.options(text: key.text, variants: key.variants)
+        let choices = KeyboardVariantPolicy.options(text: key.text, variants: model.pageKeyVariants(key))
         let accepts: () -> Bool = { [weak self] in
             guard let self else { return false }
             return current() && !self.model.isSearching && !self.model.hasSymbolBoardOverlay
@@ -1026,6 +1026,14 @@ private final class KeyboardModel: ObservableObject {
     }
 
     var catalog: UnicodeCatalog { edition.catalog }
+    /// A page key's hold choices: its own variants, then, for a character
+    /// with both a text and an emoji form, the form the key does not type.
+    func pageKeyVariants(_ key: SymbolBoardKey) -> [String] {
+        let scalars = Array(key.text.unicodeScalars)
+        guard let base = scalars.first, scalars.count == 1 || (scalars.count == 2 && [0xFE0E, 0xFE0F].contains(scalars[1].value)),
+              let forms = catalog.character(at: base.value)?.presentationForms else { return key.variants }
+        return key.variants + [forms.text, forms.emoji].filter { !$0.utf16.elementsEqual(key.text.utf16) }
+    }
     var emojiCatalog: EmojiCatalog { edition.emojiCatalog }
     var editionValue: String { edition.rawValue }
     var hasSearchQuery: Bool {
@@ -1843,7 +1851,7 @@ private struct UnicodeKeyboardView: View {
     @ViewBuilder private func savedBoardCell(_ cell: SymbolPageLayout.Cell, board: SymbolBoard, keyWidth: CGFloat, spacing: CGFloat) -> some View {
         if case .key(let index) = cell, board.keys.indices.contains(index) {
             let key = board.keys[index]
-            KeyboardVariantKey(text: key.text, variants: key.variants,
+            KeyboardVariantKey(text: key.text, variants: model.pageKeyVariants(key),
                 identifier: "keyboard.board.\(board.id).key.\(key.id)",
                 label: symbolBoardKeyLabel(key.text), route: model.inputModeID,
                 enabled: model.isShowingSymbolPages && model.showFavorites && symbolBoards.activeBoardID == board.id,

@@ -15,6 +15,9 @@ Customize Keys has a layout menu listing that layout's letters in keyboard order
 PAGES
 The Pages tab replaces Saved. Create, rename, reorder and delete pages; open a page to add keys from Unicode search or as typed text, reorder or remove them, and give each key hold variants. Toggle which page Star opens. Arrange Keys, also in Favorites, draws the page as the keyboard does: select a key or gap to move it, start a new row, or add a half-width or full-width gap before it; drag keys too. Check the keyboard draws the same rows and gaps, and Rows of Ten resets. In the keyboard, Star opens that page and hold Star shows a plain list of pages to open; there is no editing there. Pages made inside earlier keyboards are not carried over; Favorites are kept. Check that changes reach the keyboard with Full Access OFF after reopening it.
 
+TEXT AND EMOJI FORMS
+Characters with both presentations, such as ☃ and ⌚, show as text in charts and side by side in details, with a copy button for each. Add from Unicode lists each form separately, so a page can hold both; each key inserts its exact sequence, and holding one offers the other form.
+
 SEARCH, SAVE AND TYPING
 Save in a result's details adds to or removes from Favorites. Both Delete keys edit before the search caret and never the host. Done restores host typing and keeps the query. App Settings can turn off the number row; the 123 page and search keep digits. Shift: tap for one capital, double-tap for Caps Lock, touch Shift then slide for one capital.
 

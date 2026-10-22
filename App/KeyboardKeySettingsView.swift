@@ -51,8 +51,6 @@ struct KeyboardKeySettingsView: View {
                     }
                     .pickerStyle(.menu)
                     .accessibilityIdentifier("keySettings.layout")
-                } footer: {
-                    Text("A letter's choices apply in every layout that has that letter.")
                 }
             }
             ForEach(groups, id: \.0) { title, kind in
@@ -321,20 +319,13 @@ struct KeyboardKeyUnicodePicker: View {
                 } else if search.searching { ProgressView() }
                 else if search.results.isEmpty { Text("No characters found").foregroundStyle(.secondary) }
                 ForEach(search.results) { character in
-                    Button { select(character.text); dismiss() } label: {
-                        HStack(spacing: 14) {
-                            Text(character.displayText)
-                                .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 28, enabled: preferences.useUnicodeFonts)))
-                                .frame(width: 42)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(character.name).foregroundStyle(.primary)
-                                Text(character.codePointLabel).font(.caption.monospaced()).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .contentShape(Rectangle())
+                    if let forms = character.presentationForms {
+                        // Each presentation is its own choice, so a page can hold both.
+                        row(character, text: forms.text, glyph: forms.text, identifier: "picker.text.\(character.codePointLabel)")
+                        row(character, text: forms.emoji, glyph: forms.emoji, identifier: "picker.emoji.\(character.codePointLabel)")
+                    } else {
+                        row(character, text: character.text, glyph: character.displayText, identifier: "picker.\(character.codePointLabel)")
                     }
-                    .buttonStyle(.plain)
                 }
             }
             .navigationTitle("Choose a character").navigationBarTitleDisplayMode(.inline)
@@ -342,6 +333,27 @@ struct KeyboardKeyUnicodePicker: View {
             .onChange(of: query) { _, value in search.update(value, catalog: preferences.catalog, limit: 120) }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
+    }
+}
+
+private extension KeyboardKeyUnicodePicker {
+    func row(_ character: UnicodeCharacter, text: String, glyph: String, identifier: String) -> some View {
+        Button { select(text); dismiss() } label: {
+            HStack(spacing: 14) {
+                Text(glyph)
+                    .font(Font(UnicodeFontSupport.font(for: glyph, size: 28, enabled: preferences.useUnicodeFonts)))
+                    .frame(width: 42)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(character.name).foregroundStyle(.primary)
+                    Text(text.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " "))
+                        .font(.caption.monospaced()).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
     }
 }
 

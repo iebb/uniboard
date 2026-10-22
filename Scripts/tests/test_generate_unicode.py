@@ -382,6 +382,26 @@ class DownloadTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not an official final release"):
                 generator.resolve_source("latest")
 
+    def test_presentation_sequences_need_both_styles_and_fail_closed(self):
+        lines = ["# emoji-variation-sequences.txt", "",
+                 "0023 FE0E  ; text style;  # (1.1) NUMBER SIGN",
+                 "0023 FE0F  ; emoji style; # (1.1) NUMBER SIGN",
+                 "2603 FE0F  ; emoji style; # (1.1) SNOWMAN",
+                 "2603 FE0E  ; text style;  # (1.1) SNOWMAN",
+                 "1F004 FE0E ; text style;  # (5.1) MAHJONG TILE RED DRAGON"]
+        assigned = lambda cp: True
+        self.assertEqual(generator.presentation_sequences(lines, assigned), [0x23, 0x2603])
+        for bad in ["0023 FE0F  ; text style;", "0023 FE0E ; emoji style;", "0023 FE00 ; text style;",
+                    "0023 ; text style;", "zz FE0E ; text style;"]:
+            with self.assertRaises(ValueError, msg=bad):
+                generator.presentation_sequences(lines + [bad], assigned)
+        with self.assertRaises(ValueError):
+            generator.presentation_sequences(lines + ["0023 FE0E ; text style;"], assigned)
+        with self.assertRaises(ValueError):
+            generator.presentation_sequences(lines, lambda cp: cp != 0x2603)
+        with self.assertRaises(ValueError):
+            generator.presentation_sequences(["1F004 FE0E ; text style;"], assigned)
+
     def test_numeric_versions_do_not_use_lexicographic_sorting(self):
         self.assertGreater(generator.version_key("10.0"), generator.version_key("9.0"))
         self.assertGreater(generator.version_key("15.1"), generator.version_key("15.0"))

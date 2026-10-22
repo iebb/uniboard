@@ -189,6 +189,32 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertEqual(invalid.categoryName, "Future")
     }
 
+    func testCharactersWithTextAndEmojiFormsChartAsTextAndOfferBoth() throws {
+        let snowman = try XCTUnwrap(catalog.character(at: 0x2603))
+        XCTAssertTrue(snowman.hasPresentationForms)
+        XCTAssertEqual(snowman.presentationForms?.text.unicodeScalars.map(\.value), [0x2603, 0xFE0E])
+        XCTAssertEqual(snowman.presentationForms?.emoji.unicodeScalars.map(\.value), [0x2603, 0xFE0F])
+        XCTAssertEqual(snowman.displayText, "\u{2603}\u{FE0E}", "Charts show the text form")
+        XCTAssertEqual(snowman.text, "\u{2603}", "Copy and insertion keep the original scalar")
+        XCTAssertNotNil(catalog.character(at: 0x231A)?.presentationForms, "Emoji-default ⌚ also has a text form")
+        for point: UInt32 in [0x41, 0x1F600, 0x221E, 0x10FFFF] {
+            XCTAssertNil(catalog.character(at: point)?.presentationForms, String(format: "%04X", point))
+        }
+        // Each pair is listed once, sorted; anything else rejects the properties.
+        for invalid: [Any] in [[0x2603, 0x23], [0x23, 0x23], [0xD800]] {
+            let directory = try fixture()
+            try changeProperties(at: directory) { $0["presentationSequences"] = invalid }
+            XCTAssertNotNil(UnicodeCatalog(resourceURL: directory).resourceError, "\(invalid)")
+        }
+        let directory = try fixture()
+        try changeProperties(at: directory) { $0["presentationSequences"] = [0x41] }
+        let custom = UnicodeCatalog(resourceURL: directory)
+        XCTAssertEqual(custom.character(at: 0x41)?.displayText, "A\u{FE0E}")
+        XCTAssertNil(custom.character(at: 0x42)?.presentationForms)
+        XCTAssertNil(try XCTUnwrap(UnicodeCatalog(resourceURL: try fixture()).character(at: 0x41)).presentationForms,
+                     "Properties from before presentation forms have none")
+    }
+
     func testBlockCardsHandleBasicSupplementarySurrogateAndInvalidRanges() {
         let basic = UnicodeBlock(name: "Basic Latin", start: 0, end: 0x7F)
         XCTAssertEqual(basic.id, 0)

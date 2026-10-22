@@ -27,8 +27,6 @@ struct KeyboardLayoutsView: View {
                 Button { adding = true } label: { Label("Add Layout", systemImage: "plus") }
                     .disabled(preferences.layouts.count >= UnicodeEditionSettings.maximumLayouts)
                     .accessibilityIdentifier("layouts.add")
-            } footer: {
-                Text("Hold the space bar in the keyboard to switch between these layouts; it shows the current one when there are several. Up to \(UnicodeEditionSettings.maximumLayouts). Unicode search always uses English keys, and iPad's ANSI layouts apply to English only.")
             }
             if failed {
                 Text("This change could not be saved. Please try again.")
@@ -49,17 +47,12 @@ struct KeyboardLayoutsView: View {
 private struct LayoutRow: View {
     let alphabet: KeyboardAlphabet
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(alphabet.nativeName)
-                if alphabet.nativeName != alphabet.englishName {
-                    Text(alphabet.englishName).font(.subheadline).foregroundStyle(.secondary)
-                }
+        HStack(alignment: .firstTextBaseline) {
+            Text(alphabet.nativeName)
+            if alphabet.nativeName != alphabet.englishName {
+                Text(alphabet.englishName).foregroundStyle(.secondary)
             }
-            Text(alphabet.rows[0].joined(separator: " ")).font(.footnote.monospaced()).foregroundStyle(.secondary)
-                .lineLimit(1).minimumScaleFactor(0.7)
         }
-        .padding(.vertical, 2)
     }
 }
 

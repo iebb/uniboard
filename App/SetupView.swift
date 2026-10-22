@@ -73,6 +73,10 @@ struct SetupView: View {
                     .accessibilityIdentifier("extraUnicodeFonts")
                 Toggle("ConScript (UCSUR)", isOn: Binding(get: { preferences.showsUCSUR }, set: { preferences.selectUCSUR($0) }))
                     .accessibilityIdentifier("showUCSUR")
+                if preferences.showsUCSUR {
+                    Toggle("Prefer ConScript over PUA", isOn: Binding(get: { preferences.prefersUCSUR }, set: { preferences.selectPrefersUCSUR($0) }))
+                        .accessibilityIdentifier("preferUCSUR")
+                }
                 NavigationLink("Font Downloads") { FontPackDownloadsView() }
                     .accessibilityIdentifier("fontDownloads")
                 NavigationLink("Font Licenses") { FontLicenseView() }
@@ -154,6 +158,7 @@ struct KeyboardTestView: View {
 }
 
 struct UnicodeLicenseView: View {
+    @EnvironmentObject private var preferences: CatalogPreferences
     private var license: String {
         guard let url = Bundle.main.url(forResource: "Unicode-LICENSE", withExtension: "txt"),
               let text = try? String(contentsOf: url, encoding: .utf8) else {
@@ -166,6 +171,9 @@ struct UnicodeLicenseView: View {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Names, aliases, descriptions, and blocks come from the Unicode Character Database, including the latest draft data.")
                 Link("Official Unicode development data", destination: URL(string: "https://github.com/unicode-org/unicodetools")!)
+                if preferences.showsUCSUR {
+                    Link("ConScript data © Kreative Software", destination: URL(string: "https://www.kreativekorp.com/ucsur/")!)
+                }
                 Text(license).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
             }.padding(20).frame(maxWidth: 680).frame(maxWidth: .infinity, alignment: .leading)
         }.navigationTitle("Data & License").navigationBarTitleDisplayMode(.inline)

@@ -395,6 +395,29 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["U+2190"].exists)
     }
 
+    func testBlockPageShowsSixteenPerRowChart() {
+        selectAppTab("Blocks")
+        let blockSearch = app.descendants(matching: .any)["blockSearch"].firstMatch
+        XCTAssertTrue(blockSearch.waitForExistence(timeout: 5))
+        blockSearch.tap()
+        blockSearch.typeText("Arrows")
+        let arrows = app.buttons["Arrows"].firstMatch
+        XCTAssertTrue(arrows.waitForExistence(timeout: 5))
+        arrows.tap()
+        let options = app.buttons["blockDensity"].firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 5))
+        options.tap()
+        app.buttons["16 per Row"].firstMatch.tap()
+        XCTAssertTrue(options.waitUntilValueEquals("16"))
+        XCTAssertTrue(app.descendants(matching: .any)["codeChart"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["character-U+2190"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["character-U+2200"].firstMatch.exists, "The chart holds only this block")
+        attachScreenshot("Arrows block at 16 per row")
+        options.tap()
+        app.buttons["Tiles"].firstMatch.tap()
+        XCTAssertTrue(options.waitUntilValueEquals("3"))
+    }
+
     func testCatalogSelectionPreservesLookupStatusAndLocalChoice() {
         // Edition survives ordinary test launches, so establish this fixture
         // through its real Settings UI rather than resetting shared storage.
@@ -490,18 +513,32 @@ final class UniboardUITests: XCTestCase {
 
     func testConScriptCharactersShowTheirBlock() {
         setAppUCSUR(true)
+        setAppPrefersUCSUR(false)
         selectAppTab("Explore")
         searchUnicode("U+F8D0")
         dismissAppSearchKeyboard()
         let klingon = character("U+F8D0")
         XCTAssertTrue(klingon.waitForExistence(timeout: 10))
         attachScreenshot("ConScript character tinted blue")
+        XCTAssertTrue(klingon.label.contains("PRIVATE USE-F8D0"), "Without Prefer, the Unicode name stays")
         klingon.tap()
         let block = app.descendants(matching: .any)["characterProperties.ucsur"].firstMatch
         revealByScrolling(block, in: app)
-        XCTAssertEqual(accessibleText(block), "KLINGON")
-        attachScreenshot("ConScript block in details")
+        XCTAssertEqual(accessibleText(block), "Klingon")
+        XCTAssertEqual(accessibleText(app.descendants(matching: .any)["characterProperties.ucsurName"].firstMatch), "KLINGON LETTER A")
+        attachScreenshot("ConScript metadata in details")
         app.swipeDown(velocity: .fast)
+        setAppPrefersUCSUR(true)
+        selectAppTab("Explore")
+        searchUnicode("U+F8D0")
+        dismissAppSearchKeyboard()
+        XCTAssertTrue(klingon.waitForExistence(timeout: 10))
+        XCTAssertTrue(klingon.label.contains("KLINGON LETTER A"), "Prefer ConScript names the character: \(klingon.label)")
+        attachScreenshot("ConScript name preferred")
+        // Opening the character also puts the search keyboard away.
+        klingon.tap()
+        app.swipeDown(velocity: .fast)
+        setAppPrefersUCSUR(false)
         setAppUCSUR(false)
     }
 
@@ -3162,6 +3199,15 @@ final class UniboardUITests: XCTestCase {
         let value = enabled ? "1" : "0"
         if ucsur.value as? String != value { tapSwitch(ucsur) }
         XCTAssertTrue(ucsur.waitUntilValueEquals(value))
+    }
+
+    private func setAppPrefersUCSUR(_ enabled: Bool) {
+        openAppSettings()
+        let prefer = app.switches["preferUCSUR"].firstMatch
+        revealByScrolling(prefer, in: app)
+        let value = enabled ? "1" : "0"
+        if prefer.value as? String != value { tapSwitch(prefer) }
+        XCTAssertTrue(prefer.waitUntilValueEquals(value))
     }
 
     /// A Form toggle row spans its label, which does not flip the switch;

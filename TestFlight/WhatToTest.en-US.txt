@@ -16,19 +16,19 @@ KEYBOARD UNICODE
 U opens search with its keys directly. Results stay in a row above the keys, also in landscape. With Text Preview on, the preview row stays above search. Result and browse keys use rounded keycaps with the character's name in small text, no U+ code. Browsing without keys makes the keyboard two rows taller; search and typing keep their height.
 
 EXPLORE
-Tiles are 2 to 7 per row: pinch to change. Tapping a block's name in the chart opens that block, with a block navigator at its top.
+Tiles are 2 to 7 per row: pinch to change. Tapping a block's name in the chart opens that block, with a block navigator at its top. Block pages also show 8 or 16 per row as a chart; on iPad, Explore and block pages add 32 per row, and charts use more of the width.
 
 EDITIONS AND SIZE
-Only the Unicode 19 draft is bundled. Unicode 18, 17 and 16 show the draft limited to characters and emoji of that version: check that a newer character reads as unassigned, What's New lists only that version, and newer blocks are absent. The app is much smaller.
+Only the Unicode 19 draft is bundled; Unicode 18, 17 and 16 limit it to their version. Check that newer characters read as unassigned and What's New lists only that version.
 
 FONTS
 Preview basics (Unifont, Noto Sans Symbols 2) now download on demand in Settings > Font Downloads, like the other packs. With Extra Unicode fonts on and the pack downloaded, check U+0558 previews in app and keyboard with Full Access OFF. Test cancel, retry, remove and offline use.
 
 YOUR FONTS AND TEXT PREVIEW
-Font Downloads > Add Font File adds a TTF or OTF file; Use Installed Font picks a font installed by a font app. Either previews characters first, including Private Use, in the app and keyboard.
+Font Downloads > Add Font File adds a TTF or OTF file; Use Installed Font picks a font installed by a font app. Either previews characters first, including Private Use, in the app and keyboard. Settings > Text Preview adds a keyboard row showing the text around the caret as Uniboard draws it.
 
 CONSCRIPT (UCSUR)
-Settings > ConScript (UCSUR) tints registry Private Use characters blue (try U+F8D0 Klingon or U+E000 Tengwar) in the app and keyboard; details show the block. The ConScript (UCSUR) pack downloads Fairfax HD to draw them. Settings > Text Preview adds a keyboard row showing the text around the caret as Uniboard draws it.
+Settings > ConScript (UCSUR) tints registry Private Use characters blue (try U+F8D0 Klingon or U+E000 Tengwar) in the app and keyboard; details keep the Unicode name and add a ConScript group. Prefer ConScript over PUA names them as the registry does, lists ConScript blocks in Blocks, finds "tengwar letter tinco" in search and draws them with Fairfax HD first. The ConScript pack appears in Font Downloads only while ConScript is on. With ConScript off, nothing of it shows.
 
 PRIVACY AND FAVORITES
 App Favorites reach the keyboard with Full Access OFF; keyboard saves wait locally until optional Full Access permits writing back. Typing, queries, pages and favorites are never sent over a network.

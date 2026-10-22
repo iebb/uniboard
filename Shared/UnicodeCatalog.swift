@@ -211,7 +211,8 @@ struct UnicodeCharacter: Identifiable, Hashable, Sendable {
     var presentationForms: (text: String, emoji: String)? {
         hasPresentationForms ? (text + "\u{FE0E}", text + "\u{FE0F}") : nil
     }
-    var categoryName: String { UnicodeCatalog.categoryDescriptions[category] ?? category }
+    var categoryName: String { Self.categoryName(category) }
+    static func categoryName(_ category: String) -> String { UnicodeCatalog.categoryDescriptions[category] ?? category }
     var displayText: String {
         switch codePoint {
         case 0x20: return "␣"
@@ -285,13 +286,16 @@ struct UnicodeBlock: Identifiable, Hashable, Sendable, Decodable {
         0x1F300: 0x1F308, 0x1F600: 0x1F603, 0x1F680: 0x1F680,
         0x1F900: 0x1F981, 0x1FA70: 0x1FA77
     ]
+    /// A ConScript block split out of a Private Use area.
+    private var isConScript: Bool { UCSUR.isPrivateUse(start) && !name.contains("Private Use") }
     /// The hand-picked example, or nil when the block has none.
     var curatedSymbol: String? {
         if start >= 0xD800 && end <= 0xDFFF || name.contains("Private Use") { return "◇" }
-        return Self.examples[start] == nil ? nil : symbol
+        return Self.examples[start] == nil && !isConScript ? nil : symbol
     }
     var symbol: String {
         if start >= 0xD800 && end <= 0xDFFF || name.contains("Private Use") { return "◇" }
+        if isConScript { return String(Unicode.Scalar(start)!) }
         let scalar = Unicode.Scalar(Self.examples[start] ?? start)
         guard let scalar else { return "◇" }
         return name.contains("Combining") ? "◌" + String(scalar) : String(scalar)
@@ -309,6 +313,10 @@ final class UnicodeCatalog: @unchecked Sendable {
     let edition: UnicodeEdition
     /// A final edition shows only characters assigned by its version.
     private let isLimited: Bool
+    /// Present when Private Use reads as the ConScript Unicode Registry assigns it.
+    private let conscript: UCSUR.Registry?
+    private let variantLock = NSLock()
+    private var conscriptVariant: UnicodeCatalog?
     let blocks: [UnicodeBlock]
     private let representativeLock = NSLock()
     private var representatives: [UInt32: String] = [:]
@@ -344,6 +352,7 @@ final class UnicodeCatalog: @unchecked Sendable {
     init(resourceURL: URL? = nil) {
         edition = .draft
         isLimited = false
+        conscript = nil
         let catalogURL: URL?
         let blocksURL: URL?
         let propertiesURL: URL?
@@ -428,6 +437,7 @@ final class UnicodeCatalog: @unchecked Sendable {
     private init(base: UnicodeCatalog, edition: UnicodeEdition) {
         self.edition = edition
         isLimited = true
+        conscript = nil
         let key = unicodeVersionKey(edition.versionLabel)
         let spans = base.properties.assignedSpans.filter { !$0.draftAddition && $0.sortKey <= key }
         properties = UnicodePropertyData(unicodeVersion: base.properties.unicodeVersion, ages: base.properties.ages,
@@ -438,6 +448,39 @@ final class UnicodeCatalog: @unchecked Sendable {
         blocks = base.blocks.filter { block in spans.contains { $0.start <= block.end && $0.end >= block.start } }
         version = key > 0 ? edition.versionLabel : "Unavailable"
         resourceError = key > 0 ? base.resourceError : "This Unicode edition is unavailable."
+        data = base.data
+        recordCount = base.recordCount
+        recordOffset = base.recordOffset
+        rangeCount = base.rangeCount
+        rangeOffset = base.rangeOffset
+        poolOffset = base.poolOffset
+        formatVersion = base.formatVersion
+        recordSize = base.recordSize
+    }
+
+    var usesConScript: Bool { conscript != nil }
+
+    /// This edition with Private Use read as the ConScript Unicode Registry
+    /// assigns it: its blocks, character names and properties. It shares the
+    /// mapped data and is made once.
+    func withConScript() -> UnicodeCatalog {
+        guard conscript == nil else { return self }
+        variantLock.lock()
+        defer { variantLock.unlock() }
+        if let conscriptVariant { return conscriptVariant }
+        let variant = UnicodeCatalog(base: self, conscript: UCSUR.registry)
+        conscriptVariant = variant
+        return variant
+    }
+
+    private init(base: UnicodeCatalog, conscript: UCSUR.Registry) {
+        edition = base.edition
+        isLimited = base.isLimited
+        self.conscript = conscript
+        properties = base.properties
+        blocks = UCSUR.splitting(base.blocks, with: conscript.blocks)
+        version = base.version
+        resourceError = base.resourceError
         data = base.data
         recordCount = base.recordCount
         recordOffset = base.recordOffset
@@ -466,6 +509,10 @@ final class UnicodeCatalog: @unchecked Sendable {
         let block = block(containing: codePoint)?.name ?? "No Block"
         let later = isLimited && !isAssigned(codePoint)
         return data.withUnsafeBytes { bytes in
+            if !later, let entry = conscript?.entry(at: codePoint) {
+                return entry.character(blockName: block, age: age(at: codePoint), versionSortKey: sortKey(at: codePoint),
+                                       script: script(at: codePoint))
+            }
             if !later, let index = recordIndex(codePoint, bytes: bytes) {
                 return character(record: index, blockName: block, bytes: bytes)
             }
@@ -735,6 +782,14 @@ final class UnicodeCatalog: @unchecked Sendable {
                     }
                 }
             }
+            // ConScript names and aliases, when Private Use reads as the registry.
+            for entry in conscript?.entries ?? [] {
+                let text = Self.normalized(([entry.name] + entry.aliases).joined(separator: " "))
+                if stringTokens.allSatisfy({ text.contains($0) }) {
+                    let whole = stringTokens.allSatisfy { CatalogSearchQueryPolicy.containsWholeTerm($0, in: text) }
+                    candidates.append((entry.codePoint, sortKey(at: entry.codePoint), whole ? 0 : 1))
+                }
+            }
             // Whole-word AND matches precede mid-word matches. Within each tier,
             // sort ALL matches before limiting, including algorithmic names.
             // Candidates are compact numbers, not hundreds of thousands of objects.
@@ -746,7 +801,9 @@ final class UnicodeCatalog: @unchecked Sendable {
                 return $0.point < $1.point
             }
             guard !Task.isCancelled else { return [] }
-            return sorted.prefix(limit).compactMap { character(at: $0.point) }
+            // A ConScript character can match both its block and its name.
+            var seen = Set<UInt32>()
+            return sorted.filter { seen.insert($0.point).inserted }.prefix(limit).compactMap { character(at: $0.point) }
         }
     }
 

@@ -69,6 +69,7 @@ struct CharacterDetailView: View {
 
                     if !namingRows.isEmpty { PropertyGroup(title: "Names & Notes", rows: namingRows) }
                     PropertyGroup(title: "Properties", rows: propertyRows)
+                    if !conscriptRows.isEmpty { PropertyGroup(title: "ConScript", rows: conscriptRows) }
                 }
                 .padding(16).frame(maxWidth: 620).frame(maxWidth: .infinity)
             }
@@ -192,11 +193,6 @@ struct CharacterDetailView: View {
             .init(title: "Unicode age", value: character.age ?? (character.category == "Cn" ? "Not assigned" : "Pending in the draft data"), identifier: "characterProperties.age", monospaced: false),
             .init(title: "Category", value: "\(character.category) · \(character.categoryName)", identifier: "characterProperties.category", monospaced: false),
             .init(title: "Block", value: character.blockName, identifier: "characterProperties.block", monospaced: false),
-        ]
-        if preferences.showsUCSUR, let block = UCSUR.block(containing: character.codePoint) {
-            rows.append(.init(title: "ConScript block", value: block.name, identifier: "characterProperties.ucsur", monospaced: false))
-        }
-        rows += [
             .init(title: "Script", value: character.script ?? "Not listed in this source", identifier: "characterProperties.script", monospaced: false),
             .init(title: "Decimal", value: String(character.codePoint), identifier: "characterProperties.decimal", monospaced: false),
             .init(title: "UTF-8", value: character.text.utf8.map { String(format: "%02X", $0) }.joined(separator: " "), identifier: "characterProperties.utf8"),
@@ -221,6 +217,30 @@ struct CharacterDetailView: View {
         // Structured notes are shown once below, with their source context.
         if !character.annotations.isEmpty || !character.sectionAnnotations.isEmpty { return character.categoryName }
         return character.detail.isEmpty ? character.categoryName : character.detail
+    }
+
+    /// The registry's block and character, while ConScript is on but Unicode's
+    /// own name is kept; with ConScript preferred they are the main properties.
+    private var conscriptRows: [PropertyRow] {
+        guard preferences.showsUCSUR, !preferences.prefersUCSUR,
+              let block = UCSUR.block(containing: character.codePoint) else { return [] }
+        var rows: [PropertyRow] = [.init(title: "Block", value: block.name, identifier: "characterProperties.ucsur", monospaced: false)]
+        guard let entry = UCSUR.entry(at: character.codePoint) else { return rows }
+        rows.append(.init(title: "Name", value: entry.name, identifier: "characterProperties.ucsurName", monospaced: false))
+        if let section = entry.section { rows.append(.init(title: "Section", value: section, identifier: "characterProperties.ucsurSection", monospaced: false)) }
+        if !entry.aliases.isEmpty {
+            rows.append(.init(title: "Aliases", value: entry.aliases.joined(separator: "\n"), identifier: "characterProperties.ucsurAliases", monospaced: false))
+        }
+        rows.append(.init(title: "Category", value: "\(entry.category) · \(UnicodeCharacter.categoryName(entry.category))",
+                          identifier: "characterProperties.ucsurCategory", monospaced: false))
+        if entry.combiningClass != 0 { rows.append(.init(title: "Combining class", value: String(entry.combiningClass), identifier: "characterProperties.ucsurCombining")) }
+        if let bidi = entry.bidirectionalClass { rows.append(.init(title: "Bidi class", value: bidi, identifier: "characterProperties.ucsurBidi")) }
+        if let decomposition = entry.decomposition { rows.append(.init(title: "Decomposition", value: decomposition, identifier: "characterProperties.ucsurDecomposition")) }
+        if let value = entry.numericValue { rows.append(.init(title: entry.numericType ?? "Numeric value", value: value, identifier: "characterProperties.ucsurNumeric")) }
+        if let point = entry.uppercase { rows.append(.init(title: "Uppercase", value: codePointText(point), identifier: "characterProperties.ucsurUppercase")) }
+        if let point = entry.lowercase { rows.append(.init(title: "Lowercase", value: codePointText(point), identifier: "characterProperties.ucsurLowercase")) }
+        if let point = entry.titlecase { rows.append(.init(title: "Titlecase", value: codePointText(point), identifier: "characterProperties.ucsurTitlecase")) }
+        return rows
     }
 
     private func codePointText(_ value: UInt32) -> String {

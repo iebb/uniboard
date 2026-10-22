@@ -53,8 +53,8 @@ struct CodeChartBlock: Identifiable {
     /// `descending`, blocks and their rows run from the highest code point.
     static func blocks(in catalog: UnicodeCatalog, columns: Int, addedOnly: Bool = false,
                        scope: ExploreScope = ExploreScope(plane: nil, showsPrivateUse: true),
-                       descending: Bool = false) -> [CodeChartBlock] {
-        let blocks = catalog.blocks.filter(scope.includes).compactMap { block -> CodeChartBlock? in
+                       descending: Bool = false, only: UInt32? = nil) -> [CodeChartBlock] {
+        let blocks = catalog.blocks.filter { scope.includes($0) && (only == nil || $0.start == only) }.compactMap { block -> CodeChartBlock? in
             let rows = catalog.chartRows(in: block, columns: columns, addedOnly: addedOnly)
             return rows.isEmpty ? nil : CodeChartBlock(block: block, rows: descending ? rows.reversed() : rows)
         }
@@ -88,13 +88,17 @@ struct CodeChartView: UIViewRepresentable {
     var navigate: ((UnicodeBlock) -> Void)? = nil
     /// Runs from the highest code point down.
     var descending = false
+    /// The start of the one block to chart, or nil for every block in scope.
+    var only: UInt32? = nil
     let select: (UnicodeCharacter) -> Void
     @EnvironmentObject private var store: CharacterStore
     @EnvironmentObject private var preferences: CatalogPreferences
 
     static let headerHeight: CGFloat = 58
-    /// Horizontal inset that keeps the chart at most 780 points wide.
-    static func inset(for width: CGFloat) -> CGFloat { max(0, (width - 780) / 2) + 16 }
+    /// Horizontal inset that keeps the chart within its density's widest width.
+    static func inset(for width: CGFloat, density: GridDensity) -> CGFloat {
+        max(0, (width - density.maximumWidth) / 2) + 16
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -122,7 +126,7 @@ struct CodeChartView: UIViewRepresentable {
         coordinator.parent = self
         controller.coordinator = coordinator
         if previous.map({ $0.catalog !== catalog || $0.density != density || $0.addedOnly != addedOnly || $0.scope != scope
-                || $0.descending != descending }) ?? true {
+                || $0.descending != descending || $0.only != only }) ?? true {
             // A new density keeps the block being read; a new edition or plane starts over.
             coordinator.reload(keepingTopBlock: previous?.catalog === catalog && previous?.scope == scope)
         } else {
@@ -167,7 +171,7 @@ struct CodeChartView: UIViewRepresentable {
                 elementKind: UICollectionView.elementKindSectionHeader) { [weak self] header, _, indexPath in
                 guard let self, let parent = self.parent, let block = self.block(atSection: indexPath.section) else { return }
                 let side = parent.density.cellSide(in: self.contentWidth)
-                let inset = CodeChartView.inset(for: self.collectionView?.bounds.width ?? 0)
+                let inset = CodeChartView.inset(for: self.collectionView?.bounds.width ?? 0, density: parent.density)
                 header.contentConfiguration = UIHostingConfiguration {
                     CodeChartHeader(block: block.block, density: parent.density, side: side, navigate: parent.navigate)
                         .padding(.horizontal, inset)
@@ -190,7 +194,7 @@ struct CodeChartView: UIViewRepresentable {
 
         private var contentWidth: CGFloat {
             let width = collectionView?.bounds.width ?? 0
-            return width - 2 * CodeChartView.inset(for: width)
+            return width - 2 * CodeChartView.inset(for: width, density: parent?.density ?? .sixteen)
         }
 
         private func block(atSection section: Int) -> CodeChartBlock? {
@@ -201,7 +205,7 @@ struct CodeChartView: UIViewRepresentable {
         func section(at index: Int, environment: NSCollectionLayoutEnvironment) -> NSCollectionLayoutSection? {
             guard let parent else { return nil }
             let width = environment.container.effectiveContentSize.width
-            let inset = CodeChartView.inset(for: width)
+            let inset = CodeChartView.inset(for: width, density: parent.density)
             if hasLeading && index == 0 {
                 let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(240))
                 let section = NSCollectionLayoutSection(group: .vertical(layoutSize: size, subitems: [.init(layoutSize: size)]))
@@ -227,7 +231,8 @@ struct CodeChartView: UIViewRepresentable {
             guard let parent, let dataSource else { return }
             let kept = keepingTopBlock ? parent.controller.topBlock : nil
             blocks = CodeChartBlock.blocks(in: parent.catalog, columns: parent.density.rawValue,
-                                           addedOnly: parent.addedOnly, scope: parent.scope, descending: parent.descending)
+                                           addedOnly: parent.addedOnly, scope: parent.scope, descending: parent.descending,
+                                           only: parent.only)
             var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
             if hasLeading {
                 snapshot.appendSections([.leading])
@@ -353,7 +358,7 @@ struct CodeChartRow: View {
                                   showsCodePoint: false, side: side) { select(cell) }
                 } else {
                     // An unassigned code point keeps the chart aligned.
-                    RoundedRectangle(cornerRadius: density == .sixteen ? 4 : 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: density.isDense ? 4 : 8, style: .continuous)
                         .fill(Color(uiColor: .quaternarySystemFill))
                         .frame(width: side, height: side)
                         .accessibilityHidden(true)

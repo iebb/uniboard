@@ -76,6 +76,13 @@ enum UnicodeFontSupport {
         .filter { $0.id == "emoji" }.flatMap(\.fonts).map(\.asset.filename))
 
     private static func isEmojiAsset(_ asset: Asset) -> Bool { emojiFilenames.contains(asset.filename) }
+    private static let conscriptFilenames = Set(UnicodeFontPackCatalog.bundled.packs
+        .filter { $0.id == "ucsur" }.flatMap(\.fonts).map(\.asset.filename))
+    /// With ConScript preferred, its font draws Private Use text first, even
+    /// where a stock font has a glyph of its own there.
+    static var prefersConScript = false {
+        didSet { if prefersConScript != oldValue { choices.removeAllObjects() } }
+    }
 
     static var loadedFontCount: Int { graphicsFonts.count }
 
@@ -180,7 +187,14 @@ enum UnicodeFontSupport {
     private static func choice(for text: String, system: UIFont) -> Int {
         if let cached = choices.object(forKey: text as NSString) { return cached.intValue }
         var selected = systemChoice
-        if isEmojiText(text) {
+        let scalars = text.unicodeScalars.map(\.value)
+        if prefersConScript, scalars.allSatisfy(UCSUR.isPrivateUse),
+           let index = assets.indices.first(where: { index in
+               conscriptFilenames.contains(assets[index].filename) && scalars.allSatisfy(assets[index].contains)
+                   && referenceFont(at: index).map { font in scalars.allSatisfy { hasArtwork($0, in: font) } } == true
+           }) {
+            selected = index
+        } else if isEmojiText(text) {
             if stockFontsMiss(text, emoji: true) {
                 for (index, asset) in assets.enumerated() where isEmojiAsset(asset) {
                     guard let reference = referenceFont(at: index) else { continue }

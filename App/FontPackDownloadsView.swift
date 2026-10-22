@@ -79,7 +79,10 @@ private final class FontPackDownloads: ObservableObject {
         })
     }
 
-    var packs: [UnicodeFontPack] { UnicodeFontPackCatalog.bundled.packs }
+    /// The ConScript pack is offered only while ConScript is on.
+    var packs: [UnicodeFontPack] {
+        UnicodeFontPackCatalog.bundled.packs.filter { $0.id != "ucsur" || CatalogPreferences.shared.showsUCSUR }
+    }
 
     func isComplete(_ pack: UnicodeFontPack) -> Bool { installed[pack.id, default: 0] == pack.fonts.count }
 

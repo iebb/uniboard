@@ -110,18 +110,23 @@ struct ExploreView: View {
     /// and the chart's layout has settled.
     @State private var pendingJump: UInt32?
     @State private var contentWidth: CGFloat = 0
+    @State private var screenWidth: CGFloat = 0
     @State private var chart = CodeChartController()
     @StateObject private var search = CatalogSearch()
     @EnvironmentObject private var preferences: CatalogPreferences
     private var catalog: UnicodeCatalog { preferences.catalog }
-    /// 8 and 16 per row form a code chart of every block, in code-point order.
-    private var usesChart: Bool { query.isEmpty && density != .three }
+    /// The chosen density, with 32 per row only where it fits.
+    private var shown: GridDensity { density.fitting(screenWidth) }
+    /// Search results and the list stay within 780 points, so they show at most 16 per row.
+    private var listDensity: GridDensity { shown == .thirtyTwo ? .sixteen : shown }
+    /// 8, 16 and 32 per row form a code chart of every block, in code-point order.
+    private var usesChart: Bool { query.isEmpty && shown != .three }
     private var scope: ExploreScope {
         let selected = plane >= 0 && (showsPrivateUse || !ExploreScope.privateUsePlanes.contains(plane)) ? plane : nil
         return ExploreScope(plane: selected, showsPrivateUse: showsPrivateUse)
     }
     private var displayedCharacters: [UnicodeCharacter] {
-        catalog.orderedCharacters(in: scope.range, limit: pages * density.pageSize, descending: descending)
+        catalog.orderedCharacters(in: scope.range, limit: pages * listDensity.pageSize, descending: descending)
     }
 
     var body: some View {
@@ -154,13 +159,13 @@ struct ExploreView: View {
             .frame(maxWidth: 780)
 
             if usesChart {
-                CodeChartView(catalog: catalog, density: density, scope: scope, controller: chart,
+                CodeChartView(catalog: catalog, density: shown, scope: scope, controller: chart,
                               navigate: { openedBlock = $0 }, descending: descending, select: select)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if query.isEmpty {
-                            CharacterGrid(characters: displayedCharacters, density: density, width: contentWidth,
+                            CharacterGrid(characters: displayedCharacters, density: listDensity, width: contentWidth,
                                           onReachEnd: loadNextPage, select: select)
                         } else {
                             HStack {
@@ -171,7 +176,7 @@ struct ExploreView: View {
                             if !search.searching && search.results.isEmpty {
                                 EmptyCollection(symbol: "magnifyingglass", title: "No Results", message: "Try another name or description, a literal character, or a code point such as U+1F680.")
                             } else {
-                                CharacterGrid(characters: search.results, density: density, width: contentWidth, select: select)
+                                CharacterGrid(characters: search.results, density: listDensity, width: contentWidth, select: select)
                             }
                         }
                     }
@@ -187,6 +192,7 @@ struct ExploreView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { screenWidth = $0 }
         .background(Color.groupedBackground)
         .navigationTitle("Explore")
         .navigationBarTitleDisplayMode(.inline)
@@ -200,7 +206,7 @@ struct ExploreView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Picker("Characters per Row", selection: $density) {
-                        ForEach(GridDensity.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
+                        ForEach(GridDensity.offered(width: screenWidth)) { Label($0.title, systemImage: $0.symbol).tag($0) }
                     }
                     Picker("Order", selection: $descending) {
                         Label("Low to High", systemImage: "arrow.down").tag(false)
@@ -214,9 +220,9 @@ struct ExploreView: View {
                     }
                     .pickerStyle(.menu)
                     Toggle("Show Supplementary Private Use", isOn: $showsPrivateUse)
-                } label: { Image(systemName: density.symbol) }
+                } label: { Image(systemName: shown.symbol) }
                 .accessibilityLabel("View options")
-                .accessibilityValue("\(density.rawValue)")
+                .accessibilityValue("\(shown.rawValue)")
                 .accessibilityIdentifier("exploreDensity")
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -244,6 +250,6 @@ struct ExploreView: View {
     }
 
     private func loadNextPage() {
-        if displayedCharacters.count >= pages * density.pageSize { pages += 1 }
+        if displayedCharacters.count >= pages * listDensity.pageSize { pages += 1 }
     }
 }

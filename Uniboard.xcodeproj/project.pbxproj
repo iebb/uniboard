@@ -94,6 +94,7 @@
 		93C4D52C9F879198F8426C63 /* BlocksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */; };
 		944525D0E50EFA1C422995C0 /* KeyboardVariantControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D4EF80295F07AF583781860 /* KeyboardVariantControl.swift */; };
 		96A8D82A490A9BB52C923A9C /* KeyboardHostInputTraits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B24597D0441646A33610D5F /* KeyboardHostInputTraits.swift */; };
+		9A3F79CF5E08AE5B3D37997A /* UCSUR.txt in Resources */ = {isa = PBXBuildFile; fileRef = 8F4EC95753A53ED4278B3808 /* UCSUR.txt */; };
 		9A50C69D53213EF833C399EF /* UnicodeCatalog.ucd in Resources */ = {isa = PBXBuildFile; fileRef = B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */; };
 		9B9A97D719501278BD3869FC /* UnicodeEmojiSequenceAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A2BD99F4D2B39ED86269C4F /* UnicodeEmojiSequenceAuditTests.swift */; };
 		A1576FCAC1F35187DC610EDB /* CatalogPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52D9BC9C1D5A569CC0D9FA4E /* CatalogPreferences.swift */; };
@@ -137,6 +138,7 @@
 		DF66ECAE7C39F7015B73A930 /* Blocks.json in Resources */ = {isa = PBXBuildFile; fileRef = 5E6909BB645FA5674134A126 /* Blocks.json */; };
 		E0D5469511E1AF5E6818FC1B /* SymbolPageSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = E97E62E7780A345F029D3306 /* SymbolPageSettings.swift */; };
 		E0FACCB152A3529201D858E7 /* LocalPreferencePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA24ADEEB30AF21752C6C8E3 /* LocalPreferencePolicyTests.swift */; };
+		E5095B67E98F1D2FA2FF631F /* UCSUR.txt in Resources */ = {isa = PBXBuildFile; fileRef = 8F4EC95753A53ED4278B3808 /* UCSUR.txt */; };
 		E522ECA03444D7240E2EED44 /* KeyboardLayoutsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0817C677ABD24867EB1E4C87 /* KeyboardLayoutsView.swift */; };
 		E57B36AD8CA9033B6ADC4A3B /* CatalogWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E8034D4526F95C6B7DCC1E /* CatalogWorker.swift */; };
 		E9109887515306DBAFAFB05D /* KeyboardSelfSizingInputView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE2EED824EF59350BC7F5E4 /* KeyboardSelfSizingInputView.swift */; };
@@ -260,6 +262,7 @@
 		8B24597D0441646A33610D5F /* KeyboardHostInputTraits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardHostInputTraits.swift; sourceTree = "<group>"; };
 		8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = UnicodeSources.json; sourceTree = "<group>"; };
 		8E34C3DDC146150DCF5B6A32 /* KeyboardTypingLayoutPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardTypingLayoutPolicyTests.swift; sourceTree = "<group>"; };
+		8F4EC95753A53ED4278B3808 /* UCSUR.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = UCSUR.txt; sourceTree = "<group>"; };
 		91A791C3473CB60A05B20494 /* SavedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedView.swift; sourceTree = "<group>"; };
 		9420A3065ECF654CED653517 /* KeyboardInspectableInteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInspectableInteractionTests.swift; sourceTree = "<group>"; };
 		95A8C4E52513534B84177D37 /* KeyboardDocumentIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDocumentIdentity.swift; sourceTree = "<group>"; };
@@ -349,6 +352,7 @@
 			children = (
 				5E6909BB645FA5674134A126 /* Blocks.json */,
 				C6B5A677ABB9118AF14E1B2C /* EmojiCatalog-draft.json */,
+				8F4EC95753A53ED4278B3808 /* UCSUR.txt */,
 				1DF11D2AB41C1DB3C4E98E84 /* Unicode-LICENSE.txt */,
 				B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */,
 				A24745F2DC10363D8E1053AA /* UnicodeProperties.json */,
@@ -629,6 +633,7 @@
 				E922C4FE06C66E51C3F36346 /* EmojiCatalog-draft.json in Resources */,
 				8D54C8AEA026F1824C0071BE /* Fonts in Resources */,
 				6A995752DA8E4B8FD0AEB3BA /* PrivacyInfo.xcprivacy in Resources */,
+				E5095B67E98F1D2FA2FF631F /* UCSUR.txt in Resources */,
 				063D78DFCF38A7B9AC219CAE /* Unicode-LICENSE.txt in Resources */,
 				9A50C69D53213EF833C399EF /* UnicodeCatalog.ucd in Resources */,
 				33367954F1970C5F09CB4018 /* UnicodeProperties.json in Resources */,
@@ -645,6 +650,7 @@
 				A5E11B89A1F2E1E4961B8495 /* EmojiCatalog-draft.json in Resources */,
 				69678374C9FD49FFA4DD3667 /* Fonts in Resources */,
 				C9D5DD46F5FE23D4EA10AB24 /* PrivacyInfo.xcprivacy in Resources */,
+				9A3F79CF5E08AE5B3D37997A /* UCSUR.txt in Resources */,
 				53E92D441D2ED0FD013F2A49 /* Unicode-LICENSE.txt in Resources */,
 				78768285C1D49F9A586E54BE /* UnicodeCatalog.ucd in Resources */,
 				915F4383C87AB64D135A6B5C /* UnicodeProperties.json in Resources */,

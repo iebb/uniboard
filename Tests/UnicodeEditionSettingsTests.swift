@@ -36,13 +36,18 @@ final class UnicodeEditionSettingsTests: XCTestCase {
                 searchBarInsteadOfSymbols: search)
             XCTAssertTrue(settings.save(value)); XCTAssertEqual(settings.loadSnapshot(), value)
             var malformed = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
-            for field in ["showsSymbolBar", "searchBarInsteadOfSymbols", "showsNumberRow", "showsTextPreview", "showsUCSUR"] {
+            for field in ["showsSymbolBar", "searchBarInsteadOfSymbols", "showsNumberRow", "showsTextPreview", "showsUCSUR", "prefersUCSUR"] {
                 for invalid: Any in [0, 1, "true", NSNull(), [], [:]] {
                     var copy = malformed; copy[field] = invalid
                     let data = try JSONSerialization.data(withJSONObject: copy)
                     XCTAssertEqual(UnicodeEditionSettings(containerURL: { self.injectedContainer }, readPrefix: { _, _ in data }).loadSnapshot(), .init(edition: .latest))
                 }
             }
+            // Schema 8 predates preferring UCSUR, which then stays off.
+            malformed["schemaVersion"] = 8
+            malformed.removeValue(forKey: "prefersUCSUR")
+            bytes = try JSONSerialization.data(withJSONObject: malformed)
+            XCTAssertEqual(settings.loadSnapshot(), value)
             // Schema 7 predates UCSUR, which then stays off.
             malformed["schemaVersion"] = 7
             malformed.removeValue(forKey: "showsUCSUR")
@@ -109,7 +114,7 @@ final class UnicodeEditionSettingsTests: XCTestCase {
         XCTAssertFalse(UnicodeEditionSettings.Snapshot(edition: .latest).showsTextPreview, "The preview row is off by default")
         let value = UnicodeEditionSettings.Snapshot(edition: .latest, showsTextPreview: true)
         XCTAssertTrue(settings.save(value)); XCTAssertEqual(settings.loadSnapshot(), value)
-        let ucsur = UnicodeEditionSettings.Snapshot(edition: .latest, showsUCSUR: true)
+        let ucsur = UnicodeEditionSettings.Snapshot(edition: .latest, showsUCSUR: true, prefersUCSUR: true)
         XCTAssertTrue(settings.save(ucsur)); XCTAssertEqual(settings.loadSnapshot(), ucsur)
     }
 
@@ -191,8 +196,8 @@ final class UnicodeEditionSettingsTests: XCTestCase {
         let data = try XCTUnwrap(observedData)
         XCTAssertLessThanOrEqual(data.count, UnicodeEditionSettings.maximumPayloadBytes)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual(Set(object.keys), ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping", "showsSymbolBar", "searchBarInsteadOfSymbols", "showsNumberRow", "layouts", "showsTextPreview", "showsUCSUR"])
-        XCTAssertEqual(object["schemaVersion"] as? Int, 8)
+        XCTAssertEqual(Set(object.keys), ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping", "showsSymbolBar", "searchBarInsteadOfSymbols", "showsNumberRow", "layouts", "showsTextPreview", "showsUCSUR", "prefersUCSUR"])
+        XCTAssertEqual(object["schemaVersion"] as? Int, 9)
         XCTAssertEqual(object["showsTextPreview"] as? Bool, false)
         XCTAssertEqual(object["layouts"] as? [String], ["en"])
         XCTAssertEqual(object["selectionIdentifier"] as? String, "draft")

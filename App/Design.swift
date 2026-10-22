@@ -72,7 +72,7 @@ struct SectionLabel: View {
 
 /// How many character tiles Explore shows per row.
 enum GridDensity: Int, CaseIterable, Identifiable {
-    case three = 3, eight = 8, sixteen = 16
+    case three = 3, eight = 8, sixteen = 16, thirtyTwo = 32
     var id: Int { rawValue }
     var title: String { self == .three ? "Tiles" : "\(rawValue) per Row" }
     var symbol: String {
@@ -80,13 +80,14 @@ enum GridDensity: Int, CaseIterable, Identifiable {
         case .three: return "square.grid.3x3"
         case .eight: return "square.grid.4x3.fill"
         case .sixteen: return "circle.grid.3x3.fill"
+        case .thirtyTwo: return "square.grid.3x3.fill"
         }
     }
     var spacing: CGFloat {
         switch self {
         case .three: return 8
         case .eight: return 4
-        case .sixteen: return 2
+        case .sixteen, .thirtyTwo: return 2
         }
     }
     /// Characters per page, so each page fills a similar screen area.
@@ -95,11 +96,22 @@ enum GridDensity: Int, CaseIterable, Identifiable {
         case .three: return 160
         case .eight: return 320
         case .sixteen: return 640
+        case .thirtyTwo: return 1280
         }
     }
 }
 
 extension GridDensity {
+    /// 16 and 32 per row show only the glyph.
+    var isDense: Bool { rawValue >= 16 }
+    /// Widest a grid of this density grows, so wide screens and phones held
+    /// sideways give charts room.
+    var maximumWidth: CGFloat { self == .thirtyTwo ? 1600 : self == .sixteen ? 1100 : 780 }
+    /// 32 per row needs a wide screen, such as an iPad.
+    static func offered(width: CGFloat) -> [GridDensity] { allCases.filter { $0 != .thirtyTwo || width >= 960 } }
+    /// This density, or 16 per row when 32 does not fit `width`.
+    func fitting(_ width: CGFloat) -> GridDensity { self == .thirtyTwo && width > 0 && width < 960 ? .sixteen : self }
+
     /// Width of the frozen leading column of row code points.
     var rowLabelWidth: CGFloat { self == .sixteen ? 28 : 34 }
 
@@ -115,7 +127,7 @@ extension GridDensity {
         self == .sixteen ? String(format: "%03X", start >> 4) : String(format: "%04X", start)
     }
     func columnLabel(_ column: Int) -> String {
-        self == .sixteen ? String(format: "%X", column) : "+\(column)"
+        isDense ? String(format: "%X", column) : "+\(column)"
     }
 }
 
@@ -140,14 +152,14 @@ struct CharacterTile: View {
         switch density {
         case .three: return 32
         case .eight: return showsCodePoint ? 22 : 26
-        case .sixteen: return 15
+        case .sixteen, .thirtyTwo: return 15
         }
     }
     private var cornerRadius: CGFloat {
         switch density {
         case .three: return 12
         case .eight: return 8
-        case .sixteen: return 4
+        case .sixteen, .thirtyTwo: return 4
         }
     }
     private var missing: Bool {
@@ -158,12 +170,12 @@ struct CharacterTile: View {
         content
             .background(Color.previewSurface(missing: missing, ucsur: preferences.isUCSUR(character.codePoint)))
             .overlay(alignment: .topTrailing) {
-                if density != .sixteen, character.category != "Cn" {
+                if !density.isDense, character.category != "Cn" {
                     VersionRibbon(version: character.age, labeled: density == .three)
                 }
             }
             .overlay(alignment: .topLeading) {
-                if saved, density != .sixteen {
+                if saved, !density.isDense {
                     Image(systemName: "star.fill").font(.system(size: density == .three ? 9 : 6)).foregroundStyle(.yellow)
                         .padding(density == .three ? 7 : 3)
                 }
@@ -232,7 +244,7 @@ struct CharacterTile: View {
             }
             .padding(.horizontal, 2)
             .frame(width: side, height: side)
-        case .sixteen:
+        case .sixteen, .thirtyTwo:
             glyph
                 .frame(width: side, height: side)
         }

@@ -65,7 +65,12 @@ struct BlockDetailView: View {
     @State private var characters: [UnicodeCharacter] = []
     @State private var hasMore = true
     @State private var showNavigator = false
+    /// Tiles, or this block as a code chart; wide screens add 32 per row.
+    @AppStorage("blockGridDensity") private var density: GridDensity = .three
+    @State private var width: CGFloat = 0
+    @State private var chart = CodeChartController()
     @EnvironmentObject private var preferences: CatalogPreferences
+    private var shown: GridDensity { density.fitting(width) }
 
     init(block: UnicodeBlock, select: @escaping (UnicodeCharacter) -> Void) {
         _block = State(initialValue: block)
@@ -73,6 +78,42 @@ struct BlockDetailView: View {
     }
 
     var body: some View {
+        Group {
+            if shown == .three {
+                tiles
+            } else {
+                // The chart's pinned header names the block and opens the navigator.
+                CodeChartView(catalog: preferences.catalog, density: shown, controller: chart,
+                              navigate: { _ in showNavigator = true }, only: block.start, select: select)
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .background(Color.groupedBackground)
+        .navigationTitle(block.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Characters per Row", selection: $density) {
+                        ForEach(GridDensity.offered(width: width)) { Label($0.title, systemImage: $0.symbol).tag($0) }
+                    }
+                } label: { Image(systemName: shown.symbol) }
+                .accessibilityLabel("View options")
+                .accessibilityValue("\(shown.rawValue)")
+                .accessibilityIdentifier("blockDensity")
+            }
+        }
+        .onAppear { if characters.isEmpty && hasMore { loadMore() } }
+        .onChange(of: preferences.edition) { _, _ in reload() }
+        .sheet(isPresented: $showNavigator) {
+            BlockNavigator(blocks: preferences.catalog.blocks, current: block.start) { chosen in
+                block = chosen
+                reload()
+            }
+        }
+    }
+
+    private var tiles: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Button { showNavigator = true } label: {
@@ -96,17 +137,6 @@ struct BlockDetailView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 8)
             .frame(maxWidth: 780).frame(maxWidth: .infinity)
-        }
-        .background(Color.groupedBackground)
-        .navigationTitle(block.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear { if characters.isEmpty && hasMore { loadMore() } }
-        .onChange(of: preferences.edition) { _, _ in reload() }
-        .sheet(isPresented: $showNavigator) {
-            BlockNavigator(blocks: preferences.catalog.blocks, current: block.start) { chosen in
-                block = chosen
-                reload()
-            }
         }
     }
 

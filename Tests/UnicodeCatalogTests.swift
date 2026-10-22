@@ -215,6 +215,31 @@ final class UnicodeCatalogTests: XCTestCase {
                      "Properties from before presentation forms have none")
     }
 
+    func testConScriptViewNamesRegistryCharactersAndSplitsPrivateUse() throws {
+        let plain = UnicodeCatalog.latest
+        let conscript = plain.withConScript()
+        XCTAssertTrue(conscript === plain.withConScript(), "The view is made once")
+        XCTAssertTrue(conscript.withConScript() === conscript)
+        XCTAssertFalse(plain.usesConScript); XCTAssertTrue(conscript.usesConScript)
+        XCTAssertEqual(plain.character(at: 0xE000)?.name, "PRIVATE USE-E000")
+        let tinco = try XCTUnwrap(conscript.character(at: 0xE000))
+        XCTAssertEqual(tinco.name, "TENGWAR LETTER TINCO")
+        XCTAssertEqual(tinco.blockName, "Tengwar")
+        XCTAssertEqual(tinco.categoryName, "Letter")
+        XCTAssertEqual(conscript.character(at: 0xEBE0)?.name, "PRIVATE USE-EBE0", "A reassigned code point keeps its Unicode name")
+        let rest = try XCTUnwrap(conscript.blocks.first { $0.name == "Private Use Area" })
+        XCTAssertNil(UCSUR.block(containing: rest.start))
+        let klingonBlock = try XCTUnwrap(conscript.blocks.first { $0.name == "Klingon" })
+        XCTAssertEqual(klingonBlock.curatedSymbol, "\u{F8D0}")
+        XCTAssertFalse(plain.blocks.contains { $0.name == "Klingon" })
+        XCTAssertEqual(conscript.search("tengwar letter tinco").first?.codePoint, 0xE000)
+        XCTAssertTrue(plain.search("tengwar letter tinco").isEmpty)
+        XCTAssertEqual(conscript.search("suule").first?.codePoint, 0xE008, "Aliases are searchable")
+        let klingon = conscript.search("klingon", limit: 1000)
+        XCTAssertEqual(Set(klingon.map(\.codePoint)).count, klingon.count, "Block and name matches list a character once")
+        XCTAssertTrue(klingon.contains { $0.codePoint == 0xF8D0 })
+    }
+
     func testBlockCardsHandleBasicSupplementarySurrogateAndInvalidRanges() {
         let basic = UnicodeBlock(name: "Basic Latin", start: 0, end: 0x7F)
         XCTAssertEqual(basic.id, 0)

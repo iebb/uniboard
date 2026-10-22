@@ -12,6 +12,7 @@ final class CatalogPreferences: ObservableObject {
     @Published private(set) var showsNumberRow: Bool
     @Published private(set) var showsTextPreview: Bool
     @Published private(set) var showsUCSUR: Bool
+    @Published private(set) var prefersUCSUR: Bool
     @Published private(set) var layouts: [String]
     @Published private(set) var padLayout: KeyboardPadLayout
     @Published private(set) var padSymbolMapping: KeyboardPadSymbolMapping
@@ -28,11 +29,14 @@ final class CatalogPreferences: ObservableObject {
         showsNumberRow = snapshot.showsNumberRow
         showsTextPreview = snapshot.showsTextPreview
         showsUCSUR = snapshot.showsUCSUR
+        prefersUCSUR = snapshot.prefersUCSUR
+        UnicodeFontSupport.prefersConScript = snapshot.showsUCSUR && snapshot.prefersUCSUR
         layouts = snapshot.layouts
         padLayout = snapshot.padLayout
         padSymbolMapping = snapshot.padSymbolMapping
     }
-    var catalog: UnicodeCatalog { edition.catalog }
+    /// With ConScript preferred, Private Use reads as the registry assigns it.
+    var catalog: UnicodeCatalog { showsUCSUR && prefersUCSUR ? edition.catalog.withConScript() : edition.catalog }
     var emojis: EmojiCatalog { edition.emojiCatalog }
     func selectEdition(_ selection: UnicodeEdition) {
         edit { $0.edition = selection }
@@ -53,6 +57,7 @@ final class CatalogPreferences: ObservableObject {
     func selectNumberRow(_ enabled: Bool) { edit { $0.showsNumberRow = enabled } }
     func selectTextPreview(_ enabled: Bool) { edit { $0.showsTextPreview = enabled } }
     func selectUCSUR(_ enabled: Bool) { edit { $0.showsUCSUR = enabled } }
+    func selectPrefersUCSUR(_ enabled: Bool) { edit { $0.prefersUCSUR = enabled } }
     /// True for a ConScript Private Use character while that option is on.
     func isUCSUR(_ codePoint: UInt32) -> Bool { showsUCSUR && UCSUR.block(containing: codePoint) != nil }
     /// The keyboard's base layouts in switching order. False when the list is
@@ -79,6 +84,7 @@ final class CatalogPreferences: ObservableObject {
         var value = UnicodeEditionSettings.Snapshot(edition: edition, useUnicodeFonts: useUnicodeFonts,
             showsCollapseKey: showsCollapseKey, showsSymbolBar: showsSymbolBar, searchBarInsteadOfSymbols: searchBarInsteadOfSymbols,
             showsNumberRow: showsNumberRow, layouts: layouts, showsTextPreview: showsTextPreview, showsUCSUR: showsUCSUR,
+            prefersUCSUR: prefersUCSUR,
             padLayout: padLayout, padSymbolMapping: padSymbolMapping)
         change(&value)
         save(value)
@@ -103,6 +109,8 @@ final class CatalogPreferences: ObservableObject {
         if showsNumberRow != snapshot.showsNumberRow { showsNumberRow = snapshot.showsNumberRow }
         if showsTextPreview != snapshot.showsTextPreview { showsTextPreview = snapshot.showsTextPreview }
         if showsUCSUR != snapshot.showsUCSUR { showsUCSUR = snapshot.showsUCSUR }
+        if prefersUCSUR != snapshot.prefersUCSUR { prefersUCSUR = snapshot.prefersUCSUR }
+        UnicodeFontSupport.prefersConScript = showsUCSUR && prefersUCSUR
         if layouts != snapshot.layouts { layouts = snapshot.layouts }
         if padLayout != snapshot.padLayout { padLayout = snapshot.padLayout }
         if padSymbolMapping != snapshot.padSymbolMapping { padSymbolMapping = snapshot.padSymbolMapping }

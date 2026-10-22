@@ -830,6 +830,7 @@ private final class KeyboardModel: ObservableObject {
     @Published private(set) var showsNumberRow: Bool
     @Published private(set) var showsTextPreview: Bool
     @Published private(set) var showsUCSUR: Bool
+    @Published private(set) var prefersUCSUR: Bool
     /// The host's text either side of the caret, for the text preview row.
     @Published var hostTextBefore = ""
     @Published var hostTextAfter = ""
@@ -1026,7 +1027,8 @@ private final class KeyboardModel: ObservableObject {
         presentationChanged?()
     }
 
-    var catalog: UnicodeCatalog { edition.catalog }
+    /// With ConScript preferred, Private Use reads as the registry assigns it.
+    var catalog: UnicodeCatalog { showsUCSUR && prefersUCSUR ? edition.catalog.withConScript() : edition.catalog }
     /// A page key's hold choices: its own variants, then, for a character
     /// with both a text and an emoji form, the form the key does not type.
     func pageKeyVariants(_ key: SymbolBoardKey) -> [String] {
@@ -1036,7 +1038,7 @@ private final class KeyboardModel: ObservableObject {
         return key.variants + [forms.text, forms.emoji].filter { !$0.utf16.elementsEqual(key.text.utf16) }
     }
     var emojiCatalog: EmojiCatalog { edition.emojiCatalog }
-    var editionValue: String { edition.rawValue }
+    var editionValue: String { edition.rawValue + (catalog.usesConScript ? "+conscript" : "") }
     var hasSearchQuery: Bool {
         (section == .symbols || section == .emojis) && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -1052,6 +1054,8 @@ private final class KeyboardModel: ObservableObject {
         showsNumberRow = appSettings.showsNumberRow
         showsTextPreview = appSettings.showsTextPreview
         showsUCSUR = appSettings.showsUCSUR
+        prefersUCSUR = appSettings.prefersUCSUR
+        UnicodeFontSupport.prefersConScript = appSettings.showsUCSUR && appSettings.prefersUCSUR
         showsCollapseKey = appSettings.showsCollapseKey
         selectedPadLayout = appSettings.padLayout
         adoptLayouts(appSettings.layouts, keepingCurrent: false)
@@ -1105,7 +1109,12 @@ private final class KeyboardModel: ObservableObject {
             showsTextPreview = selected.showsTextPreview
             invalidateInputMode(); presentationChanged?()
         }
-        if showsUCSUR != selected.showsUCSUR { showsUCSUR = selected.showsUCSUR }
+        if showsUCSUR != selected.showsUCSUR || prefersUCSUR != selected.prefersUCSUR {
+            let reload = (showsUCSUR && prefersUCSUR) != (selected.showsUCSUR && selected.prefersUCSUR)
+            showsUCSUR = selected.showsUCSUR; prefersUCSUR = selected.prefersUCSUR
+            UnicodeFontSupport.prefersConScript = showsUCSUR && prefersUCSUR
+            if reload { invalidateInputMode(); refreshCatalog() }
+        }
         let keys = KeyboardKeySettings.shared.loadSnapshot()
         if keySettings != keys { keySettings = keys; invalidateInputMode() }
     }

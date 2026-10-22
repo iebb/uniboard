@@ -1030,6 +1030,13 @@ final class UniboardUITests: XCTestCase {
         let context = "Switch "
         let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
         let space = app.buttons["keyboard.space"].firstMatch
+        XCTAssertTrue(space.waitForExistence(timeout: 5))
+        // The keyboard remembers the layout of an earlier run. English is then
+        // the first of the others, right after the current layout.
+        if space.value as? String != "English" {
+            XCTAssertTrue(["Ελληνικά", "Русский"].contains(space.value as? String ?? ""), "With several layouts the space bar names the current one")
+            chooseHeldKeyboardOption(space, optionCount: 3, selectedIndex: 1, extraActions: 0)
+        }
         XCTAssertTrue(space.waitUntilValueEquals("English"), "With several layouts the space bar names the current one")
         chooseHeldKeyboardOption(space, optionCount: 3, selectedIndex: 1, extraActions: 0)
         XCTAssertTrue(space.waitUntilValueEquals("Ελληνικά"))
@@ -1039,17 +1046,21 @@ final class UniboardUITests: XCTestCase {
         XCTAssertFalse(app.buttons["keyboard.typing.key.q"].exists)
         alpha.tap()
         XCTAssertTrue(input.waitUntilValueEquals(context + "α"))
+        flickMainKey(alpha, up: false)
+        XCTAssertTrue(input.waitUntilValueEquals(context + "α𝛂"), "Down offers mathematical Greek")
         app.buttons["keyboard.typing.shift"].tap()
         alpha.tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context + "αΑ"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "α𝛂Α"))
         space.tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context + "αΑ "), "A tap on the named space bar still types a space")
+        XCTAssertTrue(input.waitUntilValueEquals(context + "α𝛂Α "), "A tap on the named space bar still types a space")
         attachScreenshot("Greek layout chosen by holding the space bar")
         // The chooser lists the current layout first, then the others in order.
         chooseHeldKeyboardOption(space, optionCount: 3, selectedIndex: 2, extraActions: 0)
         XCTAssertTrue(space.waitUntilValueEquals("Русский"))
         app.buttons["keyboard.typing.key.ж"].firstMatch.tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context + "αΑ ж"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "α𝛂Α ж"))
+        chooseHeldKeyboardOption(app.buttons["keyboard.typing.key.е"].firstMatch, optionCount: 2, selectedIndex: 1, extraActions: 0)
+        XCTAssertTrue(input.waitUntilValueEquals(context + "α𝛂Α жё"), "Russian е holds ё")
         let reopened = openSystemKeyboardHost(unicodeBrowse: false)
         XCTAssertTrue(app.buttons["keyboard.space"].firstMatch.waitUntilValueEquals("Русский"), "The keyboard remembers the last layout")
         XCTAssertTrue(app.buttons["keyboard.typing.key.ж"].firstMatch.exists)

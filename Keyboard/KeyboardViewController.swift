@@ -358,7 +358,7 @@ final class KeyboardViewController: UIInputViewController {
         let tapText = settings.tapOutput(for: keyID, defaultText: original,
             shifted: KeyboardTypingLayoutPolicy.usesShiftedTap(for: key, state: captured, ansiPad: ansiPad))
         let choices = KeyboardVariantPolicy.options(text: original,
-            variants: KeyboardVariantPolicy.englishVariants(for: key, uppercase: captured.shift != .lowercase))
+            variants: KeyboardVariantPolicy.holdVariants(for: key, state: captured))
         let gestures = KeyboardVariantPolicy.gestureCandidates(for: key, original: original, state: captured, settings: settings)
         let accepts: () -> Bool = { [weak self] in
             current() && self?.model.showsUnicode == false && self?.model.hasSymbolBoardOverlay == false
@@ -2404,7 +2404,7 @@ private struct KeyboardTypingView: View {
             shifted: KeyboardTypingLayoutPolicy.usesShiftedTap(for: key, state: typing.state, ansiPad: ansiPad))
         let gestures = KeyboardVariantPolicy.gestureCandidates(for: key, original: original, state: typing.state, settings: keySettings)
         return KeyboardVariantKey(text: text ?? original,
-            variants: KeyboardVariantPolicy.englishVariants(for: key, uppercase: typing.state.shift != .lowercase),
+            variants: KeyboardVariantPolicy.holdVariants(for: key, state: typing.state),
             identifier: identifier, value: layoutValue, route: mode, enabled: enabled, fontSize: fontSize,
             foreground: text == nil ? .secondaryLabel : .label,
             hint: text == nil ? "Tap is off. Hold or swipe for configured choices." : nil,

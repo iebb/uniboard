@@ -90,7 +90,7 @@ struct KeyboardKeySettingsView: View {
         .navigationTitle("Keyboard keys").navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $selectedKeyID) { keyID in
             if let descriptor = KeyboardKeySettings.descriptor(for: keyID) {
-                KeyboardSingleKeySettingsView(descriptor: descriptor, keys: keys)
+                KeyboardSingleKeySettingsView(descriptor: descriptor, alphabet: alphabet, keys: keys)
             }
         }
         .searchable(text: $query, prompt: "Find a key")
@@ -103,6 +103,8 @@ struct KeyboardKeySettingsView: View {
 
 private struct KeyboardSingleKeySettingsView: View {
     let descriptor: KeyboardKeySettings.Descriptor
+    /// The layout whose defaults the editors show.
+    let alphabet: KeyboardAlphabet
     @ObservedObject var keys: KeyboardKeyPreferences
     @State private var resetConfirmation = false
     var body: some View {
@@ -110,7 +112,7 @@ private struct KeyboardSingleKeySettingsView: View {
             Section {
                 ForEach(KeyboardKeySettings.Gesture.customizable, id: \.rawValue) { gesture in
                     NavigationLink {
-                        KeyboardGestureSettingsView(descriptor: descriptor, gesture: gesture, keys: keys,
+                        KeyboardGestureSettingsView(descriptor: descriptor, gesture: gesture, alphabet: alphabet, keys: keys,
                             current: keys.snapshot.candidates(for: descriptor.id, gesture: gesture))
                     } label: {
                         HStack {
@@ -149,6 +151,7 @@ private struct KeyboardGestureSettingsView: View {
     private struct Choice: Identifiable { let id = UUID(); var text: String }
     let descriptor: KeyboardKeySettings.Descriptor
     let gesture: KeyboardKeySettings.Gesture
+    let alphabet: KeyboardAlphabet
     @ObservedObject var keys: KeyboardKeyPreferences
     @EnvironmentObject private var preferences: CatalogPreferences
     @Environment(\.dismiss) private var dismiss
@@ -163,15 +166,15 @@ private struct KeyboardGestureSettingsView: View {
     /// The row Add Choice just created, which takes focus as it appears.
     @State private var addedChoice: UUID?
 
-    init(descriptor: KeyboardKeySettings.Descriptor, gesture: KeyboardKeySettings.Gesture,
+    init(descriptor: KeyboardKeySettings.Descriptor, gesture: KeyboardKeySettings.Gesture, alphabet: KeyboardAlphabet,
          keys: KeyboardKeyPreferences, current: [String]?) {
-        self.descriptor = descriptor; self.gesture = gesture; self.keys = keys
+        self.descriptor = descriptor; self.gesture = gesture; self.alphabet = alphabet; self.keys = keys
         _original = State(initialValue: current)
         _usesDefaults = State(initialValue: current == nil)
         _choices = State(initialValue: (current ?? []).map { Choice(text: $0) })
     }
     private var defaults: [String] {
-        KeyboardVariantPolicy.defaultCandidates(for: descriptor.id, gesture: gesture)
+        KeyboardVariantPolicy.defaultCandidates(for: descriptor.id, gesture: gesture, alphabet: alphabet)
     }
     private var candidates: [String]? {
         usesDefaults ? nil : choices.map(\.text).filter { !$0.isEmpty }
@@ -179,14 +182,24 @@ private struct KeyboardGestureSettingsView: View {
     private var valid: Bool {
         KeyboardKeySettings.Snapshot.defaults.updating(candidates, for: descriptor.id, gesture: gesture) != nil
     }
+    /// The script of the layout that has this letter, which decides its defaults.
+    private var script: KeyboardAlphabet.Script {
+        guard descriptor.kind == .letter, let key = descriptor.text else { return .latin }
+        return (alphabet.keys.contains(key) ? alphabet : KeyboardAlphabet.catalog.first { $0.keys.contains(key) })?.script ?? .latin
+    }
     private var explanation: String {
         switch gesture {
+        case .swipeDown where descriptor.kind == .letter && script == .greek:
+            return "By default: mathematical bold, italic, bold italic, sans-serif bold and sans-serif bold italic forms of the same letter in the current case, then double-struck and small capital forms where Unicode has them. Shift stays unchanged."
+        case .swipeDown where descriptor.kind == .letter && script == .cyrillic:
+            return "By default: related letters from other Cyrillic languages, in the current case. Shift stays unchanged."
         case .swipeDown where descriptor.kind == .letter:
             return "By default: styled forms of the same letter in the current case: mathematical bold, italic, script, fraktur, double-struck, sans-serif and monospace, then circled, parenthesized, fullwidth and small capital. Shift stays unchanged."
         case .swipeDown:
             return "By default: styled forms of the same character, such as mathematical, circled, parenthesized and fullwidth forms, where Unicode has them."
         case .longPress:
-            return "By default: familiar accents in the current case and stock symbol variants."
+            return script == .latin ? "By default: this layout's accents, then familiar accents in the current case, and stock symbol variants."
+                : "By default: this layout's accented letters in the current case."
         case .swipeUp:
             return "By default: the superscript, then the subscript form of the same character, where Unicode has them."
         default:

@@ -23,9 +23,24 @@ enum KeyboardVariantPolicy {
 
     private static func forms(for key: String, state: KeyboardTypingState) -> (modifiers: [String], styled: [String]) {
         guard key.unicodeScalars.count == 1, let value = key.unicodeScalars.first?.value else { return ([], []) }
+        let alphabet = state.alphabet, uppercase = state.shift != .lowercase
         if state.layout == .letters, (0x61...0x7A).contains(value) {
-            let index = Int(value - 0x61), uppercase = state.shift != .lowercase
+            // Turkish İ is not the capital these forms are drawn from.
+            if uppercase && alphabet.uppercase(key) != key.uppercased() { return ([], []) }
+            let index = Int(value - 0x61)
             return (list(letterModifiers(index, uppercase: uppercase)), list(letterStyles(index, uppercase: uppercase)))
+        }
+        if state.layout == .letters, alphabet.keys.contains(key) {
+            switch alphabet.script {
+            case .greek:
+                return (list(uppercase ? [] : greekModifiers[key] ?? []), list(greekStyles(key, uppercase: uppercase)))
+            case .cyrillic:
+                let own = Set(holdVariants(for: key, state: state))
+                let related = (cyrillicRelated[key] ?? []).map { uppercase ? alphabet.uppercase($0) : $0 }.filter { !own.contains($0) }
+                return (list(uppercase ? [] : cyrillicModifiers[key] ?? []), list(related))
+            case .latin:
+                return ([], list(key == "ı" && !uppercase ? ["𝚤"] : []))
+            }
         }
         if (0x30...0x39).contains(value) {
             let digit = Int(value - 0x30)
@@ -96,6 +111,38 @@ enum KeyboardVariantPolicy {
             digit == 0 ? 0 : 0x2473 + d, digit == 0 ? 0 : 0x2487 + d, 0xFF10 + d])
     }
 
+    /// Greek modifier letters: superscript, then subscript.
+    private static let greekModifiers: [String: [String]] = [
+        "β": ["ᵝ", "ᵦ"], "γ": ["ᵞ", "ᵧ"], "δ": ["ᵟ"], "θ": ["ᶿ"], "ι": ["ᶥ"], "ρ": ["ᵨ"], "φ": ["ᵠ", "ᵩ"], "χ": ["ᵡ", "ᵪ"]
+    ]
+    /// Capital Alpha of each Greek Mathematical Alphanumeric style. Each style
+    /// has 25 capitals with ϴ in the reserved slot after Ρ, then ∇, then 25
+    /// lowercase letters with final ς in the same place.
+    private static let greekMathStyles: [UInt32] = [0x1D6A8, 0x1D6E2, 0x1D71C, 0x1D756, 0x1D790]
+    private static let greekDoubleStruck: [String: String] = ["γ": "ℽ", "π": "ℼ", "Γ": "ℾ", "Π": "ℿ"]
+    private static let greekSmallCapitals: [String: String] = ["γ": "ᴦ", "λ": "ᴧ", "π": "ᴨ", "ρ": "ᴩ", "ψ": "ᴪ"]
+
+    static func greekStyles(_ key: String, uppercase: Bool) -> [String] {
+        guard key.unicodeScalars.count == 1, let value = key.unicodeScalars.first?.value, (0x3B1...0x3C9).contains(value) else { return [] }
+        let offset = uppercase ? value - 0x3B1 : 26 + value - 0x3B1
+        // Final sigma has no capital of its own; Shift gives Σ.
+        let math = uppercase && value == 0x3C2 ? [] : scalars(greekMathStyles.map { $0 + offset })
+        let letter = uppercase ? key.uppercased() : key
+        return math + [greekDoubleStruck[letter], uppercase ? nil : greekSmallCapitals[key]].compactMap { $0 }
+    }
+
+    /// Modifier letters encoded for Cyrillic.
+    private static let cyrillicModifiers: [String: [String]] = ["н": ["ᵸ"], "ъ": ["ꚜ"], "ь": ["ꚝ"]]
+    /// Letters of other Cyrillic languages drawn from the same base letter, and back.
+    private static let cyrillicRelated: [String: [String]] = [
+        "е": ["ё", "є", "э"], "ё": ["е"], "є": ["е", "э"], "э": ["е", "є"],
+        "и": ["й", "і", "ї", "ѝ"], "й": ["и", "ј"], "і": ["ї", "и"], "ї": ["і"], "ј": ["й"],
+        "г": ["ґ", "ѓ", "ғ"], "ґ": ["г"], "к": ["ќ", "қ"], "у": ["ў", "ү", "ұ"], "ь": ["ъ"], "ъ": ["ь"],
+        "з": ["ѕ"], "ѕ": ["з"], "д": ["ђ", "џ"], "ђ": ["д"], "џ": ["д"], "л": ["љ"], "љ": ["л"],
+        "н": ["њ", "ң"], "њ": ["н"], "ш": ["щ"], "щ": ["ш"], "ч": ["ћ", "ҷ"], "ћ": ["ч"],
+        "о": ["ө"], "а": ["ә"], "х": ["ҳ", "һ"], "ж": ["җ"]
+    ]
+
     private static let symbolForms: [String: (modifiers: [String], styled: [String])] = [
         "+": (["⁺", "₊"], ["＋"]), "-": (["⁻", "₋"], ["－"]), "=": (["⁼", "₌"], ["＝"]),
         "(": (["⁽", "₍"], ["（"]), ")": (["⁾", "₎"], ["）"])
@@ -115,7 +162,7 @@ enum KeyboardVariantPolicy {
         let keyID = KeyboardKeySettings.identifier(forCharacter: key) ?? ""
         let gestures: [KeyboardKeySettings.Gesture] = [.longPress, .swipeUp, .swipeDown]
         let defaults = [
-            options(text: original, variants: englishVariants(for: key, uppercase: state.shift != .lowercase)),
+            options(text: original, variants: holdVariants(for: key, state: state)),
             defaultSwipeUp(for: key, state: state),
             defaultSwipeDown(for: key, state: state)
         ]
@@ -141,11 +188,16 @@ enum KeyboardVariantPolicy {
     }
 
     /// A key's built-in candidates for one gesture, as the keyboard offers
-    /// them in lowercase: letters from the letter page and symbols from the
-    /// first page that has them.
-    static func defaultCandidates(for keyID: String, gesture: KeyboardKeySettings.Gesture) -> [String] {
+    /// them in lowercase: letters from the given layout, or the first that
+    /// has them, and symbols from the first page that has them.
+    static func defaultCandidates(for keyID: String, gesture: KeyboardKeySettings.Gesture,
+                                  alphabet: KeyboardAlphabet = .english) -> [String] {
         guard let descriptor = KeyboardKeySettings.descriptor(for: keyID), let key = descriptor.text else { return [] }
         var state = KeyboardTypingState()
+        if descriptor.kind == .letter {
+            state.selectAlphabet(alphabet.keys.contains(key) ? alphabet
+                : KeyboardAlphabet.catalog.first { $0.keys.contains(key) } ?? .english)
+        }
         if descriptor.kind == .character,
            let layout = KeyboardTypingLayout.allCases.first(where: { $0.rows.flatMap { $0 }.contains(key) }) {
             state.selectLayout(layout)
@@ -207,6 +259,22 @@ enum KeyboardVariantPolicy {
 
     static func contains(_ text: String, in options: [String]) -> Bool {
         options.contains { $0.utf16.elementsEqual(text.utf16) }
+    }
+
+    /// Long-press choices: the layout's own letters first, then, on Latin
+    /// layouts, the familiar English accents; symbols keep their families.
+    static func holdVariants(for key: String, state: KeyboardTypingState) -> [String] {
+        let alphabet = state.alphabet, uppercase = state.shift != .lowercase
+        let own = state.layout == .letters ? (alphabet.variants[key] ?? []).compactMap { variant -> String? in
+            guard uppercase else { return variant }
+            // ΐ and ΰ have no single capital; ß has its own.
+            let capital = variant == "ß" ? "ẞ" : alphabet.uppercase(variant)
+            return capital.unicodeScalars.count == 1 ? capital : nil
+        } : []
+        let shared = alphabet.script == .latin || state.layout != .letters || !alphabet.keys.contains(key)
+            ? englishVariants(for: key, uppercase: uppercase) : []
+        var seen = Set<String>()
+        return (own + shared).filter { seen.insert($0).inserted }
     }
 
     /// Familiar English diacritics; these are literal choices, not corrections.

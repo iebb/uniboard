@@ -27,10 +27,10 @@ final class KeyboardVariantPolicyTests: XCTestCase {
         XCTAssertEqual(upper.swipeDown.first, "𝐀")
     }
 
-    func testResolvedGestureChoosersAreDisjointForEveryKeyAndPage() {
-        for layout in KeyboardTypingLayout.allCases {
+    func testResolvedGestureChoosersAreDisjointForEveryKeyPageAndAlphabet() {
+        for alphabet in KeyboardAlphabet.catalog { for layout in KeyboardTypingLayout.allCases {
             for shifted in [false, true] {
-                var state = KeyboardTypingState(); state.selectLayout(layout)
+                var state = KeyboardTypingState(); state.selectAlphabet(alphabet); state.selectLayout(layout)
                 if shifted { state.pressShift(at: 1) }
                 for key in KeyboardKeySettings.descriptors.compactMap(\.text) {
                     let value = KeyboardVariantPolicy.gestureCandidates(for: key, original: state.label(for: key), state: state,
@@ -45,7 +45,88 @@ final class KeyboardVariantPolicyTests: XCTestCase {
                                    "Swipes never switch case")
                 }
             }
+        } }
+    }
+
+    func testEachLayoutHoldsItsOwnAccentsFirstInTheCurrentCase() throws {
+        func hold(_ key: String, _ id: String, shifted: Bool = false) throws -> [String] {
+            var state = KeyboardTypingState(); state.selectAlphabet(try XCTUnwrap(KeyboardAlphabet.alphabet(id: id)))
+            if shifted { state.pressShift(at: 1) }
+            return KeyboardVariantPolicy.gestureCandidates(for: key, original: state.label(for: key), state: state, settings: .defaults).longPress
         }
+        XCTAssertEqual(try hold("e", "fr").prefix(5), ["e", "é", "è", "ê", "ë"])
+        XCTAssertEqual(try hold("e", "cs").prefix(3), ["e", "é", "ě"])
+        XCTAssertTrue(try hold("e", "cs").contains("ē"), "Latin layouts keep the familiar accents after their own")
+        XCTAssertEqual(try hold("s", "de", shifted: true).prefix(2), ["S", "ẞ"])
+        XCTAssertEqual(try hold("е", "ru"), ["е", "ё"])
+        XCTAssertEqual(try hold("е", "ru", shifted: true), ["Е", "Ё"])
+        XCTAssertEqual(try hold("г", "uk"), ["г", "ґ"])
+        XCTAssertEqual(try hold("ι", "el"), ["ι", "ί", "ϊ", "ΐ"])
+        XCTAssertEqual(try hold("ι", "el", shifted: true), ["Ι", "Ί", "Ϊ"], "ΐ has no single capital")
+        XCTAssertEqual(try hold("i", "tr", shifted: true).prefix(2), ["İ", "Î"])
+        XCTAssertEqual(try hold("ж", "ru"), ["ж"], "Cyrillic layouts gain no Latin accents")
+        XCTAssertEqual(try hold("a", "en"), ["a", "à", "á", "â", "ä", "æ", "ã", "å", "ā"], "English is unchanged")
+    }
+
+    func testGreekFlicksGiveModifierLettersAndMathematicalGreek() throws {
+        var state = KeyboardTypingState(); state.selectAlphabet(try XCTUnwrap(KeyboardAlphabet.alphabet(id: "el")))
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "β", state: state), ["ᵝ", "ᵦ"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "α", state: state), [])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "α", state: state), ["𝛂", "𝛼", "𝜶", "𝝰", "𝞪"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "ς", state: state).first, "𝛓")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "ω", state: state).first, "𝛚")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "π", state: state), ["𝛑", "𝜋", "𝝅", "𝝿", "𝞹", "ℼ", "ᴨ"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: ";", state: state), [])
+        state.pressShift(at: 1)
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "α", state: state), ["𝚨", "𝛢", "𝜜", "𝝖", "𝞐"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "σ", state: state).first, "𝚺", "Σ follows the reserved capital slot")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "ω", state: state).first, "𝛀")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "π", state: state).last, "ℿ")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "ς", state: state), [], "Final sigma has no capital of its own")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "β", state: state), [])
+        for key in try XCTUnwrap(KeyboardAlphabet.alphabet(id: "el")).keys where key != ";" {
+            for shifted in [false, true] {
+                var each = KeyboardTypingState(); each.selectAlphabet(state.alphabet)
+                if shifted { each.pressShift(at: 1) }
+                let forms = KeyboardVariantPolicy.defaultSwipeDown(for: key, state: each)
+                XCTAssertTrue(forms.allSatisfy { $0.unicodeScalars.count == 1 }, key)
+                if !(shifted && key == "ς") { XCTAssertGreaterThanOrEqual(forms.count, 5, key) }
+            }
+        }
+    }
+
+    func testCyrillicFlicksDownToRelatedLettersWithoutTakingTheHoldChoices() throws {
+        var russian = KeyboardTypingState(); russian.selectAlphabet(try XCTUnwrap(KeyboardAlphabet.alphabet(id: "ru")))
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "е", state: russian), ["є", "э"], "ё stays on hold")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "и", state: russian), ["й", "і", "ї", "ѝ"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "ь", state: russian), [], "ъ stays on hold")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "н", state: russian), ["ᵸ"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "ь", state: russian), ["ꚝ"])
+        russian.pressShift(at: 1)
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "и", state: russian), ["Й", "І", "Ї", "Ѝ"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "н", state: russian), [])
+        var serbian = KeyboardTypingState(); serbian.selectAlphabet(try XCTUnwrap(KeyboardAlphabet.alphabet(id: "sr-Cyrl")))
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "љ", state: serbian), ["л"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "д", state: serbian), ["ђ", "џ"])
+        var ukrainian = KeyboardTypingState(); ukrainian.selectAlphabet(try XCTUnwrap(KeyboardAlphabet.alphabet(id: "uk")))
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "г", state: ukrainian), ["ѓ", "ғ"], "ґ stays on hold")
+    }
+
+    func testOtherLatinLayoutsKeepASCIIFormsAndTurkishCapitalsStayApart() throws {
+        var turkish = KeyboardTypingState(); turkish.selectAlphabet(try XCTUnwrap(KeyboardAlphabet.alphabet(id: "tr")))
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "i", state: turkish).first, "𝐢")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "ı", state: turkish), ["𝚤"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "ş", state: turkish), [])
+        turkish.pressShift(at: 1)
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "i", state: turkish), [], "İ has no mathematical forms")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "a", state: turkish).first, "𝐀")
+        var german = KeyboardTypingState(); german.selectAlphabet(try XCTUnwrap(KeyboardAlphabet.alphabet(id: "de")))
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeUp(for: "a", state: german), ["ᵃ", "ₐ"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultSwipeDown(for: "ü", state: german), [])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .longPress, alphabet: .alphabet(id: "fr")!).prefix(3),
+                       ["e", "é", "è"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.03B2", gesture: .swipeUp), ["ᵝ", "ᵦ"],
+                       "The editor finds a Greek letter's layout")
     }
 
     func testCurrencyKeysKeepCompleteHoldFamiliesAndHaveNoDefaultSwipes() {

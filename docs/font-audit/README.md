@@ -44,20 +44,32 @@ Only measured missing scalar ranges are advertised. The seven additions total **
 | Rare Han: B–F & I | 1 | 30,903,504 |
 | Rare Han: G, H & J | 1 | 7,450,532 |
 | Seal script | 1 | 5,793,816 |
-| Latest emoji previews | 1 | 31,848 |
-| Total | 68 | 58,092,484 |
+| Emoji previews | 2 | 10,821,044 |
+| Total | 69 | 68,881,680 |
 
 The original 61 asset identities, hashes and URLs are unchanged. The seven new files use the separate [completion asset release](https://github.com/iebb/uniboard/releases/tag/fonts-1.1-20261022-complete); the [original asset release](https://github.com/iebb/uniboard/releases/tag/fonts-1.1-20261022) remains intact. Source commits, SHA-256 digests, advertised ranges, licenses, and the Seal source-archive hash are pinned in [font-subset-inputs.json](font-subset-inputs.json).
 
 Noto is preferred where available. The completed downloads comprise 59 Noto faces, three Jigmo faces, one Fairfax HD face, one Archaic Cuneiform Numerals face, NewGardiner, UniHieroglyphica, a UFS preview face, and original Seal Sans. All modified OFL faces have unreserved Uniboard names and complete notices in every existing license name record. Seal Sans is copied byte-for-byte; its AGPL notice and 54,113,630-byte original editable source archive are provided alongside the download. Source archives do not count toward or need to be downloaded with runtime font packs.
 
-Packs are explicit, app-only, off by default, removable, and usable offline in the keyboard without Full Access. The 64 MB aggregate download budget, 40 MB per-file limit, SHA verification, trusted release URLs, four-font LRU and bounded text-choice cache are unchanged.
+Packs are explicit, app-only, off by default, removable, and usable offline in the keyboard without Full Access. The 80 MB aggregate download budget, 40 MB per-file limit, SHA verification, trusted release URLs, four-font LRU and bounded text-choice cache are unchanged.
 
 ## Emoji behavior
 
-Only the nine missing standalone emoji, optionally followed by VS16, may use the new color subset: U+1F6D9, U+1FA8B, U+1FA8C, U+1FA8D, U+1FACC, U+1FADD, U+1FAEB, U+1FAF9, U+1FAFA. A system glyph still wins whenever available. Joined, modifier, flag and other supported emoji retain the system font. VS15 text presentation, repeated selectors, and mixed strings containing the new emoji also stay on the system renderer; this rule does not depend on the runtime knowing Unicode 18 properties. COLR glyphs are recognized as layered color artwork rather than rejected for lacking a base outline.
+Emoji fallback is decided at runtime on the device's own iOS version, not from this iOS 27 list. A preview is drawn with the stock fonts first. If any scalar hits glyph zero or LastResort, or a fully qualified sequence shapes to more glyphs than visible characters (iOS drawing an unsupported ZWJ, modifier, flag or keycap sequence as separate pieces), the optional **Emoji previews** pack is tried in order:
 
-Current Noto's CBDT font could not be opened as a CGFont on the tested iOS runtime; its COLR font worked, including the final subset. A cmap claim alone would have missed that distinction. The native test retains a color bitmap of all nine final subset glyphs and checks both unqualified and VS16 forms, native controls, disabled behavior and cache limits. App emoji tiles/details and keyboard emoji keys/property previews use the same resolver.
+1. **Noto Color Emoji**, the unmodified sbix rebuild `noto.ttf` from [iebb/emojifonts release 2026.10](https://github.com/iebb/emojifonts/releases/tag/2026.10) (10,789,196 bytes, SHA-256 pinned, Emoji 17.0). sbix is Apple's own bitmap format, so it draws on every supported iOS version, and its GSUB ligatures cover sequences.
+2. The 31,848-byte Noto COLR subset for the nine standalone Unicode 18 emoji, which the sbix build does not yet contain.
+
+A candidate must draw the text completely and leave ink in a test render. That second check matters: COLR glyphs exist in the cmap on iOS 18.5 but draw nothing there, so the subset is used only where the runtime actually paints it. VS15 text presentation stays on text fonts.
+
+`Tests/UnicodeEmojiSequenceAuditTests.swift` (opt-in, `UNIBOARD_EMOJI_AUDIT=1`; add `UNIBOARD_EMOJI_AUDIT_INSTALL=1` with the pack files in the test host's `Documents/FontAuditAssets`) shapes all 3,963 fully qualified Unicode 18 emoji:
+
+| Runtime | Stock gaps | Recovered with the emoji pack | Still missing |
+| --- | ---: | ---: | ---: |
+| iOS 27.0 (24A5390f) | 19, all Emoji 18.0 | 9 standalone, COLR subset | 10 skin-tone thumb signs |
+| iOS 18.5 (22F77) | 182: 67 missing and 96 split Emoji 17.0; 19 Emoji 18.0 | 163, all Noto sbix | 19 Emoji 18.0 |
+
+The remaining gaps are Emoji 18.0 sequences that no pinned font contains yet. A later Noto sbix build with Emoji 18.0 can replace the pinned release without code changes.
 
 ## Native verification and reproduction
 

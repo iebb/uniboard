@@ -60,8 +60,7 @@ struct UnicodeFontDownload: Decodable, Sendable {
             && asset.filename.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0)
                 || (97...122).contains($0) || [45, 46, 95].contains($0) })
             && (asset.filename.hasSuffix(".ttf") || asset.filename.hasSuffix(".otf"))
-            && (downloadURL == UnicodeFontPackCatalog.downloadBase + asset.filename
-                || downloadURL == UnicodeFontPackCatalog.completionDownloadBase + asset.filename)
+            && UnicodeFontPackCatalog.downloadBases.contains { downloadURL == $0 + asset.filename }
     }
 }
 
@@ -76,6 +75,11 @@ struct UnicodeFontPack: Decodable, Identifiable, Sendable {
 struct UnicodeFontPackCatalog: Decodable, Sendable {
     static let downloadBase = "https://github.com/iebb/uniboard/releases/download/fonts-1.1-20261022/"
     static let completionDownloadBase = "https://github.com/iebb/uniboard/releases/download/fonts-1.1-20261022-complete/"
+    /// Upstream Noto Color Emoji rebuilt as sbix, which Core Text draws on every
+    /// supported iOS version; pinned to a dated release, never `latest`.
+    static let emojiDownloadBase = "https://github.com/iebb/emojifonts/releases/download/2026.10/"
+    static let downloadBases = [downloadBase, completionDownloadBase, emojiDownloadBase]
+    static let maximumTotalBytes: Int64 = 80 * 1024 * 1024
     static let maximumCatalogBytes = 2 * 1024 * 1024
     let schemaVersion: Int
     let unicodeVersion: String
@@ -91,7 +95,7 @@ struct UnicodeFontPackCatalog: Decodable, Sendable {
         return fonts.count <= 80 && fonts.allSatisfy(\.isValid)
             && Set(fonts.map { $0.asset.filename }).count == fonts.count
             && Set(fonts.map { $0.asset.postScriptName }).count == fonts.count
-            && fonts.reduce(Int64(0)) { $0 + $1.bytes } <= 64 * 1024 * 1024
+            && fonts.reduce(Int64(0)) { $0 + $1.bytes } <= Self.maximumTotalBytes
     }
 
     static func load(data: Data) -> Self? {

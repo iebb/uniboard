@@ -25,7 +25,7 @@ PACKS = {
     "han-supplementary": ("Rare Han: B–F & I", "Missing ideographs from CJK extensions B, C, D, E, F and I, plus compatibility characters. Uses a Jigmo subset."),
     "han-latest": ("Rare Han: G, H & J", "Missing ideographs from newer CJK extensions G, H and J. Uses a Jigmo subset."),
     "seal": ("Seal script", "All 11,328 Unicode 18 Seal characters. Uses the original Seal Sans font under AGPL-3.0; its license and corresponding source are provided with the font assets."),
-    "emoji-latest": ("Latest emoji previews", "Color previews for nine Unicode 18 emoji missing from iOS 27. Existing system emoji and joined sequences keep Apple's rendering."),
+    "emoji": ("Emoji previews", "Noto Color Emoji draws emoji your iOS version cannot, including newer sequences. Emoji iOS already draws keep Apple\u2019s artwork."),
 }
 
 
@@ -57,16 +57,22 @@ def source_font(entry, cache):
 def build(entry, source, output):
     filename = entry["filename"]
     if entry.get("distribution") == "verbatim":
-        # This independently licensed font is distributed unchanged, with its
-        # full license and original editable source in the same asset release.
-        if filename != "SealSans-Regular_v1.otf" or entry["licenseFilename"] != "SealSans-AGPL.txt":
+        # Independently licensed fonts are distributed unchanged: Seal Sans with
+        # its full license and editable source in the same asset release, and
+        # the sbix Noto Color Emoji rebuild as a runtime emoji fallback.
+        verbatim = {("SealSans-Regular_v1.otf", "SealSans-AGPL.txt"): "GNU Affero General Public License",
+                    ("noto.ttf", "NotoEmoji-OFL.txt"): "SIL Open Font License"}
+        notice = verbatim.get((filename, entry["licenseFilename"]))
+        if notice is None:
             raise ValueError("Unexpected verbatim font")
         data = source.read_bytes()
         font = TTFont(source)
         points = {cp for start, end in entry["ranges"] for cp in range(start, end + 1)}
         if font["name"].getDebugName(6) != entry["postScriptName"] or not points <= set(font.getBestCmap()):
             raise ValueError("Verbatim font identity or coverage mismatch")
-        if "GNU Affero General Public License" not in (font["name"].getDebugName(13) or ""):
+        if entry.get("coverage") == "runtime-emoji" and ("sbix" not in font or points != set(font.getBestCmap())):
+            raise ValueError("Emoji fallback must be the complete sbix cmap")
+        if notice not in (font["name"].getDebugName(13) or ""):
             raise ValueError("Verbatim font license mismatch")
         font.close()
         (output / filename).write_bytes(data)

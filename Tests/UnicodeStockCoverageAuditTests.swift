@@ -109,8 +109,9 @@ final class UnicodeStockCoverageAuditTests: XCTestCase {
     }
 
     private func verifyStandaloneColorEmojiPreviews() throws {
-        let pack = try XCTUnwrap(UnicodeFontPackCatalog.bundled.packs.first { $0.id == "emoji-latest" })
-        let points = pack.fonts.flatMap { $0.asset.ranges.flatMap { Array($0[0]...$0[1]) } }
+        let pack = try XCTUnwrap(UnicodeFontPackCatalog.bundled.packs.first { $0.id == "emoji" })
+        let subset = try XCTUnwrap(pack.fonts.first { $0.asset.postScriptName == "UniboardCoverage068-Regular" })
+        let points = subset.asset.ranges.flatMap { Array($0[0]...$0[1]) }
         XCTAssertEqual(points.count, 9)
         for point in points {
             for suffix in ["", "\u{FE0F}"] {
@@ -118,7 +119,7 @@ final class UnicodeStockCoverageAuditTests: XCTestCase {
                 let font = UnicodeFontSupport.font(for: text, size: 48, enabled: true)
                 XCTAssertTrue(UnicodeFontSupport.missingCodePoints(in: text, font: font).isEmpty)
                 if !UnicodeFontSupport.missingCodePoints(in: text, font: .systemFont(ofSize: 48)).isEmpty {
-                    XCTAssertEqual(font.fontName, pack.fonts[0].asset.postScriptName)
+                    XCTAssertEqual(font.fontName, subset.asset.postScriptName)
                     XCTAssertTrue(CTFontGetSymbolicTraits(font as CTFont).contains(.traitColorGlyphs))
                 }
                 let off = UnicodeFontSupport.font(for: text, size: 48, enabled: false)
@@ -137,8 +138,10 @@ final class UnicodeStockCoverageAuditTests: XCTestCase {
         attachment.name = "Nine Unicode 18 emoji using the exact optional Noto color subset"
         attachment.lifetime = .keepAlways
         add(attachment)
+        // Stock-drawn emoji, text presentation, and sequences no fallback can
+        // draw as one glyph keep the system font.
         for text in ["🚀", "🙂‍↔️", "👍🏽", "🇯🇵", "☃️", "\u{1FAEB}\u{200D}\u{1F680}",
-                     "\u{1FAEB}\u{FE0E}", "A\u{1FAEB}", "\u{1FAEB}\u{1F3FB}", "\u{1FAEB}\u{FE0F}\u{FE0F}"] {
+                     "\u{1FAEB}\u{FE0E}", "\u{1FAEB}\u{1F3FB}"] {
             let on = UnicodeFontSupport.font(for: text, size: 48, enabled: true)
             let off = UnicodeFontSupport.font(for: text, size: 48, enabled: false)
             XCTAssertEqual(on.fontDescriptor, off.fontDescriptor, text)

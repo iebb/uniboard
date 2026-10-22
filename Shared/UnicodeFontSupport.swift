@@ -40,12 +40,12 @@ enum UnicodeFontSupport {
     }()
     private static let downloadable = Dictionary(uniqueKeysWithValues:
         UnicodeFontPackCatalog.bundled.packs.flatMap(\.fonts).map { ($0.asset.filename, $0) })
-    private static let emojiPreviewAssets = UnicodeFontPackCatalog.bundled.packs
-        .filter { $0.id == "emoji-latest" }.flatMap(\.fonts).map(\.asset)
+    /// Color emoji fallbacks, tried in catalog order only for emoji text that
+    /// the stock fonts cannot draw as complete glyphs.
+    private static let emojiFilenames = Set(UnicodeFontPackCatalog.bundled.packs
+        .filter { $0.id == "emoji" }.flatMap(\.fonts).map(\.asset.filename))
 
-    private static func isEmojiPreview(_ point: UInt32) -> Bool {
-        emojiPreviewAssets.contains { $0.contains(point) }
-    }
+    private static func isEmojiAsset(_ asset: Asset) -> Bool { emojiFilenames.contains(asset.filename) }
 
     static var loadedFontCount: Int { graphicsFonts.count }
 
@@ -70,6 +70,7 @@ enum UnicodeFontSupport {
 
     static func clearCache() {
         choices.removeAllObjects()
+        stockMisses.removeAllObjects()
         graphicsFonts.removeAll()
         fontRecency.removeAll()
     }
@@ -77,7 +78,7 @@ enum UnicodeFontSupport {
     static func font(for text: String, size: CGFloat, enabled: Bool) -> UIFont {
         let size = normalizedPointSize(size)
         let system = UIFont.systemFont(ofSize: size)
-        guard enabled, !text.isEmpty, !preservesEmoji(text) else { return system }
+        guard enabled, !text.isEmpty else { return system }
         refreshDownloadedFonts()
         let index = choice(for: text, system: system)
         guard index != systemChoice, let graphics = graphicsFont(at: index) else { return system }
@@ -85,7 +86,7 @@ enum UnicodeFontSupport {
     }
 
     static func sourceName(for text: String, size: CGFloat, enabled: Bool) -> String? {
-        guard enabled, !text.isEmpty, !preservesEmoji(text) else { return nil }
+        guard enabled, !text.isEmpty else { return nil }
         refreshDownloadedFonts()
         let index = choice(for: text, system: .systemFont(ofSize: normalizedPointSize(size)))
         return assets.indices.contains(index) ? assets[index].displayName : nil
@@ -95,40 +96,74 @@ enum UnicodeFontSupport {
         size.isFinite && size > 0 ? min(512, max(1, size)) : UIFont.systemFontSize
     }
 
-    /// Only the audited standalone emoji (optionally with VS16) may use the
-    /// color preview pack. Joined/modifier/flag sequences retain Apple's shaping.
-    private static func preservesEmoji(_ text: String) -> Bool {
-        let points = text.unicodeScalars.map(\.value)
-        if let first = points.first, isEmojiPreview(first),
-           points.count == 1 || (points.count == 2 && points[1] == 0xFE0F) { return false }
-        // The runtime's Unicode tables may predate these emoji. Do not infer
-        // their sequence behavior from scalar properties (notably VS15).
-        if points.contains(where: isEmojiPreview) { return true }
-        return text.unicodeScalars.contains {
-            $0.value == 0xFE0F || $0.value == 0x200D || (0xE0020...0xE007F).contains($0.value)
-                || $0.properties.isEmojiPresentation
+    /// Emoji presentation, emoji sequences, and scalars this runtime's Unicode
+    /// tables do not know yet but an emoji fallback covers. VS15 keeps text.
+    static func isEmojiText(_ text: String) -> Bool {
+        let scalars = text.unicodeScalars
+        if scalars.contains(where: { $0.value == 0xFE0E }) { return false }
+        return scalars.contains { scalar in
+            let value = scalar.value
+            return value == 0xFE0F || value == 0x200D || value == 0x20E3 || (0xE0020...0xE007F).contains(value)
+                || (0x1F3FB...0x1F3FF).contains(value) || scalar.properties.isEmojiPresentation
+                || (scalar.properties.generalCategory == .unassigned
+                    && assets.contains { isEmojiAsset($0) && $0.contains(value) })
         }
+    }
+
+    /// Stock or fallback rendering is accepted only when nothing tofus and no
+    /// emoji sequence falls apart into more glyphs than visible characters.
+    private static func drawsEmoji(_ text: String, font: UIFont) -> Bool {
+        missingCodePoints(in: text, font: font).isEmpty && visibleGlyphCount(in: text, font: font) <= text.count
     }
 
     private static func choice(for text: String, system: UIFont) -> Int {
         if let cached = choices.object(forKey: text as NSString) { return cached.intValue }
-        let missing = missingCodePoints(in: text, font: system)
         var selected = systemChoice
-        if !missing.isEmpty {
-            for (index, asset) in assets.enumerated() where missing.allSatisfy(asset.contains) {
-                guard let graphics = graphicsFont(at: index) else { continue }
-                let candidate = CTFontCreateWithGraphicsFont(graphics, 32, nil, nil)
-                // A whitelist alone is insufficient: reject corrupt/non-drawing
-                // glyphs rather than replace one placeholder with another.
-                if missing.allSatisfy({ hasArtwork($0, in: candidate) }),
-                   missingCodePoints(in: text, font: candidate as UIFont).isEmpty {
-                    selected = index
-                    break
+        if isEmojiText(text) {
+            if !drawsEmoji(text, font: system) {
+                for (index, asset) in assets.enumerated() where isEmojiAsset(asset) {
+                    guard let graphics = graphicsFont(at: index) else { continue }
+                    let candidate = CTFontCreateWithGraphicsFont(graphics, 32, nil, nil) as UIFont
+                    if drawsEmoji(text, font: candidate), inks(text, font: candidate) {
+                        selected = index
+                        break
+                    }
+                }
+            }
+        } else {
+            let missing = missingCodePoints(in: text, font: system)
+            if !missing.isEmpty {
+                for (index, asset) in assets.enumerated() where !isEmojiAsset(asset) && missing.allSatisfy(asset.contains) {
+                    guard let graphics = graphicsFont(at: index) else { continue }
+                    let candidate = CTFontCreateWithGraphicsFont(graphics, 32, nil, nil)
+                    // A whitelist alone is insufficient: reject corrupt/non-drawing
+                    // glyphs rather than replace one placeholder with another.
+                    if missing.allSatisfy({ hasArtwork($0, in: candidate) }),
+                       missingCodePoints(in: text, font: candidate as UIFont).isEmpty {
+                        selected = index
+                        break
+                    }
                 }
             }
         }
         choices.setObject(NSNumber(value: selected), forKey: text as NSString)
         return selected
+    }
+
+    /// A color glyph can exist in the cmap yet draw nothing (for example COLR
+    /// paint on a runtime without support), so render once and look for ink.
+    private static func inks(_ text: String, font: UIFont) -> Bool {
+        let width = 64 * max(1, text.count), height = 64
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.textPosition = CGPoint(x: 8, y: 16)
+            CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font])), context)
+            return true
+        }
+        return drawn && stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 0 }
     }
 
     private static func graphicsFont(at index: Int) -> CGFont? {
@@ -155,9 +190,6 @@ enum UnicodeFontSupport {
         var glyphs = [CGGlyph](repeating: 0, count: characters.count)
         CTFontGetGlyphsForCharacters(font, &characters, &glyphs, characters.count)
         guard let glyph = glyphs.first, glyph != 0 else { return false }
-        // COLR glyphs draw through paint layers and may have no base outline.
-        // Only pinned, bitmap-verified standalone emoji may take this path.
-        if isEmojiPreview(point), CTFontGetSymbolicTraits(font).contains(.traitColorGlyphs) { return true }
         guard let path = CTFontCreatePathForGlyph(font, glyph, nil) else { return false }
         return !path.isEmpty
     }
@@ -197,6 +229,43 @@ enum UnicodeFontSupport {
             }
         }
         return missing
+    }
+
+    /// Visible glyphs in the shaped line. Ligature-deleted slots and
+    /// zero-advance joiners/selectors are not counted, so a supported emoji
+    /// sequence is one glyph and an unsupported one draws its separate parts.
+    static func visibleGlyphCount(in text: String, font: UIFont) -> Int {
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        var count = 0
+        for run in CTLineGetGlyphRuns(line) as! [CTRun] {
+            let length = CTRunGetGlyphCount(run)
+            var glyphs = [CGGlyph](repeating: 0, count: length)
+            var advances = [CGSize](repeating: .zero, count: length)
+            CTRunGetGlyphs(run, CFRange(location: 0, length: 0), &glyphs)
+            CTRunGetAdvances(run, CFRange(location: 0, length: 0), &advances)
+            count += zip(glyphs, advances).filter { $0.0 != 0xFFFF && $0.1.width > 0.5 }.count
+        }
+        return count
+    }
+
+    private static let stockMisses: NSCache<NSString, NSNumber> = {
+        let cache = NSCache<NSString, NSNumber>()
+        cache.countLimit = 4_096
+        return cache
+    }()
+
+    /// Whether iOS's own fonts cannot draw `text` completely: a placeholder,
+    /// or an emoji sequence split into pieces. A fallback preview still counts,
+    /// since other apps will not have that font.
+    static func stockFontsMiss(_ text: String, emoji: Bool = false) -> Bool {
+        guard !text.isEmpty else { return false }
+        let key = "\(emoji ? 1 : 0)\(text)" as NSString
+        if let cached = stockMisses.object(forKey: key) { return cached.boolValue }
+        let system = UIFont.systemFont(ofSize: 32)
+        let miss = emoji || isEmojiText(text) ? !drawsEmoji(text, font: system)
+            : !missingCodePoints(in: text, font: system).isEmpty
+        stockMisses.setObject(NSNumber(value: miss), forKey: key)
+        return miss
     }
 
     static var licenseText: String {

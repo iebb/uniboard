@@ -105,6 +105,7 @@
 		986B43FB673F5198BF5FB1D3 /* UnicodeSources-older.json in Resources */ = {isa = PBXBuildFile; fileRef = DE47074D4C3370D1F0D94403 /* UnicodeSources-older.json */; };
 		9A50C69D53213EF833C399EF /* UnicodeCatalog.ucd in Resources */ = {isa = PBXBuildFile; fileRef = B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */; };
 		9AB039E4D85D3E5D97F67EFC /* UnicodeCatalog-older.ucd in Resources */ = {isa = PBXBuildFile; fileRef = 43C80DCCEDA13A62C9C85134 /* UnicodeCatalog-older.ucd */; };
+		9B9A97D719501278BD3869FC /* UnicodeEmojiSequenceAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A2BD99F4D2B39ED86269C4F /* UnicodeEmojiSequenceAuditTests.swift */; };
 		A1576FCAC1F35187DC610EDB /* CatalogPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52D9BC9C1D5A569CC0D9FA4E /* CatalogPreferences.swift */; };
 		A1A003808C73EF04DD957659 /* CompanionAppRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49CC0A642A0BD0AF6C9CAD61 /* CompanionAppRoute.swift */; };
 		A3EB9F84FD82E593B1835D3C /* KeyboardSymbolPagesPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0CB9190C7ED0900DD4624B7 /* KeyboardSymbolPagesPager.swift */; };
@@ -276,6 +277,7 @@
 		95A8C4E52513534B84177D37 /* KeyboardDocumentIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDocumentIdentity.swift; sourceTree = "<group>"; };
 		984EDFFAF22643E351C9AE0D /* KeyboardDocumentIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDocumentIdentityTests.swift; sourceTree = "<group>"; };
 		98FDDC20D72CB0276CC63DE5 /* Uniboard.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Uniboard.entitlements; sourceTree = "<group>"; };
+		9A2BD99F4D2B39ED86269C4F /* UnicodeEmojiSequenceAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeEmojiSequenceAuditTests.swift; sourceTree = "<group>"; };
 		9A3EA0FEE5D25A5F0390A76E /* UnicodeCatalog-previous.ucd */ = {isa = PBXFileReference; path = "UnicodeCatalog-previous.ucd"; sourceTree = "<group>"; };
 		9DE2EED824EF59350BC7F5E4 /* KeyboardSelfSizingInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardSelfSizingInputView.swift; sourceTree = "<group>"; };
 		9F721983462BBAEACEAC27A0 /* CatalogWorkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogWorkerTests.swift; sourceTree = "<group>"; };
@@ -436,6 +438,7 @@
 				7C848742463EC05B9E73E569 /* SymbolBoardStoreTests.swift */,
 				22CAA7A19492D753D0BC5772 /* UnicodeCatalogTests.swift */,
 				37497C1AB0325C18D3421224 /* UnicodeEditionSettingsTests.swift */,
+				9A2BD99F4D2B39ED86269C4F /* UnicodeEmojiSequenceAuditTests.swift */,
 				79A0AAC450E4BC2938D5DEFA /* UnicodeFontAssetsTests.swift */,
 				66B0D93D77F880C230230AD1 /* UnicodeFontCoverageProbeTests.swift */,
 				5345E5836B3801BB96805A87 /* UnicodeFontSupportTests.swift */,
@@ -731,6 +734,7 @@
 				248DC88948EC019B113989AF /* SymbolBoardStoreTests.swift in Sources */,
 				28C42E6074C8E415AEA640E2 /* UnicodeCatalogTests.swift in Sources */,
 				2C93F45FF7CD9EC54A510128 /* UnicodeEditionSettingsTests.swift in Sources */,
+				9B9A97D719501278BD3869FC /* UnicodeEmojiSequenceAuditTests.swift in Sources */,
 				ADADA56AE082023BC2F6D515 /* UnicodeFontAssetsTests.swift in Sources */,
 				2EEF1C21CBE3475E8354F14B /* UnicodeFontCoverageProbeTests.swift in Sources */,
 				6B866426EF7B9F015ABCCB97 /* UnicodeFontSupportTests.swift in Sources */,

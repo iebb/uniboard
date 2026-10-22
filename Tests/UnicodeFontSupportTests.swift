@@ -62,12 +62,38 @@ final class UnicodeFontSupportTests: XCTestCase {
     }
 
     func testSupportedTextEmojiAndReservedSlotsStayOnSystemFonts() {
+        // Text iOS draws completely, text presentation, sequences no fallback
+        // draws as one glyph, and unassigned slots never switch fonts.
         for text in ["A", "Ω", "🚀", "🙂‍↔️", "☃️", "🇯🇵", "\u{1FAEB}\u{200D}\u{1F680}",
-                     "\u{1FAEB}\u{FE0E}", "A\u{1FAEB}", "\u{1FAEB}\u{1F3FB}", "\u{1FAEB}\u{FE0F}\u{FE0F}", "\u{0378}"] {
+                     "\u{1FAEB}\u{FE0E}", "\u{1FAEB}\u{1F3FB}", "\u{0378}"] {
             let font = UnicodeFontSupport.font(for: text, size: 32, enabled: true)
             XCTAssertEqual(font.fontDescriptor, UIFont.systemFont(ofSize: 32).fontDescriptor, text)
             XCTAssertNil(UnicodeFontSupport.sourceName(for: text, size: 32, enabled: true), text)
         }
+    }
+
+    func testEmojiTextAndGlyphCountsDetectSplitSequencesAtRuntime() {
+        for text in ["🚀", "☃️", "🇯🇵", "👍🏽", "#️⃣", "🙂‍↔️"] {
+            XCTAssertTrue(UnicodeFontSupport.isEmojiText(text), text)
+            XCTAssertEqual(UnicodeFontSupport.visibleGlyphCount(in: text, font: .systemFont(ofSize: 32)), 1, text)
+            XCTAssertFalse(UnicodeFontSupport.stockFontsMiss(text, emoji: true), text)
+        }
+        for text in ["A", "Ω", "☃", "\u{2603}\u{FE0E}", "1"] {
+            XCTAssertFalse(UnicodeFontSupport.isEmojiText(text), text)
+            XCTAssertFalse(UnicodeFontSupport.stockFontsMiss(text), text)
+        }
+        // Not a recommended sequence: iOS draws two rockets, so it must count as split.
+        let split = "\u{1F680}\u{200D}\u{1F680}"
+        XCTAssertEqual(UnicodeFontSupport.visibleGlyphCount(in: split, font: .systemFont(ofSize: 32)), 2)
+        XCTAssertTrue(UnicodeFontSupport.stockFontsMiss(split, emoji: true))
+        XCTAssertTrue(UnicodeFontSupport.stockFontsMiss("\u{0378}"))
+        // A Unicode 18 letter that a bundled fallback draws still counts:
+        // other apps showing it will not have that font.
+        let armenian = "\u{0558}"
+        XCTAssertNotEqual(UnicodeFontSupport.font(for: armenian, size: 32, enabled: true).fontName,
+                          UIFont.systemFont(ofSize: 32).fontName)
+        XCTAssertTrue(UnicodeFontSupport.stockFontsMiss(armenian))
+        UnicodeFontSupport.clearCache()
     }
 
     func testFontPreferencesDefaultOffAndPersistInTheAppOwnedSharedSnapshot() {

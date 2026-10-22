@@ -17,9 +17,9 @@ def validate_downloads(directory: Path) -> None:
     protected_emoji = {cp for block in stock["blocks"] for cp in block["emojiMissing"]}
     assert catalog["schemaVersion"] == inputs["schemaVersion"] == 1
     assert catalog["unicodeVersion"] == inputs["unicodeVersion"] == "18.0.0"
-    assert [pack["id"] for pack in catalog["packs"]] == ["historic-symbols", "han-supplementary", "han-latest", "seal", "emoji-latest"]
+    assert [pack["id"] for pack in catalog["packs"]] == ["historic-symbols", "han-supplementary", "han-latest", "seal", "emoji"]
     fonts = [font for pack in catalog["packs"] for font in pack["fonts"]]
-    assert len(fonts) == len(inputs["fonts"]) == 68
+    assert len(fonts) == len(inputs["fonts"]) == 69
     by_name = {entry["filename"]: entry for entry in inputs["fonts"]}
     assert len(by_name) == len(fonts)
     assert len({font["asset"]["postScriptName"] for font in fonts}) == len(fonts)
@@ -28,7 +28,16 @@ def validate_downloads(directory: Path) -> None:
         asset = font["asset"]
         filename = asset["filename"]
         source = by_name[filename]
-        if source.get("distribution") == "verbatim":
+        runtime_emoji = source.get("coverage") == "runtime-emoji"
+        if runtime_emoji:
+            # The sbix Noto rebuild is a complete runtime fallback: the app
+            # renders with stock fonts first and uses it only for emoji that tofu.
+            assert source.get("distribution") == "verbatim" and source["packId"] == "emoji"
+            assert filename == "noto.ttf" and asset["licenseFilename"] == "NotoEmoji-OFL.txt"
+            assert asset["sha256"] == source["sourceFontSha256"] == source["sourceDownloadSha256"]
+            assert re.fullmatch(r"https://github\.com/iebb/emojifonts/releases/download/\d{4}\.\d{2}(\.\d{2})?/", source["downloadBase"])
+            assert asset["sourceURL"] == source["downloadBase"] + filename
+        elif source.get("distribution") == "verbatim":
             assert filename == "SealSans-Regular_v1.otf"
             assert asset["licenseFilename"] == "SealSans-AGPL.txt"
             assert asset["sha256"] == source["sourceFontSha256"]
@@ -53,16 +62,18 @@ def validate_downloads(directory: Path) -> None:
         for lo, hi in asset["ranges"]:
             assert type(lo) is int and type(hi) is int and 0 <= lo <= hi <= 0x10FFFF and lo > previous
             covered = set(range(lo, hi + 1))
+            previous = hi
+            if runtime_emoji:
+                continue
             assert covered <= targets
-            if source["packId"] == "emoji-latest":
+            if source["packId"] == "emoji":
                 assert covered <= protected_emoji, "Only audited missing emoji may use the color preview pack"
             else:
                 assert covered.isdisjoint(protected_emoji)
             assert covered.isdisjoint(points), "Each download must contribute unique measured preview coverage"
             points.update(covered)
-            previous = hi
         assert not (directory / filename).exists(), "Download assets must not enlarge the initial app/keyboard bundles"
-    assert total <= 64 * 1024 * 1024
+    assert total <= 80 * 1024 * 1024
     print(f"Validated {len(catalog['packs'])} optional packs: {len(fonts)} pinned fonts, {total:,} download bytes, {len(points):,} iOS-measured scalars.")
 
 

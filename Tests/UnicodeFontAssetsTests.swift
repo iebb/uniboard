@@ -51,6 +51,9 @@ final class UnicodeFontAssetsTests: XCTestCase {
         let a = asset()
         XCTAssertTrue(UnicodeFontDownload(asset: a, bytes: 1, downloadURL: UnicodeFontPackCatalog.downloadBase + a.filename).isValid)
         XCTAssertTrue(UnicodeFontDownload(asset: a, bytes: 1, downloadURL: UnicodeFontPackCatalog.completionDownloadBase + a.filename).isValid)
+        XCTAssertTrue(UnicodeFontDownload(asset: a, bytes: 1, downloadURL: UnicodeFontPackCatalog.emojiDownloadBase + a.filename).isValid)
+        XCTAssertFalse(UnicodeFontDownload(asset: a, bytes: 1, downloadURL: "https://github.com/iebb/emojifonts/releases/download/latest/" + a.filename).isValid,
+                       "A rolling release cannot satisfy a pinned digest")
         for url in ["http://github.com/font.ttf", UnicodeFontPackCatalog.downloadBase + "other.ttf",
                     UnicodeFontPackCatalog.downloadBase + a.filename + "?token=x", "https://evil.example/font.ttf"] {
             XCTAssertFalse(UnicodeFontDownload(asset: a, bytes: 1, downloadURL: url).isValid)
@@ -106,7 +109,11 @@ final class UnicodeFontAssetsTests: XCTestCase {
         if FileManager.default.fileExists(atPath: path.path) {
             let catalog = try XCTUnwrap(UnicodeFontPackCatalog.load(data: Data(contentsOf: path)))
             XCTAssertEqual(catalog.packs.count, 5)
-            XCTAssertEqual(catalog.packs.flatMap(\.fonts).count, 68)
+            XCTAssertEqual(catalog.packs.flatMap(\.fonts).count, 69)
+            let emoji = try XCTUnwrap(catalog.packs.first { $0.id == "emoji" })
+            XCTAssertEqual(emoji.fonts.map(\.asset.postScriptName), ["NotoColorEmoji", "UniboardCoverage068-Regular"],
+                           "The complete sbix fallback is tried before the Unicode 18 COLR subset")
+            XCTAssertLessThanOrEqual(catalog.packs.flatMap(\.fonts).reduce(Int64(0)) { $0 + $1.bytes }, UnicodeFontPackCatalog.maximumTotalBytes)
             XCTAssertEqual(UnicodeFontPackCatalog.loadBundled(resourceURL: path).packs.count, 5)
         }
         XCTAssertTrue(UnicodeFontPackCatalog.loadBundled(resourceURL: nil).packs.isEmpty)

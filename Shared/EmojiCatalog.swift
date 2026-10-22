@@ -99,6 +99,9 @@ final class EmojiCatalog: @unchecked Sendable {
         return order == .codePoint ? entries : entries.sorted { Self.precedes($0, $1, order: order) }
     }
 
+    /// Emoji this release introduces, in code-point order.
+    var addedEntries: [UnicodeEmojiEntry] { entries.filter { $0.emojiVersion == version } }
+
     func entries(offset: Int = 0, limit: Int = 256,
                  order: UnicodeSortOrder = .codePoint) -> [UnicodeEmojiEntry] {
         guard offset >= 0, limit > 0, !Task.isCancelled else { return [] }

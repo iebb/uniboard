@@ -18,6 +18,7 @@
 		0DC91D9F1106CD59E07CE01D /* KeyboardEnglishInputPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E605AEE1EF72C3C22DB00A7 /* KeyboardEnglishInputPolicy.swift */; };
 		1067D8D3E4ED41BEACDE7C9A /* KeyboardHostInputTraits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B24597D0441646A33610D5F /* KeyboardHostInputTraits.swift */; };
 		106ED12704C39D4C693646BF /* UnicodeProperties-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = 107C19BC010C3CBBC642AC42 /* UnicodeProperties-latest.json */; };
+		121164399FB97D550F0BD94B /* NewInEditionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B954105DFC7A800D4E800323 /* NewInEditionView.swift */; };
 		1262E56C314CA8FAB23F5014 /* SavedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A791C3473CB60A05B20494 /* SavedView.swift */; };
 		1459D2941080CE1C3D7A75BB /* UnicodeCatalog-latest.ucd in Resources */ = {isa = PBXBuildFile; fileRef = AAE6E346B7955C1B12E0338E /* UnicodeCatalog-latest.ucd */; };
 		1831564AF0E06DA9DADB5D83 /* UnicodeProperties-previous.json in Resources */ = {isa = PBXBuildFile; fileRef = 0E95919528538BFB5AA44213 /* UnicodeProperties-previous.json */; };
@@ -54,6 +55,7 @@
 		40D82904796803C729EDD539 /* KeyboardTypingPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61806DEF4868F1A3B2CC4E4E /* KeyboardTypingPolicyTests.swift */; };
 		430FB248A00BA13AF115E347 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3A9666760F5893403CE00B6 /* SetupView.swift */; };
 		44D6271BB541B1F1A9EC55F5 /* EmojiCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3DCCA512819F343E378874 /* EmojiCatalog.swift */; };
+		44FC68A9D032718A8D997D03 /* CodeChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C0A996B59C241BAE34B795B /* CodeChart.swift */; };
 		4947270AD85808EFFFF26231 /* UnicodeProperties-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = 107C19BC010C3CBBC642AC42 /* UnicodeProperties-latest.json */; };
 		498B01D0E44243E753969DBE /* EmojiCatalog-latest.json in Resources */ = {isa = PBXBuildFile; fileRef = C0C20A0D596CCC44AB869917 /* EmojiCatalog-latest.json */; };
 		49BCB0A1EF11692A5439A673 /* UnicodeFontSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FCD917B7BA585375F02ACA /* UnicodeFontSupport.swift */; };
@@ -249,6 +251,7 @@
 		5A2A0C60221406691228336E /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Fonts; sourceTree = SOURCE_ROOT; };
 		5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlocksView.swift; sourceTree = "<group>"; };
 		5BE250893A1CF86E89DCF238 /* Blocks-older.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Blocks-older.json"; sourceTree = "<group>"; };
+		5C0A996B59C241BAE34B795B /* CodeChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeChart.swift; sourceTree = "<group>"; };
 		5E6909BB645FA5674134A126 /* Blocks.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Blocks.json; sourceTree = "<group>"; };
 		5E75C4427C3A099357E49BC6 /* Blocks-latest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Blocks-latest.json"; sourceTree = "<group>"; };
 		5FEA8F554D190B33260E7161 /* UnicodeSources-previous.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "UnicodeSources-previous.json"; sourceTree = "<group>"; };
@@ -290,6 +293,7 @@
 		ACC24723A64562F6EDD61941 /* KeyboardInteractionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInteractionPolicy.swift; sourceTree = "<group>"; };
 		B18617D9009B85751C34705E /* KeyboardTouchActionControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardTouchActionControlTests.swift; sourceTree = "<group>"; };
 		B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */ = {isa = PBXFileReference; path = UnicodeCatalog.ucd; sourceTree = "<group>"; };
+		B954105DFC7A800D4E800323 /* NewInEditionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewInEditionView.swift; sourceTree = "<group>"; };
 		BB9BAA50EF4DC94FB5B03CD1 /* UniboardUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = UniboardUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BD9AE24B925558FFEF4DF2BD /* KeyboardRepeatingDeleteControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardRepeatingDeleteControlTests.swift; sourceTree = "<group>"; };
 		C0C20A0D596CCC44AB869917 /* EmojiCatalog-latest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "EmojiCatalog-latest.json"; sourceTree = "<group>"; };
@@ -336,6 +340,7 @@
 				5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */,
 				52D9BC9C1D5A569CC0D9FA4E /* CatalogPreferences.swift */,
 				DA39E9D562CC12833DB173DD /* CharacterDetailView.swift */,
+				5C0A996B59C241BAE34B795B /* CodeChart.swift */,
 				3CB8050F1485946A042EFCDF /* ContentView.swift */,
 				50167B2ECEEF4DFCF3D6C893 /* Design.swift */,
 				D7843518DDC3C9656827D184 /* EmojisView.swift */,
@@ -343,6 +348,7 @@
 				FC6B6DEDCD4EC38CF03A67DA /* Info.plist */,
 				D51A0B194DB88BE172540D41 /* KeyboardKeyPreferences.swift */,
 				A728582A5FBEACA24D420EF5 /* KeyboardKeySettingsView.swift */,
+				B954105DFC7A800D4E800323 /* NewInEditionView.swift */,
 				91A791C3473CB60A05B20494 /* SavedView.swift */,
 				F3A9666760F5893403CE00B6 /* SetupView.swift */,
 				98FDDC20D72CB0276CC63DE5 /* Uniboard.entitlements */,
@@ -792,6 +798,7 @@
 				EECEB364F7CCB2F3D61173B1 /* CatalogWorker.swift in Sources */,
 				229A7E40362FD588C2621C63 /* CharacterDetailView.swift in Sources */,
 				BCDD2D2225E610AF83BA2879 /* CharacterStore.swift in Sources */,
+				44FC68A9D032718A8D997D03 /* CodeChart.swift in Sources */,
 				A1A003808C73EF04DD957659 /* CompanionAppRoute.swift in Sources */,
 				5A2291389771B024DE549E33 /* ContentView.swift in Sources */,
 				6E9C637749D4AA9EC16A7D1B /* Design.swift in Sources */,
@@ -820,6 +827,7 @@
 				BDA4172F47D126C435721C78 /* KeyboardVariantControl.swift in Sources */,
 				C79EDADB8A6A24F86D9D2AE4 /* KeyboardVariantPolicy.swift in Sources */,
 				E93DAC28C3A83FD14274C71D /* LocalPreferencePolicy.swift in Sources */,
+				121164399FB97D550F0BD94B /* NewInEditionView.swift in Sources */,
 				1262E56C314CA8FAB23F5014 /* SavedView.swift in Sources */,
 				430FB248A00BA13AF115E347 /* SetupView.swift in Sources */,
 				069E131529729AFBC285927E /* SymbolBoardStore.swift in Sources */,

@@ -27,7 +27,7 @@ struct BlocksView: View {
                     NavigationLink {
                         BlockDetailView(block: block, select: select)
                     } label: {
-                        let symbol = block.symbol
+                        let symbol = catalog.representative(of: block)
                         HStack(spacing: 12) {
                             Text(symbol)
                                 .font(Font(UnicodeFontSupport.font(for: symbol, size: 22, enabled: preferences.useUnicodeFonts)))

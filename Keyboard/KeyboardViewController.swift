@@ -1773,7 +1773,7 @@ private struct UnicodeKeyboardView: View {
                 LazyVStack(spacing: 6) {
                     ForEach(model.catalog.blocks) { block in
                         Button { model.openBlock(block) } label: {
-                            let symbol = block.symbol
+                            let symbol = model.catalog.representative(of: block)
                             HStack(spacing: 10) {
                                 Text(symbol).font(Font(UnicodeFontSupport.font(for: symbol, size: 21, enabled: model.useUnicodeFonts))).foregroundStyle(KeyboardPalette.accent).frame(width: 31)
                                 VStack(alignment: .leading, spacing: 2) {

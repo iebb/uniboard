@@ -772,6 +772,55 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertFalse(UnicodeNameAlias(name: "Unknown", kind: "unknown").isFormal)
     }
 
+    func testBlockPreviewUsesATypicalVisibleCharacter() throws {
+        let catalog = UnicodeEdition.latest.catalog
+        func block(_ name: String) throws -> UnicodeBlock { try XCTUnwrap(catalog.blocks.first { $0.name == name }) }
+        XCTAssertEqual(catalog.representative(of: try block("Basic Latin")), "A", "Curated examples win")
+        XCTAssertEqual(catalog.representative(of: try block("Cyrillic Supplement")), "\u{0500}", "First letter, not the block start")
+        XCTAssertEqual(catalog.representative(of: try block("Mathematical Alphanumeric Symbols")), "\u{1D400}")
+        XCTAssertEqual(catalog.representative(of: try block("Combining Diacritical Marks for Symbols")), "\u{25CC}\u{20D0}")
+        XCTAssertEqual(catalog.representative(of: try block("Variation Selectors")), "◇", "Invisible-only blocks use a placeholder")
+        XCTAssertEqual(catalog.representative(of: try block("Private Use Area")), "◇")
+    }
+
+    func testEachFinalEditionListsExactlyItsOwnAdditions() throws {
+        for edition in [UnicodeEdition.latest, .previous, .older] {
+            let catalog = edition.catalog
+            let major = catalog.version.split(separator: ".").first.map(String.init) ?? ""
+            let added = catalog.addedCharacters(limit: Int.max)
+            XCTAssertEqual(added.count, catalog.addedCount)
+            XCTAssertGreaterThan(added.count, 0)
+            XCTAssertTrue(added.allSatisfy { $0.age == major + ".0" }, edition.rawValue)
+            XCTAssertEqual(added.map(\.codePoint), added.map(\.codePoint).sorted())
+            let emoji = edition.emojiCatalog.addedEntries
+            XCTAssertTrue(emoji.allSatisfy { $0.emojiVersion == edition.emojiCatalog.version })
+        }
+        XCTAssertEqual(UnicodeEdition.latest.catalog.addedCharacters(limit: 3).map(\.codePoint), [0x0558, 0x058B, 0x058C])
+        XCTAssertEqual(UnicodeEdition.latest.emojiCatalog.addedEntries.count, 19)
+        let seal = try XCTUnwrap(UnicodeEdition.latest.catalog.blocks.first { $0.name == "Seal" })
+        let rows = UnicodeEdition.latest.catalog.chartRows(in: seal, columns: 16, addedOnly: true)
+        XCTAssertEqual(rows.reduce(0) { $0 + $1.assigned.nonzeroBitCount }, 11_328)
+    }
+
+    func testChartRowsMarkAssignedColumnsWithoutCreatingCharacters() throws {
+        let directory = try fixture(records: [0, 0x41, 0x1F680], ranges: [(0xAC00, 0xAC05, 1)])
+        let fixture = UnicodeCatalog(resourceURL: directory)
+        XCTAssertNil(fixture.resourceError)
+        let latin = UnicodeBlock(name: "Basic Latin", start: 0, end: 0x7F)
+        XCTAssertEqual(fixture.chartRows(in: latin, columns: 16), [
+            UnicodeChartRow(start: 0, assigned: 1), UnicodeChartRow(start: 0x40, assigned: 1 << 1)])
+        XCTAssertEqual(fixture.chartRows(in: latin, columns: 8).map(\.start), [0, 0x40])
+        let hangul = UnicodeBlock(name: "Hangul Syllables", start: 0xAC00, end: 0xD7AF)
+        XCTAssertEqual(fixture.chartRows(in: hangul, columns: 16), [UnicodeChartRow(start: 0xAC00, assigned: 0b11_1111)])
+        XCTAssertEqual(fixture.chartRows(in: hangul, columns: 4), [
+            UnicodeChartRow(start: 0xAC00, assigned: 0b1111), UnicodeChartRow(start: 0xAC04, assigned: 0b11)])
+        let row = fixture.chartRows(in: hangul, columns: 16)[0]
+        XCTAssertEqual((0..<16).filter(row.isAssigned), [0, 1, 2, 3, 4, 5])
+        XCTAssertTrue(fixture.chartRows(in: latin, columns: 0).isEmpty)
+        XCTAssertTrue(fixture.chartRows(in: latin, columns: 17).isEmpty)
+        XCTAssertTrue(fixture.chartRows(in: UnicodeBlock(name: "Empty", start: 0x100, end: 0x17F), columns: 16).isEmpty)
+    }
+
     func testFixturePagesReconstructExactAssignedScalarSetWithExtremeOffsetsAndLimits() throws {
         let directory = try fixture(records: [0, 0x41, 0x1F680], ranges: [(0xAC00, 0xAC05, 1)])
         let fixture = UnicodeCatalog(resourceURL: directory)

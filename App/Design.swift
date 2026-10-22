@@ -66,49 +66,104 @@ struct SectionLabel: View {
     }
 }
 
+/// How many character tiles Explore shows per row.
+enum GridDensity: Int, CaseIterable, Identifiable {
+    case three = 3, eight = 8, sixteen = 16
+    var id: Int { rawValue }
+    var title: String { "\(rawValue) per Row" }
+    var symbol: String {
+        switch self {
+        case .three: return "square.grid.3x3"
+        case .eight: return "square.grid.4x3.fill"
+        case .sixteen: return "circle.grid.3x3.fill"
+        }
+    }
+    var spacing: CGFloat {
+        switch self {
+        case .three: return 8
+        case .eight: return 4
+        case .sixteen: return 2
+        }
+    }
+    /// Characters per page, so each page fills a similar screen area.
+    var pageSize: Int {
+        switch self {
+        case .three: return 160
+        case .eight: return 320
+        case .sixteen: return 640
+        }
+    }
+}
+
+extension GridDensity {
+    /// Width of the frozen leading column of row code points.
+    var rowLabelWidth: CGFloat { self == .sixteen ? 28 : 34 }
+
+    /// The side of a square cell when a row of this density fills `width`.
+    func cellSide(in width: CGFloat) -> CGFloat {
+        let columns = CGFloat(rawValue)
+        return max(8, ((width - rowLabelWidth - spacing * columns) / columns).rounded(.down))
+    }
+
+    /// 16 columns share a row prefix ("004" + column 0–F); 8 columns show
+    /// the row's first code point and offsets +0…+7.
+    func rowLabel(_ start: UInt32) -> String {
+        self == .sixteen ? String(format: "%03X", start >> 4) : String(format: "%04X", start)
+    }
+    func columnLabel(_ column: Int) -> String {
+        self == .sixteen ? String(format: "%X", column) : "+\(column)"
+    }
+}
+
 struct CharacterTile: View {
     let character: UnicodeCharacter
     @EnvironmentObject private var preferences: CatalogPreferences
     var saved = false
+    var density: GridDensity = .three
+    /// A code chart labels rows and columns, so its tiles omit the code point.
+    var showsCodePoint = true
+    /// Square side for dense rows, measured from the available width.
+    var side: CGFloat = 40
     var action: () -> Void
     @State private var hoverTask: Task<Void, Never>?
     private var ageText: String {
         if let age = character.age { return "Unicode " + age }
         return character.category == "Cn" ? "Unassigned" : "Age pending"
     }
+    private var glyphSize: CGFloat {
+        switch density {
+        case .three: return 32
+        case .eight: return showsCodePoint ? 22 : 26
+        case .sixteen: return 15
+        }
+    }
+    private var cornerRadius: CGFloat {
+        switch density {
+        case .three: return 12
+        case .eight: return 8
+        case .sixteen: return 4
+        }
+    }
     private var missing: Bool {
         UnicodeFontSupport.stockFontsMiss(character.displayText)
     }
 
     var body: some View {
-        VStack(spacing: 3) {
-            Text(character.displayText)
-                .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 32, enabled: preferences.useUnicodeFonts)))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .frame(height: 44)
-            Text(character.name)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.primary)
-                .lineLimit(2).multilineTextAlignment(.center)
-                .frame(height: 28)
-            Text(character.codePointLabel)
-                .font(.caption2.monospaced())
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 106)
-        .padding(.horizontal, 4)
+        content
             .background(Color.previewSurface(missing: missing))
             .overlay(alignment: .topTrailing) {
-                if character.category != "Cn" { VersionRibbon(version: character.age) }
+                if density != .sixteen, character.category != "Cn" {
+                    VersionRibbon(version: character.age, labeled: density == .three)
+                }
             }
             .overlay(alignment: .topLeading) {
-                if saved { Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(.yellow).padding(7) }
+                if saved, density != .sixteen {
+                    Image(systemName: "star.fill").font(.system(size: density == .three ? 9 : 6)).foregroundStyle(.yellow)
+                        .padding(density == .three ? 7 : 3)
+                }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .gesture(LongPressGesture(minimumDuration: 0.4).exclusively(before: TapGesture()).onEnded { _ in action() })
         .onHover { hovering in
             hoverTask?.cancel()
@@ -129,22 +184,100 @@ struct CharacterTile: View {
         .accessibilityAction(named: Text("Inspect character"), action)
         .accessibilityIdentifier("character-\(character.codePointLabel)")
     }
+
+    private var glyph: some View {
+        Text(character.displayText)
+            .font(Font(UnicodeFontSupport.font(for: character.displayText, size: glyphSize, enabled: preferences.useUnicodeFonts)))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+    }
+
+    @ViewBuilder private var content: some View {
+        switch density {
+        case .three:
+            VStack(spacing: 3) {
+                glyph.frame(height: 44)
+                Text(character.name)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2).multilineTextAlignment(.center)
+                    .frame(height: 28)
+                Text(character.codePointLabel)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 106)
+            .padding(.horizontal, 4)
+        case .eight:
+            VStack(spacing: 1) {
+                glyph.frame(height: showsCodePoint ? 26 : 34)
+                if showsCodePoint {
+                    Text(character.codePointLabel)
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                }
+            }
+            .padding(.horizontal, 2)
+            .frame(width: side, height: side)
+        case .sixteen:
+            glyph
+                .frame(width: side, height: side)
+        }
+    }
 }
 
 struct CharacterGrid: View {
     let characters: [UnicodeCharacter]
+    /// Explore chooses a fixed density; other screens keep adaptive columns.
+    var density: GridDensity? = nil
+    /// The grid's measured width, which sizes dense cells.
+    var width: CGFloat = 0
     /// Called when the last character scrolls into view, to load the next page.
     var onReachEnd: (() -> Void)? = nil
     @EnvironmentObject private var store: CharacterStore
     var select: (UnicodeCharacter) -> Void
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: 8)], spacing: 8) {
-            ForEach(characters) { character in
-                CharacterTile(character: character, saved: store.isFavorite(character.codePoint)) { select(character) }
-                    .onAppear { if character.id == characters.last?.id { onReachEnd?() } }
+        if let density, density != .three, width > 0 {
+            let side = density.cellSide(in: width)
+            // Dense rows keep a frozen leading column with each row's first code point.
+            let rows = stride(from: 0, to: characters.count, by: density.rawValue).map {
+                Array(characters[$0..<min($0 + density.rawValue, characters.count)])
+            }
+            LazyVStack(spacing: density.spacing) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    HStack(spacing: density.spacing) {
+                        Text(String(format: "%04X", row[0].codePoint))
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: density.rowLabelWidth, alignment: .leading)
+                            .accessibilityHidden(true)
+                        ForEach(0..<density.rawValue, id: \.self) { column in
+                            if column < row.count {
+                                tile(row[column], density: density, side: side)
+                            } else {
+                                Color.clear.frame(width: side, height: side)
+                            }
+                        }
+                    }
+                    .onAppear { if index == rows.count - 1 { onReachEnd?() } }
+                }
+            }
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: 8)], spacing: 8) {
+                ForEach(characters) { character in
+                    tile(character, density: .three, side: 0)
+                        .onAppear { if character.id == characters.last?.id { onReachEnd?() } }
+                }
             }
         }
+    }
+
+    private func tile(_ character: UnicodeCharacter, density: GridDensity, side: CGFloat) -> some View {
+        CharacterTile(character: character, saved: store.isFavorite(character.codePoint), density: density, side: side) { select(character) }
     }
 }
 

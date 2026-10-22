@@ -260,19 +260,24 @@ struct UnicodeBlock: Identifiable, Hashable, Sendable, Decodable {
         if start >= 0xD800 && end <= 0xDFFF { return "UTF-16 surrogate code units" }
         return "\(Int(end - start + 1).formatted()) code points · \(start < 0x10000 ? "Basic plane" : "Plane \(start >> 16)")"
     }
-    var symbol: String {
-        let examples: [UInt32: UInt32] = [
-            0x0000: 0x0041, 0x0080: 0x00C6, 0x0300: 0x0301, 0x0370: 0x03A9,
-            0x0400: 0x0416, 0x0590: 0x05D0, 0x0600: 0x0639, 0x0900: 0x0905,
-            0x2000: 0x2022, 0x20A0: 0x20AC, 0x2100: 0x2126, 0x2190: 0x2192,
-            0x2200: 0x2211, 0x2300: 0x2318, 0x2500: 0x253C, 0x2580: 0x2588,
-            0x2600: 0x2605, 0x2700: 0x2708, 0x2800: 0x283F, 0x3000: 0x3005,
-            0x3040: 0x3042, 0x30A0: 0x30A2, 0x4E00: 0x4E2D, 0xAC00: 0xD55C,
-            0x1F300: 0x1F308, 0x1F600: 0x1F603, 0x1F680: 0x1F680,
-            0x1F900: 0x1F981, 0x1FA70: 0x1FA77
-        ]
+    private static let examples: [UInt32: UInt32] = [
+        0x0000: 0x0041, 0x0080: 0x00C6, 0x0300: 0x0301, 0x0370: 0x03A9,
+        0x0400: 0x0416, 0x0590: 0x05D0, 0x0600: 0x0639, 0x0900: 0x0905,
+        0x2000: 0x2022, 0x20A0: 0x20AC, 0x2100: 0x2126, 0x2190: 0x2192,
+        0x2200: 0x2211, 0x2300: 0x2318, 0x2500: 0x253C, 0x2580: 0x2588,
+        0x2600: 0x2605, 0x2700: 0x2708, 0x2800: 0x283F, 0x3000: 0x3005,
+        0x3040: 0x3042, 0x30A0: 0x30A2, 0x4E00: 0x4E2D, 0xAC00: 0xD55C,
+        0x1F300: 0x1F308, 0x1F600: 0x1F603, 0x1F680: 0x1F680,
+        0x1F900: 0x1F981, 0x1FA70: 0x1FA77
+    ]
+    /// The hand-picked example, or nil when the block has none.
+    var curatedSymbol: String? {
         if start >= 0xD800 && end <= 0xDFFF || name.contains("Private Use") { return "◇" }
-        let scalar = Unicode.Scalar(examples[start] ?? start)
+        return Self.examples[start] == nil ? nil : symbol
+    }
+    var symbol: String {
+        if start >= 0xD800 && end <= 0xDFFF || name.contains("Private Use") { return "◇" }
+        let scalar = Unicode.Scalar(Self.examples[start] ?? start)
         guard let scalar else { return "◇" }
         return name.contains("Combining") ? "◌" + String(scalar) : String(scalar)
     }
@@ -435,6 +440,78 @@ final class UnicodeCatalog: @unchecked Sendable {
                                        sortKey: span.sortKey, draftAddition: span.draftAddition)
         }
         return page(in: spans, offset: offset, limit: limit, order: order)
+    }
+
+    /// Code-chart rows of `columns` code points (at most 16) inside `block`
+    /// that hold at least one assigned character, with a bit per assigned
+    /// column. Built from assigned spans, without creating any characters.
+    /// With `addedOnly`, only characters this edition adds are marked.
+    func chartRows(in block: UnicodeBlock, columns: Int, addedOnly: Bool = false) -> [UnicodeChartRow] {
+        guard (1...16).contains(columns), block.start <= block.end, block.end <= 0x10FFFF else { return [] }
+        let spans = addedOnly ? addedSpans : properties.assignedSpans
+        var low = 0, high = spans.count
+        while low < high {
+            let mid = (low + high) / 2
+            if spans[mid].end < block.start { low = mid + 1 } else { high = mid }
+        }
+        let width = UInt32(columns)
+        var rows: [UnicodeChartRow] = []
+        var index = low
+        while index < spans.count, spans[index].start <= block.end {
+            let start = max(block.start, spans[index].start), end = min(block.end, spans[index].end)
+            var point = start
+            while point <= end {
+                let rowStart = point - point % width
+                let last = min(end, rowStart + width - 1)
+                var bits: UInt16 = 0
+                for column in (point - rowStart)...(last - rowStart) { bits |= 1 << UInt16(column) }
+                if rows.last?.start == rowStart {
+                    rows[rows.count - 1] = UnicodeChartRow(start: rowStart, assigned: rows[rows.count - 1].assigned | bits)
+                } else {
+                    rows.append(UnicodeChartRow(start: rowStart, assigned: bits))
+                }
+                if last == UInt32.max { break }
+                point = last + 1
+            }
+            index += 1
+        }
+        return rows
+    }
+
+    /// Spans of characters this edition adds over the previous one: its own
+    /// Unicode age, or draft additions not yet given an age.
+    private var addedSpans: [UnicodeAssignedSpan] {
+        let key = unicodeVersionKey(version)
+        return properties.assignedSpans.filter { $0.draftAddition || $0.sortKey == key }
+    }
+
+    /// How many characters this edition adds over the previous one.
+    var addedCount: Int { addedSpans.reduce(0) { $0 + Int($1.end - $1.start + 1) } }
+
+    /// Characters this edition adds over the previous one, by code point.
+    func addedCharacters(offset: Int = 0, limit: Int = 256) -> [UnicodeCharacter] {
+        page(in: addedSpans, offset: offset, limit: limit, order: .codePoint)
+    }
+
+    /// A typical character for previewing `block`: its curated example, else
+    /// its first visible assigned letter, then symbol, number, punctuation or mark.
+    func representative(of block: UnicodeBlock) -> String {
+        if let curated = block.curatedSymbol { return curated }
+        let ranks: [Character: Int] = ["L": 0, "S": 1, "N": 2, "P": 3, "M": 4]
+        var best: (rank: Int, text: String)?
+        var examined = 0
+        for row in chartRows(in: block, columns: 16) {
+            for column in 0..<16 where row.isAssigned(column: column) {
+                guard let character = character(at: row.start + UInt32(column)), !character.isInvisible,
+                      let rank = character.category.first.flatMap({ ranks[$0] }) else { continue }
+                if rank == 0 { return character.displayText }
+                if best.map({ rank < $0.rank }) ?? true { best = (rank, character.displayText) }
+                examined += 1
+                // Blocks without letters settle on their best early candidate.
+                if examined >= 128 { return best?.text ?? "◇" }
+            }
+        }
+        return best?.text ?? "◇"
     }
 
     /// Applies global ordering before pagination and creates only the requested page.
@@ -883,6 +960,13 @@ private struct UnicodeDecomposition: Decodable {
     let codePoint: UInt32
     let value: String
 }
+/// One row of a code chart: its first code point and a bit per assigned column.
+struct UnicodeChartRow: Hashable, Sendable {
+    let start: UInt32
+    let assigned: UInt16
+    func isAssigned(column: Int) -> Bool { assigned & (1 << UInt16(column)) != 0 }
+}
+
 private struct UnicodePropertyData: Decodable {
     let unicodeVersion: String
     let ages: [UnicodePropertyRange]

@@ -256,6 +256,38 @@ final class KeyboardVariantControlTests: XCTestCase {
         XCTAssertEqual(route.inserted, ["ì"])
     }
 
+    func testHoldKeepsLongPressChoicesWhileDragStaysWithinTheKeyHeight() {
+        let clock = GestureClock(), route = Route(), owner = NSObject()
+        let state = KeyboardVariantInteraction(schedule: clock.schedule)
+        gestureSetup(state, route: route, long: ["e", "é"], up: ["E"], down: ["3"])
+        var shown: [[String]] = []
+        state.show = { values, _, _ in shown.append(values); return true }
+        XCTAssertTrue(state.begin(owner: owner)); clock.fire(0)
+        // Vertical travel past the flick threshold, but still over the key.
+        for point in [CGPoint(x: 0, y: -18), CGPoint(x: 0, y: 16), CGPoint(x: 2, y: -19)] {
+            state.move(owner: owner, index: nil, movedBeforeHold: true, delta: point, insideKeyHeight: true)
+        }
+        XCTAssertEqual(shown, [["e", "é"]])
+        XCTAssertFalse(state.swipeSelecting)
+        state.move(owner: owner, index: 1, movedBeforeHold: true, delta: CGPoint(x: 36, y: -19),
+                   directPopupIndex: 1, insideKeyHeight: true)
+        XCTAssertTrue(state.end(owner: owner, inside: true))
+        XCTAssertEqual(route.inserted, ["é"])
+
+        // Leaving the key vertically still switches to the swipe group.
+        let other = NSObject(), otherClock = GestureClock(), otherRoute = Route()
+        let leaving = KeyboardVariantInteraction(schedule: otherClock.schedule)
+        gestureSetup(leaving, route: otherRoute, long: ["e", "é"], up: ["E"], down: ["3"])
+        var leavingShown: [[String]] = []
+        leaving.show = { values, _, _ in leavingShown.append(values); return true }
+        XCTAssertTrue(leaving.begin(owner: other)); otherClock.fire(0)
+        leaving.move(owner: other, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -18), insideKeyHeight: true)
+        leaving.move(owner: other, index: nil, movedBeforeHold: true, delta: CGPoint(x: 0, y: -30), insideKeyHeight: false)
+        XCTAssertEqual(leavingShown, [["e", "é"], ["E"]])
+        XCTAssertTrue(leaving.end(owner: other, inside: true))
+        XCTAssertEqual(otherRoute.inserted, ["E"])
+    }
+
     func testUnmappedVerticalMovementStillSelectsInspectAndEditFromAnOpenPageKey() {
         for command in 0..<2 {
             let clock = GestureClock(), route = Route(), owner = NSObject()

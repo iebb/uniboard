@@ -188,7 +188,9 @@ final class KeyboardVariantInteraction {
     /// Reversing a continuous vertical drag changes groups after a deliberate
     /// movement, without requiring a return past the original key.
     /// Sideways selection starts a new vertical reference and keeps its group.
-    private func gestureDirection(at delta: CGPoint) -> KeyboardKeySettings.Gesture? {
+    /// A held key keeps its long-press choices until the touch leaves the
+    /// key's own vertical span.
+    private func gestureDirection(at delta: CGPoint, insideKeyHeight: Bool) -> KeyboardKeySettings.Gesture? {
         let step = CGPoint(x: delta.x - previousGestureDelta.x, y: delta.y - previousGestureDelta.y)
         previousGestureDelta = delta
         guard step.x.isFinite, step.y.isFinite else { cancel(ending: false); return nil }
@@ -202,6 +204,7 @@ final class KeyboardVariantInteraction {
             gestureAnchor = delta
             return nil
         }
+        if activeGesture == .longPress, insideKeyHeight { return nil }
         let travel = CGPoint(x: delta.x - gestureAnchor.x, y: delta.y - gestureAnchor.y)
         // A diagonal slide into the open accent row remains a hold choice.
         // Changing its group requires a clearly vertical gesture instead.
@@ -209,7 +212,8 @@ final class KeyboardVariantInteraction {
         return KeyboardVariantPolicy.swipeDirection(delta: travel)
     }
 
-    func move(owner: AnyObject, index: Int?, movedBeforeHold: Bool, delta: CGPoint? = nil, directPopupIndex: Int? = nil) {
+    func move(owner: AnyObject, index: Int?, movedBeforeHold: Bool, delta: CGPoint? = nil, directPopupIndex: Int? = nil,
+              insideKeyHeight: Bool = false) {
         guard tracking, self.owner === owner, let id = token, let actions else { return }
         let current = actions.isCurrent()
         guard token == id else { return }
@@ -220,7 +224,7 @@ final class KeyboardVariantInteraction {
             if movedBeforeHold { cancel(ending: false) }
             return
         }
-        if let delta, let direction = gestureDirection(at: delta), direction != activeGesture {
+        if let delta, let direction = gestureDirection(at: delta, insideKeyHeight: insideKeyHeight), direction != activeGesture {
             let configured = direction == .swipeUp ? actions.swipeUp : actions.swipeDown
             let choices = configured.map { KeyboardVariantPolicy.candidates(override: $0, defaults: []) } ?? []
             if choices.isEmpty {
@@ -588,7 +592,7 @@ final class KeyboardVariantButton: UIControl {
         interaction.move(owner: primary, index: index,
             movedBeforeHold: abs(local.x - initialPoint.x) > 10 || abs(local.y - initialPoint.y) > 10,
             delta: CGPoint(x: local.x - initialPoint.x, y: local.y - initialPoint.y),
-            directPopupIndex: directPopupIndex(at: point))
+            directPopupIndex: directPopupIndex(at: point), insideKeyHeight: insideKeyHeight(local))
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches { activeIDs.remove(ObjectIdentifier(touch)) }
@@ -599,7 +603,7 @@ final class KeyboardVariantButton: UIControl {
             let index = selectedIndex(at: point)
             interaction.move(owner: primary, index: index, movedBeforeHold: false,
                 delta: CGPoint(x: local.x - initialPoint.x, y: local.y - initialPoint.y),
-                directPopupIndex: directPopupIndex(at: point))
+                directPopupIndex: directPopupIndex(at: point), insideKeyHeight: insideKeyHeight(local))
             let inside = interaction.swipeSelecting ? capturedContainer.map { contains(point, in: $0.bounds) } == true
                 : interaction.popupVisible ? index != nil : contains(local, in: bounds)
             _ = interaction.end(owner: primary, inside: inside)
@@ -644,6 +648,9 @@ final class KeyboardVariantButton: UIControl {
     private func clearGeometry() { capturedWindow = nil; capturedContainer = nil; removePopup() }
     private func same(_ a: CGRect, _ b: CGRect) -> Bool {
         a.origin.x == b.origin.x && a.origin.y == b.origin.y && a.width == b.width && a.height == b.height
+    }
+    private func insideKeyHeight(_ local: CGPoint) -> Bool {
+        local.y.isFinite && local.y >= bounds.minY && local.y <= bounds.maxY
     }
     private func contains(_ point: CGPoint, in rect: CGRect) -> Bool {
         point.x.isFinite && point.y.isFinite && point.x >= rect.minX && point.x <= rect.maxX

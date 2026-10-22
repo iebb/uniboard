@@ -26,7 +26,6 @@ struct SavedView: View {
                     Text("Favorites").tag(false)
                     Text("Recently Used").tag(true)
                 }.pickerStyle(.segmented)
-                CatalogControls()
                 if characters.isEmpty && emojis.isEmpty && otherTexts.isEmpty {
                     EmptyCollection(symbol: showRecents ? "clock" : "star", title: showRecents ? "No Recent Characters" : "No Favorites", message: showRecents ? "Characters you copy or add to your scratchpad appear here." : "Open any character and tap Save to keep it here and on the keyboard’s Favorites page.")
                 } else if !characters.isEmpty {

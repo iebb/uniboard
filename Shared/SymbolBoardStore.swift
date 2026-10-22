@@ -7,12 +7,18 @@ import CoreFoundation
 struct SymbolBoardKey: Codable, Identifiable, Equatable {
     let id: String
     var text: String
+    /// Hold choices.
     var variants: [String]
+    /// Swipe-up and swipe-down choices; nil leaves the gesture off.
+    var up: [String]? = nil
+    var down: [String]? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.id == rhs.id && exact(lhs.text, rhs.text)
-            && lhs.variants.count == rhs.variants.count
-            && zip(lhs.variants, rhs.variants).allSatisfy { exact($0, $1) }
+        lhs.id == rhs.id && exact(lhs.text, rhs.text) && exact(lhs.variants, rhs.variants)
+            && exact(lhs.up ?? [], rhs.up ?? []) && exact(lhs.down ?? [], rhs.down ?? [])
+    }
+    static func exact(_ lhs: [String], _ rhs: [String]) -> Bool {
+        lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { exact($0, $1) }
     }
     static func exact(_ lhs: String, _ rhs: String) -> Bool {
         lhs.utf16.elementsEqual(rhs.utf16)
@@ -258,6 +264,8 @@ final class SymbolBoardStore: ObservableObject {
         struct Key: Codable {
             let text: String
             let variants: [String]
+            var up: [String]? = nil
+            var down: [String]? = nil
         }
         let schemaVersion: Int
         let pages: [Page]
@@ -267,7 +275,7 @@ final class SymbolBoardStore: ObservableObject {
 
     func exportedPages() -> Data? {
         let file = PageFile(schemaVersion: 1, pages: customPages.map { board in
-            PageFile.Page(name: board.name, keys: board.keys.map { PageFile.Key(text: $0.text, variants: $0.variants) },
+            PageFile.Page(name: board.name, keys: board.keys.map { PageFile.Key(text: $0.text, variants: $0.variants, up: $0.up, down: $0.down) },
                           layout: board.layout)
         })
         let encoder = JSONEncoder()
@@ -282,7 +290,7 @@ final class SymbolBoardStore: ObservableObject {
               file.schemaVersion == 1, !file.pages.isEmpty, boards.count + file.pages.count <= Self.maximumBoards else { return nil }
         let imported = file.pages.map { page in
             SymbolBoard(id: UUID().uuidString.lowercased(), name: page.name, keys: page.keys.map {
-                SymbolBoardKey(id: UUID().uuidString.lowercased(), text: $0.text, variants: $0.variants)
+                SymbolBoardKey(id: UUID().uuidString.lowercased(), text: $0.text, variants: $0.variants, up: $0.up, down: $0.down)
             }, layout: page.layout)
         }
         // Committing validates every name, key, variant and row.
@@ -314,6 +322,17 @@ final class SymbolBoardStore: ObservableObject {
         guard unique.count <= Self.maximumVariants else { return false }
         var next = boards
         next[board].keys[index].variants = unique
+        return commit(next)
+    }
+    /// Saves a key's swipe-up or swipe-down choices; none turns the swipe off.
+    @discardableResult func setSwipe(boardID: String, keyID: String, up: Bool, choices: [String]) -> Bool {
+        guard let board = boards.firstIndex(where: { $0.id == boardID }),
+              let index = boards[board].keys.firstIndex(where: { $0.id == keyID }),
+              choices.allSatisfy(Self.validText) else { return false }
+        let unique = Self.uniqueExact(choices)
+        guard unique.count <= Self.maximumVariants else { return false }
+        var next = boards
+        if up { next[board].keys[index].up = unique.isEmpty ? nil : unique } else { next[board].keys[index].down = unique.isEmpty ? nil : unique }
         return commit(next)
     }
 
@@ -422,6 +441,9 @@ final class SymbolBoardStore: ObservableObject {
                 validID(key.id) && validText(key.text) && key.variants.count <= maximumVariants
                     && key.variants.allSatisfy(validText)
                     && uniqueExact([key.text] + key.variants).count == key.variants.count + 1
+                    && [key.up, key.down].allSatisfy { swipe in
+                        swipe.map { !$0.isEmpty && $0.count <= maximumVariants && $0.allSatisfy(validText) && uniqueExact($0).count == $0.count } ?? true
+                    }
             }
         }
     }

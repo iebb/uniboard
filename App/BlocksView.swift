@@ -20,6 +20,9 @@ struct BlocksView: View {
                 SearchBar(text: $query, placeholder: "Block name or range", identifier: "blockSearch")
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
+                CatalogControls()
+                    .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+                    .listRowBackground(Color.clear)
             }
 
             Section {
@@ -71,6 +74,13 @@ struct BlockDetailView: View {
     @State private var chart = CodeChartController()
     @EnvironmentObject private var preferences: CatalogPreferences
     private var shown: GridDensity { density.fitting(width) }
+    /// The blocks before and after this one, for stepping through them.
+    private func neighbour(_ offset: Int) -> UnicodeBlock? {
+        let blocks = preferences.catalog.blocks
+        guard let index = blocks.firstIndex(where: { $0.start == block.start }),
+              blocks.indices.contains(index + offset) else { return nil }
+        return blocks[index + offset]
+    }
 
     init(block: UnicodeBlock, select: @escaping (UnicodeCharacter) -> Void) {
         _block = State(initialValue: block)
@@ -92,6 +102,16 @@ struct BlockDetailView: View {
         .navigationTitle(block.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button { step(-1) } label: { Image(systemName: "chevron.up") }
+                    .disabled(neighbour(-1) == nil)
+                    .accessibilityLabel(neighbour(-1).map { "Previous block, \($0.name)" } ?? "Previous block")
+                    .accessibilityIdentifier("block.previous")
+                Button { step(1) } label: { Image(systemName: "chevron.down") }
+                    .disabled(neighbour(1) == nil)
+                    .accessibilityLabel(neighbour(1).map { "Next block, \($0.name)" } ?? "Next block")
+                    .accessibilityIdentifier("block.next")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Picker("Characters per Row", selection: $density) {
@@ -131,7 +151,6 @@ struct BlockDetailView: View {
                 .accessibilityLabel("\(block.name), \(block.rangeLabel)")
                 .accessibilityHint("Jump to another block")
                 .accessibilityIdentifier("blockNavigator")
-                CatalogControls()
                 CharacterGrid(characters: characters, onReachEnd: { if hasMore { loadMore() } }, select: select)
                 if characters.isEmpty && !hasMore {
                     EmptyCollection(symbol: "square.dashed", title: "No Assigned Characters", message: block.name.contains("Surrogate") ? "Surrogate code points encode other characters and cannot be inserted on their own." : "This block has no assigned characters in the selected Unicode edition.")
@@ -148,4 +167,9 @@ struct BlockDetailView: View {
         hasMore = page.count == 256
     }
     private func reload() { characters = []; hasMore = true; loadMore() }
+    private func step(_ offset: Int) {
+        guard let next = neighbour(offset) else { return }
+        block = next
+        reload()
+    }
 }

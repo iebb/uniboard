@@ -17,7 +17,8 @@ extension Color {
 }
 
 /// A colored corner ribbon naming the Unicode or Emoji version that added a
-/// character. Each version keeps its own hue everywhere it appears.
+/// character. Versions run through the rainbow from red, the oldest, to
+/// blue, the newest; draft additions are purple.
 struct VersionRibbon: View {
     /// A version such as "18.0" or "15.1", or nil for draft additions.
     let version: String?
@@ -25,10 +26,10 @@ struct VersionRibbon: View {
     var labeled = true
 
     static func color(for version: String?) -> Color {
-        guard let version, let major = Double(version.split(separator: ".").first ?? "") else { return .purple }
-        // Golden-ratio steps keep neighbouring versions far apart in hue.
-        let hue = (major * 0.618_034 + 0.08).truncatingRemainder(dividingBy: 1)
-        return Color(hue: hue, saturation: 0.62, brightness: 0.78)
+        guard let version, let number = Double(version) else { return .purple }
+        // Emoji 0.6 is the oldest and Unicode 18 the newest final version.
+        let position = min(1, max(0, (number - 0.6) / (18 - 0.6)))
+        return Color(hue: position * 0.66, saturation: 0.72, brightness: 0.74)
     }
     private var label: String {
         guard let version else { return "draft" }

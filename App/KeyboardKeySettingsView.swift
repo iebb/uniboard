@@ -1,6 +1,6 @@
 import SwiftUI
 
-private extension KeyboardKeySettings.Gesture {
+extension KeyboardKeySettings.Gesture {
     var title: String {
         switch self { case .tap: return "Tap"; case .shiftedTap: return "Shifted tap"; case .longPress: return "Long press"; case .swipeUp: return "Swipe up"; case .swipeDown: return "Swipe down" }
     }
@@ -145,7 +145,7 @@ private struct KeyboardSingleKeySettingsView: View {
     }
 }
 
-private struct KeyboardGestureSettingsView: View {
+struct KeyboardGestureSettingsView: View {
     private struct Choice: Identifiable { let id = UUID(); var text: String }
     let descriptor: KeyboardKeySettings.Descriptor
     let gesture: KeyboardKeySettings.Gesture

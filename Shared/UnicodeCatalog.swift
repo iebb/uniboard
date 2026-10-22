@@ -557,7 +557,7 @@ final class UnicodeCatalog: @unchecked Sendable {
     /// column. Built from assigned spans, without creating any characters.
     /// With `addedOnly`, only characters this edition adds are marked.
     func chartRows(in block: UnicodeBlock, columns: Int, addedOnly: Bool = false) -> [UnicodeChartRow] {
-        guard (1...16).contains(columns), block.start <= block.end, block.end <= 0x10FFFF else { return [] }
+        guard (1...32).contains(columns), block.start <= block.end, block.end <= 0x10FFFF else { return [] }
         let spans = addedOnly ? addedSpans : properties.assignedSpans
         var low = 0, high = spans.count
         while low < high {
@@ -573,8 +573,8 @@ final class UnicodeCatalog: @unchecked Sendable {
             while point <= end {
                 let rowStart = point - point % width
                 let last = min(end, rowStart + width - 1)
-                var bits: UInt16 = 0
-                for column in (point - rowStart)...(last - rowStart) { bits |= 1 << UInt16(column) }
+                var bits: UInt32 = 0
+                for column in (point - rowStart)...(last - rowStart) { bits |= 1 << column }
                 if rows.last?.start == rowStart {
                     rows[rows.count - 1] = UnicodeChartRow(start: rowStart, assigned: rows[rows.count - 1].assigned | bits)
                 } else {
@@ -642,16 +642,27 @@ final class UnicodeCatalog: @unchecked Sendable {
         page(in: properties.assignedSpans, offset: offset, limit: limit, order: order)
     }
 
-    /// Characters whose code points fall in `range`, lowest first, or highest
-    /// first when `descending`.
-    func orderedCharacters(in range: ClosedRange<UInt32>, offset: Int = 0, limit: Int = 256,
-                           descending: Bool = false) -> [UnicodeCharacter] {
-        let spans = properties.assignedSpans.compactMap { span -> UnicodeAssignedSpan? in
-            guard span.start <= range.upperBound && span.end >= range.lowerBound else { return nil }
-            return UnicodeAssignedSpan(start: max(range.lowerBound, span.start), end: min(range.upperBound, span.end),
-                                       sortKey: span.sortKey, draftAddition: span.draftAddition)
+    /// Characters whose code points fall in `range` but none of `hidden`,
+    /// lowest first, or highest first when `descending`.
+    func orderedCharacters(in range: ClosedRange<UInt32>, excluding hidden: [ClosedRange<UInt32>] = [],
+                           offset: Int = 0, limit: Int = 256, descending: Bool = false) -> [UnicodeCharacter] {
+        let spans = properties.assignedSpans.flatMap { span -> [UnicodeAssignedSpan] in
+            guard span.start <= range.upperBound && span.end >= range.lowerBound else { return [] }
+            var pieces = [max(range.lowerBound, span.start)...min(range.upperBound, span.end)]
+            for cut in hidden { pieces = pieces.flatMap { Self.subtracting(cut, from: $0) } }
+            return pieces.map { UnicodeAssignedSpan(start: $0.lowerBound, end: $0.upperBound,
+                                                    sortKey: span.sortKey, draftAddition: span.draftAddition) }
         }
         return page(in: spans, offset: offset, limit: limit, order: .codePoint, descending: descending)
+    }
+
+    /// What is left of `piece` around `cut`.
+    private static func subtracting(_ cut: ClosedRange<UInt32>, from piece: ClosedRange<UInt32>) -> [ClosedRange<UInt32>] {
+        guard cut.overlaps(piece) else { return [piece] }
+        var left: [ClosedRange<UInt32>] = []
+        if piece.lowerBound < cut.lowerBound { left.append(piece.lowerBound...(cut.lowerBound - 1)) }
+        if piece.upperBound > cut.upperBound { left.append((cut.upperBound + 1)...piece.upperBound) }
+        return left
     }
 
     private func page(in spans: [UnicodeAssignedSpan], offset: Int, limit: Int,
@@ -1124,8 +1135,9 @@ private struct UnicodeDecomposition: Decodable {
 /// One row of a code chart: its first code point and a bit per assigned column.
 struct UnicodeChartRow: Hashable, Sendable {
     let start: UInt32
-    let assigned: UInt16
-    func isAssigned(column: Int) -> Bool { assigned & (1 << UInt16(column)) != 0 }
+    /// One bit per column, up to 32 columns.
+    let assigned: UInt32
+    func isAssigned(column: Int) -> Bool { (0..<32).contains(column) && assigned & (1 << UInt32(column)) != 0 }
 }
 
 private struct UnicodePropertyData: Decodable {

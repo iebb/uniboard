@@ -129,6 +129,18 @@ final class SymbolBoardStoreTests: XCTestCase {
                 for text in ["∑", "∞"] { XCTAssertNotNil(from.add(text: text, to: id)) }
                 let sum = try XCTUnwrap(from.boards.last?.keys.first?.id)
                 XCTAssertTrue(from.setVariants(boardID: id, keyID: sum, variants: ["∏"]))
+                XCTAssertTrue(from.setSwipe(boardID: id, keyID: sum, up: true, choices: ["⅀", "⅀", "Σ"]))
+                XCTAssertTrue(from.setSwipe(boardID: id, keyID: sum, up: false, choices: ["∫"]))
+                XCTAssertEqual(from.key(boardID: id, keyID: sum)?.up, ["⅀", "Σ"], "Repeats are dropped")
+                for bad in [[""], Array(repeating: "x", count: 1).flatMap { _ in (0...16).map { String(UnicodeScalar(0x2200 + $0)!) } }] {
+                    XCTAssertFalse(from.setSwipe(boardID: id, keyID: sum, up: true, choices: bad))
+                }
+                XCTAssertFalse(from.setSwipe(boardID: id, keyID: "missing", up: true, choices: ["x"]))
+                XCTAssertFalse(from.setSwipe(boardID: "missing", keyID: sum, up: true, choices: ["x"]))
+                let infinity = try XCTUnwrap(from.boards.last?.keys.last?.id)
+                XCTAssertTrue(from.setSwipe(boardID: id, keyID: infinity, up: false, choices: ["♾"]))
+                XCTAssertTrue(from.setSwipe(boardID: id, keyID: infinity, up: false, choices: []))
+                XCTAssertNil(from.key(boardID: id, keyID: infinity)?.down, "No choices turn the swipe off")
                 XCTAssertTrue(from.setLayout(boardID: id, layout: SymbolPageLayout("hk/k")))
                 XCTAssertNotNil(from.add(text: "★", to: SymbolBoardStore.favoritesID))
                 let file = try XCTUnwrap(from.exportedPages())
@@ -139,6 +151,8 @@ final class SymbolBoardStoreTests: XCTestCase {
                 XCTAssertNotEqual(page.id, id, "Imported pages get new identities")
                 XCTAssertEqual(page.keys.map(\.text), ["∑", "∞"])
                 XCTAssertEqual(page.keys.first?.variants, ["∏"])
+                XCTAssertEqual(page.keys.first?.up, ["⅀", "Σ"])
+                XCTAssertEqual(page.keys.first?.down, ["∫"])
                 XCTAssertEqual(page.layout, "hk/k")
                 XCTAssertTrue(to.favoriteTexts.isEmpty, "Favorites are not part of a page file")
                 XCTAssertEqual(to.importPages(file), 1, "Importing again adds another copy")

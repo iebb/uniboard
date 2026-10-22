@@ -2,10 +2,14 @@ import SwiftUI
 
 struct SetupView: View {
     @EnvironmentObject private var preferences: CatalogPreferences
+    /// Explore's two Supplementary Private Use planes, hidden by default.
+    @AppStorage("exploreShowsPrivateUse") private var showsPrivateUse = false
     var body: some View {
         Form {
             Section {
                 CatalogEditionPicker()
+                Toggle("Supplementary Private Use", isOn: $showsPrivateUse)
+                    .accessibilityIdentifier("showSupplementaryPrivateUse")
                 if let message = preferences.editionSaveError {
                     Text(message).foregroundStyle(.red)
                         .accessibilityIdentifier("unicodeEdition.saveError")

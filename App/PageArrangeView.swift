@@ -8,14 +8,20 @@ struct PageArrangeView: View {
     let boardID: String
     @ObservedObject private var boards = SymbolBoardStore.shared
     @State private var selection: Layout.Position?
-    @State private var canvasWidth: CGFloat = 360
+    /// The width the keys and gaps of a row share.
+    @State private var canvasWidth: CGFloat = 300
     @State private var failed = false
     private let spacing: CGFloat = 5
+    /// The drop target that ends every row.
+    private let rowEnd: CGFloat = 12
     private var board: SymbolBoard? { boards.boards.first { $0.id == boardID } }
     private var keyCount: Int { board?.keys.count ?? 0 }
     /// Exactly the keyboard's rows: every slot holds a key.
     private var layout: Layout { Layout.resolved(board?.layout, keyCount: keyCount).fitted(keyCount: keyCount) }
     private var selectedItem: Layout.Item? { selection.flatMap(layout.item(at:)) }
+    private var selectedKey: SymbolBoardKey? {
+        selection.flatMap(layout.keyIndex(at:)).flatMap { board?.keys.indices.contains($0) == true ? board?.keys[$0] : nil }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,9 +40,17 @@ struct PageArrangeView: View {
                 }
                 .padding(16)
             }
+            // Measured outside the canvas, so wider keys can never widen the screen.
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                canvasWidth = max(0, width - 32 - 16 - rowEnd - spacing)
+            }
             .background(Color(.systemGroupedBackground))
             Divider()
-            controls.padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
+            VStack(spacing: 8) {
+                if let key = selectedKey { layers(key) }
+                controls
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
         }
         .navigationTitle(board.map { "Arrange \($0.name)" } ?? "Arrange")
         .navigationBarTitleDisplayMode(.inline)
@@ -60,7 +74,7 @@ struct PageArrangeView: View {
                         tile(Layout.Position(row: row, index: index), keyWidth: width)
                     }
                     // Dropping here puts an item at the end of the row.
-                    Color.clear.frame(width: max(width / 2, 12), height: 44).contentShape(Rectangle())
+                    Color.clear.frame(width: rowEnd, height: 44).contentShape(Rectangle())
                         .dropDestination(for: String.self) { items, _ in drop(items, at: .init(row: row, index: layout.rows[row].count)) }
                 }
             }
@@ -68,10 +82,6 @@ struct PageArrangeView: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .background(GeometryReader { proxy in
-            Color.clear.onAppear { canvasWidth = proxy.size.width - 16 }
-                .onChange(of: proxy.size.width) { _, width in canvasWidth = width - 16 }
-        })
         // A container keeps each tile's own identifier.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("arrange.canvas")
@@ -110,6 +120,28 @@ struct PageArrangeView: View {
         .accessibilityValue("Row \(position.row + 1), place \(position.index + 1)")
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("arrange.\(position.row).\(position.index)")
+    }
+
+    /// The selected key's swipe-up, hold and swipe-down choices.
+    private func layers(_ key: SymbolBoardKey) -> some View {
+        KeyLayersPanel(summary: { gesture in
+            KeyLayersPanel<KeyLayerEditor>.summary(choices(key, gesture))
+        }, destination: { gesture in
+            KeyLayerEditor(title: "\(gesture.title) · \(symbolKeyPreview(key.text))", choices: choices(key, gesture) ?? []) { values in
+                switch gesture {
+                case .longPress: return boards.setVariants(boardID: boardID, keyID: key.id, variants: values)
+                default: return boards.setSwipe(boardID: boardID, keyID: key.id, up: gesture == .swipeUp, choices: values)
+                }
+            }
+        })
+    }
+
+    private func choices(_ key: SymbolBoardKey, _ gesture: KeyboardKeySettings.Gesture) -> [String]? {
+        switch gesture {
+        case .swipeUp: return key.up
+        case .swipeDown: return key.down
+        default: return key.variants
+        }
     }
 
     private var controls: some View {

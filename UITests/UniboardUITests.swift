@@ -413,6 +413,11 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["character-U+2190"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["character-U+2200"].firstMatch.exists, "The chart holds only this block")
         attachScreenshot("Arrows block at 16 per row")
+        app.buttons["block.next"].firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["character-U+2200"].firstMatch.waitForExistence(timeout: 5),
+                      "Next opens Mathematical Operators")
+        app.buttons["block.previous"].firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["character-U+2190"].firstMatch.waitForExistence(timeout: 5))
         options.tap()
         app.buttons["Tiles"].firstMatch.tap()
         XCTAssertTrue(options.waitUntilValueEquals("3"))
@@ -424,10 +429,13 @@ final class UniboardUITests: XCTestCase {
         selectAppEdition("latest")
         for tab in ["Explore", "Emoji", "Blocks", "Pages"] {
             appTab(tab).tap()
-            XCTAssertFalse(app.descendants(matching: .any)["unicodeEdition"].firstMatch.exists,
-                           "Only Settings may expose a catalog edition selector")
-            XCTAssertFalse(app.buttons["unicodeEdition.current"].firstMatch.exists,
-                           "A catalog version outside Settings is read-only")
+            let version = app.buttons["unicodeEdition.current"].firstMatch
+            if tab == "Pages" {
+                XCTAssertFalse(version.exists, "Pages show no version")
+            } else {
+                XCTAssertTrue(version.waitForExistence(timeout: 5), "\(tab) shows a version menu")
+                XCTAssertEqual(version.value as? String, "latest")
+            }
         }
         for (edition, has17, has18) in [("older", false, false), ("previous", true, false),
                                        ("latest", true, true), ("draft", true, true)] {
@@ -1618,6 +1626,48 @@ final class UniboardUITests: XCTestCase {
         chooseHeldKeyboardOption(text, optionCount: 2, selectedIndex: 1)
         XCTAssertTrue(input.waitUntilValueEquals("☃\u{FE0E}☃\u{FE0F}☃\u{FE0F}"), "Holding a text-form key offers the emoji form")
         attachScreenshot("The keyboard page holds the text and emoji snowman")
+    }
+
+    func testArrangeEditsKeyLayersAndTheMainKeyboard() {
+        openAppPages()
+        let symbols = app.buttons["pages.page.stock-symbols"].firstMatch
+        XCTAssertTrue(symbols.waitForExistence(timeout: 5))
+        symbols.tap()
+        openArrange()
+        let first = app.buttons["arrange.0.0"].firstMatch, tenth = app.buttons["arrange.0.9"].firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(first.frame.minX, app.frame.minX, "Arrange fits the screen")
+        XCTAssertLessThanOrEqual(tenth.frame.maxX, app.frame.maxX, "Arrange fits the screen")
+        first.tap()
+        let up = app.buttons["layers.swipeUp"].firstMatch
+        XCTAssertTrue(up.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["layers.longPress"].exists && app.buttons["layers.swipeDown"].exists)
+        up.tap()
+        app.buttons["layer.addChoice"].firstMatch.tap()
+        let field = app.textFields["layer.choice.0"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.typeText("x")
+        app.buttons["layer.save"].firstMatch.tap()
+        XCTAssertTrue(up.waitUntilValueEquals("x"), "The swipe-up layer keeps its new choice")
+        attachScreenshot("Arrange shows the selected key's three layers")
+        up.tap()
+        let saved = app.textFields["layer.choice.0"].firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        saved.tap()
+        saved.typeText(XCUIKeyboardKey.delete.rawValue)
+        app.buttons["layer.save"].firstMatch.tap()
+        XCTAssertTrue(up.waitUntilValueEquals("Off"))
+
+        openAppPages()
+        let keyboard = app.buttons["pages.keyboard"].firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        keyboard.tap()
+        let q = app.buttons["mainKeyboard.key.letter.q"].firstMatch
+        XCTAssertTrue(q.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(app.buttons["mainKeyboard.key.letter.p"].firstMatch.frame.maxX, app.frame.maxX)
+        q.tap()
+        XCTAssertTrue(app.buttons["layers.swipeDown"].firstMatch.waitForExistence(timeout: 5))
+        attachScreenshot("The main keyboard's Q key shows its three layers")
     }
 
     private func openArrange() {

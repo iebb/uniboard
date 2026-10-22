@@ -136,7 +136,7 @@ enum KeyboardTopRow: String, CaseIterable {
     }
 }
 
-/// The only edition selector lives in the app's Settings tab.
+/// The edition selector in the app's Settings tab.
 struct CatalogEditionPicker: View {
     @EnvironmentObject private var preferences: CatalogPreferences
     var body: some View {
@@ -154,15 +154,27 @@ struct CatalogEditionPicker: View {
     }
 }
 
-/// The selected edition, shown where characters are listed. Characters are
-/// always listed from the lowest code point.
+/// The selected edition, shown where characters are browsed, and a menu
+/// that switches it. Characters are always listed from the lowest code point.
 struct CatalogControls: View {
     @EnvironmentObject private var preferences: CatalogPreferences
     var body: some View {
-        Text(preferences.edition.title)
+        Menu {
+            Picker("Version", selection: Binding(get: { preferences.edition }, set: { preferences.selectEdition($0) })) {
+                ForEach([UnicodeEdition.draft, .latest, .previous, .older]) { edition in
+                    Text(edition.title).tag(edition)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(preferences.edition.title)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold))
+            }
             .font(.subheadline)
             .foregroundStyle(.secondary)
-            .accessibilityIdentifier("unicodeEdition.current")
-            .accessibilityValue(preferences.edition.rawValue)
+        }
+        .accessibilityLabel("Unicode version")
+        .accessibilityIdentifier("unicodeEdition.current")
+        .accessibilityValue(preferences.edition.rawValue)
     }
 }

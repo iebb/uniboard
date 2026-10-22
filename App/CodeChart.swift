@@ -3,13 +3,36 @@ import UIKit
 
 /// Which code points Explore shows: one plane, or all of them. The two
 /// Supplementary Private Use planes hold no published characters, so they
-/// are hidden unless the viewer asks for them.
+/// are hidden unless Settings shows them; with ConScript on, plane 15 shows
+/// for the registry's blocks there.
 struct ExploreScope: Equatable {
     /// A plane number from 0 to 16, or nil for every plane.
     var plane: Int?
     var showsPrivateUse: Bool
+    var showsConScript = false
 
     static let privateUsePlanes: Set<Int> = [15, 16]
+    /// The Private Use planes left out.
+    var hiddenPlanes: Set<Int> { showsPrivateUse ? [] : showsConScript ? [16] : Self.privateUsePlanes }
+    /// Private Use left out as rows of placeholders unless Settings shows
+    /// it; with ConScript on, only the registry's blocks stay.
+    var hiddenRanges: [ClosedRange<UInt32>] {
+        guard !showsPrivateUse else { return [] }
+        guard showsConScript else { return [0xE000...0xF8FF] }
+        var hidden: [ClosedRange<UInt32>] = []
+        for area: ClosedRange<UInt32> in [0xE000...0xF8FF, 0xF0000...0xFFFFD] {
+            var next = area.lowerBound
+            for block in UCSUR.registry.blocks where block.start >= area.lowerBound && block.end <= area.upperBound {
+                if block.start > next { hidden.append(next...(block.start - 1)) }
+                next = block.end + 1
+            }
+            if next <= area.upperBound { hidden.append(next...area.upperBound) }
+        }
+        return hidden
+    }
+    func hides(_ points: ClosedRange<UInt32>) -> Bool {
+        hiddenRanges.contains { $0.lowerBound <= points.lowerBound && $0.upperBound >= points.upperBound }
+    }
 
     static func name(of plane: Int) -> String {
         switch plane {
@@ -25,20 +48,18 @@ struct ExploreScope: Equatable {
     }
 
     /// Planes with at least one block, offered in the plane menu.
-    static func planes(in catalog: UnicodeCatalog, showsPrivateUse: Bool) -> [Int] {
-        Array(Set(catalog.blocks.map { Int($0.start >> 16) }))
-            .filter { showsPrivateUse || !privateUsePlanes.contains($0) }
-            .sorted()
+    func planes(in catalog: UnicodeCatalog) -> [Int] {
+        Array(Set(catalog.blocks.map { Int($0.start >> 16) })).filter { !hiddenPlanes.contains($0) }.sorted()
     }
 
     /// The code points in view, as one contiguous range.
     var range: ClosedRange<UInt32> {
         if let plane { return UInt32(plane) << 16...(UInt32(plane) << 16 | 0xFFFF) }
-        return 0...(showsPrivateUse ? 0x10FFFF : 0xEFFFF)
+        return 0...(hiddenPlanes.contains(15) ? 0xEFFFF : hiddenPlanes.contains(16) ? 0xFFFFF : 0x10FFFF)
     }
 
     func includes(_ block: UnicodeBlock) -> Bool {
-        range.contains(block.start)
+        range.contains(block.start) && !hides(block.start...block.end)
     }
 }
 
@@ -56,6 +77,7 @@ struct CodeChartBlock: Identifiable {
                        descending: Bool = false, only: UInt32? = nil) -> [CodeChartBlock] {
         let blocks = catalog.blocks.filter { scope.includes($0) && (only == nil || $0.start == only) }.compactMap { block -> CodeChartBlock? in
             let rows = catalog.chartRows(in: block, columns: columns, addedOnly: addedOnly)
+                .filter { !scope.hides($0.start...($0.start + UInt32(columns) - 1)) }
             return rows.isEmpty ? nil : CodeChartBlock(block: block, rows: descending ? rows.reversed() : rows)
         }
         return descending ? blocks.reversed() : blocks

@@ -215,6 +215,16 @@ final class UnicodeCatalogTests: XCTestCase {
                      "Properties from before presentation forms have none")
     }
 
+    func testOrderedCharactersSkipHiddenRanges() {
+        let points = { (hidden: [ClosedRange<UInt32>]) in
+            UnicodeCatalog.latest.orderedCharacters(in: 0xE000...0xE00F, excluding: hidden).map(\.codePoint)
+        }
+        XCTAssertEqual(points([0xE002...0xE00D]), [0xE000, 0xE001, 0xE00E, 0xE00F])
+        XCTAssertEqual(points([0xD000...0xE00D, 0xE00F...0xF000]), [0xE00E])
+        XCTAssertEqual(points([0x41...0x5A]).count, 16)
+        XCTAssertTrue(points([0xE000...0xE00F]).isEmpty)
+    }
+
     func testConScriptViewNamesRegistryCharactersAndSplitsPrivateUse() throws {
         let plain = UnicodeCatalog.latest
         let conscript = plain.withConScript()
@@ -888,7 +898,14 @@ final class UnicodeCatalogTests: XCTestCase {
         let row = fixture.chartRows(in: hangul, columns: 16)[0]
         XCTAssertEqual((0..<16).filter(row.isAssigned), [0, 1, 2, 3, 4, 5])
         XCTAssertTrue(fixture.chartRows(in: latin, columns: 0).isEmpty)
-        XCTAssertTrue(fixture.chartRows(in: latin, columns: 17).isEmpty)
+        XCTAssertTrue(fixture.chartRows(in: latin, columns: 33).isEmpty)
+        // 32 per row keeps every column, including the upper half.
+        XCTAssertEqual(fixture.chartRows(in: latin, columns: 32), [
+            UnicodeChartRow(start: 0, assigned: 1), UnicodeChartRow(start: 0x40, assigned: 1 << 1)])
+        let wide = UnicodeCatalog.latest.chartRows(in: latin, columns: 32)
+        XCTAssertEqual(wide.map(\.start), [0, 0x20, 0x40, 0x60])
+        XCTAssertTrue(wide[1].isAssigned(column: 31), "U+003F is in the upper half of its row")
+        XCTAssertFalse(wide[1].isAssigned(column: 32))
         XCTAssertTrue(fixture.chartRows(in: UnicodeBlock(name: "Empty", start: 0x100, end: 0x17F), columns: 16).isEmpty)
     }
 

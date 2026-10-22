@@ -122,11 +122,12 @@ struct ExploreView: View {
     /// 8, 16 and 32 per row form a code chart of every block, in code-point order.
     private var usesChart: Bool { query.isEmpty && shown != .three }
     private var scope: ExploreScope {
-        let selected = plane >= 0 && (showsPrivateUse || !ExploreScope.privateUsePlanes.contains(plane)) ? plane : nil
-        return ExploreScope(plane: selected, showsPrivateUse: showsPrivateUse)
+        let all = ExploreScope(plane: nil, showsPrivateUse: showsPrivateUse, showsConScript: preferences.showsUCSUR)
+        return ExploreScope(plane: plane >= 0 && !all.hiddenPlanes.contains(plane) ? plane : nil,
+                            showsPrivateUse: showsPrivateUse, showsConScript: preferences.showsUCSUR)
     }
     private var displayedCharacters: [UnicodeCharacter] {
-        catalog.orderedCharacters(in: scope.range, limit: pages * listDensity.pageSize, descending: descending)
+        catalog.orderedCharacters(in: scope.range, excluding: scope.hiddenRanges, limit: pages * listDensity.pageSize, descending: descending)
     }
 
     var body: some View {
@@ -176,7 +177,8 @@ struct ExploreView: View {
                             if !search.searching && search.results.isEmpty {
                                 EmptyCollection(symbol: "magnifyingglass", title: "No Results", message: "Try another name or description, a literal character, or a code point such as U+1F680.")
                             } else {
-                                CharacterGrid(characters: search.results, density: listDensity, width: contentWidth, select: select)
+                                // Results come from anywhere, so they show as tiles rather than code chart rows.
+                                CharacterGrid(characters: search.results, density: .three, width: contentWidth, select: select)
                             }
                         }
                     }
@@ -214,12 +216,11 @@ struct ExploreView: View {
                     }
                     Picker("Plane", selection: $plane) {
                         Text("All Planes").tag(-1)
-                        ForEach(ExploreScope.planes(in: catalog, showsPrivateUse: showsPrivateUse), id: \.self) { number in
+                        ForEach(scope.planes(in: catalog), id: \.self) { number in
                             Text("\(number) · \(ExploreScope.name(of: number))").tag(number)
                         }
                     }
                     .pickerStyle(.menu)
-                    Toggle("Show Supplementary Private Use", isOn: $showsPrivateUse)
                 } label: { Image(systemName: shown.symbol) }
                 .accessibilityLabel("View options")
                 .accessibilityValue("\(shown.rawValue)")

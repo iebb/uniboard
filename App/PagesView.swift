@@ -16,6 +16,12 @@ struct PagesView: View {
     var body: some View {
         List {
             Section {
+                NavigationLink { MainKeyboardEditorView() } label: {
+                    Label("Keyboard", systemImage: "keyboard")
+                }
+                .accessibilityIdentifier("pages.keyboard")
+            }
+            Section {
                 ForEach(boards.boards) { board in
                     NavigationLink {
                         if board.id == SymbolBoardStore.favoritesID {

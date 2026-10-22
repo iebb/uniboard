@@ -471,7 +471,8 @@ final class KeyboardViewController: UIInputViewController {
     private func makeSymbolBoardActions(renderedMode: UUID, boardID: String, key: SymbolBoardKey) -> KeyboardVariantActions? {
         guard let current = makeBoardConfigurationGuard(renderedMode: renderedMode) else { return nil }
         let activeBoardID = SymbolBoardStore.shared.activeBoardID
-        let choices = KeyboardVariantPolicy.options(text: key.text, variants: model.pageKeyVariants(key))
+        // Hold choices, then the key's own swipe-up and swipe-down choices.
+        let choices = KeyboardVariantPolicy.options(text: key.text, variants: model.pageKeyVariants(key)) + (key.up ?? []) + (key.down ?? [])
         let accepts: () -> Bool = { [weak self] in
             guard let self else { return false }
             return current() && !self.model.isSearching && !self.model.hasSymbolBoardOverlay
@@ -496,7 +497,7 @@ final class KeyboardViewController: UIInputViewController {
             guard let self, accepts(), KeyboardVariantPolicy.contains(text, in: choices) else { return false }
             self.model.inspectText(text)
             return true
-        })
+        }, swipeUp: key.up, swipeDown: key.down)
     }
 
     private func makeQueryAction(renderedMode: UUID, renderedQuery: String) -> KeyboardQueryActionSession? {
@@ -1929,7 +1930,8 @@ private struct UnicodeKeyboardView: View {
                 identifier: "keyboard.board.\(board.id).key.\(key.id)",
                 label: symbolBoardKeyLabel(key.text), route: model.inputModeID,
                 enabled: model.isShowingSymbolPages && model.showFavorites && symbolBoards.activeBoardID == board.id,
-                fontSize: 23, useUnicodeFonts: model.useUnicodeFonts, showsInspection: true, showsEditing: true,
+                fontSize: 23, useUnicodeFonts: model.useUnicodeFonts, swipeUp: key.up, swipeDown: key.down,
+                showsInspection: true, showsEditing: true,
                 factory: { [mode = model.inputModeID, boardID = board.id] in boardKeyActions(mode, boardID, key) })
                 .frame(width: keyWidth, height: savedKeyHeight)
                 .keyboardKeySurface(radius: 7, fill: KeyboardPalette.conscriptFill(key.text, shows: model.showsUCSUR))
@@ -2579,7 +2581,8 @@ private struct KeyboardTypingFavoriteRow: View, Equatable {
                     KeyboardVariantKey(text: key.text, variants: key.variants,
                         identifier: "keyboard.typing.favorite.\(board.id).\(key.id)",
                         label: symbolBoardKeyLabel(key.text), route: route, enabled: enabled,
-                        fontSize: 23, useUnicodeFonts: useUnicodeFonts, showsInspection: true, showsEditing: true,
+                        fontSize: 23, useUnicodeFonts: useUnicodeFonts, swipeUp: key.up, swipeDown: key.down,
+                        showsInspection: true, showsEditing: true,
                         factory: { [route = route] in actionFactory(route, board.id, key) })
                         .frame(width: keyWidth, height: keyHeight)
                         .keyboardKeySurface(radius: 7, fill: KeyboardPalette.conscriptFill(key.text, shows: showsUCSUR))

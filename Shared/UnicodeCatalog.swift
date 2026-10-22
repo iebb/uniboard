@@ -293,6 +293,8 @@ final class UnicodeCatalog: @unchecked Sendable {
 
     let edition: UnicodeEdition
     let blocks: [UnicodeBlock]
+    private let representativeLock = NSLock()
+    private var representatives: [UInt32: String] = [:]
     let version: String
     let resourceError: String?
     private let data: Data
@@ -497,6 +499,18 @@ final class UnicodeCatalog: @unchecked Sendable {
     /// its first visible assigned letter, then symbol, number, punctuation or mark.
     func representative(of block: UnicodeBlock) -> String {
         if let curated = block.curatedSymbol { return curated }
+        representativeLock.lock()
+        let cached = representatives[block.start]
+        representativeLock.unlock()
+        if let cached { return cached }
+        let found = findRepresentative(of: block)
+        representativeLock.lock()
+        representatives[block.start] = found
+        representativeLock.unlock()
+        return found
+    }
+
+    private func findRepresentative(of block: UnicodeBlock) -> String {
         let ranks: [Character: Int] = ["L": 0, "S": 1, "N": 2, "P": 3, "M": 4]
         var best: (rank: Int, text: String)?
         var examined = 0

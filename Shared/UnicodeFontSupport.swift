@@ -11,10 +11,27 @@ enum UnicodeFontSupport {
     private struct Manifest: Decodable { let fonts: [Asset] }
     private static let choices: NSCache<NSString, NSNumber> = {
         let cache = NSCache<NSString, NSNumber>()
-        cache.countLimit = 2_048
+        cache.countLimit = 8_192
+        return cache
+    }()
+    /// Scalars the stock fonts cannot draw, shared by the missing-glyph tint
+    /// and the font choice so each preview is shaped once.
+    private static let stockMissing: NSCache<NSString, NSArray> = {
+        let cache = NSCache<NSString, NSArray>()
+        cache.countLimit = 8_192
+        return cache
+    }()
+    /// Resolved preview fonts by asset and point size.
+    private static let resolvedFonts: NSCache<NSString, UIFont> = {
+        let cache = NSCache<NSString, UIFont>()
+        cache.countLimit = 64
         return cache
     }()
     private static var graphicsFonts: [Int: CGFont] = [:]
+    /// A 32-point instance of each loaded font for coverage checks.
+    private static var referenceFonts: [Int: CTFont] = [:]
+    /// Assets whose file is not installed or does not open, until downloads change.
+    private static var unavailableFonts: Set<Int> = []
     private static var fontRecency: [Int] = []
     static let maximumLoadedFonts = 4
     private static var downloadRevision = ""
@@ -71,7 +88,11 @@ enum UnicodeFontSupport {
     static func clearCache() {
         choices.removeAllObjects()
         stockMisses.removeAllObjects()
+        stockMissing.removeAllObjects()
+        resolvedFonts.removeAllObjects()
         graphicsFonts.removeAll()
+        referenceFonts.removeAll()
+        unavailableFonts.removeAll()
         fontRecency.removeAll()
     }
 
@@ -81,8 +102,33 @@ enum UnicodeFontSupport {
         guard enabled, !text.isEmpty else { return system }
         refreshDownloadedFonts()
         let index = choice(for: text, system: system)
-        guard index != systemChoice, let graphics = graphicsFont(at: index) else { return system }
-        return CTFontCreateWithGraphicsFont(graphics, size, nil, nil) as UIFont
+        guard index != systemChoice else { return system }
+        let key = "\(index)@\(size)" as NSString
+        if let cached = resolvedFonts.object(forKey: key) { return cached }
+        guard let graphics = graphicsFont(at: index) else { return system }
+        let font = CTFontCreateWithGraphicsFont(graphics, size, nil, nil) as UIFont
+        resolvedFonts.setObject(font, forKey: key)
+        return font
+    }
+
+    private static let systemReference = UIFont.systemFont(ofSize: 32) as CTFont
+
+    /// Whether the system font has a glyph for every UTF-16 unit of `text`.
+    private static func systemFontDraws(_ text: String) -> Bool {
+        var characters = Array(text.utf16)
+        guard !characters.isEmpty, characters.count <= 8 else { return false }
+        var glyphs = [CGGlyph](repeating: 0, count: characters.count)
+        return CTFontGetGlyphsForCharacters(systemReference, &characters, &glyphs, characters.count)
+    }
+
+    /// The scalars of `text` that the stock fonts draw as a placeholder.
+    private static func stockMissingCodePoints(in text: String) -> [UInt32] {
+        if let cached = stockMissing.object(forKey: text as NSString) as? [UInt32] { return cached }
+        // Most previews are drawn by the system font itself; only text it
+        // lacks needs a full shaping pass through the fallback cascade.
+        let missing = systemFontDraws(text) ? [] : missingCodePoints(in: text, font: .systemFont(ofSize: 32))
+        stockMissing.setObject(missing as NSArray, forKey: text as NSString)
+        return missing
     }
 
     static func sourceName(for text: String, size: CGFloat, enabled: Bool) -> String? {
@@ -120,10 +166,10 @@ enum UnicodeFontSupport {
         if let cached = choices.object(forKey: text as NSString) { return cached.intValue }
         var selected = systemChoice
         if isEmojiText(text) {
-            if !drawsEmoji(text, font: system) {
+            if stockFontsMiss(text, emoji: true) {
                 for (index, asset) in assets.enumerated() where isEmojiAsset(asset) {
-                    guard let graphics = graphicsFont(at: index) else { continue }
-                    let candidate = CTFontCreateWithGraphicsFont(graphics, 32, nil, nil) as UIFont
+                    guard let reference = referenceFont(at: index) else { continue }
+                    let candidate = reference as UIFont
                     if drawsEmoji(text, font: candidate), inks(text, font: candidate) {
                         selected = index
                         break
@@ -131,11 +177,10 @@ enum UnicodeFontSupport {
                 }
             }
         } else {
-            let missing = missingCodePoints(in: text, font: system)
+            let missing = stockMissingCodePoints(in: text)
             if !missing.isEmpty {
                 for (index, asset) in assets.enumerated() where !isEmojiAsset(asset) && missing.allSatisfy(asset.contains) {
-                    guard let graphics = graphicsFont(at: index) else { continue }
-                    let candidate = CTFontCreateWithGraphicsFont(graphics, 32, nil, nil)
+                    guard let candidate = referenceFont(at: index) else { continue }
                     // A whitelist alone is insufficient: reject corrupt/non-drawing
                     // glyphs rather than replace one placeholder with another.
                     if missing.allSatisfy({ hasArtwork($0, in: candidate) }),
@@ -172,14 +217,31 @@ enum UnicodeFontSupport {
             fontRecency.append(index)
             return cached
         }
+        // A missing download is checked once per download revision, not on
+        // every preview that its ranges cover.
+        guard !unavailableFonts.contains(index) else { return nil }
         guard assets.indices.contains(index), let url = resourceURL(assets[index].filename),
               let provider = CGDataProvider(url: url as CFURL), let font = CGFont(provider),
-              font.postScriptName as String? == assets[index].postScriptName else { return nil }
+              font.postScriptName as String? == assets[index].postScriptName else {
+            unavailableFonts.insert(index)
+            return nil
+        }
         graphicsFonts[index] = font
         fontRecency.append(index)
         while fontRecency.count > maximumLoadedFonts {
-            graphicsFonts.removeValue(forKey: fontRecency.removeFirst())
+            let evicted = fontRecency.removeFirst()
+            graphicsFonts.removeValue(forKey: evicted)
+            referenceFonts.removeValue(forKey: evicted)
         }
+        return font
+    }
+
+    /// A 32-point instance of a loaded font, made once while it stays loaded.
+    private static func referenceFont(at index: Int) -> CTFont? {
+        guard let graphics = graphicsFont(at: index) else { return nil }
+        if let cached = referenceFonts[index] { return cached }
+        let font = CTFontCreateWithGraphicsFont(graphics, 32, nil, nil)
+        referenceFonts[index] = font
         return font
     }
 
@@ -263,7 +325,7 @@ enum UnicodeFontSupport {
         if let cached = stockMisses.object(forKey: key) { return cached.boolValue }
         let system = UIFont.systemFont(ofSize: 32)
         let miss = emoji || isEmojiText(text) ? !drawsEmoji(text, font: system)
-            : !missingCodePoints(in: text, font: system).isEmpty
+            : !stockMissingCodePoints(in: text).isEmpty
         stockMisses.setObject(NSNumber(value: miss), forKey: key)
         return miss
     }

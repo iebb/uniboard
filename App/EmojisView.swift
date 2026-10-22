@@ -6,10 +6,12 @@ struct EmojisView: View {
     @EnvironmentObject private var preferences: CatalogPreferences
     @State private var query = ""
     @State private var pageLimit = 120
+    /// Code point order, or by the version that introduced each emoji.
+    @AppStorage("emojiSortOrder") private var order: UnicodeSortOrder = .codePoint
     private var entries: [UnicodeEmojiEntry] {
         query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? preferences.emojis.entries(limit: pageLimit)
-            : preferences.emojis.search(query, limit: pageLimit)
+            ? preferences.emojis.entries(limit: pageLimit, order: order)
+            : preferences.emojis.search(query, limit: pageLimit, order: order)
     }
     var body: some View {
         ScrollView {
@@ -26,8 +28,21 @@ struct EmojisView: View {
         }
         .background(Color.groupedBackground)
         .navigationTitle("Emoji")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Order", selection: $order) {
+                        ForEach(UnicodeSortOrder.allCases) { Text($0.title).tag($0) }
+                    }
+                } label: { Image(systemName: "arrow.up.arrow.down") }
+                .accessibilityLabel("Order")
+                .accessibilityValue(order.title)
+                .accessibilityIdentifier("emojiOrder")
+            }
+        }
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: query) { _, _ in pageLimit = 120 }
+        .onChange(of: order) { _, _ in pageLimit = 120 }
         .onChange(of: preferences.edition) { _, _ in pageLimit = 120 }
     }
 }

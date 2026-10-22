@@ -461,6 +461,33 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("Explore uses ascending code point order")
     }
 
+    func testEmojiSortByVersionAndExploreHighToLow() {
+        selectAppTab("Emoji")
+        let order = app.buttons["emojiOrder"].firstMatch
+        XCTAssertTrue(order.waitForExistence(timeout: 5))
+        order.tap()
+        app.buttons["Newest first"].firstMatch.tap()
+        XCTAssertTrue(order.waitUntilValueEquals("Newest first"))
+        attachScreenshot("Emoji sorted newest first")
+        order.tap()
+        app.buttons["Code point"].firstMatch.tap()
+        XCTAssertTrue(order.waitUntilValueEquals("Code point"))
+        selectAppTab("Explore")
+        let options = app.buttons["exploreDensity"].firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 5))
+        options.tap()
+        app.buttons["Tiles"].firstMatch.tap()
+        options.tap()
+        app.buttons["High to Low"].firstMatch.tap()
+        // Plane 14's last variation selector is the highest character shown by default.
+        XCTAssertTrue(app.descendants(matching: .any)["character-U+E01EF"].firstMatch.waitForExistence(timeout: 10),
+                      "High to low starts at the top of the code space")
+        attachScreenshot("Explore from the highest code point")
+        options.tap()
+        app.buttons["Low to High"].firstMatch.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["character-U+0020"].firstMatch.waitForExistence(timeout: 10))
+    }
+
     func testEmojiDetailsAndScratchpadPreserveWholeZWJSequence() {
         selectAppTab("Emoji")
         search("woman technologist", fieldIdentifier: "emojiSearch")

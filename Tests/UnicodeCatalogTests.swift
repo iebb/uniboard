@@ -837,6 +837,15 @@ final class UnicodeCatalogTests: XCTestCase {
         let next = catalog.orderedCharacters(in: 0x10000...0x1FFFF, offset: 300, limit: 1)
         XCTAssertGreaterThan(try XCTUnwrap(next.first).codePoint, try XCTUnwrap(smp.last).codePoint)
         XCTAssertEqual(catalog.orderedCharacters(in: 0xF0000...0xF0001, limit: 10).map(\.codePoint), [0xF0000, 0xF0001])
+        // High to low pages the same characters from the top of the range.
+        let ascending = catalog.orderedCharacters(in: 0x2600...0x27BF, limit: 2000).map(\.codePoint)
+        let descending = catalog.orderedCharacters(in: 0x2600...0x27BF, limit: 2000, descending: true).map(\.codePoint)
+        XCTAssertEqual(descending, ascending.reversed())
+        let pages = stride(from: 0, to: descending.count, by: 7).flatMap {
+            catalog.orderedCharacters(in: 0x2600...0x27BF, offset: $0, limit: 7, descending: true).map(\.codePoint)
+        }
+        XCTAssertEqual(pages, descending)
+        XCTAssertEqual(catalog.orderedCharacters(in: 0xF0000...0xF0001, limit: 10, descending: true).map(\.codePoint), [0xF0001, 0xF0000])
     }
 
     func testChartRowsMarkAssignedColumnsWithoutCreatingCharacters() throws {

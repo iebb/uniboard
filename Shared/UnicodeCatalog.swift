@@ -595,18 +595,20 @@ final class UnicodeCatalog: @unchecked Sendable {
         page(in: properties.assignedSpans, offset: offset, limit: limit, order: order)
     }
 
-    /// Code-point-ordered characters whose code points fall in `range`.
-    func orderedCharacters(in range: ClosedRange<UInt32>, offset: Int = 0, limit: Int = 256) -> [UnicodeCharacter] {
+    /// Characters whose code points fall in `range`, lowest first, or highest
+    /// first when `descending`.
+    func orderedCharacters(in range: ClosedRange<UInt32>, offset: Int = 0, limit: Int = 256,
+                           descending: Bool = false) -> [UnicodeCharacter] {
         let spans = properties.assignedSpans.compactMap { span -> UnicodeAssignedSpan? in
             guard span.start <= range.upperBound && span.end >= range.lowerBound else { return nil }
             return UnicodeAssignedSpan(start: max(range.lowerBound, span.start), end: min(range.upperBound, span.end),
                                        sortKey: span.sortKey, draftAddition: span.draftAddition)
         }
-        return page(in: spans, offset: offset, limit: limit, order: .codePoint)
+        return page(in: spans, offset: offset, limit: limit, order: .codePoint, descending: descending)
     }
 
     private func page(in spans: [UnicodeAssignedSpan], offset: Int, limit: Int,
-                      order: UnicodeSortOrder) -> [UnicodeCharacter] {
+                      order: UnicodeSortOrder, descending: Bool = false) -> [UnicodeCharacter] {
         guard offset >= 0, limit > 0, !Task.isCancelled else { return [] }
         let ordered = spans.sorted { left, right in
             if order != .codePoint && left.sortKey != right.sortKey {
@@ -616,14 +618,19 @@ final class UnicodeCatalog: @unchecked Sendable {
         }
         var remainingOffset = offset
         var points: [UInt32] = []
-        for span in ordered {
+        for span in descending ? ordered.reversed() : ordered {
             if Task.isCancelled { return [] }
             let count = Int(span.end - span.start + 1)
             if remainingOffset >= count { remainingOffset -= count; continue }
-            let start = span.start + UInt32(remainingOffset)
+            let take = min(count - remainingOffset, limit - points.count)
+            if descending {
+                let top = span.end - UInt32(remainingOffset)
+                points.append(contentsOf: (0..<UInt32(take)).map { top - $0 })
+            } else {
+                let start = span.start + UInt32(remainingOffset)
+                points.append(contentsOf: start..<(start + UInt32(take)))
+            }
             remainingOffset = 0
-            let take = min(Int(span.end - start + 1), limit - points.count)
-            points.append(contentsOf: start..<(start + UInt32(take)))
             if points.count == limit { break }
         }
         var result: [UnicodeCharacter] = []

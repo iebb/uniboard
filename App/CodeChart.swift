@@ -49,13 +49,16 @@ struct CodeChartBlock: Identifiable {
     let rows: [UnicodeChartRow]
     var id: UInt32 { block.start }
 
-    /// With `addedOnly`, the chart holds only what this edition adds.
+    /// With `addedOnly`, the chart holds only what this edition adds. When
+    /// `descending`, blocks and their rows run from the highest code point.
     static func blocks(in catalog: UnicodeCatalog, columns: Int, addedOnly: Bool = false,
-                       scope: ExploreScope = ExploreScope(plane: nil, showsPrivateUse: true)) -> [CodeChartBlock] {
-        catalog.blocks.filter(scope.includes).compactMap { block in
+                       scope: ExploreScope = ExploreScope(plane: nil, showsPrivateUse: true),
+                       descending: Bool = false) -> [CodeChartBlock] {
+        let blocks = catalog.blocks.filter(scope.includes).compactMap { block -> CodeChartBlock? in
             let rows = catalog.chartRows(in: block, columns: columns, addedOnly: addedOnly)
-            return rows.isEmpty ? nil : CodeChartBlock(block: block, rows: rows)
+            return rows.isEmpty ? nil : CodeChartBlock(block: block, rows: descending ? rows.reversed() : rows)
         }
+        return descending ? blocks.reversed() : blocks
     }
 }
 
@@ -83,6 +86,8 @@ struct CodeChartView: UIViewRepresentable {
     var leading: AnyView? = nil
     /// Opens a block from its header; nil for a static header.
     var navigate: ((UnicodeBlock) -> Void)? = nil
+    /// Runs from the highest code point down.
+    var descending = false
     let select: (UnicodeCharacter) -> Void
     @EnvironmentObject private var store: CharacterStore
     @EnvironmentObject private var preferences: CatalogPreferences
@@ -116,7 +121,8 @@ struct CodeChartView: UIViewRepresentable {
         let previous = coordinator.parent
         coordinator.parent = self
         controller.coordinator = coordinator
-        if previous.map({ $0.catalog !== catalog || $0.density != density || $0.addedOnly != addedOnly || $0.scope != scope }) ?? true {
+        if previous.map({ $0.catalog !== catalog || $0.density != density || $0.addedOnly != addedOnly || $0.scope != scope
+                || $0.descending != descending }) ?? true {
             // A new density keeps the block being read; a new edition or plane starts over.
             coordinator.reload(keepingTopBlock: previous?.catalog === catalog && previous?.scope == scope)
         } else {
@@ -221,7 +227,7 @@ struct CodeChartView: UIViewRepresentable {
             guard let parent, let dataSource else { return }
             let kept = keepingTopBlock ? parent.controller.topBlock : nil
             blocks = CodeChartBlock.blocks(in: parent.catalog, columns: parent.density.rawValue,
-                                           addedOnly: parent.addedOnly, scope: parent.scope)
+                                           addedOnly: parent.addedOnly, scope: parent.scope, descending: parent.descending)
             var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
             if hasLeading {
                 snapshot.appendSections([.leading])
@@ -251,7 +257,8 @@ struct CodeChartView: UIViewRepresentable {
         /// characters, at the top of the chart.
         func jump(to start: UInt32) {
             guard let view = collectionView, !blocks.isEmpty else { return }
-            let index = blocks.firstIndex { $0.block.start >= start } ?? blocks.count - 1
+            let descending = parent?.descending == true
+            let index = blocks.firstIndex { descending ? $0.block.start <= start : $0.block.start >= start } ?? blocks.count - 1
             let first = IndexPath(item: 0, section: index + leadingOffset)
             view.layoutIfNeeded()
             view.scrollToItem(at: first, at: .top, animated: false)

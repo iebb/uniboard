@@ -101,6 +101,8 @@ struct ExploreView: View {
     /// A plane number, or -1 for every plane.
     @AppStorage("explorePlane") private var plane = -1
     @AppStorage("exploreShowsPrivateUse") private var showsPrivateUse = false
+    /// Highest code point first.
+    @AppStorage("exploreDescending") private var descending = false
     @State private var showScratchpad = false
     @State private var showNavigator = false
     @State private var openedBlock: UnicodeBlock?
@@ -119,7 +121,7 @@ struct ExploreView: View {
         return ExploreScope(plane: selected, showsPrivateUse: showsPrivateUse)
     }
     private var displayedCharacters: [UnicodeCharacter] {
-        catalog.orderedCharacters(in: scope.range, limit: pages * density.pageSize)
+        catalog.orderedCharacters(in: scope.range, limit: pages * density.pageSize, descending: descending)
     }
 
     var body: some View {
@@ -153,7 +155,7 @@ struct ExploreView: View {
 
             if usesChart {
                 CodeChartView(catalog: catalog, density: density, scope: scope, controller: chart,
-                              navigate: { openedBlock = $0 }, select: select)
+                              navigate: { openedBlock = $0 }, descending: descending, select: select)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -200,6 +202,10 @@ struct ExploreView: View {
                     Picker("Characters per Row", selection: $density) {
                         ForEach(GridDensity.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
                     }
+                    Picker("Order", selection: $descending) {
+                        Label("Low to High", systemImage: "arrow.down").tag(false)
+                        Label("High to Low", systemImage: "arrow.up").tag(true)
+                    }
                     Picker("Plane", selection: $plane) {
                         Text("All Planes").tag(-1)
                         ForEach(ExploreScope.planes(in: catalog, showsPrivateUse: showsPrivateUse), id: \.self) { number in
@@ -228,6 +234,7 @@ struct ExploreView: View {
             }
         }
         .onChange(of: density) { _, _ in pages = 1 }
+        .onChange(of: descending) { _, _ in pages = 1 }
         .onChange(of: scope) { _, _ in pages = 1 }
         .onChange(of: preferences.edition) { _, _ in
             pages = 1

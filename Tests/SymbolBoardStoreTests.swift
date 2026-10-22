@@ -104,6 +104,23 @@ final class SymbolBoardStoreTests: XCTestCase {
         }
     }
 
+    func testAnInvalidSharedPageFileKeepsTheBuiltInPagesAndFavorites() throws {
+        let pages = try sharedPages().settings
+        try withDefaults { defaults in
+            let store = SymbolBoardStore(defaults: defaults, pages: pages, configuresPages: false)
+            XCTAssertNotNil(store.add(text: "☃", to: SymbolBoardStore.favoritesID))
+            XCTAssertTrue(store.isFavorite("☃"))
+            XCTAssertFalse(store.isFavorite("☃\u{FE0F}"), "Favorites match exact text")
+            // A file that decodes but lacks the built-in Symbols page is not adopted.
+            XCTAssertTrue(pages.save(.init(pages: [SymbolBoard(id: SymbolBoardStore.favoritesID, name: "Favorites", keys: [])],
+                                           starPageID: SymbolBoardStore.favoritesID)))
+            store.refreshPages()
+            XCTAssertEqual(store.boards.map(\.id), [SymbolBoardStore.stockID, SymbolBoardStore.favoritesID])
+            XCTAssertEqual(store.favoriteTexts, ["☃"])
+            XCTAssertEqual(store.preferredStarBoardID, SymbolBoardStore.favoritesID)
+        }
+    }
+
     func testPagesMadeInsideAnEarlierKeyboardAreNotCarriedOver() throws {
         let pages = try sharedPages().settings
         try withDefaults { defaults in

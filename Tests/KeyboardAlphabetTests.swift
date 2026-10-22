@@ -18,6 +18,7 @@ final class KeyboardAlphabetTests: XCTestCase {
             XCTAssertFalse(alphabet.englishName.isEmpty)
         }
         XCTAssertNil(KeyboardAlphabet.alphabet(id: "xx"))
+        XCTAssertEqual(Set(KeyboardAlphabet.catalog).count, ids.count, "Alphabets hash by their identifier")
     }
 
     func testEveryLayoutHasThreeRowsOfSingleDistinctKeysThatFitAPhone() {

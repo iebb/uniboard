@@ -24,6 +24,8 @@ MINIMUMS = {
     "KeyboardEnglishInputPolicy.swift": 1.0,
     "LocalPreferencePolicy.swift": 1.0,
     "CatalogWorker.swift": 1.0,
+    "KeyboardAlphabet.swift": 1.0,
+    "SymbolPageLayout.swift": 1.0,
 }
 
 

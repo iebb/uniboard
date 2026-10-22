@@ -301,7 +301,7 @@ final class SymbolBoardStore: ObservableObject {
     /// inside earlier keyboards are not carried over.
     func refreshPages() {
         guard let pages, canEdit else { return }
-        let favorites = boards.first { $0.id == Self.favoritesID }?.keys ?? []
+        let favorites = boards.filter { $0.id == Self.favoritesID }.flatMap(\.keys)
         let snapshot = pages.load()
         var next = snapshot?.pages ?? Self.initialBoards(favorites: [])
         var preferred = snapshot?.starPageID ?? Self.favoritesID

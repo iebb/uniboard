@@ -194,9 +194,9 @@ enum KeyboardVariantPolicy {
                                   alphabet: KeyboardAlphabet = .english) -> [String] {
         guard let descriptor = KeyboardKeySettings.descriptor(for: keyID), let key = descriptor.text else { return [] }
         var state = KeyboardTypingState()
-        if descriptor.kind == .letter {
-            state.selectAlphabet(alphabet.keys.contains(key) ? alphabet
-                : KeyboardAlphabet.catalog.first { $0.keys.contains(key) } ?? .english)
+        if descriptor.kind == .letter,
+           let owner = alphabet.keys.contains(key) ? alphabet : KeyboardAlphabet.catalog.first(where: { $0.keys.contains(key) }) {
+            state.selectAlphabet(owner)
         }
         if descriptor.kind == .character,
            let layout = KeyboardTypingLayout.allCases.first(where: { $0.rows.flatMap { $0 }.contains(key) }) {

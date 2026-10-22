@@ -522,7 +522,7 @@ final class UnicodeCatalog: @unchecked Sendable {
                 if best.map({ rank < $0.rank }) ?? true { best = (rank, character.displayText) }
                 examined += 1
                 // Blocks without letters settle on their best early candidate.
-                if examined >= 128 { return best?.text ?? "◇" }
+                if examined >= 128, let best { return best.text }
             }
         }
         return best?.text ?? "◇"

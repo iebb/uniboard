@@ -101,6 +101,9 @@ enum UnicodeFontSupport {
         let points = text.unicodeScalars.map(\.value)
         if let first = points.first, isEmojiPreview(first),
            points.count == 1 || (points.count == 2 && points[1] == 0xFE0F) { return false }
+        // The runtime's Unicode tables may predate these emoji. Do not infer
+        // their sequence behavior from scalar properties (notably VS15).
+        if points.contains(where: isEmojiPreview) { return true }
         return text.unicodeScalars.contains {
             $0.value == 0xFE0F || $0.value == 0x200D || (0xE0020...0xE007F).contains($0.value)
                 || $0.properties.isEmojiPresentation

@@ -137,7 +137,8 @@ final class UnicodeStockCoverageAuditTests: XCTestCase {
         attachment.name = "Nine Unicode 18 emoji using the exact optional Noto color subset"
         attachment.lifetime = .keepAlways
         add(attachment)
-        for text in ["🚀", "🙂‍↔️", "👍🏽", "🇯🇵", "☃️", "\u{1FAEB}\u{200D}\u{1F680}"] {
+        for text in ["🚀", "🙂‍↔️", "👍🏽", "🇯🇵", "☃️", "\u{1FAEB}\u{200D}\u{1F680}",
+                     "\u{1FAEB}\u{FE0E}", "A\u{1FAEB}", "\u{1FAEB}\u{1F3FB}", "\u{1FAEB}\u{FE0F}\u{FE0F}"] {
             let on = UnicodeFontSupport.font(for: text, size: 48, enabled: true)
             let off = UnicodeFontSupport.font(for: text, size: 48, enabled: false)
             XCTAssertEqual(on.fontDescriptor, off.fontDescriptor, text)

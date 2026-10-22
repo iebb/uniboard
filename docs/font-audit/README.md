@@ -55,7 +55,7 @@ Packs are explicit, app-only, off by default, removable, and usable offline in t
 
 ## Emoji behavior
 
-Only the nine missing standalone emoji, optionally followed by VS16, may use the new color subset: U+1F6D9, U+1FA8B, U+1FA8C, U+1FA8D, U+1FACC, U+1FADD, U+1FAEB, U+1FAF9, U+1FAFA. A system glyph still wins whenever available. Joined, modifier, flag and other supported emoji retain the system font. COLR glyphs are recognized as layered color artwork rather than rejected for lacking a base outline.
+Only the nine missing standalone emoji, optionally followed by VS16, may use the new color subset: U+1F6D9, U+1FA8B, U+1FA8C, U+1FA8D, U+1FACC, U+1FADD, U+1FAEB, U+1FAF9, U+1FAFA. A system glyph still wins whenever available. Joined, modifier, flag and other supported emoji retain the system font. VS15 text presentation, repeated selectors, and mixed strings containing the new emoji also stay on the system renderer; this rule does not depend on the runtime knowing Unicode 18 properties. COLR glyphs are recognized as layered color artwork rather than rejected for lacking a base outline.
 
 Current Noto's CBDT font could not be opened as a CGFont on the tested iOS runtime; its COLR font worked, including the final subset. A cmap claim alone would have missed that distinction. The native test retains a color bitmap of all nine final subset glyphs and checks both unqualified and VS16 forms, native controls, disabled behavior and cache limits. App emoji tiles/details and keyboard emoji keys/property previews use the same resolver.
 

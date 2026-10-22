@@ -227,12 +227,37 @@ private final class FontPackDownloads: ObservableObject {
     }
 }
 
+/// The system font picker, listing fonts installed on the device.
+private struct InstalledFontPicker: UIViewControllerRepresentable {
+    let picked: (String?) -> Void
+
+    func makeUIViewController(context: Context) -> UIFontPickerViewController {
+        let configuration = UIFontPickerViewController.Configuration()
+        configuration.includeFaces = true
+        let picker = UIFontPickerViewController(configuration: configuration)
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ picker: UIFontPickerViewController, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(picked: picked) }
+
+    final class Coordinator: NSObject, UIFontPickerViewControllerDelegate {
+        let picked: (String?) -> Void
+        init(picked: @escaping (String?) -> Void) { self.picked = picked }
+        func fontPickerViewControllerDidPickFont(_ picker: UIFontPickerViewController) {
+            picked(picker.selectedFontDescriptor.map { UIFont(descriptor: $0, size: 12).fontName })
+        }
+        func fontPickerViewControllerDidCancel(_ picker: UIFontPickerViewController) { picked(nil) }
+    }
+}
+
 struct FontPackDownloadsView: View {
     @EnvironmentObject private var preferences: CatalogPreferences
     @StateObject private var downloads = FontPackDownloads.shared
     @State private var customFonts = CustomFontStore.shared.fonts
     @State private var importing = false
     @State private var importFailed = false
+    @State private var pickingInstalled = false
 
     var body: some View {
         Form {
@@ -277,10 +302,7 @@ struct FontPackDownloadsView: View {
             }
             Section {
                 ForEach(customFonts) { font in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(font.displayName)
-                        Text(font.postScriptName).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    }
+                    Text(font.displayName)
                     .swipeActions {
                         Button("Remove", role: .destructive) {
                             try? CustomFontStore.shared.remove(font)
@@ -289,9 +311,12 @@ struct FontPackDownloadsView: View {
                     }
                     .accessibilityIdentifier("fontDownloads.custom.\(font.filename)")
                 }
-                Button { importing = true } label: { Label("Add Font", systemImage: "plus") }
+                Button { importing = true } label: { Label("Add Font File", systemImage: "doc.badge.plus") }
                     .disabled(customFonts.count >= CustomFontStore.maximumFonts)
                     .accessibilityIdentifier("fontDownloads.addFont")
+                Button { pickingInstalled = true } label: { Label("Use Installed Font", systemImage: "textformat") }
+                    .disabled(customFonts.count >= CustomFontStore.maximumFonts)
+                    .accessibilityIdentifier("fontDownloads.useInstalled")
                 if importFailed {
                     Text("This file could not be added as a font.").foregroundStyle(.red)
                         .accessibilityIdentifier("fontDownloads.addFont.error")
@@ -311,6 +336,17 @@ struct FontPackDownloadsView: View {
         .navigationTitle("Font Downloads")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { downloads.reload(); reloadCustomFonts() }
+        .sheet(isPresented: $pickingInstalled) {
+            InstalledFontPicker { name in
+                pickingInstalled = false
+                guard let name else { return }
+                let added = try? CustomFontStore.shared.addInstalled(postScriptName: name)
+                importFailed = added == nil
+                if added != nil { preferences.selectUnicodeFonts(true) }
+                reloadCustomFonts()
+            }
+            .ignoresSafeArea()
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.font]) { result in
             guard case .success(let url) = result else { return }
             let scoped = url.startAccessingSecurityScopedResource()

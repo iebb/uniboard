@@ -26,6 +26,7 @@ MINIMUMS = {
     "CatalogWorker.swift": 1.0,
     "KeyboardAlphabet.swift": 1.0,
     "SymbolPageLayout.swift": 1.0,
+    "UCSUR.swift": 1.0,
 }
 
 

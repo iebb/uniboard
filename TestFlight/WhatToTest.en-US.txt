@@ -25,7 +25,10 @@ FONTS
 Preview basics (Unifont, Noto Sans Symbols 2) now download on demand in Settings > Font Downloads, like the other packs. With Extra Unicode fonts on and the pack downloaded, check U+0558 previews in app and keyboard with Full Access OFF. Test cancel, retry, remove and offline use.
 
 YOUR FONTS AND TEXT PREVIEW
-Font Downloads > Add Font adds a TTF or OTF file; it previews characters first, including Private Use, in the app and keyboard. Settings > Text Preview adds a keyboard row showing the text around the caret as Uniboard draws it.
+Font Downloads > Add Font File adds a TTF or OTF file; Use Installed Font picks a font installed by a font app. Either previews characters first, including Private Use, in the app and keyboard.
+
+CONSCRIPT (UCSUR)
+Settings > ConScript (UCSUR) tints registry Private Use characters blue (try U+F8D0 Klingon or U+E000 Tengwar) in the app and keyboard; details show the block. The ConScript (UCSUR) pack downloads Fairfax HD to draw them. Settings > Text Preview adds a keyboard row showing the text around the caret as Uniboard draws it.
 
 PRIVACY AND FAVORITES
 App Favorites reach the keyboard with Full Access OFF; keyboard saves wait locally until optional Full Access permits writing back. Typing, queries, pages and favorites are never sent over a network.

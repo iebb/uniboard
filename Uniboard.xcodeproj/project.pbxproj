@@ -88,6 +88,7 @@
 		8EF067FFC72FDF28E4F21C71 /* SymbolBoardStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41D3D251CE076E09EF76D3B /* SymbolBoardStore.swift */; };
 		8F7AF965AC9EDDE7615E6BA0 /* UnicodeSources.json in Resources */ = {isa = PBXBuildFile; fileRef = 8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */; };
 		90117207CA59BB25334A5E85 /* CompanionAppRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EB5240DA35F8434A42325F5 /* CompanionAppRouteTests.swift */; };
+		9114B0A612C5142CD87A35FD /* UCSUR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E9EA1BECEEF3A3CA9EED979 /* UCSUR.swift */; };
 		915F4383C87AB64D135A6B5C /* UnicodeProperties.json in Resources */ = {isa = PBXBuildFile; fileRef = A24745F2DC10363D8E1053AA /* UnicodeProperties.json */; };
 		9364EE774EA80C6EEBB3DF20 /* CustomFontStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9C3E9D468A589CA9967CE7 /* CustomFontStore.swift */; };
 		93C4D52C9F879198F8426C63 /* BlocksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */; };
@@ -117,6 +118,7 @@
 		C0E97F0D9EAE853CA7FCEB01 /* KeyboardKeySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530F4249047F03D584B4DE2D /* KeyboardKeySettings.swift */; };
 		C1B417957D800D0B171FC926 /* KeyboardInteractionPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8504175A3CB2AEA7218AF691 /* KeyboardInteractionPolicyTests.swift */; };
 		C3DA7E542A9B5174E00D44B3 /* FavoriteSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1976A65554D1A801D23D24A /* FavoriteSync.swift */; };
+		C795A7BE75D5C234AE51F3F6 /* UCSUR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E9EA1BECEEF3A3CA9EED979 /* UCSUR.swift */; };
 		C79EDADB8A6A24F86D9D2AE4 /* KeyboardVariantPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBBF4093360B454BD7E14BAD /* KeyboardVariantPolicy.swift */; };
 		C86AD8E9FAFBBB1354639529 /* KeyboardDocumentIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A8C4E52513534B84177D37 /* KeyboardDocumentIdentity.swift */; };
 		C9D5DD46F5FE23D4EA10AB24 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */; };
@@ -148,6 +150,7 @@
 		EDC868FA3373442D63A192DA /* FontPackDownloadsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760B04D640BC742FC838C0D9 /* FontPackDownloadsView.swift */; };
 		EECEB364F7CCB2F3D61173B1 /* CatalogWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E8034D4526F95C6B7DCC1E /* CatalogWorker.swift */; };
 		F0FCF93DE576D58FD5C3C1CB /* KeyboardRepeatingDeleteControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC483210EFEC390B79F8B5BB /* KeyboardRepeatingDeleteControl.swift */; };
+		F16B0BD5FC5A70B1F2E814BB /* UCSURTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B49294CD40A553613382D9D3 /* UCSURTests.swift */; };
 		F514E348C9AA37A94E9DD860 /* UnicodeStockCoverageAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3710FDDB233ACB1C278190BB /* UnicodeStockCoverageAuditTests.swift */; };
 		F5A017F5BA3746D69BF7C97F /* UnicodeSources.json in Resources */ = {isa = PBXBuildFile; fileRef = 8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */; };
 		F664FF3FB128A8FCDAA58ECD /* CatalogPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B30566745A73A8F9A6CDEF0 /* CatalogPreferencesTests.swift */; };
@@ -221,6 +224,7 @@
 		37497C1AB0325C18D3421224 /* UnicodeEditionSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeEditionSettingsTests.swift; sourceTree = "<group>"; };
 		3C72FB1C6224B9BCA108A40B /* AppSearchFieldTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSearchFieldTests.swift; sourceTree = "<group>"; };
 		3CB8050F1485946A042EFCDF /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		3E9EA1BECEEF3A3CA9EED979 /* UCSUR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UCSUR.swift; sourceTree = "<group>"; };
 		4095E46165DABA2D9D7DA548 /* KeyboardVariantKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardVariantKey.swift; sourceTree = "<group>"; };
 		44FCD917B7BA585375F02ACA /* UnicodeFontSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeFontSupport.swift; sourceTree = "<group>"; };
 		49CC0A642A0BD0AF6C9CAD61 /* CompanionAppRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionAppRoute.swift; sourceTree = "<group>"; };
@@ -272,6 +276,7 @@
 		A751792BE65134112FCC8556 /* UniboardApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UniboardApp.swift; sourceTree = "<group>"; };
 		ACC24723A64562F6EDD61941 /* KeyboardInteractionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInteractionPolicy.swift; sourceTree = "<group>"; };
 		B18617D9009B85751C34705E /* KeyboardTouchActionControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardTouchActionControlTests.swift; sourceTree = "<group>"; };
+		B49294CD40A553613382D9D3 /* UCSURTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UCSURTests.swift; sourceTree = "<group>"; };
 		B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */ = {isa = PBXFileReference; path = UnicodeCatalog.ucd; sourceTree = "<group>"; };
 		B954105DFC7A800D4E800323 /* NewInEditionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewInEditionView.swift; sourceTree = "<group>"; };
 		BB9BAA50EF4DC94FB5B03CD1 /* UniboardUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = UniboardUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -412,6 +417,7 @@
 				663AD2F7AA4B19119C73F049 /* PrivacyManifestTests.swift */,
 				7C848742463EC05B9E73E569 /* SymbolBoardStoreTests.swift */,
 				8499C3EBBCBB98A8A5F87F54 /* SymbolPageLayoutTests.swift */,
+				B49294CD40A553613382D9D3 /* UCSURTests.swift */,
 				22CAA7A19492D753D0BC5772 /* UnicodeCatalogTests.swift */,
 				37497C1AB0325C18D3421224 /* UnicodeEditionSettingsTests.swift */,
 				9A2BD99F4D2B39ED86269C4F /* UnicodeEmojiSequenceAuditTests.swift */,
@@ -469,6 +475,7 @@
 				A41D3D251CE076E09EF76D3B /* SymbolBoardStore.swift */,
 				625891A14AFCE34A29DE6576 /* SymbolPageLayout.swift */,
 				E97E62E7780A345F029D3306 /* SymbolPageSettings.swift */,
+				3E9EA1BECEEF3A3CA9EED979 /* UCSUR.swift */,
 				A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */,
 				CAA4AA431F0B36B45763F4BB /* UnicodeEditionSettings.swift */,
 				71146EC4A5A77E523CF62174 /* UnicodeFontAssets.swift */,
@@ -685,6 +692,7 @@
 				BFC8649E36A0F8A4F0F4EE55 /* PrivacyManifestTests.swift in Sources */,
 				248DC88948EC019B113989AF /* SymbolBoardStoreTests.swift in Sources */,
 				AA4FD041352C67CFCA7A5E31 /* SymbolPageLayoutTests.swift in Sources */,
+				F16B0BD5FC5A70B1F2E814BB /* UCSURTests.swift in Sources */,
 				28C42E6074C8E415AEA640E2 /* UnicodeCatalogTests.swift in Sources */,
 				2C93F45FF7CD9EC54A510128 /* UnicodeEditionSettingsTests.swift in Sources */,
 				9B9A97D719501278BD3869FC /* UnicodeEmojiSequenceAuditTests.swift in Sources */,
@@ -732,6 +740,7 @@
 				8EF067FFC72FDF28E4F21C71 /* SymbolBoardStore.swift in Sources */,
 				3D76FAAD6DA269F378726069 /* SymbolPageLayout.swift in Sources */,
 				E0D5469511E1AF5E6818FC1B /* SymbolPageSettings.swift in Sources */,
+				9114B0A612C5142CD87A35FD /* UCSUR.swift in Sources */,
 				D946C028C1043F7CB96D15B4 /* UnicodeCatalog.swift in Sources */,
 				BAE7E1E883576686AB505245 /* UnicodeEditionSettings.swift in Sources */,
 				5FA6C207B06E5C5AA1CDBEE3 /* UnicodeFontAssets.swift in Sources */,
@@ -789,6 +798,7 @@
 				069E131529729AFBC285927E /* SymbolBoardStore.swift in Sources */,
 				E9D5179DF3DE60A8A7237BBF /* SymbolPageLayout.swift in Sources */,
 				88676082A894925C0566FF58 /* SymbolPageSettings.swift in Sources */,
+				C795A7BE75D5C234AE51F3F6 /* UCSUR.swift in Sources */,
 				B09CEAAD19C426CB3809D22E /* UniboardApp.swift in Sources */,
 				59F9E36BF5D5A1566884BDEE /* UnicodeCatalog.swift in Sources */,
 				CE108ADD067CB459EEB75E4F /* UnicodeEditionSettings.swift in Sources */,

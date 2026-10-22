@@ -27,7 +27,7 @@ struct CharacterDetailView: View {
                             .minimumScaleFactor(0.5).lineLimit(1)
                             .padding(24)
                             .frame(maxWidth: .infinity).frame(height: 196)
-                            .background(Color.previewSurface(missing: glyphMissing), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .background(Color.previewSurface(missing: glyphMissing, ucsur: preferences.isUCSUR(character.codePoint)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
 
                     VStack(spacing: 4) {
@@ -87,7 +87,7 @@ struct CharacterDetailView: View {
             .accessibilityIdentifier(identifier)
             .padding(12)
         .frame(maxWidth: .infinity).frame(height: 196)
-        .background(Color.previewSurface(missing: glyphMissing), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color.previewSurface(missing: glyphMissing, ucsur: preferences.isUCSUR(character.codePoint)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title) presentation")
     }
@@ -192,6 +192,11 @@ struct CharacterDetailView: View {
             .init(title: "Unicode age", value: character.age ?? (character.category == "Cn" ? "Not assigned" : "Pending in the draft data"), identifier: "characterProperties.age", monospaced: false),
             .init(title: "Category", value: "\(character.category) · \(character.categoryName)", identifier: "characterProperties.category", monospaced: false),
             .init(title: "Block", value: character.blockName, identifier: "characterProperties.block", monospaced: false),
+        ]
+        if preferences.showsUCSUR, let block = UCSUR.block(containing: character.codePoint) {
+            rows.append(.init(title: "ConScript block", value: block.name, identifier: "characterProperties.ucsur", monospaced: false))
+        }
+        rows += [
             .init(title: "Script", value: character.script ?? "Not listed in this source", identifier: "characterProperties.script", monospaced: false),
             .init(title: "Decimal", value: String(character.codePoint), identifier: "characterProperties.decimal", monospaced: false),
             .init(title: "UTF-8", value: character.text.utf8.map { String(format: "%02X", $0) }.joined(separator: " "), identifier: "characterProperties.utf8"),

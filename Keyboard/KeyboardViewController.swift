@@ -829,6 +829,7 @@ private final class KeyboardModel: ObservableObject {
     @Published private(set) var searchBarInsteadOfSymbols: Bool
     @Published private(set) var showsNumberRow: Bool
     @Published private(set) var showsTextPreview: Bool
+    @Published private(set) var showsUCSUR: Bool
     /// The host's text either side of the caret, for the text preview row.
     @Published var hostTextBefore = ""
     @Published var hostTextAfter = ""
@@ -1056,6 +1057,7 @@ private final class KeyboardModel: ObservableObject {
         searchBarInsteadOfSymbols = appSettings.searchBarInsteadOfSymbols
         showsNumberRow = appSettings.showsNumberRow
         showsTextPreview = appSettings.showsTextPreview
+        showsUCSUR = appSettings.showsUCSUR
         showsCollapseKey = appSettings.showsCollapseKey
         selectedPadLayout = appSettings.padLayout
         adoptLayouts(appSettings.layouts, keepingCurrent: false)
@@ -1109,6 +1111,7 @@ private final class KeyboardModel: ObservableObject {
             showsTextPreview = selected.showsTextPreview
             invalidateInputMode(); presentationChanged?()
         }
+        if showsUCSUR != selected.showsUCSUR { showsUCSUR = selected.showsUCSUR }
         let keys = KeyboardKeySettings.shared.loadSnapshot()
         if keySettings != keys { keySettings = keys; invalidateInputMode() }
     }
@@ -1305,14 +1308,19 @@ enum KeyboardPalette {
     static let actionUI = UIColor.systemBlue
     /// A key whose glyph iOS and every installed fallback still cannot draw.
     /// Opaque, so the tint reads the same over the translucent keyboard tray.
-    static let missingGlyphUI = UIColor { traits in
-        let key = keyUI.resolvedColor(with: traits), red = UIColor.systemRed.resolvedColor(with: traits)
-        var k: (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0), r = k
-        key.getRed(&k.0, green: &k.1, blue: &k.2, alpha: &k.3)
-        red.getRed(&r.0, green: &r.1, blue: &r.2, alpha: &r.3)
-        let amount: CGFloat = 0.18
-        return UIColor(red: k.0 + (r.0 - k.0) * amount, green: k.1 + (r.1 - k.1) * amount,
-                       blue: k.2 + (r.2 - k.2) * amount, alpha: 1)
+    static let missingGlyphUI = tintedKey(.systemRed)
+    /// A Private Use key the ConScript Unicode Registry assigns.
+    static let ucsurUI = tintedKey(.systemBlue)
+    private static func tintedKey(_ tint: UIColor) -> UIColor {
+        UIColor { traits in
+            let key = keyUI.resolvedColor(with: traits), tint = tint.resolvedColor(with: traits)
+            var k: (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0), r = k
+            key.getRed(&k.0, green: &k.1, blue: &k.2, alpha: &k.3)
+            tint.getRed(&r.0, green: &r.1, blue: &r.2, alpha: &r.3)
+            let amount: CGFloat = 0.18
+            return UIColor(red: k.0 + (r.0 - k.0) * amount, green: k.1 + (r.1 - k.1) * amount,
+                           blue: k.2 + (r.2 - k.2) * amount, alpha: 1)
+        }
     }
     static let actionTextUI = UIColor.white
     static let accent = Color(uiColor: accentUI)
@@ -1697,7 +1705,7 @@ private struct UnicodeKeyboardView: View {
                 LazyHStack(spacing: 5) {
                     ForEach(model.section == .emojis ? model.emojiResults.map(KeyboardItem.emoji) : searchItems(model.results), id: \.keyIdentifier) { item in
                         InspectableCharacterKey(item: item, favorite: isFavorite(item), compact: true,
-                            useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.isSearching, showsName: true,
+                            useUnicodeFonts: model.useUnicodeFonts, showsUCSUR: model.showsUCSUR, route: model.inputModeID, enabled: model.isSearching, showsName: true,
                             actionFactory: { [mode = model.inputModeID] in keyActions(mode, item) })
                             .frame(width: 58, height: model.typingKeyHeight)
                             .keyboardKeySurface(radius: 7)
@@ -1747,7 +1755,7 @@ private struct UnicodeKeyboardView: View {
                 LazyVGrid(columns: columns, spacing: 6) {
                     ForEach(searchItems(model.results), id: \.keyIdentifier) { item in
                         InspectableCharacterKey(item: item, favorite: isFavorite(item), compact: model.isCompactLayout,
-                            useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.showsUnicode, showsName: true,
+                            useUnicodeFonts: model.useUnicodeFonts, showsUCSUR: model.showsUCSUR, route: model.inputModeID, enabled: model.showsUnicode, showsName: true,
                             actionFactory: { [mode = model.inputModeID] in keyActions(mode, item) })
                             .frame(height: keyHeight)
                             .keyboardKeySurface(radius: 7)
@@ -1942,7 +1950,7 @@ private struct UnicodeKeyboardView: View {
             LazyVGrid(columns: savedBoardColumns, spacing: 4) {
                 ForEach(characters) { character in
                     InspectableCharacterKey(item: .character(character), favorite: false, compact: true,
-                        useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID,
+                        useUnicodeFonts: model.useUnicodeFonts, showsUCSUR: model.showsUCSUR, route: model.inputModeID,
                         enabled: model.isShowingSymbolPages && (legacy ? model.showFavorites && symbolBoards.activeBoardID == SymbolBoardStore.favoritesID : !model.showFavorites), glyphOnly: true,
                         actionFactory: { [mode = model.inputModeID] in keyActions(mode, .character(character)) })
                         .frame(maxWidth: .infinity).frame(height: savedKeyHeight)
@@ -1951,7 +1959,7 @@ private struct UnicodeKeyboardView: View {
                 }
                 ForEach(emojis) { emoji in
                     InspectableCharacterKey(item: .emoji(emoji), favorite: false, compact: true,
-                        useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID,
+                        useUnicodeFonts: model.useUnicodeFonts, showsUCSUR: model.showsUCSUR, route: model.inputModeID,
                         enabled: model.isShowingSymbolPages && (legacy ? model.showFavorites && symbolBoards.activeBoardID == SymbolBoardStore.favoritesID : !model.showFavorites), glyphOnly: true,
                         actionFactory: { [mode = model.inputModeID] in keyActions(mode, .emoji(emoji)) })
                         .frame(maxWidth: .infinity).frame(height: savedKeyHeight)
@@ -1984,7 +1992,7 @@ private struct UnicodeKeyboardView: View {
     private func characterTiles(_ characters: [UnicodeCharacter], pagination: (() -> Void)? = nil) -> some View {
         return LazyVGrid(columns: columns, spacing: 6) {
             ForEach(characters) { character in
-                InspectableCharacterKey(item: .character(character), favorite: store.isFavorite(character.codePoint), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.showsUnicode,
+                InspectableCharacterKey(item: .character(character), favorite: store.isFavorite(character.codePoint), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, showsUCSUR: model.showsUCSUR, route: model.inputModeID, enabled: model.showsUnicode,
                     showsName: true, actionFactory: { [mode = model.inputModeID] in keyActions(mode, .character(character)) })
                     .frame(height: keyHeight)
                     .keyboardKeySurface(radius: 7)
@@ -1995,7 +2003,7 @@ private struct UnicodeKeyboardView: View {
     private func emojiTiles(_ emojis: [UnicodeEmojiEntry], pagination: (() -> Void)? = nil) -> some View {
         return LazyVGrid(columns: columns, spacing: 6) {
             ForEach(emojis) { emoji in
-                InspectableCharacterKey(item: .emoji(emoji), favorite: store.isFavoriteEmoji(emoji.id), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.showsUnicode,
+                InspectableCharacterKey(item: .emoji(emoji), favorite: store.isFavoriteEmoji(emoji.id), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, showsUCSUR: model.showsUCSUR, route: model.inputModeID, enabled: model.showsUnicode,
                     showsName: true, actionFactory: { [mode = model.inputModeID] in keyActions(mode, .emoji(emoji)) })
                     .frame(height: keyHeight)
                     .keyboardKeySurface(radius: 7)
@@ -2622,6 +2630,7 @@ private struct InspectableCharacterKey: UIViewRepresentable {
     let favorite: Bool
     let compact: Bool
     let useUnicodeFonts: Bool
+    let showsUCSUR: Bool
     let route: UUID
     let enabled: Bool
     var glyphOnly = false
@@ -2632,7 +2641,7 @@ private struct InspectableCharacterKey: UIViewRepresentable {
 
     func makeUIView(context: Context) -> InspectableKeyButton { InspectableKeyButton() }
     func updateUIView(_ uiView: InspectableKeyButton, context: Context) {
-        uiView.configure(item: item, favorite: favorite, compact: compact, useUnicodeFonts: useUnicodeFonts, glyphOnly: glyphOnly || showsName,
+        uiView.configure(item: item, favorite: favorite, compact: compact, useUnicodeFonts: useUnicodeFonts, showsUCSUR: showsUCSUR, glyphOnly: glyphOnly || showsName,
             showsName: showsName, route: route, enabled: enabled, actionFactory: actionFactory)
         uiView.accessibilityIdentifier = identifier ?? item.keyIdentifier
     }
@@ -2728,7 +2737,7 @@ private final class InspectableKeyButton: UIControl {
     override var isHighlighted: Bool {
         didSet { pressFeedback.setPressed(isHighlighted) }
     }
-    func configure(item: KeyboardItem, favorite: Bool, compact: Bool, useUnicodeFonts: Bool, glyphOnly: Bool, showsName: Bool = false,
+    func configure(item: KeyboardItem, favorite: Bool, compact: Bool, useUnicodeFonts: Bool, showsUCSUR: Bool, glyphOnly: Bool, showsName: Bool = false,
                    route: UUID, enabled: Bool, actionFactory: @escaping KeyboardInspectableInteraction.ActionFactory) {
         if usesExternalKeySurface != glyphOnly {
             usesExternalKeySurface = glyphOnly
@@ -2743,7 +2752,9 @@ private final class InspectableKeyButton: UIControl {
         glyph.text = item.displayText
         glyphHeight.constant = compact ? 26 : 34
         let missing: Bool
+        var ucsur = false
         if case .character(let character) = item {
+            ucsur = showsUCSUR && UCSUR.block(containing: character.codePoint) != nil
             let size: CGFloat = character.isInvisible ? 17 : compact ? 24 : 32
             glyph.font = UnicodeFontSupport.font(for: character.displayText, size: size, enabled: useUnicodeFonts)
             accessibilityValue = UnicodeFontSupport.sourceName(for: character.displayText, size: size, enabled: useUnicodeFonts).map { "Preview font: \($0)" }
@@ -2754,8 +2765,9 @@ private final class InspectableKeyButton: UIControl {
             accessibilityValue = UnicodeFontSupport.sourceName(for: item.displayText, size: size, enabled: useUnicodeFonts).map { "Preview font: \($0)" }
             missing = UnicodeFontSupport.stockFontsMiss(item.displayText, emoji: true)
         }
-        backgroundColor = glyphOnly ? (missing ? UIColor.systemRed.withAlphaComponent(0.18) : .clear)
-            : missing ? KeyboardPalette.missingGlyphUI : KeyboardPalette.keyUI
+        backgroundColor = glyphOnly
+            ? (ucsur ? UIColor.systemBlue.withAlphaComponent(0.18) : missing ? UIColor.systemRed.withAlphaComponent(0.18) : .clear)
+            : ucsur ? KeyboardPalette.ucsurUI : missing ? KeyboardPalette.missingGlyphUI : KeyboardPalette.keyUI
         code.text = item.footer
         name.text = showsName ? item.name : nil
         name.isHidden = !showsName

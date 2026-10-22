@@ -10,6 +10,8 @@ struct CustomFont: Codable, Equatable, Identifiable {
     let postScriptName: String
     let sha256: String
     let ranges: [[UInt32]]
+    /// Installed on the device rather than copied in; opened by PostScript name.
+    var installed: Bool? = nil
     var id: String { filename }
 }
 
@@ -42,8 +44,30 @@ final class CustomFontStore: @unchecked Sendable {
     }
 
     func url(forFilename filename: String) -> URL? {
-        guard Self.validFilename(filename), let directory, fonts.contains(where: { $0.filename == filename }) else { return nil }
+        guard Self.validFilename(filename), !filename.hasPrefix("Installed-"), let directory,
+              fonts.contains(where: { $0.filename == filename }) else { return nil }
         return directory.appendingPathComponent(filename)
+    }
+
+    /// Uses a font installed on the device, such as one from a font app, by its PostScript name.
+    @discardableResult func addInstalled(postScriptName: String) throws -> CustomFont {
+        guard let directory else { throw Failure.unavailable }
+        let font = CTFontCreateWithName(postScriptName as CFString, 12, nil)
+        // An unknown name silently falls back to another font; refuse that.
+        guard CTFontCopyPostScriptName(font) as String == postScriptName,
+              postScriptName.range(of: #"^[A-Za-z0-9._-]{1,100}$"#, options: .regularExpression) != nil else { throw Failure.notAFont }
+        let filename = "Installed-" + postScriptName
+        var fonts = fonts
+        if let existing = fonts.first(where: { $0.filename == filename }) { return existing }
+        guard fonts.count < Self.maximumFonts else { throw Failure.tooMany }
+        let ranges = Self.ranges(CTFontCopyCharacterSet(font))
+        guard !ranges.isEmpty else { throw Failure.notAFont }
+        let custom = CustomFont(filename: filename, displayName: CTFontCopyFullName(font) as String,
+                                postScriptName: postScriptName, sha256: "", ranges: ranges, installed: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        fonts.append(custom)
+        try save(fonts, in: directory)
+        return custom
     }
 
     /// Adds a TrueType or OpenType font, or returns the same font if it was already added.
@@ -83,7 +107,7 @@ final class CustomFontStore: @unchecked Sendable {
     }
 
     private static func validFilename(_ name: String) -> Bool {
-        name.range(of: #"^Custom-[0-9a-f]{16}\.(ttf|otf)$"#, options: .regularExpression) != nil
+        name.range(of: #"^(Custom-[0-9a-f]{16}\.(ttf|otf)|Installed-[A-Za-z0-9._-]{1,100})$"#, options: .regularExpression) != nil
     }
 
     /// Scalar ranges a character set covers, without surrogates.

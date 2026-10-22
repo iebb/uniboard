@@ -235,8 +235,11 @@ enum UnicodeFontSupport {
         // A missing download is checked once per download revision, not on
         // every preview that its ranges cover.
         guard !unavailableFonts.contains(index) else { return nil }
-        guard assets.indices.contains(index), let url = resourceURL(assets[index].filename),
-              let provider = CGDataProvider(url: url as CFURL), let font = CGFont(provider),
+        // A font installed on the device opens by name; the rest from their files.
+        let installed = assets.indices.contains(index) && assets[index].filename.hasPrefix("Installed-")
+        guard assets.indices.contains(index),
+              let font = installed ? CGFont(assets[index].postScriptName as CFString)
+                : resourceURL(assets[index].filename).flatMap { CGDataProvider(url: $0 as CFURL) }.flatMap(CGFont.init),
               font.postScriptName as String? == assets[index].postScriptName else {
             unavailableFonts.insert(index)
             return nil

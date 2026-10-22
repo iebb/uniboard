@@ -17,9 +17,11 @@ def validate_downloads(directory: Path) -> None:
     protected_emoji = {cp for block in stock["blocks"] for cp in block["emojiMissing"]}
     assert catalog["schemaVersion"] == inputs["schemaVersion"] == 1
     assert catalog["unicodeVersion"] == inputs["unicodeVersion"] == "18.0.0"
-    assert [pack["id"] for pack in catalog["packs"]] == ["preview-basics", "historic-symbols", "han-supplementary", "han-latest", "seal", "emoji"]
-    # Preview basics are the unchanged manifest fonts, checked in validate().
-    fonts = [font for pack in catalog["packs"][1:] for font in pack["fonts"]]
+    assert [pack["id"] for pack in catalog["packs"]] == ["preview-basics", "historic-symbols", "han-supplementary", "han-latest", "seal", "emoji", "ucsur"]
+    validate_ucsur(catalog["packs"][-1], inputs, directory)
+    # Preview basics are the unchanged manifest fonts, checked in validate();
+    # the UCSUR pack draws Private Use characters, outside the measured audit.
+    fonts = [font for pack in catalog["packs"][1:-1] for font in pack["fonts"]]
     assert len(fonts) == len(inputs["fonts"]) == 69
     by_name = {entry["filename"]: entry for entry in inputs["fonts"]}
     assert len(by_name) == len(fonts)
@@ -74,9 +76,25 @@ def validate_downloads(directory: Path) -> None:
             assert covered.isdisjoint(points), "Each download must contribute unique measured preview coverage"
             points.update(covered)
         assert not (directory / filename).exists(), "Download assets must not enlarge the initial app/keyboard bundles"
-    total += sum(font["bytes"] for font in catalog["packs"][0]["fonts"])
+    total += sum(font["bytes"] for pack in (catalog["packs"][0], catalog["packs"][-1]) for font in pack["fonts"])
     assert total <= 96 * 1024 * 1024
     print(f"Validated {len(catalog['packs'])} optional packs: {len(fonts)} pinned fonts, {total:,} download bytes, {len(points):,} iOS-measured scalars.")
+
+
+def validate_ucsur(pack, inputs, directory: Path) -> None:
+    """Fairfax HD, unchanged, for ConScript Unicode Registry Private Use characters."""
+    [font] = pack["fonts"]
+    asset = font["asset"]
+    source = next(entry for entry in inputs["fonts"] if entry.get("family") == "Fairfax HD")
+    assert asset["filename"] == "FairfaxHD.ttf" and asset["postScriptName"] == "FairfaxHD"
+    assert asset["sha256"] == source["sourceFontSha256"] and asset["sourceURL"] == source["sourceURL"]
+    assert asset["licenseFilename"] == "FairfaxHD-OFL.txt" and "SIL OPEN FONT LICENSE" in (directory / asset["licenseFilename"]).read_text()
+    assert font["downloadURL"] == inputs["downloadBase"] + asset["filename"]
+    assert not (directory / asset["filename"]).exists(), "Download assets must not enlarge the bundles"
+    previous = -1
+    for lo, hi in asset["ranges"]:
+        assert previous < lo <= hi and (0xE000 <= lo and hi <= 0xF8FF or 0xF0000 <= lo and hi <= 0x10FFFD), "UCSUR coverage is Private Use only"
+        previous = hi
 
 
 def validate(directory: Path) -> None:

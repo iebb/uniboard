@@ -488,6 +488,23 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["character-U+0020"].firstMatch.waitForExistence(timeout: 10))
     }
 
+    func testConScriptCharactersShowTheirBlock() {
+        setAppUCSUR(true)
+        selectAppTab("Explore")
+        searchUnicode("U+F8D0")
+        dismissAppSearchKeyboard()
+        let klingon = character("U+F8D0")
+        XCTAssertTrue(klingon.waitForExistence(timeout: 10))
+        attachScreenshot("ConScript character tinted blue")
+        klingon.tap()
+        let block = app.descendants(matching: .any)["characterProperties.ucsur"].firstMatch
+        revealByScrolling(block, in: app)
+        XCTAssertEqual(accessibleText(block), "KLINGON")
+        attachScreenshot("ConScript block in details")
+        app.swipeDown(velocity: .fast)
+        setAppUCSUR(false)
+    }
+
     func testEmojiDetailsAndScratchpadPreserveWholeZWJSequence() {
         selectAppTab("Emoji")
         search("woman technologist", fieldIdentifier: "emojiSearch")
@@ -3120,6 +3137,15 @@ final class UniboardUITests: XCTestCase {
         let value = enabled ? "1" : "0"
         if fonts.value as? String != value { tapSwitch(fonts) }
         XCTAssertTrue(fonts.waitUntilValueEquals(value))
+    }
+
+    private func setAppUCSUR(_ enabled: Bool) {
+        openAppSettings()
+        let ucsur = app.switches["showUCSUR"].firstMatch
+        revealByScrolling(ucsur, in: app)
+        let value = enabled ? "1" : "0"
+        if ucsur.value as? String != value { tapSwitch(ucsur) }
+        XCTAssertTrue(ucsur.waitUntilValueEquals(value))
     }
 
     /// A Form toggle row spans its label, which does not flip the switch;

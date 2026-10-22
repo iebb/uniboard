@@ -108,14 +108,14 @@ final class UnicodeFontAssetsTests: XCTestCase {
             .appendingPathComponent("Fonts/DownloadableFonts.json")
         if FileManager.default.fileExists(atPath: path.path) {
             let catalog = try XCTUnwrap(UnicodeFontPackCatalog.load(data: Data(contentsOf: path)))
-            XCTAssertEqual(catalog.packs.count, 6)
+            XCTAssertEqual(catalog.packs.count, 7)
             XCTAssertEqual(catalog.packs.first?.id, "preview-basics", "Preview fonts download on demand first")
-            XCTAssertEqual(catalog.packs.flatMap(\.fonts).count, 73)
+            XCTAssertEqual(catalog.packs.flatMap(\.fonts).count, 74)
             let emoji = try XCTUnwrap(catalog.packs.first { $0.id == "emoji" })
             XCTAssertEqual(emoji.fonts.map(\.asset.postScriptName), ["NotoColorEmoji", "UniboardCoverage068-Regular"],
                            "The complete sbix fallback is tried before the Unicode 18 COLR subset")
             XCTAssertLessThanOrEqual(catalog.packs.flatMap(\.fonts).reduce(Int64(0)) { $0 + $1.bytes }, UnicodeFontPackCatalog.maximumTotalBytes)
-            XCTAssertEqual(UnicodeFontPackCatalog.loadBundled(resourceURL: path).packs.count, 6)
+            XCTAssertEqual(UnicodeFontPackCatalog.loadBundled(resourceURL: path).packs.count, 7)
         }
         XCTAssertTrue(UnicodeFontPackCatalog.loadBundled(resourceURL: nil).packs.isEmpty)
         XCTAssertTrue(UnicodeFontPackCatalog.loadBundled(resourceURL: URL(fileURLWithPath: "/nonexistent/uniboard-font-catalog")).packs.isEmpty)

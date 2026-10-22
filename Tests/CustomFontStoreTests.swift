@@ -23,5 +23,18 @@ final class CustomFontStoreTests: XCTestCase {
         XCTAssertNil(store.url(forFilename: "../escape.ttf"))
         XCTAssertThrowsError(try CustomFontStore(directory: nil).add(Data()))
     }
+
+    func testInstalledFontsAreUsedByNameOnce() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = CustomFontStore(directory: directory)
+        let font = try store.addInstalled(postScriptName: "Helvetica")
+        XCTAssertEqual(font.filename, "Installed-Helvetica")
+        XCTAssertEqual(font.installed, true)
+        XCTAssertEqual(try store.addInstalled(postScriptName: "Helvetica"), font)
+        XCTAssertEqual(store.fonts, [font])
+        XCTAssertNil(store.url(forFilename: font.filename), "Installed fonts have no file of their own")
+        XCTAssertThrowsError(try store.addInstalled(postScriptName: "NoSuchFont-Uniboard"), "An unknown name falls back to another font")
+    }
 }
 #endif

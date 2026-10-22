@@ -71,6 +71,8 @@ struct SetupView: View {
             Section {
                 Toggle("Extra Unicode Fonts", isOn: Binding(get: { preferences.useUnicodeFonts }, set: { preferences.selectUnicodeFonts($0) }))
                     .accessibilityIdentifier("extraUnicodeFonts")
+                Toggle("ConScript (UCSUR)", isOn: Binding(get: { preferences.showsUCSUR }, set: { preferences.selectUCSUR($0) }))
+                    .accessibilityIdentifier("showUCSUR")
                 NavigationLink("Font Downloads") { FontPackDownloadsView() }
                     .accessibilityIdentifier("fontDownloads")
                 NavigationLink("Font Licenses") { FontLicenseView() }

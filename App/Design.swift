@@ -8,8 +8,12 @@ extension Color {
     /// Behind a preview whose glyph iOS and every installed fallback still
     /// draws as a placeholder.
     static let missingGlyph = Color.red.opacity(0.16)
+    /// Behind a Private Use character the ConScript Unicode Registry assigns.
+    static let ucsur = Color.blue.opacity(0.16)
 
-    static func previewSurface(missing: Bool) -> Color { missing ? .missingGlyph : .groupedSurface }
+    static func previewSurface(missing: Bool, ucsur: Bool = false) -> Color {
+        ucsur ? .ucsur : missing ? .missingGlyph : .groupedSurface
+    }
 }
 
 /// A colored corner ribbon naming the Unicode or Emoji version that added a
@@ -152,7 +156,7 @@ struct CharacterTile: View {
 
     var body: some View {
         content
-            .background(Color.previewSurface(missing: missing))
+            .background(Color.previewSurface(missing: missing, ucsur: preferences.isUCSUR(character.codePoint)))
             .overlay(alignment: .topTrailing) {
                 if density != .sixteen, character.category != "Cn" {
                     VersionRibbon(version: character.age, labeled: density == .three)

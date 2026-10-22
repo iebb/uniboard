@@ -117,6 +117,30 @@ enum KeyboardVariantPolicy {
         return GestureCandidates(longPress: result[0], swipeUp: result[1], swipeDown: result[2])
     }
 
+    /// A key's built-in candidates for one gesture, as the iPhone keyboard
+    /// offers them in lowercase with the number row: letters from the letter
+    /// page, digits from the number row, and symbols from the first page that
+    /// has them.
+    static func defaultCandidates(for keyID: String, gesture: KeyboardKeySettings.Gesture,
+                                  mapping: KeyboardPadSymbolMapping) -> [String] {
+        guard let descriptor = KeyboardKeySettings.descriptor(for: keyID), let key = descriptor.text else { return [] }
+        var state = KeyboardTypingState()
+        if descriptor.kind == .character,
+           let layout = KeyboardTypingLayout.allCases.first(where: { $0.rows.flatMap { $0 }.contains(key) }) {
+            state.selectLayout(layout)
+        }
+        let auxiliary = descriptor.kind == .digit
+        let groups = gestureCandidates(for: key, original: key, state: state, isAuxiliaryKey: auxiliary,
+                                       widePad: false, ansiPad: false, mapping: mapping,
+                                       hasNumberRow: state.layout == .letters, settings: .defaults)
+        switch gesture {
+        case .longPress: return groups.longPress
+        case .swipeUp: return groups.swipeUp
+        case .swipeDown: return groups.swipeDown
+        case .tap, .shiftedTap: return []
+        }
+    }
+
     static func candidates(override: [String]?, defaults: [String]) -> [String] {
         let values = override ?? defaults
         let limit = override == nil ? maximumVariants + 1 : maximumVariants

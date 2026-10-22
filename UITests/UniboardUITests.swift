@@ -146,9 +146,13 @@ final class UniboardUITests: XCTestCase {
         let gesture = app.buttons["keySettings.gesture.swipeUp"].firstMatch
         XCTAssertTrue(gesture.waitForExistence(timeout: 5))
         gesture.tap()
-        let behavior = app.segmentedControls["keySettings.behavior"]
-        XCTAssertTrue(behavior.waitForExistence(timeout: 5))
-        behavior.buttons["Custom"].tap()
+        // The editor lists the default candidates; replace them with one choice.
+        XCTAssertTrue(app.staticTexts["keySettings.isDefault"].waitForExistence(timeout: 5))
+        let removeAll = app.buttons["keySettings.removeAll"].firstMatch
+        revealByScrolling(removeAll, in: app)
+        removeAll.tap()
+        XCTAssertTrue(app.staticTexts["keySettings.off"].waitForExistence(timeout: 5))
+        app.buttons["keySettings.addChoice"].tap()
         let choice = app.textFields["keySettings.choice.0"].firstMatch
         XCTAssertTrue(choice.waitForExistence(timeout: 5))
         choice.tap()
@@ -175,12 +179,14 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Q key"].waitForExistence(timeout: 5))
         XCTAssertTrue(gesture.waitUntilValueEquals("xy"), "Explicit key settings survive an ordinary app relaunch")
         gesture.tap()
-        XCTAssertTrue(behavior.waitForExistence(timeout: 5))
-        behavior.buttons["Off"].tap()
+        let removeAllSaved = app.buttons["keySettings.removeAll"].firstMatch
+        XCTAssertTrue(removeAllSaved.waitForExistence(timeout: 5))
+        revealByScrolling(removeAllSaved, in: app)
+        removeAllSaved.tap()
         app.buttons["keySettings.save"].tap()
         XCTAssertTrue(gesture.waitUntilValueEquals("Off"))
         gesture.tap()
-        XCTAssertTrue(behavior.buttons["Off"].isSelected)
+        XCTAssertTrue(app.staticTexts["keySettings.off"].waitForExistence(timeout: 5), "Removing every choice turns the gesture off")
         app.navigationBars.buttons.firstMatch.tap()
         app.buttons["keySettings.resetKey"].tap()
         app.buttons["Restore defaults"].tap()
@@ -1208,9 +1214,12 @@ final class UniboardUITests: XCTestCase {
         key.tap()
         XCTAssertTrue(app.descendants(matching: .any)["keySettings.detail.\(keyID)"].firstMatch.waitForExistence(timeout: 5))
         app.buttons["keySettings.gesture.\(gesture)"].tap()
-        app.segmentedControls["keySettings.behavior"].buttons["Custom"].tap()
+        let removeAll = app.buttons["keySettings.removeAll"].firstMatch
+        XCTAssertTrue(removeAll.waitForExistence(timeout: 5))
+        revealByScrolling(removeAll, in: app)
+        removeAll.tap()
         for (index, value) in choices.enumerated() {
-            if index > 0 { app.buttons["keySettings.addChoice"].tap() }
+            app.buttons["keySettings.addChoice"].tap()
             let field = app.textFields["keySettings.choice.\(index)"].firstMatch
             XCTAssertTrue(field.waitForExistence(timeout: 5))
             field.tap()

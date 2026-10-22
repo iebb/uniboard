@@ -122,81 +122,107 @@ private struct KeyboardSingleKeySettingsView: View {
 }
 
 private struct KeyboardGestureSettingsView: View {
-    private enum Mode: String, CaseIterable { case system = "Default", disabled = "Off", custom = "Custom" }
     private struct Choice: Identifiable { let id = UUID(); var text: String }
     let descriptor: KeyboardKeySettings.Descriptor
     let gesture: KeyboardKeySettings.Gesture
     @ObservedObject var keys: KeyboardKeyPreferences
+    @EnvironmentObject private var preferences: CatalogPreferences
     @Environment(\.dismiss) private var dismiss
     @State private var original: [String]?
-    @State private var mode: Mode
     @State private var choices: [Choice]
+    /// True while the list shows the built-in candidates, which follow case
+    /// and layout while typing. Any edit makes the list a fixed custom set.
+    @State private var usesDefaults: Bool
     @State private var showsUnicodePicker = false
     @State private var saveAttempted = false
     @State private var saveAlert = false
+    @FocusState private var focused: UUID?
 
     init(descriptor: KeyboardKeySettings.Descriptor, gesture: KeyboardKeySettings.Gesture,
          keys: KeyboardKeyPreferences, current: [String]?) {
         self.descriptor = descriptor; self.gesture = gesture; self.keys = keys
         _original = State(initialValue: current)
-        _mode = State(initialValue: current.map { $0.isEmpty ? .disabled : .custom } ?? .system)
+        _usesDefaults = State(initialValue: current == nil)
         _choices = State(initialValue: (current ?? []).map { Choice(text: $0) })
     }
+    private var defaults: [String] {
+        KeyboardVariantPolicy.defaultCandidates(for: descriptor.id, gesture: gesture, mapping: preferences.padSymbolMapping)
+    }
     private var candidates: [String]? {
-        switch mode { case .system: return nil; case .disabled: return []; case .custom: return choices.map(\.text) }
+        usesDefaults ? nil : choices.map(\.text).filter { !$0.isEmpty }
     }
     private var valid: Bool {
-        if mode == .custom && choices.isEmpty { return false }
-        return KeyboardKeySettings.Snapshot.defaults.updating(candidates, for: descriptor.id, gesture: gesture) != nil
+        KeyboardKeySettings.Snapshot.defaults.updating(candidates, for: descriptor.id, gesture: gesture) != nil
     }
+    private var explanation: String {
+        switch gesture {
+        case .swipeDown where descriptor.kind == .letter:
+            return "By default: the opposite case first, then its accented choices. Shift stays unchanged."
+        case .longPress:
+            return "By default: familiar accents in the current case and stock symbol variants."
+        case .swipeUp:
+            return "By default: the mapped symbol, then unused macOS U.S. Option and Shift–Option characters. Dead-key accents insert their literal spacing form."
+        default:
+            return ""
+        }
+    }
+
     var body: some View {
         List {
             Section {
-                Picker("Behavior", selection: $mode) {
-                    ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).accessibilityIdentifier("keySettings.behavior")
-                if mode == .system {
-                    Text("Use Uniboard’s built-in behavior.").foregroundStyle(.secondary)
-                    if gesture == .swipeDown && descriptor.kind == .letter {
-                        Text("Selects the opposite case first, followed by its accented choices. The keyboard’s Shift state stays unchanged.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if gesture == .longPress {
-                        Text("Includes familiar accents in the current case and stock symbol variants. Custom choices replace these defaults.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if gesture == .swipeUp {
-                        Text("Swipe up to choose the mapped symbol and unused macOS U.S. Option or Shift–Option characters. On wide iPad and number-row layouts, the first choice appears above the key. Dead-key accents insert their literal spacing form. Custom choices replace the hint; Off hides it.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                } else if mode == .disabled {
-                    Text("This gesture is disabled. An ordinary tap still works.").foregroundStyle(.secondary)
+                ForEach($choices) { $choice in
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("Character or sequence", text: $choice.text, axis: .vertical)
+                            .font(.title2).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .lineLimit(1...3)
+                            .focused($focused, equals: choice.id)
+                            .accessibilityIdentifier("keySettings.choice.\(choices.firstIndex(where: { $0.id == choice.id }) ?? 0)")
+                        Text(codePoints(choice.text)).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }.padding(.vertical, 4)
                 }
+                .onDelete { choices.remove(atOffsets: $0) }
+                .onMove { choices.move(fromOffsets: $0, toOffset: $1) }
+                if choices.isEmpty {
+                    Text("Off. This gesture does nothing; a tap still types the key.")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("keySettings.off")
+                }
+                Button {
+                    let choice = Choice(text: "")
+                    choices.append(choice)
+                    // The field exists only after this update, so focus it on the next pass.
+                    DispatchQueue.main.async { focused = choice.id }
+                } label: { Label("Add Choice", systemImage: "plus") }
+                    .disabled(choices.count >= gesture.maximumChoices)
+                    .accessibilityIdentifier("keySettings.addChoice")
+                Button { showsUnicodePicker = true } label: { Label("Choose from Unicode", systemImage: "character.book.closed") }
+                    .disabled(choices.count >= gesture.maximumChoices)
+                    .accessibilityIdentifier("keySettings.chooseUnicode")
+            } header: {
+                HStack {
+                    Text("Choices in Selection Order")
+                    Spacer()
+                    if usesDefaults { Text("Default").accessibilityIdentifier("keySettings.isDefault") }
+                }
+            } footer: {
+                Text([explanation, "Defaults are shown for lowercase iPhone typing and follow case and layout; once edited, this list is used as is. Swipe a choice to remove it, or remove every choice to turn the gesture off."]
+                    .filter { !$0.isEmpty }.joined(separator: " "))
             }
-            if mode == .custom {
-                Section {
-                    ForEach($choices) { $choice in
-                        VStack(alignment: .leading, spacing: 6) {
-                            TextField("Character or sequence", text: $choice.text, axis: .vertical)
-                                .font(.title2).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                .lineLimit(1...3)
-                                .accessibilityIdentifier("keySettings.choice.\(choices.firstIndex(where: { $0.id == choice.id }) ?? 0)")
-                            Text(codePoints(choice.text)).font(.caption.monospaced()).foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        }.padding(.vertical, 4)
-                    }
-                    .onDelete { choices.remove(atOffsets: $0) }
-                    .onMove { choices.move(fromOffsets: $0, toOffset: $1) }
-                    Button { choices.append(Choice(text: "")) } label: { Label("Add choice", systemImage: "plus") }
-                        .disabled(choices.count >= gesture.maximumChoices)
-                        .accessibilityIdentifier("keySettings.addChoice")
-                    Button { showsUnicodePicker = true } label: { Label("Choose from Unicode", systemImage: "character.book.closed") }
-                        .disabled(choices.count >= gesture.maximumChoices)
-                        .accessibilityIdentifier("keySettings.chooseUnicode")
-                } header: { Text("Choices in selection order") } footer: {
-                    Text("Up to 16 different choices, each up to 64 Unicode scalars. Paste a whole emoji or combining sequence into one choice. Swipe a row to remove it; use Edit to reorder.")
+            if !valid {
+                Text("Choices must be different, at most 16, and each up to 64 Unicode scalars.")
+                    .font(.caption).foregroundStyle(.red)
+            }
+            Section {
+                Button("Reset to Default") {
+                    choices = defaults.map { Choice(text: $0) }
+                    usesDefaults = true
                 }
-                if !valid { Text("Choices must be nonempty and cannot repeat exactly. Check the 16-choice and 64-scalar limits.").font(.caption).foregroundStyle(.red) }
+                .disabled(usesDefaults)
+                .accessibilityIdentifier("keySettings.resetGesture")
+                Button("Remove All", role: .destructive) { choices = [] }
+                    .disabled(choices.isEmpty)
+                    .accessibilityIdentifier("keySettings.removeAll")
             }
             if saveAttempted, let error = keys.saveError {
                 Text(error).foregroundStyle(.red).accessibilityIdentifier("keySettings.saveError")
@@ -217,16 +243,19 @@ private struct KeyboardGestureSettingsView: View {
                     }
                 }.disabled(!valid).accessibilityIdentifier("keySettings.save")
             }
-            ToolbarItem(placement: .bottomBar) { if mode == .custom { EditButton() } }
+            ToolbarItem(placement: .bottomBar) { EditButton() }
         }
-        .onChange(of: mode) { _, value in if value == .custom && choices.isEmpty { choices.append(Choice(text: "")) } }
+        .onAppear { if usesDefaults && choices.isEmpty { choices = defaults.map { Choice(text: $0) } } }
+        .onChange(of: choices.map(\.text)) { _, texts in
+            if usesDefaults && texts != defaults { usesDefaults = false }
+        }
         .alert("Couldn’t save key", isPresented: $saveAlert) {
             Button("OK", role: .cancel) {}
         } message: { Text(keys.saveError ?? "Please try again.") }
         .sheet(isPresented: $showsUnicodePicker) {
             KeyboardKeyUnicodePicker { text in
                 guard choices.count < gesture.maximumChoices else { return }
-                if choices.count == 1 && choices[0].text.isEmpty { choices[0].text = text }
+                if let empty = choices.firstIndex(where: { $0.text.isEmpty }) { choices[empty].text = text }
                 else { choices.append(Choice(text: text)) }
             }
         }

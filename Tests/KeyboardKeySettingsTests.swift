@@ -29,6 +29,23 @@ final class KeyboardKeySettingsTests: XCTestCase {
         }
     }
 
+    func testDefaultCandidatesMatchTheKeyboardsOwnGroups() {
+        let hold = KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .longPress, mapping: .standard)
+        XCTAssertEqual(hold.first, "e")
+        XCTAssertTrue(hold.contains("é"))
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .swipeDown, mapping: .standard).first, "E")
+        XCTAssertFalse(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .standard).isEmpty)
+        XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .none).isEmpty)
+        XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "digit.1", gesture: .swipeDown, mapping: .standard).isEmpty)
+        XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "utility.space", gesture: .longPress, mapping: .standard).isEmpty)
+        for key in Settings.descriptors {
+            for gesture in Settings.Gesture.customizable {
+                let values = KeyboardVariantPolicy.defaultCandidates(for: key.id, gesture: gesture, mapping: .standard)
+                XCTAssertEqual(Set(values.map { Array($0.utf16) }).count, values.count, "\(key.id) \(gesture)")
+            }
+        }
+    }
+
     func testTapsAlwaysTypeTheKeyItselfAndIgnoreSavedTapValues() throws {
         let defaults = Settings.Snapshot.defaults
         XCTAssertEqual(Settings.Gesture.customizable, [.swipeUp, .swipeDown, .longPress])

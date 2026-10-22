@@ -176,6 +176,7 @@ struct CharacterTile: View {
             }
         }
         .onDisappear { hoverTask?.cancel() }
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(character.name), \(character.codePointLabel)")
         .accessibilityValue(ageText)
         .accessibilityHint("Tap, hold, or hover to show Unicode properties and description")

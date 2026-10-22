@@ -82,6 +82,7 @@ private struct EmojiTile: View {
                 }
             }
             .onDisappear { hoverTask?.cancel() }
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(emoji.name), \(emoji.codePointLabel)")
             .accessibilityValue("Emoji \(emoji.emojiVersion)")
             .accessibilityHint("Tap, hold, or hover for the complete emoji sequence and properties")

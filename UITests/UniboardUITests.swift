@@ -418,6 +418,12 @@ final class UniboardUITests: XCTestCase {
                       "Next opens Mathematical Operators")
         app.buttons["block.previous"].firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["character-U+2190"].firstMatch.waitForExistence(timeout: 5))
+        app.descendants(matching: .any)["chartBlockNavigator"].firstMatch.press(forDuration: 1)
+        // The menu's preview card is outside the app's own identifiers; its button is not.
+        XCTAssertTrue(app.buttons["Copy Range"].firstMatch.waitForExistence(timeout: 5), "Holding a block name shows its info")
+        XCTAssertTrue(app.otherElements.matching(NSPredicate(format: "label CONTAINS 'Since, Unicode 1.1'")).firstMatch.exists)
+        attachScreenshot("Holding a block name shows its info")
+        app.buttons["Copy Range"].firstMatch.tap()
         options.tap()
         app.buttons["Tiles"].firstMatch.tap()
         XCTAssertTrue(options.waitUntilValueEquals("3"))
@@ -1668,6 +1674,22 @@ final class UniboardUITests: XCTestCase {
         q.tap()
         XCTAssertTrue(app.buttons["layers.swipeDown"].firstMatch.waitForExistence(timeout: 5))
         attachScreenshot("The main keyboard's Q key shows its three layers")
+        let key = app.buttons["layers.tap"].firstMatch
+        XCTAssertTrue(key.waitUntilValueEquals("q"), "The key types itself until changed")
+        key.tap()
+        app.buttons["layer.addChoice"].firstMatch.tap()
+        let output = app.textFields["layer.choice.0"].firstMatch
+        XCTAssertTrue(output.waitForExistence(timeout: 5))
+        output.typeText("x")
+        app.buttons["layer.save"].firstMatch.tap()
+        XCTAssertTrue(key.waitUntilValueEquals("x"), "The changed key types x")
+        key.tap()
+        let changed = app.textFields["layer.choice.0"].firstMatch
+        XCTAssertTrue(changed.waitForExistence(timeout: 5))
+        changed.tap()
+        changed.typeText(XCUIKeyboardKey.delete.rawValue)
+        app.buttons["layer.save"].firstMatch.tap()
+        XCTAssertTrue(key.waitUntilValueEquals("q"), "No value restores the key's own text")
     }
 
     private func openArrange() {

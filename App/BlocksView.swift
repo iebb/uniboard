@@ -45,6 +45,7 @@ struct BlocksView: View {
                     }
                     .accessibilityLabel(block.name)
                     .accessibilityValue(block.rangeLabel)
+                    .blockInfo(block, catalog: catalog, showsUCSUR: preferences.showsUCSUR)
                 }
             } header: {
                 Text(query.isEmpty ? "\(catalog.blocks.count) blocks" : "\(blocks.count) of \(catalog.blocks.count) blocks")
@@ -151,6 +152,7 @@ struct BlockDetailView: View {
                 .accessibilityLabel("\(block.name), \(block.rangeLabel)")
                 .accessibilityHint("Jump to another block")
                 .accessibilityIdentifier("blockNavigator")
+                .blockInfo(block, catalog: preferences.catalog, showsUCSUR: preferences.showsUCSUR)
                 CharacterGrid(characters: characters, onReachEnd: { if hasMore { loadMore() } }, select: select)
                 if characters.isEmpty && !hasMore {
                     EmptyCollection(symbol: "square.dashed", title: "No Assigned Characters", message: block.name.contains("Surrogate") ? "Surrogate code points encode other characters and cannot be inserted on their own." : "This block has no assigned characters in the selected Unicode edition.")
@@ -171,5 +173,52 @@ struct BlockDetailView: View {
         guard let next = neighbour(offset) else { return }
         block = next
         reload()
+    }
+}
+
+/// What long-pressing a block's name shows: where it is, how much of it is
+/// assigned and since when, or, for a ConScript block, its registry.
+struct BlockInfoCard: View {
+    let block: UnicodeBlock
+    let catalog: UnicodeCatalog
+    let showsUCSUR: Bool
+
+    private var registry: UCSUR.Block? {
+        guard showsUCSUR, let found = UCSUR.block(containing: block.start),
+              found.start == block.start, found.end == block.end else { return nil }
+        return found
+    }
+
+    var body: some View {
+        let plane = Int(block.start >> 16)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(block.name).font(.headline)
+            LabeledContent("Range", value: block.rangeLabel)
+            LabeledContent("Plane", value: "\(plane) · \(ExploreScope.name(of: plane))")
+            LabeledContent("Code points", value: Int(block.end - block.start + 1).formatted())
+            if registry != nil {
+                LabeledContent("Registry", value: "ConScript (UCSUR)")
+                LabeledContent("Characters", value: UCSUR.registry.entries.filter { $0.codePoint >= block.start && $0.codePoint <= block.end }.count.formatted())
+            } else {
+                LabeledContent("Assigned", value: catalog.assignedCount(in: block).formatted())
+                if let version = catalog.firstVersion(in: block) { LabeledContent("Since", value: "Unicode \(version)") }
+            }
+        }
+        .font(.subheadline)
+        .padding(16)
+        .frame(width: 300)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("blockInfo")
+    }
+}
+
+extension View {
+    /// Long-pressing shows the block's info.
+    func blockInfo(_ block: UnicodeBlock, catalog: UnicodeCatalog, showsUCSUR: Bool) -> some View {
+        contextMenu {
+            Button { UIPasteboard.general.string = block.rangeLabel } label: { Label("Copy Range", systemImage: "doc.on.doc") }
+        } preview: {
+            BlockInfoCard(block: block, catalog: catalog, showsUCSUR: showsUCSUR)
+        }
     }
 }

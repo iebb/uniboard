@@ -4,22 +4,22 @@ import SwiftUI
 /// opening its list of choices.
 struct KeyLayersPanel<Destination: View>: View {
     /// Each layer's choices as shown on the key, or nil for none.
+    var layers: [KeyboardKeySettings.Gesture] = [.swipeUp, .longPress, .swipeDown]
     let summary: (KeyboardKeySettings.Gesture) -> String
     let destination: (KeyboardKeySettings.Gesture) -> Destination
-    static var layers: [KeyboardKeySettings.Gesture] { [.swipeUp, .longPress, .swipeDown] }
 
     var body: some View {
         HStack(spacing: 8) {
-            ForEach(Self.layers, id: \.rawValue) { gesture in
+            ForEach(layers, id: \.rawValue) { gesture in
                 NavigationLink { destination(gesture) } label: {
                     VStack(spacing: 2) {
-                        Image(systemName: gesture.icon).font(.body)
+                        Image(systemName: gesture == .tap ? "character.cursor.ibeam" : gesture.icon).font(.body)
                         Text(summary(gesture)).font(.caption).lineLimit(1).minimumScaleFactor(0.6)
                     }
                     .frame(maxWidth: .infinity, minHeight: 40)
                 }
                 .buttonStyle(.bordered)
-                .accessibilityLabel(gesture.title)
+                .accessibilityLabel(gesture == .tap ? "Key" : gesture.title)
                 .accessibilityValue(summary(gesture))
                 .accessibilityIdentifier("layers.\(gesture.rawValue)")
             }
@@ -38,6 +38,7 @@ struct KeyLayersPanel<Destination: View>: View {
 struct KeyLayerEditor: View {
     private struct Choice: Identifiable { let id = UUID(); var text: String }
     let title: String
+    var maximum = SymbolBoardStore.maximumVariants
     let save: ([String]) -> Bool
     @Environment(\.dismiss) private var dismiss
     @State private var choices: [Choice]
@@ -45,8 +46,9 @@ struct KeyLayerEditor: View {
     @State private var addedChoice: UUID?
     @State private var failed = false
 
-    init(title: String, choices: [String], save: @escaping ([String]) -> Bool) {
+    init(title: String, choices: [String], maximum: Int = SymbolBoardStore.maximumVariants, save: @escaping ([String]) -> Bool) {
         self.title = title
+        self.maximum = maximum
         self.save = save
         _choices = State(initialValue: choices.map { Choice(text: $0) })
     }
@@ -67,10 +69,10 @@ struct KeyLayerEditor: View {
                     addedChoice = choice.id
                     choices.append(choice)
                 } label: { Label("Add Choice", systemImage: "plus") }
-                    .disabled(choices.count >= SymbolBoardStore.maximumVariants)
+                    .disabled(choices.count >= maximum)
                     .accessibilityIdentifier("layer.addChoice")
                 Button { showsUnicodePicker = true } label: { Label("Choose from Unicode", systemImage: "character.book.closed") }
-                    .disabled(choices.count >= SymbolBoardStore.maximumVariants)
+                    .disabled(choices.count >= maximum)
                     .accessibilityIdentifier("layer.chooseUnicode")
             }
             if failed {
@@ -94,7 +96,7 @@ struct KeyLayerEditor: View {
         }
         .sheet(isPresented: $showsUnicodePicker) {
             KeyboardKeyUnicodePicker { text in
-                guard choices.count < SymbolBoardStore.maximumVariants else { return }
+                guard choices.count < maximum else { return }
                 if let empty = choices.firstIndex(where: { $0.text.isEmpty }) { choices[empty].text = text }
                 else { choices.append(Choice(text: text)) }
             }

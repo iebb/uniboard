@@ -47,16 +47,20 @@ final class KeyboardKeySettingsTests: XCTestCase {
         }
     }
 
-    func testTapsAlwaysTypeTheKeyItselfAndIgnoreSavedTapValues() throws {
+    func testTapsTypeTheKeyItselfUnlessTheKeyWasChanged() throws {
         let defaults = Settings.Snapshot.defaults
         XCTAssertEqual(Settings.Gesture.customizable, [.swipeUp, .swipeDown, .longPress])
         XCTAssertEqual(defaults.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Q")
-        for saved in [Settings.Overrides(tap: ["w"]), .init(tap: []), .init(shiftedTap: ["Ω"]), .init(tap: ["a", "b"])] {
-            let value = Settings.Snapshot(overrides: ["letter.q": saved])
-            XCTAssertEqual(value.tapOutput(for: "letter.q", defaultText: "q", shifted: false), "q")
-            XCTAssertEqual(value.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Q")
-        }
-        XCTAssertEqual(Settings.Snapshot(overrides: ["digit.1": .init(tap: ["q"])]).tapOutput(for: "digit.1", defaultText: "!", shifted: true), "!")
+        let changed = Settings.Snapshot(overrides: ["letter.q": .init(tap: ["ð"])])
+        XCTAssertEqual(changed.tapOutput(for: "letter.q", defaultText: "q", shifted: false), "ð")
+        XCTAssertEqual(changed.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Ð", "Shift types the changed letter's capital")
+        let shifted = Settings.Snapshot(overrides: ["letter.q": .init(tap: ["ð"], shiftedTap: ["Ω"])])
+        XCTAssertEqual(shifted.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Ω")
+        let empty = Settings.Snapshot(overrides: ["letter.q": .init(tap: [])])
+        XCTAssertEqual(empty.tapOutput(for: "letter.q", defaultText: "q", shifted: false), "q")
+        let digit = Settings.Snapshot(overrides: ["digit.1": .init(tap: ["q"])])
+        XCTAssertEqual(digit.tapOutput(for: "digit.1", defaultText: "1", shifted: false), "q")
+        XCTAssertEqual(digit.tapOutput(for: "digit.1", defaultText: "!", shifted: true), "!", "Other keys keep their shifted text")
         XCTAssertNil(defaults.tapOutput(for: "utility.space", defaultText: " ", shifted: false))
         XCTAssertNil(defaults.tapOutput(for: "letter.q", defaultText: "", shifted: false))
     }

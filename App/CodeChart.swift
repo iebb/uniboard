@@ -195,7 +195,8 @@ struct CodeChartView: UIViewRepresentable {
                 let side = parent.density.cellSide(in: self.contentWidth)
                 let inset = CodeChartView.inset(for: self.collectionView?.bounds.width ?? 0, density: parent.density)
                 header.contentConfiguration = UIHostingConfiguration {
-                    CodeChartHeader(block: block.block, density: parent.density, side: side, navigate: parent.navigate)
+                    CodeChartHeader(block: block.block, density: parent.density, side: side, navigate: parent.navigate,
+                                    catalog: parent.catalog, showsUCSUR: parent.preferences.showsUCSUR)
                         .padding(.horizontal, inset)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                         .background(Color.groupedBackground)
@@ -318,6 +319,8 @@ struct CodeChartHeader: View {
     let density: GridDensity
     let side: CGFloat
     let navigate: ((UnicodeBlock) -> Void)?
+    let catalog: UnicodeCatalog
+    let showsUCSUR: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -327,10 +330,12 @@ struct CodeChartHeader: View {
                     .accessibilityLabel("\(block.name), \(block.rangeLabel)")
                     .accessibilityHint("Open this block")
                     .accessibilityIdentifier("chartBlockNavigator")
+                    .blockInfo(block, catalog: catalog, showsUCSUR: showsUCSUR)
             } else {
                 title(chevron: false)
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isHeader)
+                    .blockInfo(block, catalog: catalog, showsUCSUR: showsUCSUR)
             }
             HStack(spacing: density.spacing) {
                 Color.clear.frame(width: density.rowLabelWidth, height: 1)

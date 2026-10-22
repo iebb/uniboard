@@ -24,14 +24,19 @@ struct VersionRibbon: View {
     let version: String?
     var prefix = ""
     var labeled = true
+    /// A ConScript character reads CSUR, its registry, rather than its Unicode age.
+    var conscript = false
 
+    static let conscriptColor = Color.indigo
     static func color(for version: String?) -> Color {
         guard let version, let number = Double(version) else { return .purple }
         // Emoji 0.6 is the oldest and Unicode 18 the newest final version.
         let position = min(1, max(0, (number - 0.6) / (18 - 0.6)))
         return Color(hue: position * 0.66, saturation: 0.72, brightness: 0.74)
     }
+    private var color: Color { conscript ? Self.conscriptColor : Self.color(for: version) }
     private var label: String {
+        if conscript { return "CSUR" }
         guard let version else { return "draft" }
         return prefix + (version.hasSuffix(".0") ? String(version.dropLast(2)) : version)
     }
@@ -43,7 +48,7 @@ struct VersionRibbon: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .frame(width: 64, height: 15)
-                .background(Self.color(for: version))
+                .background(color)
                 // Centre the band 14pt in from the corner, along the diagonal.
                 .rotationEffect(.degrees(45))
                 .offset(x: 18, y: 6.5)
@@ -52,7 +57,7 @@ struct VersionRibbon: View {
             Path { path in
                 path.move(to: .zero); path.addLine(to: CGPoint(x: 10, y: 0)); path.addLine(to: CGPoint(x: 10, y: 10))
             }
-            .fill(Self.color(for: version))
+            .fill(color)
             .frame(width: 10, height: 10)
             .accessibilityHidden(true)
         }
@@ -172,7 +177,7 @@ struct CharacterTile: View {
             .background(Color.previewSurface(missing: missing, ucsur: preferences.isUCSUR(character.codePoint)))
             .overlay(alignment: .topTrailing) {
                 if !density.isDense, character.category != "Cn" {
-                    VersionRibbon(version: character.age, labeled: density == .three)
+                    VersionRibbon(version: character.age, labeled: density == .three, conscript: preferences.isUCSUR(character.codePoint))
                 }
             }
             .overlay(alignment: .topLeading) {

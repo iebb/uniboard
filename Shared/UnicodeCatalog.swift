@@ -656,6 +656,20 @@ final class UnicodeCatalog: @unchecked Sendable {
         return page(in: spans, offset: offset, limit: limit, order: .codePoint, descending: descending)
     }
 
+    /// How many of a block's code points this edition assigns.
+    func assignedCount(in block: UnicodeBlock) -> Int {
+        properties.assignedSpans.reduce(0) { total, span in
+            let start = max(span.start, block.start), end = min(span.end, block.end)
+            return start <= end ? total + Int(end - start + 1) : total
+        }
+    }
+
+    /// The Unicode version that first assigned a code point in `block`.
+    func firstVersion(in block: UnicodeBlock) -> String? {
+        let spans = properties.assignedSpans.filter { $0.start <= block.end && $0.end >= block.start }
+        return spans.min { $0.sortKey < $1.sortKey }.flatMap { age(at: max($0.start, block.start)) }
+    }
+
     /// What is left of `piece` around `cut`.
     private static func subtracting(_ cut: ClosedRange<UInt32>, from piece: ClosedRange<UInt32>) -> [ClosedRange<UInt32>] {
         guard cut.overlaps(piece) else { return [piece] }

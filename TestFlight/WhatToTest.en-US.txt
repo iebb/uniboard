@@ -7,16 +7,16 @@ GESTURES
 Hold gives the layout's accents first (French é è ê ë, Russian ё, Greek ά). Up gives superscript then subscript; Down gives styled forms: mathematical Latin, mathematical Greek (𝛂), or related Cyrillic letters (є э for е). Groups never repeat across Hold, Up and Down. Customize Keys has a layout menu.
 
 PAGES
-The Pages tab sets up pages and the page Star opens. Arrange Keys places keys in rows with half-width and full-width gaps; select a key to edit its swipe-up, hold and swipe-down choices, and check the keyboard uses all three. Pages > Keyboard does the same for the main keyboard's keys. The Pages menu exports and imports custom pages.
+The Pages tab sets up pages and the page Star opens. Arrange Keys places keys in rows with half-width and full-width gaps; select a key to edit its swipe-up, hold and swipe-down choices, and check the keyboard uses all three. Pages > Keyboard does the same for the main keys, and Key changes what a key types. The Pages menu exports and imports custom pages.
 
 TEXT AND EMOJI FORMS
-Characters with both presentations (☃, ⌚) show as text in charts and side by side in details, with a copy button each. The picker adds each form separately. In keyboard search they appear twice, once per form; each inserts its exact sequence, and holding a page key offers the other form.
+Characters with both presentations (☃, ⌚) show as text in charts and side by side in details. The picker adds each form separately. In keyboard search they appear twice, once per form; each inserts its exact sequence, and holding a page key offers the other form.
 
 KEYBOARD UNICODE
 U opens search with its keys directly. Results stay in a row above the keys, also in landscape. With Text Preview on, the preview row stays above search. Result and browse keys use rounded keycaps with the character's name in small text, no U+ code. Browsing without keys makes the keyboard two rows taller; search and typing keep their height.
 
 EXPLORE
-Tiles are 2 to 7 per row: pinch to change; search results are always tiles. Block pages also chart 8 or 16 per row (iPad adds 32), with up and down arrows for the previous and next block. Version ribbons run red (oldest) to blue (newest). Explore, Blocks and Emoji switch the Unicode version from the menu under the search field. Private Use stays hidden unless Settings > Private Use Area is on; with ConScript on, its ranges still show.
+Tiles are 2 to 7 per row: pinch to change; search results are always tiles. Block pages also chart 8 or 16 per row (iPad adds 32), with up and down arrows for the previous and next block. Hold a block name for its info. Version ribbons run red (oldest) to blue (newest); ConScript reads CSUR. Explore, Blocks and Emoji switch the Unicode version from the menu under the search field. Private Use stays hidden unless Settings > Private Use Area is on; with ConScript on, its ranges still show.
 
 EDITIONS AND SIZE
 Only the Unicode 19 draft is bundled; Unicode 18, 17 and 16 limit it to their version. Check that newer characters read as unassigned and What's New lists only that version.

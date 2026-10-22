@@ -50,13 +50,21 @@ struct MainKeyboardEditorView: View {
             .background(Color(.systemGroupedBackground))
             if let descriptor {
                 Divider()
-                KeyLayersPanel(summary: { gesture in
-                    // No saved choices means the built-in defaults.
+                KeyLayersPanel(layers: [.tap, .swipeUp, .longPress, .swipeDown], summary: { gesture in
+                    // No saved choices means the built-in defaults; the key itself types its own text.
                     let values = keys.snapshot.candidates(for: descriptor.id, gesture: gesture)
-                    return values == nil ? "Default" : KeyLayersPanel<KeyboardGestureSettingsView>.summary(values)
-                }, destination: { gesture in
-                    KeyboardGestureSettingsView(descriptor: descriptor, gesture: gesture, alphabet: alphabet, keys: keys,
-                                                current: keys.snapshot.candidates(for: descriptor.id, gesture: gesture))
+                    if gesture == .tap { return symbolKeyPreview(values?.first ?? descriptor.text ?? descriptor.title) }
+                    return values == nil ? "Default" : KeyLayersPanel<AnyView>.summary(values)
+                }, destination: { (gesture: KeyboardKeySettings.Gesture) -> AnyView in
+                    let original = keys.snapshot.candidates(for: descriptor.id, gesture: gesture)
+                    guard gesture == .tap else {
+                        return AnyView(KeyboardGestureSettingsView(descriptor: descriptor, gesture: gesture, alphabet: alphabet,
+                                                                   keys: keys, current: original))
+                    }
+                    // One value; none restores the key's own text.
+                    return AnyView(KeyLayerEditor(title: "Key · \(descriptor.title)", choices: original ?? [], maximum: 1) { values in
+                        keys.save(values.isEmpty ? nil : values, keyID: descriptor.id, gesture: .tap, replacing: original)
+                    })
                 })
                 .padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
             }
@@ -69,11 +77,13 @@ struct MainKeyboardEditorView: View {
     private func tile(_ key: String) -> some View {
         let id = KeyboardKeySettings.identifier(forCharacter: key)
         let isSelected = id != nil && id == selected
+        // A changed key shows what it now types.
+        let shown = id.flatMap { keys.snapshot.tapOutput(for: $0, defaultText: key, shifted: false) } ?? key
         return Button { selected = isSelected ? nil : id } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color(.secondarySystemGroupedBackground))
                     .shadow(color: .black.opacity(0.12), radius: 0, y: 1)
-                Text(key).font(.system(size: 22)).minimumScaleFactor(0.4).lineLimit(1).padding(2)
+                Text(symbolKeyPreview(shown)).font(.system(size: 22)).minimumScaleFactor(0.4).lineLimit(1).padding(2)
                 if isSelected {
                     RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.accentColor, lineWidth: 2.5)
                 }

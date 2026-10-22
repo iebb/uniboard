@@ -215,6 +215,19 @@ final class UnicodeCatalogTests: XCTestCase {
                      "Properties from before presentation forms have none")
     }
 
+    func testBlockInfoCountsAssignedCodePointsAndFirstVersion() {
+        let catalog = UnicodeCatalog.latest
+        let latin = UnicodeBlock(name: "Basic Latin", start: 0, end: 0x7F)
+        XCTAssertEqual(catalog.assignedCount(in: latin), 128)
+        XCTAssertEqual(catalog.firstVersion(in: latin), "1.1")
+        let sidetic = UnicodeBlock(name: "Sidetic", start: 0x10940, end: 0x1095F)
+        XCTAssertEqual(catalog.firstVersion(in: sidetic), "17.0")
+        XCTAssertLessThan(catalog.assignedCount(in: sidetic), 32)
+        let empty = UnicodeBlock(name: "Unassigned", start: 0x2FE0, end: 0x2FEF)
+        XCTAssertEqual(catalog.assignedCount(in: empty), 0)
+        XCTAssertNil(catalog.firstVersion(in: empty))
+    }
+
     func testOrderedCharactersSkipHiddenRanges() {
         let points = { (hidden: [ClosedRange<UInt32>]) in
             UnicodeCatalog.latest.orderedCharacters(in: 0xE000...0xE00F, excluding: hidden).map(\.codePoint)

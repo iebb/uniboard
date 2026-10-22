@@ -14,8 +14,7 @@ enum UnicodeEdition: String, CaseIterable, Identifiable, Sendable {
         // The bounded loader supplies a numeric label or "Unavailable". Both
         // have a first component; prefix also safely handles an empty label.
         let number = versionLabel.prefix { $0 != "." }
-        let status = self == .draft ? "DRAFT" : self == .latest ? "latest release" : "release"
-        return "Unicode \(number) · \(status)"
+        return self == .draft ? "Unicode \(number) Draft" : "Unicode \(number)"
     }
     var catalog: UnicodeCatalog {
         switch self {

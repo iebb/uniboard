@@ -134,9 +134,7 @@ final class UnicodeCatalogTests: XCTestCase {
             XCTAssertEqual(edition.id, edition.rawValue)
             XCTAssertTrue(edition.title.hasPrefix("Unicode "))
             XCTAssertTrue(edition.title.contains(edition.versionLabel.split(separator: ".").first.map(String.init) ?? ""))
-            if edition == .draft { XCTAssertTrue(edition.title.hasSuffix("DRAFT")) }
-            else if edition == .latest { XCTAssertTrue(edition.title.hasSuffix("latest release")) }
-            else { XCTAssertTrue(edition.title.hasSuffix("release")) }
+            XCTAssertEqual(edition.title.hasSuffix(" Draft"), edition == .draft)
         }
         for (order, title): (UnicodeSortOrder, String) in [
             (.newestFirst, "Newest first"), (.oldestFirst, "Oldest first"), (.codePoint, "Code point")
@@ -570,8 +568,7 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertEqual(UnicodeEdition.draft.rawValue, "draft")
         for edition in UnicodeEdition.allCases {
             let major = edition.catalog.version.split(separator: ".").first.map(String.init) ?? ""
-            let status = edition == .draft ? "DRAFT" : edition == .latest ? "latest release" : "release"
-            XCTAssertEqual(edition.title, "Unicode \(major) · \(status)")
+            XCTAssertEqual(edition.title, edition == .draft ? "Unicode \(major) Draft" : "Unicode \(major)")
             XCTAssertEqual(edition.versionLabel, edition.catalog.version)
             if unicodeVersionKey(edition.catalog.version) >= unicodeVersionKey("18.0") {
                 XCTAssertEqual(edition.catalog.character(at: 0x1FAEB)?.name, "CRACKING FACE")

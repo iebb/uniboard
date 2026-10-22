@@ -8,50 +8,41 @@ struct EmojisView: View {
     @State private var pageLimit = 120
     private var entries: [UnicodeEmojiEntry] {
         query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? preferences.emojis.entries(limit: pageLimit, order: preferences.order)
-            : preferences.emojis.search(query, limit: pageLimit, order: preferences.order)
+            ? preferences.emojis.entries(limit: pageLimit)
+            : preferences.emojis.search(query, limit: pageLimit)
     }
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                Text("Every expression.\nEvery little detail.")
-                    .font(.system(size: 35, design: .serif)).foregroundStyle(Palette.ink)
-                Text("Find emoji by name, group or code points. A tap opens the full sequence; hold or hover for its properties.")
-                    .font(.subheadline).foregroundStyle(Palette.muted)
-                SearchBar(text: $query, placeholder: "Search emoji, like woman technologist", identifier: "emojiSearch")
+            VStack(alignment: .leading, spacing: 16) {
+                SearchBar(text: $query, placeholder: "Name, group or code points", identifier: "emojiSearch")
                 CatalogControls()
-                Text("Version order uses each emoji’s introduction. The ages of its individual Unicode scalars can differ.")
-                    .font(.caption).foregroundStyle(Palette.muted)
-                EmojiGrid(entries: entries, select: select)
+                EmojiGrid(entries: entries, onReachEnd: { if entries.count == pageLimit { pageLimit += 120 } }, select: select)
                 if entries.isEmpty {
-                    EmptyCollection(symbol: "face.smiling", title: "No matching emoji", message: "Try a name such as rocket, a group such as flags, or paste an emoji sequence.")
-                } else if entries.count == pageLimit {
-                    Button("Load more emoji") { pageLimit += 120 }
-                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity).padding(16)
-                        .background(Palette.soft, in: RoundedRectangle(cornerRadius: 14))
-                        .accessibilityIdentifier("loadMoreEmoji")
+                    EmptyCollection(symbol: "face.smiling", title: "No Matching Emoji", message: "Try a name such as rocket, a group such as flags, or paste an emoji sequence.")
                 }
-                Text("Your iOS fonts may show a box or several symbols for newer emoji. The name, sequence and properties remain readable; Uniboard inserts the original sequence.")
-                    .font(.caption).foregroundStyle(Palette.muted)
-            }.padding(22).frame(maxWidth: 780).frame(maxWidth: .infinity)
+                Text("Version order uses each emoji’s introduction; its individual Unicode scalars can be older. Your iOS fonts may show a box or several symbols for newer emoji, but Uniboard always inserts the original sequence.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }.padding(.horizontal, 16).padding(.bottom, 24).frame(maxWidth: 780).frame(maxWidth: .infinity)
         }
-        .background(Palette.background)
-        .navigationTitle("Emoji").navigationBarTitleDisplayMode(.inline)
+        .background(Color.groupedBackground)
+        .navigationTitle("Emoji")
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: query) { _, _ in pageLimit = 120 }
         .onChange(of: preferences.edition) { _, _ in pageLimit = 120 }
-        .onChange(of: preferences.order) { _, _ in pageLimit = 120 }
     }
 }
 
 struct EmojiGrid: View {
     let entries: [UnicodeEmojiEntry]
+    /// Called when the last emoji scrolls into view, to load the next page.
+    var onReachEnd: (() -> Void)? = nil
     var select: (UnicodeEmojiEntry) -> Void
     @EnvironmentObject private var store: CharacterStore
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: 9)], spacing: 9) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: 8)], spacing: 8) {
             ForEach(entries) { emoji in
                 EmojiTile(emoji: emoji, favorite: store.isFavoriteEmoji(emoji.id)) { select(emoji) }
+                    .onAppear { if emoji.id == entries.last?.id { onReachEnd?() } }
             }
         }
     }
@@ -63,18 +54,22 @@ private struct EmojiTile: View {
     let action: () -> Void
     @EnvironmentObject private var preferences: CatalogPreferences
     @State private var hoverTask: Task<Void, Never>?
+    private var missing: Bool {
+        UnicodeFontSupport.stockFontsMiss(emoji.text, emoji: true)
+    }
     var body: some View {
-        VStack(spacing: 7) {
-            Text(emoji.text).font(Font(UnicodeFontSupport.font(for: emoji.text, size: 32, enabled: preferences.useUnicodeFonts))).lineLimit(1).minimumScaleFactor(0.55).frame(height: 40)
-            Text(emoji.name.capitalized).font(.system(size: 11, weight: .medium))
-                .lineLimit(2).multilineTextAlignment(.center).foregroundStyle(Palette.ink).frame(height: 28)
-            Text("Emoji \(emoji.emojiVersion)").font(.system(size: 9, design: .monospaced)).foregroundStyle(Palette.muted)
-        }.padding(.horizontal, 4).frame(maxWidth: .infinity).frame(height: 122)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 15))
-            .overlay(alignment: .topTrailing) {
-                if favorite { Image(systemName: "star.fill").font(.system(size: 8)).foregroundStyle(Palette.accent).padding(8) }
+        VStack(spacing: 3) {
+            Text(emoji.text).font(Font(UnicodeFontSupport.font(for: emoji.text, size: 34, enabled: preferences.useUnicodeFonts))).lineLimit(1).minimumScaleFactor(0.55).frame(height: 44)
+            Text(emoji.name).font(.caption2.weight(.medium))
+                .lineLimit(2).multilineTextAlignment(.center).frame(height: 28)
+        }.padding(.horizontal, 4).frame(maxWidth: .infinity).frame(height: 92)
+            .background(Color.previewSurface(missing: missing))
+            .overlay(alignment: .topTrailing) { VersionRibbon(version: emoji.emojiVersion, prefix: "E") }
+            .overlay(alignment: .topLeading) {
+                if favorite { Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(.yellow).padding(7) }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 15))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .gesture(LongPressGesture(minimumDuration: 0.4).exclusively(before: TapGesture()).onEnded { _ in action() })
             .onHover { hovering in
                 hoverTask?.cancel()
@@ -107,72 +102,79 @@ struct EmojiDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(spacing: 20) {
                     Text(emoji.text).font(Font(UnicodeFontSupport.font(for: emoji.text, size: 92, enabled: preferences.useUnicodeFonts))).lineLimit(1).minimumScaleFactor(0.4)
-                        .frame(maxWidth: .infinity).frame(height: 190)
-                        .background(Palette.soft, in: RoundedRectangle(cornerRadius: 24))
-                    Text(emoji.name.capitalized).font(.system(size: 27, design: .serif))
-                        .foregroundStyle(Palette.ink).accessibilityIdentifier("emojiProperties.name")
-                    Text("\(emoji.group) · \(emoji.subgroup). This fully qualified emoji contains \(emoji.codePoints.count) Unicode scalar\(emoji.codePoints.count == 1 ? "" : "s"). Copying or inserting it preserves the complete sequence.")
-                        .font(.subheadline).foregroundStyle(Palette.muted)
-                        .accessibilityIdentifier("emojiProperties.description")
-                    Text(emoji.codePointLabel).font(.caption.monospaced()).foregroundStyle(Palette.accent)
-                        .textSelection(.enabled).accessibilityIdentifier("emojiProperties.codepoints")
-                    Text("A missing glyph does not remove its name or properties. Older iOS fonts may display this sequence as a box or separate components.")
-                        .font(.caption).foregroundStyle(Palette.muted)
-                    Button {
-                        UIPasteboard.general.string = emoji.text
-                        store.recordEmojiUse(emoji)
-                        copied = true
-                    } label: {
-                        Label(copied ? "Copied emoji" : "Copy emoji", systemImage: copied ? "checkmark" : "doc.on.doc")
-                            .font(.headline).frame(maxWidth: .infinity).padding(17)
-                            .foregroundStyle(Palette.surface).background(Palette.ink, in: RoundedRectangle(cornerRadius: 15))
-                    }.accessibilityIdentifier("copyEmoji")
-                    HStack {
-                        Button {
-                            store.toggleFavoriteEmoji(emoji)
-                        } label: {
-                            Label(store.isFavoriteEmoji(emoji.id) ? "Saved" : "Save", systemImage: store.isFavoriteEmoji(emoji.id) ? "star.fill" : "star")
-                                .frame(maxWidth: .infinity).padding(15).background(Palette.soft, in: RoundedRectangle(cornerRadius: 15))
-                        }.accessibilityIdentifier("toggleEmojiFavorite")
-                        Button {
-                            scratchpad += emoji.text
-                            store.recordEmojiUse(emoji)
-                            added = true
-                        } label: {
-                            Label(added ? "Added" : "Scratchpad", systemImage: added ? "checkmark" : "plus")
-                                .frame(maxWidth: .infinity).padding(15).background(Palette.soft, in: RoundedRectangle(cornerRadius: 15))
-                        }.accessibilityIdentifier("addEmojiToScratchpad")
-                    }.font(.subheadline.weight(.semibold)).foregroundStyle(Palette.accent)
-                    property("EMOJI INTRODUCTION", value: "Emoji \(emoji.emojiVersion)", id: "version")
-                    property("NEWEST SCALAR AGE", value: "Unicode \(emoji.unicodeVersion)", id: "age")
-                    property("UTF-8", value: emoji.text.utf8.map { String(format: "%02X", $0) }.joined(separator: " "), id: "utf8")
-                    property("UTF-16", value: emoji.text.utf16.map { String(format: "%04X", $0) }.joined(separator: " "), id: "utf16")
-                    Text("Unicode components").font(.headline).foregroundStyle(Palette.ink)
-                    ForEach(Array(emoji.codePoints.enumerated()), id: \.offset) { _, cp in
-                        if let character = preferences.catalog.character(at: cp) {
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text("\(character.codePointLabel) · \(character.name.capitalized)")
-                                    .font(.caption.monospaced().weight(.semibold)).foregroundStyle(Palette.ink)
-                                Text(character.detail).font(.caption).foregroundStyle(Palette.muted)
-                                Text("\(character.categoryName) · \(character.age.map { "Unicode \($0)" } ?? "Age pending")")
-                                    .font(.caption).foregroundStyle(Palette.muted)
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
-                                .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14))
-                        }
+                        .padding(24)
+                        .frame(maxWidth: .infinity).frame(height: 196)
+                        .background(Color.previewSurface(missing: UnicodeFontSupport.stockFontsMiss(emoji.text, emoji: true)),
+                                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    VStack(spacing: 4) {
+                        Text(emoji.name).font(.title2.weight(.semibold))
+                            .multilineTextAlignment(.center)
+                            .accessibilityIdentifier("emojiProperties.name")
+                        Text(emoji.codePointLabel).font(.body.monospaced()).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .textSelection(.enabled).accessibilityIdentifier("emojiProperties.codepoints")
                     }
-                }.padding(24).frame(maxWidth: 620).frame(maxWidth: .infinity).buttonStyle(.plain)
-            }.background(Palette.background)
-                .navigationTitle("Emoji properties").navigationBarTitleDisplayMode(.inline)
+                    VStack(spacing: 10) {
+                        Button {
+                            UIPasteboard.general.string = emoji.text
+                            store.recordEmojiUse(emoji)
+                            copied = true
+                        } label: {
+                            Label(copied ? "Copied" : "Copy Emoji", systemImage: copied ? "checkmark" : "doc.on.doc")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("copyEmoji")
+                        HStack(spacing: 10) {
+                            Button {
+                                store.toggleFavoriteEmoji(emoji)
+                            } label: {
+                                Label(store.isFavoriteEmoji(emoji.id) ? "Saved" : "Save", systemImage: store.isFavoriteEmoji(emoji.id) ? "star.fill" : "star")
+                                    .frame(maxWidth: .infinity)
+                            }.accessibilityIdentifier("toggleEmojiFavorite")
+                            Button {
+                                scratchpad += emoji.text
+                                store.recordEmojiUse(emoji)
+                                added = true
+                            } label: {
+                                Label(added ? "Added" : "Scratchpad", systemImage: added ? "checkmark" : "plus")
+                                    .frame(maxWidth: .infinity)
+                            }.accessibilityIdentifier("addEmojiToScratchpad")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .controlSize(.large)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(emoji.group) · \(emoji.subgroup). This fully qualified emoji contains \(emoji.codePoints.count) Unicode scalar\(emoji.codePoints.count == 1 ? "" : "s"). Copying or inserting it preserves the complete sequence.")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                            .background(Color.groupedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .accessibilityIdentifier("emojiProperties.description")
+                        Text("A missing glyph does not remove its name or properties. Older iOS fonts may display this sequence as a box or separate components.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .padding(.horizontal, 16)
+                    }
+                    PropertyGroup(title: "Properties", rows: [
+                        .init(title: "Introduced", value: "Emoji \(emoji.emojiVersion)", identifier: "emojiProperties.version", monospaced: false),
+                        .init(title: "Newest scalar age", value: "Unicode \(emoji.unicodeVersion)", identifier: "emojiProperties.age", monospaced: false),
+                        .init(title: "UTF-8", value: emoji.text.utf8.map { String(format: "%02X", $0) }.joined(separator: " "), identifier: "emojiProperties.utf8", stacked: true),
+                        .init(title: "UTF-16", value: emoji.text.utf16.map { String(format: "%04X", $0) }.joined(separator: " "), identifier: "emojiProperties.utf16", stacked: true),
+                    ])
+                    let components = emoji.codePoints.compactMap { preferences.catalog.character(at: $0) }
+                    if !components.isEmpty {
+                        PropertyGroup(title: "Unicode Components", rows: components.enumerated().map { index, character in
+                            PropertyRow(title: "\(character.codePointLabel) · \(character.name)",
+                                  value: [character.detail, "\(character.categoryName) · \(character.age.map { "Unicode \($0)" } ?? "Age pending")"]
+                                    .filter { !$0.isEmpty }.joined(separator: "\n"),
+                                  identifier: "emojiProperties.component.\(index)", monospaced: false, stacked: true)
+                        })
+                    }
+                }.padding(16).frame(maxWidth: 620).frame(maxWidth: .infinity)
+            }.background(Color.groupedBackground)
+                .navigationTitle("Emoji").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }.presentationDragIndicator(.visible)
-    }
-    private func property(_ title: String, value: String, id: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title).font(.caption.monospaced()).foregroundStyle(Palette.muted)
-            Text(value).font(.caption.monospaced()).foregroundStyle(Palette.ink).textSelection(.enabled)
-                .accessibilityIdentifier("emojiProperties.\(id)")
-        }
     }
 }

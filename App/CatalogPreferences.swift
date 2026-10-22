@@ -5,24 +5,18 @@ final class CatalogPreferences: ObservableObject {
     static let shared = CatalogPreferences()
     @Published private(set) var edition: UnicodeEdition
     @Published private(set) var editionSaveError: String?
-    @Published var order: UnicodeSortOrder {
-        didSet { defaults.set(order.rawValue, forKey: "appUnicodeSort") }
-    }
     @Published private(set) var useUnicodeFonts: Bool
     @Published private(set) var showsCollapseKey: Bool
     @Published private(set) var showsSymbolBar: Bool
     @Published private(set) var searchBarInsteadOfSymbols: Bool
     @Published private(set) var padLayout: KeyboardPadLayout
     @Published private(set) var padSymbolMapping: KeyboardPadSymbolMapping
-    private let defaults: UserDefaults
     private let editionSettings: UnicodeEditionSettings
 
-    init(defaults: UserDefaults = .standard, editionSettings: UnicodeEditionSettings = .shared) {
-        self.defaults = defaults
+    init(editionSettings: UnicodeEditionSettings = .shared) {
         self.editionSettings = editionSettings
         let snapshot = editionSettings.loadSnapshot()
         edition = snapshot.edition
-        order = defaults.string(forKey: "appUnicodeSort").flatMap(UnicodeSortOrder.init(rawValue:)) ?? .codePoint
         useUnicodeFonts = snapshot.useUnicodeFonts
         showsCollapseKey = snapshot.showsCollapseKey
         showsSymbolBar = snapshot.showsSymbolBar
@@ -38,11 +32,27 @@ final class CatalogPreferences: ObservableObject {
     func selectUnicodeFonts(_ enabled: Bool) {
         edit { $0.useUnicodeFonts = enabled }
     }
+    /// Redraws every preview after downloaded fonts are installed or removed.
+    func fontFilesChanged() {
+        UnicodeFontSupport.refreshDownloadedFonts(force: true)
+        objectWillChange.send()
+    }
     func selectCollapseKey(_ enabled: Bool) {
         edit { $0.showsCollapseKey = enabled }
     }
     func selectSymbolBar(_ enabled: Bool) { edit { $0.showsSymbolBar = enabled } }
     func selectSearchBarInsteadOfSymbols(_ enabled: Bool) { edit { $0.searchBarInsteadOfSymbols = enabled } }
+    /// The keyboard's optional row above the keys, as one choice.
+    var topRow: KeyboardTopRow {
+        guard showsSymbolBar else { return .off }
+        return searchBarInsteadOfSymbols ? .search : .symbols
+    }
+    func selectTopRow(_ row: KeyboardTopRow) {
+        edit {
+            $0.showsSymbolBar = row != .off
+            if row != .off { $0.searchBarInsteadOfSymbols = row == .search }
+        }
+    }
     func selectPadLayout(_ layout: KeyboardPadLayout) { edit { $0.padLayout = layout } }
     func selectPadSymbolMapping(_ mapping: KeyboardPadSymbolMapping) { edit { $0.padSymbolMapping = mapping } }
     private func edit(_ change: (inout UnicodeEditionSettings.Snapshot) -> Void) {
@@ -78,7 +88,17 @@ final class CatalogPreferences: ObservableObject {
         // UI-test launches preserve the complete shared snapshot so opening
         // the host cannot undo an app setting that the keyboard must read.
         if !preservingEdition { save(.init(edition: .latest)) }
-        order = .codePoint
+    }
+}
+
+enum KeyboardTopRow: String, CaseIterable {
+    case off, symbols, search
+    var title: String {
+        switch self {
+        case .off: return "Off"
+        case .symbols: return "Symbols"
+        case .search: return "Search"
+        }
     }
 }
 
@@ -86,59 +106,29 @@ final class CatalogPreferences: ObservableObject {
 struct CatalogEditionPicker: View {
     @EnvironmentObject private var preferences: CatalogPreferences
     var body: some View {
-        Menu {
-            ForEach(UnicodeEdition.allCases) { edition in
-                Button { preferences.selectEdition(edition) } label: {
-                    Label(edition.title, systemImage: preferences.edition == edition ? "checkmark" : "circle")
-                }
-                .accessibilityIdentifier("edition.\(edition.rawValue)")
-            }
-        } label: {
-            HStack {
-                Label(preferences.edition.title, systemImage: "books.vertical")
-                Spacer()
-                Image(systemName: "chevron.up.chevron.down").font(.caption)
+        Picker("Version", selection: Binding(get: { preferences.edition }, set: { preferences.selectEdition($0) })) {
+            // Newest first: the draft, then each final release.
+            ForEach([UnicodeEdition.draft, .latest, .previous, .older]) { edition in
+                Text(edition.title).tag(edition)
+                    .accessibilityIdentifier("edition.\(edition.rawValue)")
             }
         }
+        .pickerStyle(.menu)
         .accessibilityIdentifier("unicodeEdition")
         .accessibilityLabel("Unicode version")
         .accessibilityValue(preferences.edition.rawValue)
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(Palette.accent)
     }
 }
 
+/// The selected edition, shown where characters are listed. Characters are
+/// always listed from the lowest code point.
 struct CatalogControls: View {
     @EnvironmentObject private var preferences: CatalogPreferences
-    var showSort = true
     var body: some View {
-        HStack(spacing: 12) {
-            Label(preferences.edition.title, systemImage: "books.vertical")
-                .accessibilityIdentifier("unicodeEdition.current")
-                .accessibilityValue(preferences.edition.rawValue)
-            Spacer(minLength: 0)
-            if showSort {
-                Menu {
-                    ForEach(UnicodeSortOrder.allCases) { order in
-                        Button { preferences.order = order } label: {
-                            Label(order.title, systemImage: preferences.order == order ? "checkmark" : "circle")
-                        }
-                        .accessibilityIdentifier("sort.\(order.rawValue)")
-                    }
-                } label: {
-                    Label {
-                        Text(preferences.order.title)
-                            .accessibilityIdentifier("unicodeSort.current")
-                            .accessibilityValue(preferences.order.rawValue)
-                    } icon: { Image(systemName: "arrow.up.arrow.down") }
-                }
-                .accessibilityIdentifier("unicodeSort")
-                .accessibilityLabel("Sort characters")
-                .accessibilityValue(preferences.order.rawValue)
-            }
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(Palette.accent)
-        .padding(.vertical, 8)
+        Text(preferences.edition.title)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("unicodeEdition.current")
+            .accessibilityValue(preferences.edition.rawValue)
     }
 }

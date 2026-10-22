@@ -13,7 +13,7 @@ final class CatalogSearchTests: XCTestCase {
 
     func testExactSupplementaryQueryPublishesItsOriginalScalar() async throws {
         let search = CatalogSearch()
-        search.update("U+1F680", catalog: .latest, order: .codePoint)
+        search.update("U+1F680", catalog: .latest)
         try await waitUntilSettled(search)
         XCTAssertEqual(search.results.map(\.codePoint), [0x1F680])
         XCTAssertEqual(search.results.map(\.text), ["🚀"])
@@ -21,16 +21,16 @@ final class CatalogSearchTests: XCTestCase {
 
     func testRapidReplacementPublishesOnlyTheNewestQuery() async throws {
         let search = CatalogSearch()
-        search.update("U+0041", catalog: .shared, order: .newestFirst)
-        search.update("U+1F680", catalog: .latest, order: .oldestFirst)
+        search.update("U+0041", catalog: .shared)
+        search.update("U+1F680", catalog: .latest)
         try await waitUntilSettled(search)
         XCTAssertEqual(search.results.map(\.codePoint), [0x1F680])
     }
 
     func testClearingAQueuedQueryDoesNotRepopulateResults() async throws {
         let search = CatalogSearch()
-        search.update("letter", catalog: .latest, order: .newestFirst)
-        search.update(" \n\t ", catalog: .latest, order: .newestFirst)
+        search.update("letter", catalog: .latest)
+        search.update(" \n\t ", catalog: .latest)
         XCTAssertFalse(search.searching)
         XCTAssertTrue(search.results.isEmpty)
         try await Task.sleep(for: .milliseconds(250))
@@ -41,7 +41,7 @@ final class CatalogSearchTests: XCTestCase {
     func testNonpositiveLimitsDoNotProduceResults() async throws {
         let search = CatalogSearch()
         for limit in [0, -1, Int.min] {
-            search.update("U+1F680", catalog: .latest, order: .codePoint, limit: limit)
+            search.update("U+1F680", catalog: .latest, limit: limit)
             try await waitUntilSettled(search)
             XCTAssertTrue(search.results.isEmpty)
         }
@@ -51,7 +51,7 @@ final class CatalogSearchTests: XCTestCase {
         var search: CatalogSearch? = CatalogSearch()
         weak var reference: CatalogSearch?
         reference = search
-        search?.update("letter", catalog: .latest, order: .newestFirst)
+        search?.update("letter", catalog: .latest)
         search = nil
         XCTAssertNil(reference)
     }

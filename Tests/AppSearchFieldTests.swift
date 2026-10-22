@@ -44,7 +44,7 @@ final class AppSearchFieldTests: XCTestCase {
         XCTAssertEqual(field.returnKeyType, .done)
         XCTAssertEqual(field.clearButtonMode, .never)
         XCTAssertTrue(field.adjustsFontForContentSizeCategory)
-        XCTAssertEqual(field.font, UIFont.preferredFont(forTextStyle: .subheadline))
+        XCTAssertEqual(field.font, UIFont.preferredFont(forTextStyle: .body))
         XCTAssertTrue(field.delegate === field)
     }
 

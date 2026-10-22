@@ -10,6 +10,9 @@ import Glibc
 struct KeyboardKeySettings {
     enum Gesture: String, CaseIterable, Codable, Sendable { case tap, shiftedTap, longPress, swipeUp, swipeDown
         var maximumChoices: Int { self == .tap || self == .shiftedTap ? 1 : KeyboardVariantPolicy.maximumVariants }
+        /// The layers a key can be customized with. Taps always type the key
+        /// itself; tap values saved by earlier versions are kept but ignored.
+        static let customizable: [Gesture] = [.swipeUp, .swipeDown, .longPress]
     }
     enum Kind: String, Sendable { case letter, digit, character }
     struct Descriptor: Identifiable, Equatable, Sendable {
@@ -83,20 +86,11 @@ struct KeyboardKeySettings {
             guard KeyboardKeySettings.descriptor(for: keyID) != nil else { return nil }
             return overrides[keyID]?.candidates(for: gesture)
         }
-        /// Taps are independent of the three gesture candidate sets. Explicit
-        /// shifted text stays literal; a default shifted letter mapping follows
-        /// the remapped letter's case, while snippets and symbols stay exact.
+        /// A tap always types the key itself. Tap and shifted-tap values saved
+        /// by earlier versions are ignored, so no key can be left without a tap.
         func tapOutput(for keyID: String, defaultText: String, shifted: Bool) -> String? {
-            guard let descriptor = KeyboardKeySettings.descriptor(for: keyID), KeyboardVariantPolicy.validText(defaultText) else { return nil }
-            let values = overrides[keyID]
-            let explicitShift = shifted ? values?.shiftedTap : nil
-            guard let choices = explicitShift ?? values?.tap else { return defaultText }
-            guard choices.count == 1, let text = choices.first, KeyboardVariantPolicy.validText(text) else { return nil }
-            if shifted && explicitShift == nil && descriptor.kind == .letter && text.count == 1 && text.first?.isLetter == true {
-                let upper = text.uppercased()
-                return KeyboardVariantPolicy.validText(upper) ? upper : text
-            }
-            return text
+            guard KeyboardKeySettings.descriptor(for: keyID) != nil, KeyboardVariantPolicy.validText(defaultText) else { return nil }
+            return defaultText
         }
         /// The editor prepares a value first, then publishes it only if save succeeds.
         func updating(_ candidates: [String]?, for keyID: String, gesture: Gesture) -> Snapshot? {

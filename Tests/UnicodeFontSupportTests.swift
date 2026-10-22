@@ -103,14 +103,14 @@ final class UnicodeFontSupportTests: XCTestCase {
         var sharedBytes = Data()
         let settings = UnicodeEditionSettings(containerURL: { URL(fileURLWithPath: "/font-preference-fixture") },
             readPrefix: { _, _ in sharedBytes }, writeAtomically: { data, _ in sharedBytes = data })
-        let app = CatalogPreferences(defaults: defaults, editionSettings: settings)
+        let app = CatalogPreferences(editionSettings: settings)
         XCTAssertFalse(app.useUnicodeFonts)
         app.selectUnicodeFonts(true)
-        XCTAssertTrue(CatalogPreferences(defaults: defaults, editionSettings: settings).useUnicodeFonts)
+        XCTAssertTrue(CatalogPreferences(editionSettings: settings).useUnicodeFonts)
         XCTAssertTrue(settings.loadSnapshot().useUnicodeFonts)
         XCTAssertFalse(defaults.bool(forKey: "keyboardUnicodeFonts"))
         app.reset()
-        XCTAssertFalse(CatalogPreferences(defaults: defaults, editionSettings: settings).useUnicodeFonts)
+        XCTAssertFalse(CatalogPreferences(editionSettings: settings).useUnicodeFonts)
     }
 
     func testInvalidAndExtremePointSizesHaveFiniteBoundedFallbacks() {
@@ -173,10 +173,9 @@ final class UnicodeFontSupportTests: XCTestCase {
         defaults.set("unknown edition", forKey: "appUnicodeEdition")
         defaults.set(123, forKey: "appUnicodeSort")
         defaults.set("YES", forKey: "appUnicodeFonts")
-        let preferences = CatalogPreferences(defaults: defaults,
+        let preferences = CatalogPreferences(
             editionSettings: UnicodeEditionSettings(containerURL: { nil }))
         XCTAssertEqual(preferences.edition, .latest)
-        XCTAssertEqual(preferences.order, .codePoint)
         XCTAssertFalse(preferences.useUnicodeFonts)
     }
 
@@ -192,19 +191,16 @@ final class UnicodeFontSupportTests: XCTestCase {
             containerURL: { URL(fileURLWithPath: "/uniboard-preferences-fixture", isDirectory: true) },
             readPrefix: { _, _ in sharedSelection ?? Data() },
             writeAtomically: { bytes, _ in sharedSelection = bytes })
-        let preferences = CatalogPreferences(defaults: defaults, editionSettings: editionSettings)
+        let preferences = CatalogPreferences(editionSettings: editionSettings)
         preferences.selectEdition(.previous)
-        preferences.order = .codePoint
         preferences.selectUnicodeFonts(true)
-        let restored = CatalogPreferences(defaults: defaults, editionSettings: editionSettings)
+        let restored = CatalogPreferences(editionSettings: editionSettings)
         XCTAssertEqual(restored.edition, .previous)
         XCTAssertEqual(editionSettings.load(), .previous)
-        XCTAssertEqual(restored.order, .codePoint)
         XCTAssertTrue(restored.useUnicodeFonts)
         XCTAssertTrue(editionSettings.loadSnapshot().useUnicodeFonts)
         restored.reset()
-        XCTAssertEqual(CatalogPreferences(defaults: defaults, editionSettings: editionSettings).edition, .latest)
-        XCTAssertEqual(CatalogPreferences(defaults: defaults, editionSettings: editionSettings).order, .codePoint)
+        XCTAssertEqual(CatalogPreferences(editionSettings: editionSettings).edition, .latest)
         XCTAssertEqual(defaults.string(forKey: "keyboardUnicodeEdition"), "draft")
         XCTAssertEqual(defaults.string(forKey: "keyboardUnicodeSort"), "oldestFirst")
         XCTAssertTrue(defaults.bool(forKey: "keyboardUnicodeFonts"))

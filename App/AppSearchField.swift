@@ -37,7 +37,7 @@ final class AppSearchTextField: UITextField, UITextFieldDelegate {
         borderStyle = .none
         backgroundColor = .clear
         textColor = .label
-        font = .preferredFont(forTextStyle: .subheadline)
+        font = .preferredFont(forTextStyle: .body)
         adjustsFontForContentSizeCategory = true
         autocapitalizationType = .none
         autocorrectionType = .no

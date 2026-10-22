@@ -12,142 +12,161 @@ struct CharacterDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    ZStack(alignment: .bottom) {
-                        RoundedRectangle(cornerRadius: 26).fill(Palette.soft)
-                        VStack(spacing: 18) {
-                            Text(character.displayText)
-                                .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts)))
-                                .foregroundStyle(Palette.ink)
-                                .accessibilityIdentifier("characterGlyph")
-                                .minimumScaleFactor(0.5).lineLimit(1)
-                            Text(character.codePointLabel)
-                                .font(.subheadline.monospaced().weight(.medium))
-                                .foregroundStyle(Palette.accent)
-                                .accessibilityIdentifier("characterProperties.codepoints")
-                        }.padding(27)
-                    }.frame(height: 223)
+                VStack(spacing: 20) {
+                    Text(character.displayText)
+                        .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts)))
+                        .accessibilityIdentifier("characterGlyph")
+                        .minimumScaleFactor(0.5).lineLimit(1)
+                        .padding(24)
+                        .frame(maxWidth: .infinity).frame(height: 196)
+                        .background(Color.previewSurface(missing: glyphMissing), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-                    VStack(spacing: 9) {
-                        Text(character.name.capitalized)
-                            .font(.system(size: 27, weight: .regular, design: .serif))
-                            .multilineTextAlignment(.center).foregroundStyle(Palette.ink)
+                    VStack(spacing: 4) {
+                        Text(character.name)
+                            .font(.title2.weight(.semibold))
+                            .multilineTextAlignment(.center)
                             .accessibilityIdentifier("characterProperties.name")
-                        Text(character.blockName).font(.subheadline).foregroundStyle(Palette.muted)
-                        Text(character.category == "Cn" ? "Unassigned" : "Assigned")
-                            .font(.caption.weight(.semibold)).foregroundStyle(Palette.accent)
-                            .accessibilityIdentifier("characterProperties.status")
+                        Text(character.codePointLabel)
+                            .font(.body.monospaced())
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("characterProperties.codepoints")
                     }
 
+                    actions
+
+                    VStack(alignment: .leading, spacing: 8) {
                         Text(characterDescription)
-                            .font(.subheadline).foregroundStyle(Palette.muted)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 17))
+                            .padding(16)
+                            .background(Color.groupedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .accessibilityIdentifier("characterProperties.description")
-                    Text("The name and properties remain available even if your iOS font cannot display this glyph.")
-                        .font(.caption).foregroundStyle(Palette.muted)
-                    namingInformation
-                    if character.category == "Cn" {
-                        Label("This code point is not assigned in the selected Unicode edition.", systemImage: "square.dashed")
-                            .font(.caption).foregroundStyle(Palette.muted)
-                    } else if character.isInvisible {
-                        Label("This character is invisible. Its preview is a placeholder; copying inserts the actual character.", systemImage: "eye.slash")
-                            .font(.caption).foregroundStyle(Palette.muted)
-                    } else if character.category.hasPrefix("M") {
-                        Label("The dotted circle is only a preview. This mark combines with the character before it.", systemImage: "circle.dotted")
-                            .font(.caption).foregroundStyle(Palette.muted)
+                        Group {
+                            if character.category == "Cn" {
+                                Label("This code point is not assigned in the selected Unicode edition.", systemImage: "square.dashed")
+                            } else if character.isInvisible {
+                                Label("This character is invisible. Its preview is a placeholder; copying inserts the actual character.", systemImage: "eye.slash")
+                            } else if character.category.hasPrefix("M") {
+                                Label("The dotted circle is only a preview. This mark combines with the character before it.", systemImage: "circle.dotted")
+                            } else if glyphMissing {
+                                Label(previewFont == nil
+                                      ? "iOS can’t display this character, so its preview is a placeholder. The name and properties are still accurate."
+                                      : "iOS can’t display this character. The preview uses \(previewFont!); other apps may show a placeholder.",
+                                      systemImage: "exclamationmark.triangle")
+                            }
+                        }
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
                     }
 
-                    VStack(spacing: 10) {
-                        Button {
-                            UIPasteboard.general.string = character.text
-                            store.recordUse(character.codePoint)
-                            copied = true
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        } label: {
-                            Label(copied ? "Copied character" : "Copy character", systemImage: copied ? "checkmark" : "doc.on.doc")
-                                .font(.headline).frame(maxWidth: .infinity).padding(17)
-                                .foregroundStyle(Palette.surface)
-                                .background(Palette.ink, in: RoundedRectangle(cornerRadius: 15))
-                        }.accessibilityIdentifier("copyCharacter")
-
-                        HStack(spacing: 10) {
-                            Button {
-                                store.toggleFavorite(character.codePoint)
-                            } label: {
-                                Label(store.isFavorite(character.codePoint) ? "Saved" : "Save", systemImage: store.isFavorite(character.codePoint) ? "star.fill" : "star")
-                                    .frame(maxWidth: .infinity).padding(15)
-                                    .background(Palette.soft, in: RoundedRectangle(cornerRadius: 15))
-                            }
-                            .accessibilityLabel(store.isFavorite(character.codePoint) ? "Remove from favorites" : "Add to favorites")
-                            .accessibilityIdentifier("toggleFavorite")
-                            .disabled(character.category == "Cn" && !store.isFavorite(character.codePoint))
-                            Button {
-                                scratchpad += character.text
-                                store.recordUse(character.codePoint)
-                                added = true
-                            } label: {
-                                Label(added ? "Added" : "Scratchpad", systemImage: added ? "checkmark" : "plus")
-                                    .frame(maxWidth: .infinity).padding(15)
-                                    .background(Palette.soft, in: RoundedRectangle(cornerRadius: 15))
-                            }.accessibilityIdentifier("addToScratchpad")
-                        }.font(.subheadline.weight(.semibold)).foregroundStyle(Palette.accent)
-                    }.buttonStyle(.plain)
-
-                    VStack(alignment: .leading, spacing: 20) {
-                        if let source = UnicodeFontSupport.sourceName(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts) {
-                            metadata("PREVIEW FONT", value: source, identifier: "fontSource")
-                        }
-                        metadata("UNICODE AGE", value: character.age ?? (character.category == "Cn" ? "Not assigned" : "Pending in the draft data"), identifier: "age")
-                        metadata("GENERAL CATEGORY", value: "\(character.category) · \(character.categoryName)", identifier: "category")
-                        metadata("BLOCK", value: character.blockName, identifier: "block")
-                        metadata("SCRIPT", value: character.script ?? "Not listed in this source", identifier: "script")
-                        metadata("DECIMAL", value: String(character.codePoint), identifier: "decimal")
-                        metadata("UTF-8", value: character.text.utf8.map { String(format: "%02X", $0) }.joined(separator: " "), identifier: "utf8")
-                        metadata("UTF-16", value: character.text.utf16.map { String(format: "%04X", $0) }.joined(separator: " "), identifier: "utf16")
-                        metadata("BIDIRECTIONAL CLASS", value: character.bidirectionalClass ?? "Not listed in this source", identifier: "bidi")
-                        metadata("COMBINING CLASS", value: character.combiningClass.map(String.init) ?? "Not listed in this source", identifier: "combining")
-                        metadata("DECOMPOSITION", value: character.decomposition.flatMap { $0.isEmpty ? nil : $0 } ?? "None listed", identifier: "decomposition")
-                        if let value = character.numericValue {
-                            metadata("NUMERIC VALUE", value: value, identifier: "numericValue")
-                        }
-                        if let type = character.numericType {
-                            metadata("NUMERIC TYPE", value: type, identifier: "numericType")
-                        }
-                        if let point = character.simpleUppercase { metadata("UPPERCASE", value: codePointText(point), identifier: "uppercase") }
-                        if let point = character.simpleLowercase { metadata("LOWERCASE", value: codePointText(point), identifier: "lowercase") }
-                        if let point = character.simpleTitlecase { metadata("TITLECASE", value: codePointText(point), identifier: "titlecase") }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 2)
+                    if !namingRows.isEmpty { PropertyGroup(title: "Names & Notes", rows: namingRows) }
+                    PropertyGroup(title: "Properties", rows: propertyRows)
                 }
-                .padding(24).frame(maxWidth: 620).frame(maxWidth: .infinity)
+                .padding(16).frame(maxWidth: 620).frame(maxWidth: .infinity)
             }
-            .background(Palette.background)
-            .navigationTitle("Character detail")
+            .background(Color.groupedBackground)
+            .navigationTitle("Character")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
         .presentationDragIndicator(.visible)
     }
 
-    private var namingInformation: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if !character.nameAliases.isEmpty {
-                metadata("ALIASES", value: character.nameAliases.map { "\($0.kindLabel): \($0.name)" }.joined(separator: "\n"), identifier: "aliases", monospaced: false)
+    private var actions: some View {
+        VStack(spacing: 10) {
+            Button {
+                UIPasteboard.general.string = character.text
+                store.recordUse(character.codePoint)
+                copied = true
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } label: {
+                Label(copied ? "Copied" : "Copy Character", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    .frame(maxWidth: .infinity)
             }
-            if let section = character.namesListSection {
-                metadata("UNICODE SECTION", value: section, identifier: "section", monospaced: false)
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("copyCharacter")
+
+            HStack(spacing: 10) {
+                Button {
+                    store.toggleFavorite(character.codePoint)
+                } label: {
+                    Label(store.isFavorite(character.codePoint) ? "Saved" : "Save", systemImage: store.isFavorite(character.codePoint) ? "star.fill" : "star")
+                        .frame(maxWidth: .infinity)
+                }
+                .accessibilityLabel(store.isFavorite(character.codePoint) ? "Remove from favorites" : "Add to favorites")
+                .accessibilityIdentifier("toggleFavorite")
+                .disabled(character.category == "Cn" && !store.isFavorite(character.codePoint))
+                Button {
+                    scratchpad += character.text
+                    store.recordUse(character.codePoint)
+                    added = true
+                } label: {
+                    Label(added ? "Added" : "Scratchpad", systemImage: added ? "checkmark" : "plus")
+                        .frame(maxWidth: .infinity)
+                }.accessibilityIdentifier("addToScratchpad")
             }
-            let notes = character.sectionAnnotations + character.annotations
-            if !notes.isEmpty { metadata("UNICODE NOTES", value: (Array(NSOrderedSet(array: notes)) as? [String] ?? notes).joined(separator: "\n"), identifier: "notes", monospaced: false) }
-            if let oldName = character.unicode1Name {
-                metadata("UNICODE 1.0 NAME", value: oldName, identifier: "unicode1Name")
-            }
-            if !character.crossReferences.isEmpty {
-                metadata("RELATED CHARACTERS", value: character.crossReferences.map { "\($0.codePointLabel) · \($0.name)" }.joined(separator: "\n"), identifier: "references", monospaced: false)
-            }
+            .buttonStyle(.bordered)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .controlSize(.large)
+    }
+
+    private var previewFont: String? {
+        UnicodeFontSupport.sourceName(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts)
+    }
+    private var glyphMissing: Bool {
+        UnicodeFontSupport.stockFontsMiss(character.displayText)
+    }
+
+    private var namingRows: [PropertyRow] {
+        var rows: [PropertyRow] = []
+        if !character.nameAliases.isEmpty {
+            rows.append(.init(title: "Aliases", value: character.nameAliases.map { "\($0.kindLabel): \($0.name)" }.joined(separator: "\n"), identifier: "characterProperties.aliases", monospaced: false, stacked: true))
+        }
+        if let section = character.namesListSection {
+            rows.append(.init(title: "Unicode section", value: section, identifier: "characterProperties.section", monospaced: false, stacked: true))
+        }
+        let notes = character.sectionAnnotations + character.annotations
+        if !notes.isEmpty {
+            rows.append(.init(title: "Unicode notes", value: (Array(NSOrderedSet(array: notes)) as? [String] ?? notes).joined(separator: "\n"), identifier: "characterProperties.notes", monospaced: false, stacked: true))
+        }
+        if let oldName = character.unicode1Name {
+            rows.append(.init(title: "Unicode 1.0 name", value: oldName, identifier: "characterProperties.unicode1Name", monospaced: false, stacked: true))
+        }
+        if !character.crossReferences.isEmpty {
+            rows.append(.init(title: "Related characters", value: character.crossReferences.map { "\($0.codePointLabel) · \($0.name)" }.joined(separator: "\n"), identifier: "characterProperties.references", monospaced: false, stacked: true))
+        }
+        return rows
+    }
+
+    private var propertyRows: [PropertyRow] {
+        let decomposition = character.decomposition.flatMap { $0.isEmpty ? nil : $0 }
+        var rows: [PropertyRow] = [
+            .init(title: "Status", value: character.category == "Cn" ? "Unassigned" : "Assigned", identifier: "characterProperties.status", monospaced: false),
+        ]
+        if let source = UnicodeFontSupport.sourceName(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts) {
+            rows.append(.init(title: "Preview font", value: source, identifier: "characterProperties.fontSource", monospaced: false))
+        }
+        rows += [
+            .init(title: "Unicode age", value: character.age ?? (character.category == "Cn" ? "Not assigned" : "Pending in the draft data"), identifier: "characterProperties.age", monospaced: false),
+            .init(title: "Category", value: "\(character.category) · \(character.categoryName)", identifier: "characterProperties.category", monospaced: false),
+            .init(title: "Block", value: character.blockName, identifier: "characterProperties.block", monospaced: false),
+            .init(title: "Script", value: character.script ?? "Not listed in this source", identifier: "characterProperties.script", monospaced: false),
+            .init(title: "Decimal", value: String(character.codePoint), identifier: "characterProperties.decimal", monospaced: false),
+            .init(title: "UTF-8", value: character.text.utf8.map { String(format: "%02X", $0) }.joined(separator: " "), identifier: "characterProperties.utf8"),
+            .init(title: "UTF-16", value: character.text.utf16.map { String(format: "%04X", $0) }.joined(separator: " "), identifier: "characterProperties.utf16"),
+            .init(title: "Bidi class", value: character.bidirectionalClass ?? "Not listed in this source", identifier: "characterProperties.bidi", monospaced: character.bidirectionalClass != nil),
+            .init(title: "Combining class", value: character.combiningClass.map(String.init) ?? "Not listed in this source", identifier: "characterProperties.combining", monospaced: false),
+            .init(title: "Decomposition", value: decomposition ?? "None listed", identifier: "characterProperties.decomposition", monospaced: decomposition != nil),
+        ]
+        if let value = character.numericValue {
+            rows.append(.init(title: "Numeric value", value: value, identifier: "characterProperties.numericValue"))
+        }
+        if let type = character.numericType {
+            rows.append(.init(title: "Numeric type", value: type, identifier: "characterProperties.numericType", monospaced: false))
+        }
+        if let point = character.simpleUppercase { rows.append(.init(title: "Uppercase", value: codePointText(point), identifier: "characterProperties.uppercase")) }
+        if let point = character.simpleLowercase { rows.append(.init(title: "Lowercase", value: codePointText(point), identifier: "characterProperties.lowercase")) }
+        if let point = character.simpleTitlecase { rows.append(.init(title: "Titlecase", value: codePointText(point), identifier: "characterProperties.titlecase")) }
+        return rows
     }
 
     private var characterDescription: String {
@@ -159,14 +178,6 @@ struct CharacterDetailView: View {
     private func codePointText(_ value: UInt32) -> String {
         String(format: "U+%04X", value) + (UnicodeScalar(value).map { " · \(String($0))" } ?? "")
     }
-
-    private func metadata(_ title: String, value: String, identifier: String, monospaced: Bool = true) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(title).font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1).foregroundStyle(Palette.muted)
-            Text(value).font(monospaced ? .caption.monospaced() : .subheadline).foregroundStyle(Palette.ink).textSelection(.enabled)
-                .accessibilityIdentifier("characterProperties.\(identifier)")
-        }
-    }
 }
 
 struct ScratchpadView: View {
@@ -177,31 +188,32 @@ struct ScratchpadView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Make something\nwith your characters.")
-                    .font(.system(size: 32, weight: .regular, design: .serif)).foregroundStyle(Palette.ink)
-                Text("Add characters from their detail cards, or try Uniboard using the keyboard globe.")
-                    .font(.subheadline).foregroundStyle(Palette.muted)
+            VStack(alignment: .leading, spacing: 10) {
                 TextEditor(text: $text)
-                    .font(.title2).padding(12).scrollContentBackground(.hidden)
-                    .background(Palette.surface, in: RoundedRectangle(cornerRadius: 20))
+                    .font(.title2).padding(8).scrollContentBackground(.hidden)
+                    .background(Color.groupedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .accessibilityIdentifier("scratchpadInput")
-                HStack {
-                    Button { confirmClear = true } label: { Label("Clear", systemImage: "trash") }
+                Text("Add characters from their detail pages, or type here with Uniboard.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+            }
+            .padding(16).background(Color.groupedBackground)
+            .navigationTitle("Scratchpad").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button("Clear", systemImage: "trash", role: .destructive) { confirmClear = true }
                         .disabled(text.isEmpty)
                     Spacer()
-                    Button {
+                    Button(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") {
                         UIPasteboard.general.string = text
                         copied = true
-                    } label: { Label(copied ? "Copied" : "Copy text", systemImage: copied ? "checkmark" : "doc.on.doc") }
-                        .buttonStyle(.borderedProminent).disabled(text.isEmpty)
+                    }
+                    .disabled(text.isEmpty)
                 }
             }
-            .padding(24).background(Palette.background)
-            .navigationTitle("Scratchpad").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .confirmationDialog("Clear your scratchpad?", isPresented: $confirmClear, titleVisibility: .visible) {
-                Button("Clear scratchpad", role: .destructive) { text = "" }
+                Button("Clear Scratchpad", role: .destructive) { text = "" }
             }
         }
     }

@@ -700,8 +700,8 @@ private enum KeyboardItem {
 
     var name: String {
         switch self {
-        case .character(let character): return character.name.capitalized
-        case .emoji(let emoji): return emoji.name.capitalized
+        case .character(let character): return character.name
+        case .emoji(let emoji): return emoji.name
         }
     }
     var displayText: String {
@@ -798,13 +798,8 @@ private final class KeyboardModel: ObservableObject {
             refreshCatalog()
         }
     }
-    @Published var order: UnicodeSortOrder {
-        didSet {
-            defaults.set(orderValue, forKey: "keyboard.unicodeSortOrder")
-            if order != oldValue { invalidateInputMode() }
-            refreshCatalog()
-        }
-    }
+    /// Characters are always listed from the lowest code point.
+    let order = UnicodeSortOrder.codePoint
     @Published private(set) var useUnicodeFonts: Bool {
         didSet {
             if oldValue && !useUnicodeFonts { UnicodeFontSupport.clearCache() }
@@ -888,9 +883,6 @@ private final class KeyboardModel: ObservableObject {
 
     var showsUnicode: Bool { panel == .unicode || isSearching || inspection != nil || symbolBoardInspectionText != nil || symbolBoardManagerPresented }
     var hasSymbolBoardOverlay: Bool { symbolBoardManagerPresented || symbolBoardSaveText != nil }
-    var showsCharacterOrder: Bool {
-        showsUnicode && !isShowingSymbolPages && inspection == nil && symbolBoardInspectionText == nil && !hasSymbolBoardOverlay
-    }
     var isShowingSymbolPages: Bool { panel == .unicode && section == .saved && !isSearching }
     var modeValue: String { inspection != nil || symbolBoardInspectionText != nil ? "inspection" : isSearching ? "query" : panel == .typing ? "typing" : "unicode" }
     var typingLayoutValue: String {
@@ -1099,13 +1091,6 @@ private final class KeyboardModel: ObservableObject {
     var catalog: UnicodeCatalog { edition.catalog }
     var emojiCatalog: EmojiCatalog { edition.emojiCatalog }
     var editionValue: String { edition.rawValue }
-    var orderValue: String {
-        switch order {
-        case .newestFirst: return "newestFirst"
-        case .oldestFirst: return "oldestFirst"
-        case .codePoint: return "codePoint"
-        }
-    }
     var hasSearchQuery: Bool {
         (section == .symbols || section == .emojis) && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -1115,11 +1100,6 @@ private final class KeyboardModel: ObservableObject {
         let appSettings = UnicodeEditionSettings.shared.loadSnapshot()
         keySettings = KeyboardKeySettings.shared.loadSnapshot()
         edition = appSettings.edition
-        switch defaults.string(forKey: "keyboard.unicodeSortOrder") {
-        case "newestFirst": order = .newestFirst
-        case "oldestFirst": order = .oldestFirst
-        default: order = .codePoint
-        }
         useUnicodeFonts = appSettings.useUnicodeFonts
         showsSymbolBar = appSettings.showsSymbolBar
         searchBarInsteadOfSymbols = appSettings.searchBarInsteadOfSymbols
@@ -1249,28 +1229,10 @@ private final class KeyboardModel: ObservableObject {
     }
 
     func sorted(_ characters: [UnicodeCharacter]) -> [UnicodeCharacter] {
-        characters.sorted { lhs, rhs in
-            switch order {
-            case .newestFirst:
-                if lhs.versionSortKey != rhs.versionSortKey { return lhs.versionSortKey > rhs.versionSortKey }
-            case .oldestFirst:
-                if lhs.versionSortKey != rhs.versionSortKey { return lhs.versionSortKey < rhs.versionSortKey }
-            case .codePoint: break
-            }
-            return lhs.codePoint < rhs.codePoint
-        }
+        characters.sorted { $0.codePoint < $1.codePoint }
     }
     func sorted(_ emojis: [UnicodeEmojiEntry]) -> [UnicodeEmojiEntry] {
-        emojis.sorted { lhs, rhs in
-            switch order {
-            case .newestFirst:
-                if lhs.versionSortKey != rhs.versionSortKey { return lhs.versionSortKey > rhs.versionSortKey }
-            case .oldestFirst:
-                if lhs.versionSortKey != rhs.versionSortKey { return lhs.versionSortKey < rhs.versionSortKey }
-            case .codePoint: break
-            }
-            return lhs.codePoints.lexicographicallyPrecedes(rhs.codePoints)
-        }
+        emojis.sorted { $0.codePoints.lexicographicallyPrecedes($1.codePoints) }
     }
 
     private func refreshCatalog() {
@@ -1338,12 +1300,9 @@ private final class KeyboardModel: ObservableObject {
 }
 
 enum KeyboardPalette {
-    // Keycaps use iOS semantic surfaces; brand color is reserved for selection.
-    static let accentUI = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.98, green: 0.65, blue: 0.48, alpha: 1)
-            : UIColor(red: 0.73, green: 0.30, blue: 0.17, alpha: 1)
-    }
+    // Keycaps use iOS semantic surfaces; the system tint marks selection and
+    // the action key, matching the stock keyboard.
+    static let accentUI = UIColor.systemBlue
     static let backgroundUI = UIColor.systemGroupedBackground
     static let keyUI = UIColor.secondarySystemGroupedBackground
     static let modifierUI = UIColor { traits in
@@ -1354,10 +1313,17 @@ enum KeyboardPalette {
     static let borderUI = UIColor { traits in
         UIColor.separator.resolvedColor(with: traits).withAlphaComponent(traits.accessibilityContrast == .high ? 0.65 : 0.16)
     }
-    static let actionUI = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? .systemGray3
-            : UIColor(red: 0.16, green: 0.17, blue: 0.19, alpha: 1)
+    static let actionUI = UIColor.systemBlue
+    /// A key whose glyph iOS and every installed fallback still cannot draw.
+    /// Opaque, so the tint reads the same over the translucent keyboard tray.
+    static let missingGlyphUI = UIColor { traits in
+        let key = keyUI.resolvedColor(with: traits), red = UIColor.systemRed.resolvedColor(with: traits)
+        var k: (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0), r = k
+        key.getRed(&k.0, green: &k.1, blue: &k.2, alpha: &k.3)
+        red.getRed(&r.0, green: &r.1, blue: &r.2, alpha: &r.3)
+        let amount: CGFloat = 0.18
+        return UIColor(red: k.0 + (r.0 - k.0) * amount, green: k.1 + (r.1 - k.1) * amount,
+                       blue: k.2 + (r.2 - k.2) * amount, alpha: 1)
     }
     static let actionTextUI = UIColor.white
     static let accent = Color(uiColor: accentUI)
@@ -1584,7 +1550,6 @@ private struct UnicodeKeyboardView: View {
 
             panelButton
             if model.showsUnicode { sectionMenu }
-            if model.showsCharacterOrder { optionsMenu }
             // A single fixed trailing key in search, browsing and inspection.
             RepeatingDeleteKey(action: delete, isQuery: model.isSearching, route: model.inputModeID,
                 enabled: model.showsUnicodeToolbar && !model.hasSymbolBoardOverlay)
@@ -1680,43 +1645,16 @@ private struct UnicodeKeyboardView: View {
         .accessibilityIdentifier("keyboard.section")
     }
 
-    private var optionsMenu: some View {
-        Menu {
-            Section("Character order") {
-                sortOption(.newestFirst, identifier: "newest")
-                sortOption(.oldestFirst, identifier: "oldest")
-                sortOption(.codePoint, identifier: "codepoint")
-            }
-
-        } label: {
-            Image(systemName: "ellipsis").font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.primary)
-                .frame(width: 36, height: headerHeight)
-                .keyboardControlSurface()
-        }
-        .buttonStyle(KeyboardPressStyle())
-        .accessibilityLabel("Keyboard options")
-        .accessibilityValue(model.orderValue)
-        .accessibilityIdentifier("keyboard.options")
-    }
-
-    private func sortOption(_ order: UnicodeSortOrder, identifier: String) -> some View {
-        Button { model.order = order } label: {
-            Label(order.title, systemImage: model.order == order ? "checkmark" : "circle")
-        }
-        .accessibilityIdentifier("keyboard.order.\(identifier)")
-    }
-
     @ViewBuilder private var content: some View {
         if model.isSearching || model.hasSearchQuery { searchResults }
         else {
             switch model.section {
             case .symbols:
                 if model.discoveryLoading { ProgressView("Loading Unicode…").font(.system(size: 12)) }
-                else { characterGrid(model.discoveryCharacters, pagination: model.loadSymbolsPage).id("symbols-\(model.editionValue)-\(model.orderValue)") }
+                else { characterGrid(model.discoveryCharacters, pagination: model.loadSymbolsPage).id("symbols-\(model.editionValue)") }
             case .emojis:
                 if model.discoveryLoading { ProgressView("Loading emoji…").font(.system(size: 12)) }
-                else { emojiGrid(model.discoveryEmojis, pagination: model.loadEmojisPage).id("emojis-\(model.editionValue)-\(model.orderValue)") }
+                else { emojiGrid(model.discoveryEmojis, pagination: model.loadEmojisPage).id("emojis-\(model.editionValue)") }
             case .blocks: blockContent
             case .saved: savedContent
             }
@@ -1828,15 +1766,16 @@ private struct UnicodeKeyboardView: View {
                 .frame(height: 23)
                 if model.blockLoading && model.blockCharacters.isEmpty { ProgressView("Loading block…").font(.system(size: 12)) }
                 else if model.blockCharacters.isEmpty { emptyState(icon: "square.dashed", title: "No assigned characters", detail: "This block is reserved in Unicode \(model.catalog.version).") }
-                else { characterGrid(model.blockCharacters, pagination: model.loadBlockPage).id("block-\(block.id)-\(model.editionValue)-\(model.orderValue)") }
+                else { characterGrid(model.blockCharacters, pagination: model.loadBlockPage).id("block-\(block.id)-\(model.editionValue)") }
             }
         } else {
             ScrollView {
                 LazyVStack(spacing: 6) {
                     ForEach(model.catalog.blocks) { block in
                         Button { model.openBlock(block) } label: {
+                            let symbol = block.symbol
                             HStack(spacing: 10) {
-                                Text(block.symbol).font(Font(UnicodeFontSupport.font(for: block.symbol, size: 21, enabled: model.useUnicodeFonts))).foregroundStyle(KeyboardPalette.accent).frame(width: 31)
+                                Text(symbol).font(Font(UnicodeFontSupport.font(for: symbol, size: 21, enabled: model.useUnicodeFonts))).foregroundStyle(KeyboardPalette.accent).frame(width: 31)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(block.name).font(.system(size: 13, weight: .medium)).foregroundStyle(Color.primary).lineLimit(1)
                                     Text(block.rangeLabel).font(.system(size: 9, design: .monospaced)).foregroundStyle(KeyboardPalette.secondary)
@@ -2158,7 +2097,7 @@ private struct UnicodeKeyboardView: View {
                 let character = model.catalog.character(at: point)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("\(index + 1). \(String(format: "U+%04X", point))").font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    Text(character?.name.capitalized ?? "Unicode scalar").font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Text(character?.name ?? "Unicode scalar").font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("keyboard.properties.component.\(index).name")
                     if let character {
                         Text("\(character.categoryName) · \(character.age.map { "Unicode \($0)" } ?? "Age not listed")")
@@ -2301,7 +2240,7 @@ private struct UnicodeKeyboardView: View {
                     fontSize: 14, isAction: true, contentPosition: usesPadKeyPositions ? .bottomRight : .center, route: model.inputModeID,
                     factory: { [mode = model.inputModeID] in action(mode, .returnKey) })
                     .frame(width: plan.returnWidth, height: controlHeight)
-                    .background(model.isPadLayout && !model.showsUnicode ? Color(uiColor: .systemBlue) : KeyboardPalette.action, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(KeyboardPalette.action, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
     }
@@ -2458,7 +2397,7 @@ private struct KeyboardTypingView: View {
         KeyboardTouchKey(title: returnTitle, identifier: "keyboard.return", label: "\(returnTitle) key", fontSize: 14,
             isAction: true, contentPosition: .bottomRight, route: mode, factory: { [mode = mode] in action(mode, .returnKey) })
             .frame(width: width, height: height)
-            .background(Color(uiColor: .systemBlue), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .background(KeyboardPalette.action, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
     private func padShift(width: CGFloat, height: CGFloat, right: Bool) -> some View {
@@ -2714,7 +2653,6 @@ private final class InspectableKeyButton: UIControl {
             usesExternalKeySurface = glyphOnly
             invalidateIntrinsicContentSize()
         }
-        backgroundColor = glyphOnly ? .clear : KeyboardPalette.keyUI
         layer.borderWidth = glyphOnly ? 0 : 0.4
         interaction.configure(contextIdentifier: route, itemIdentifier: item.keyIdentifier,
             enabled: enabled, actionFactory: actionFactory)
@@ -2723,15 +2661,20 @@ private final class InspectableKeyButton: UIControl {
         accessibilityElementsHidden = !enabled
         glyph.text = item.displayText
         glyphHeight.constant = compact ? 26 : 34
+        let missing: Bool
         if case .character(let character) = item {
             let size: CGFloat = character.isInvisible ? 17 : compact ? 24 : 32
             glyph.font = UnicodeFontSupport.font(for: character.displayText, size: size, enabled: useUnicodeFonts)
             accessibilityValue = UnicodeFontSupport.sourceName(for: character.displayText, size: size, enabled: useUnicodeFonts).map { "Preview font: \($0)" }
+            missing = UnicodeFontSupport.stockFontsMiss(character.displayText)
         } else {
             let size: CGFloat = compact ? 24 : 32
             glyph.font = UnicodeFontSupport.font(for: item.displayText, size: size, enabled: useUnicodeFonts)
             accessibilityValue = UnicodeFontSupport.sourceName(for: item.displayText, size: size, enabled: useUnicodeFonts).map { "Preview font: \($0)" }
+            missing = UnicodeFontSupport.stockFontsMiss(item.displayText, emoji: true)
         }
+        backgroundColor = glyphOnly ? (missing ? UIColor.systemRed.withAlphaComponent(0.18) : .clear)
+            : missing ? KeyboardPalette.missingGlyphUI : KeyboardPalette.keyUI
         code.text = item.footer
         codeHeight.isActive = !glyphOnly
         code.isHidden = glyphOnly

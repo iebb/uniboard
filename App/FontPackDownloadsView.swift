@@ -78,6 +78,8 @@ private final class FontPackDownloads: ObservableObject {
             message = "Shared font storage is unavailable. Reopen the app and try again."
             return
         }
+        // Downloading a pack is a request to use it: turn previews on.
+        if !CatalogPreferences.shared.useUnicodeFonts { CatalogPreferences.shared.selectUnicodeFonts(true) }
         let id = UUID()
         runID = id
         activePack = pack.id
@@ -118,7 +120,7 @@ private final class FontPackDownloads: ObservableObject {
                     }
                 }
                 progress = 1
-                message = "Downloaded. Enable Extra Unicode fonts to use these previews in the app and keyboard."
+                message = "Downloaded. The app and keyboard now use these fonts for previews iOS can’t draw."
             } catch {
                 if Task.isCancelled {
                     message = "Download cancelled. Completed fonts are kept; retry to download the rest."
@@ -127,6 +129,7 @@ private final class FontPackDownloads: ObservableObject {
                 }
             }
             UnicodeFontSupport.clearCache()
+            CatalogPreferences.shared.fontFilesChanged()
             reload()
             activePack = nil
             runID = nil
@@ -149,6 +152,7 @@ private final class FontPackDownloads: ObservableObject {
             message = "Download removed. Bundled fonts remain available."
         } catch { message = "Some font files could not be removed. Reopen this page and try again." }
         UnicodeFontSupport.clearCache()
+        CatalogPreferences.shared.fontFilesChanged()
         reload()
     }
 
@@ -174,22 +178,24 @@ struct FontPackDownloadsView: View {
     @StateObject private var downloads = FontPackDownloads.shared
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Toggle("Extra Unicode fonts", isOn: Binding(get: { preferences.useUnicodeFonts },
+        Form {
+            Section {
+                Toggle("Extra Unicode Fonts", isOn: Binding(get: { preferences.useUnicodeFonts },
                     set: { preferences.selectUnicodeFonts($0) }))
-                    .font(.headline).accessibilityIdentifier("fontDownloads.enable")
-                Text("Keep the built-in fonts, or download just the extra previews you need. Downloads are optional, stored on this device, and work offline in both the app and keyboard without Full Access.")
-                    .font(.subheadline).foregroundStyle(Palette.muted)
-                Text("Measured against iOS 27. Fonts improve previews only; other apps choose their own fonts. Some newer characters still have no suitable bundled or downloadable glyph.")
-                    .font(.caption).foregroundStyle(Palette.muted)
-                ForEach(UnicodeFontPackCatalog.bundled.packs) { pack in
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(pack.title).font(.headline).foregroundStyle(Palette.ink)
-                        Text(pack.detail).font(.subheadline).foregroundStyle(Palette.muted)
+                    .accessibilityIdentifier("fontDownloads.enable")
+            } footer: {
+                Text("Keep the built-in fonts, or download just the extra previews you need. Downloads are optional, stored on this device, and work offline in both the app and keyboard without Full Access. Measured against iOS 27; some newer characters still have no suitable glyph.")
+            }
+            ForEach(UnicodeFontPackCatalog.bundled.packs) { pack in
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
                         let count = downloads.installed[pack.id, default: 0]
-                        Text("\(ByteCountFormatter.string(fromByteCount: pack.bytes, countStyle: .file)) · \(count)/\(pack.fonts.count) fonts downloaded")
-                            .font(.caption).foregroundStyle(Palette.muted)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(pack.title).font(.headline)
+                            Text(pack.detail).font(.subheadline).foregroundStyle(.secondary)
+                            Text("\(ByteCountFormatter.string(fromByteCount: pack.bytes, countStyle: .file)) · \(count)/\(pack.fonts.count) fonts downloaded")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
                         if downloads.activePack == pack.id {
                             ProgressView(value: downloads.progress)
                                 .accessibilityIdentifier("fontDownloads.progress.\(pack.id)")
@@ -199,7 +205,7 @@ struct FontPackDownloadsView: View {
                                 if count < pack.fonts.count {
                                     Button(count == 0 ? "Download" : "Download remaining fonts") { downloads.download(pack) }
                                         .accessibilityIdentifier("fontDownloads.download.\(pack.id)")
-                                } else { Label("Available offline", systemImage: "checkmark.circle.fill").foregroundStyle(Palette.accent) }
+                                } else { Label("Available offline", systemImage: "checkmark.circle.fill").foregroundStyle(.secondary) }
                                 Spacer()
                                 if downloads.stored.contains(pack.id) {
                                     Button("Remove", role: .destructive) { downloads.remove(pack) }
@@ -207,20 +213,23 @@ struct FontPackDownloadsView: View {
                                 }
                             }.disabled(downloads.activePack != nil)
                         }
-                    }.padding(18).background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
+                    }
+                    .buttonStyle(.borderless)
+                    .padding(.vertical, 4)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("fontDownloads.pack.\(pack.id)")
                 }
+            }
+            Section {
                 if let message = downloads.message {
-                    Text(message).font(.subheadline).foregroundStyle(Palette.accent)
+                    Text(message)
                         .accessibilityIdentifier("fontDownloads.message")
                 }
+            } footer: {
                 Text("Downloads contact GitHub’s file CDN. No typing, search terms or favorites are included in download requests. Font licenses and source information are available in Settings.")
-                    .font(.caption).foregroundStyle(Palette.muted)
-            }.padding(20)
+            }
         }
-        .background(Palette.background)
-        .navigationTitle("Optional font downloads")
+        .navigationTitle("Font Downloads")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { downloads.reload() }
     }

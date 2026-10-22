@@ -9,7 +9,7 @@ final class CatalogPreferencesTests: XCTestCase {
     func testTopBarSettingsPersistIndependentlyAndFailedWritesKeepPreviousValues() throws {
         try withDefaults { defaults in
             let storage = try SharedFile(.previous)
-            let value = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            let value = CatalogPreferences(editionSettings: storage.settings)
             XCTAssertTrue(value.showsSymbolBar); XCTAssertFalse(value.searchBarInsteadOfSymbols)
             value.selectSearchBarInsteadOfSymbols(true); value.selectSymbolBar(false)
             value.selectEdition(.draft)
@@ -20,7 +20,7 @@ final class CatalogPreferencesTests: XCTestCase {
             XCTAssertFalse(value.showsSymbolBar); XCTAssertTrue(value.searchBarInsteadOfSymbols)
             XCTAssertNotNil(value.editionSaveError)
             storage.failWrites = false
-            let restored = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            let restored = CatalogPreferences(editionSettings: storage.settings)
             XCTAssertFalse(restored.showsSymbolBar); XCTAssertTrue(restored.searchBarInsteadOfSymbols)
         }
     }
@@ -28,7 +28,7 @@ final class CatalogPreferencesTests: XCTestCase {
     func testPadSettingsPreserveOtherFieldsAcrossSavesRefreshesAndFailedWrites() throws {
         try withDefaults { defaults in
             let storage = try SharedFile(.previous)
-            let preferences = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            let preferences = CatalogPreferences(editionSettings: storage.settings)
             preferences.selectPadLayout(.ansi)
             preferences.selectPadSymbolMapping(.none)
             preferences.selectUnicodeFonts(true)
@@ -103,23 +103,6 @@ final class CatalogPreferencesTests: XCTestCase {
         try body(defaults)
     }
 
-    func testFreshInvalidAndSavedSortPreferencesUseAscendingOnlyAsFallback() async throws {
-        try withDefaults { defaults in
-            let storage = try SharedFile(.latest)
-            XCTAssertEqual(CatalogPreferences(defaults: defaults, editionSettings: storage.settings).order, .codePoint)
-            XCTAssertNil(defaults.object(forKey: "appUnicodeSort"), "Reading defaults does not rewrite an explicit selection")
-            for order in UnicodeSortOrder.allCases {
-                defaults.set(order.rawValue, forKey: "appUnicodeSort")
-                XCTAssertEqual(CatalogPreferences(defaults: defaults, editionSettings: storage.settings).order, order)
-                XCTAssertEqual(defaults.string(forKey: "appUnicodeSort"), order.rawValue)
-            }
-            for invalid: Any in ["unrecognized", 123, true] {
-                defaults.set(invalid, forKey: "appUnicodeSort")
-                XCTAssertEqual(CatalogPreferences(defaults: defaults, editionSettings: storage.settings).order, .codePoint)
-            }
-        }
-    }
-
     func testMissingSharedContainerDefaultsToLatestDespiteLegacyDraftAndCannotClaimSave() async throws {
         try withDefaults { defaults in
             defaults.set("draft", forKey: "appUnicodeEdition")
@@ -128,7 +111,7 @@ final class CatalogPreferencesTests: XCTestCase {
             let settings = UnicodeEditionSettings(containerURL: { nil },
                 readPrefix: { _, _ in XCTFail("No global file fallback is permitted"); return Data() },
                 writeAtomically: { _, _ in XCTFail("No global file fallback is permitted") })
-            let preferences = CatalogPreferences(defaults: defaults, editionSettings: settings)
+            let preferences = CatalogPreferences(editionSettings: settings)
             XCTAssertEqual(preferences.edition, .latest)
             XCTAssertNil(preferences.editionSaveError)
             preferences.selectEdition(.draft)
@@ -143,7 +126,7 @@ final class CatalogPreferencesTests: XCTestCase {
         try withDefaults { defaults in
             defaults.set("legacy-local-choice", forKey: "appUnicodeEdition")
             let storage = try SharedFile(.latest)
-            let preferences = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            let preferences = CatalogPreferences(editionSettings: storage.settings)
             var published: [UnicodeEdition] = []
             var identifiersAtPublication: [String?] = []
             let observation = preferences.$edition.dropFirst().sink { edition in
@@ -168,7 +151,7 @@ final class CatalogPreferencesTests: XCTestCase {
             let storage = try SharedFile(.previous)
             let original = storage.data
             storage.failWrites = true
-            let preferences = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            let preferences = CatalogPreferences(editionSettings: storage.settings)
             var published: [UnicodeEdition] = []
             let observation = preferences.$edition.dropFirst().sink { published.append($0) }
             defer { observation.cancel() }
@@ -185,7 +168,7 @@ final class CatalogPreferencesTests: XCTestCase {
     func testSuccessfulRetryClearsTheErrorAndAdoptsExactlyTheRetriedChoice() async throws {
         try withDefaults { defaults in
             let storage = try SharedFile(.previous)
-            let preferences = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            let preferences = CatalogPreferences(editionSettings: storage.settings)
             storage.failWrites = true
             preferences.selectEdition(.draft)
             XCTAssertNotNil(preferences.editionSaveError)
@@ -202,22 +185,18 @@ final class CatalogPreferencesTests: XCTestCase {
 
     func testUITestResetPreservesWholeSharedSnapshotAndNeverWritesSharedStorage() async throws {
         try withDefaults { defaults in
-            defaults.set(UnicodeSortOrder.oldestFirst.rawValue, forKey: "appUnicodeSort")
             defaults.set(true, forKey: "appUnicodeFonts")
             let storage = try SharedFile(.draft)
             storage.data = try SharedFile.payload(.init(edition: .draft, useUnicodeFonts: true, showsCollapseKey: true))
             let original = storage.data
-            let preferences = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
-            XCTAssertEqual(preferences.order, .oldestFirst)
+            let preferences = CatalogPreferences(editionSettings: storage.settings)
             XCTAssertTrue(preferences.useUnicodeFonts)
             preferences.reset(preservingEdition: true)
             XCTAssertEqual(preferences.edition, .draft)
             XCTAssertEqual(storage.data, original)
             XCTAssertEqual(storage.writeAttempts, 0)
-            XCTAssertEqual(preferences.order, .codePoint)
             XCTAssertTrue(preferences.useUnicodeFonts)
             XCTAssertTrue(preferences.showsCollapseKey)
-            XCTAssertEqual(defaults.string(forKey: "appUnicodeSort"), UnicodeSortOrder.codePoint.rawValue)
             XCTAssertEqual(defaults.object(forKey: "appUnicodeFonts") as? Bool, true, "Old local preferences are not an authority or migration target")
         }
     }
@@ -225,14 +204,12 @@ final class CatalogPreferencesTests: XCTestCase {
     func testExplicitResetPersistsLatestWhileResettingLocalDisplayPreferences() async throws {
         try withDefaults { defaults in
             let storage = try SharedFile(.older)
-            let preferences = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
-            preferences.order = .codePoint
+            let preferences = CatalogPreferences(editionSettings: storage.settings)
             preferences.selectUnicodeFonts(true)
             preferences.reset()
             XCTAssertEqual(preferences.edition, .latest)
             XCTAssertEqual(try storage.storedIdentifier(), "latest")
             XCTAssertEqual(storage.successfulWrites, 2)
-            XCTAssertEqual(preferences.order, .codePoint)
             XCTAssertFalse(preferences.useUnicodeFonts)
             XCTAssertNil(preferences.editionSaveError)
         }
@@ -241,7 +218,7 @@ final class CatalogPreferencesTests: XCTestCase {
     func testRefreshOnlyPublishesChangedValuesAndNeverSavesOrMigrates() async throws {
         try withDefaults { defaults in
             let storage = try SharedFile(.draft)
-            let preferences = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            let preferences = CatalogPreferences(editionSettings: storage.settings)
             var published: [UnicodeEdition] = []
             let observation = preferences.$edition.dropFirst().sink { published.append($0) }
             defer { observation.cancel() }
@@ -265,8 +242,7 @@ final class CatalogPreferencesTests: XCTestCase {
     func testFailedExplicitResetReportsUnsavedEditionWhileResettingLocalOptions() async throws {
         try withDefaults { defaults in
             let storage = try SharedFile(.previous)
-            let preferences = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
-            preferences.order = .oldestFirst
+            let preferences = CatalogPreferences(editionSettings: storage.settings)
             preferences.selectUnicodeFonts(true)
             storage.failWrites = true
             preferences.reset()
@@ -274,7 +250,6 @@ final class CatalogPreferencesTests: XCTestCase {
             XCTAssertEqual(try storage.storedIdentifier(), UnicodeEdition.previous.selectionIdentifier)
             XCTAssertNotNil(preferences.editionSaveError)
             XCTAssertEqual(storage.successfulWrites, 1)
-            XCTAssertEqual(preferences.order, .codePoint)
             XCTAssertTrue(preferences.useUnicodeFonts, "A failed atomic reset retains every published shared setting")
         }
     }
@@ -284,7 +259,7 @@ final class CatalogPreferencesTests: XCTestCase {
             defaults.set(true, forKey: "appUnicodeFonts")
             defaults.set(true, forKey: "keyboardUnicodeFonts")
             let storage = try SharedFile(.previous)
-            let preferences = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            let preferences = CatalogPreferences(editionSettings: storage.settings)
             XCTAssertFalse(preferences.useUnicodeFonts)
             XCTAssertFalse(preferences.showsCollapseKey)
             var persistedAtPublication: [UnicodeEditionSettings.Snapshot] = []
@@ -296,7 +271,7 @@ final class CatalogPreferencesTests: XCTestCase {
             let expected = UnicodeEditionSettings.Snapshot(edition: .older, useUnicodeFonts: true, showsCollapseKey: true)
             XCTAssertEqual(storage.settings.loadSnapshot(), expected)
             XCTAssertEqual(persistedAtPublication, [.init(edition: .previous, useUnicodeFonts: true)])
-            let restored = CatalogPreferences(defaults: defaults, editionSettings: storage.settings)
+            let restored = CatalogPreferences(editionSettings: storage.settings)
             XCTAssertEqual(restored.edition, .older)
             XCTAssertTrue(restored.useUnicodeFonts)
             XCTAssertTrue(restored.showsCollapseKey)

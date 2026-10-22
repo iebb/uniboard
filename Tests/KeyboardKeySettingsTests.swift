@@ -29,36 +29,18 @@ final class KeyboardKeySettingsTests: XCTestCase {
         }
     }
 
-    func testTapResolutionCoversCaseExactSequencesDisabledOutputsAndMalformedDirectValues() throws {
+    func testTapsAlwaysTypeTheKeyItselfAndIgnoreSavedTapValues() throws {
         let defaults = Settings.Snapshot.defaults
+        XCTAssertEqual(Settings.Gesture.customizable, [.swipeUp, .swipeDown, .longPress])
         XCTAssertEqual(defaults.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Q")
-        for (text, upper) in [("w", "W"), ("é", "É"), ("e\u{301}", "E\u{301}"), ("ß", "SS"), ("xy", "xy"), ("👩‍💻", "👩‍💻"), (" ", " ")] {
-            let value = try XCTUnwrap(defaults.updating([text], for: "letter.q", gesture: .tap))
-            XCTAssertEqual(value.tapOutput(for: "letter.q", defaultText: "q", shifted: false)?.utf16.map { $0 }, Array(text.utf16))
-            XCTAssertEqual(value.tapOutput(for: "letter.q", defaultText: "Q", shifted: true)?.utf16.map { $0 }, Array(upper.utf16))
-            let shifted = try XCTUnwrap(value.updating(["Ω"], for: "letter.q", gesture: .shiftedTap))
-            XCTAssertEqual(shifted.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Ω")
-            XCTAssertEqual(shifted.tapOutput(for: "letter.q", defaultText: "q", shifted: false), text)
+        for saved in [Settings.Overrides(tap: ["w"]), .init(tap: []), .init(shiftedTap: ["Ω"]), .init(tap: ["a", "b"])] {
+            let value = Settings.Snapshot(overrides: ["letter.q": saved])
+            XCTAssertEqual(value.tapOutput(for: "letter.q", defaultText: "q", shifted: false), "q")
+            XCTAssertEqual(value.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Q")
         }
-        var value = try XCTUnwrap(defaults.updating([], for: "letter.q", gesture: .tap))
-        XCTAssertNil(value.tapOutput(for: "letter.q", defaultText: "Q", shifted: true))
-        value = try XCTUnwrap(value.updating(["Shift only"], for: "letter.q", gesture: .shiftedTap))
-        XCTAssertEqual(value.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Shift only")
-        XCTAssertNil(value.tapOutput(for: "letter.q", defaultText: "q", shifted: false))
-        value = try XCTUnwrap(value.updating([], for: "letter.q", gesture: .shiftedTap))
-        XCTAssertNil(value.tapOutput(for: "letter.q", defaultText: "Q", shifted: true))
-        let symbol = Settings.Snapshot(overrides: ["digit.1": .init(tap: ["q"])])
-        XCTAssertEqual(symbol.tapOutput(for: "digit.1", defaultText: "!", shifted: true), "q")
-        for invalid in [["a", "b"], [""], [String(repeating: "a", count: 65)]] {
-            XCTAssertNil(Settings.Snapshot(overrides: ["letter.q": .init(tap: invalid)]).tapOutput(for: "letter.q", defaultText: "q", shifted: false))
-        }
+        XCTAssertEqual(Settings.Snapshot(overrides: ["digit.1": .init(tap: ["q"])]).tapOutput(for: "digit.1", defaultText: "!", shifted: true), "!")
         XCTAssertNil(defaults.tapOutput(for: "utility.space", defaultText: " ", shifted: false))
         XCTAssertNil(defaults.tapOutput(for: "letter.q", defaultText: "", shifted: false))
-        let expansive = "\u{0390}" + String(repeating: "\u{0301}", count: 63)
-        XCTAssertEqual(expansive.count, 1)
-        XCTAssertGreaterThan(expansive.uppercased().unicodeScalars.count, 64)
-        let bounded = try XCTUnwrap(defaults.updating([expansive], for: "letter.q", gesture: .tap))
-        XCTAssertEqual(bounded.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), expansive)
     }
 
     func testTapSlotsHaveOneOutputWhileGesturesKeepSixteenAndVersionOneCannotSmuggleNewFields() throws {

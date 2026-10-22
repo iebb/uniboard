@@ -4,13 +4,6 @@ import UIKit
 @MainActor
 final class UniboardUITests: XCTestCase {
     private var app: XCUIApplication!
-    private struct KeyboardOptionsSnapshot {
-        let dismissalPoints: [CGPoint]
-        let hostText: String
-        let queryValue: String
-        let optionsValue: String
-    }
-    private var keyboardOptionsSnapshot: KeyboardOptionsSnapshot?
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -29,7 +22,7 @@ final class UniboardUITests: XCTestCase {
         let link = app.buttons["fontDownloads"].firstMatch
         revealByScrolling(link, in: app)
         link.tap()
-        XCTAssertTrue(app.navigationBars["Optional font downloads"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Font Downloads"].firstMatch.waitForExistence(timeout: 5))
         for id in ["historic-symbols", "han-supplementary", "han-latest"] {
             let pack = app.descendants(matching: .any)["fontDownloads.pack.\(id)"].firstMatch
             revealByScrolling(pack, in: app)
@@ -65,7 +58,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(download.waitForExistence(timeout: 5))
         download.tap()
         // Leaving and reopening must observe the same app-wide operation.
-        app.navigationBars["Optional font downloads"].buttons.firstMatch.tap()
+        app.navigationBars["Font Downloads"].buttons.firstMatch.tap()
         revealByScrolling(link, in: app)
         link.tap()
         let pack = app.descendants(matching: .any)["fontDownloads.pack.historic-symbols"].firstMatch
@@ -86,7 +79,7 @@ final class UniboardUITests: XCTestCase {
             XCTAssertTrue(ready.waitForExistence(timeout: 180), "The large Han pack must complete through the real bounded downloader")
         }
         attachScreenshot("All three independently removable font packs are available offline")
-        app.navigationBars["Optional font downloads"].buttons.firstMatch.tap()
+        app.navigationBars["Font Downloads"].buttons.firstMatch.tap()
         app.launchArguments = []
         let input = openSystemKeyboardHost()
         defer {
@@ -228,7 +221,7 @@ final class UniboardUITests: XCTestCase {
         }
         attachScreenshot("Suzhou numerals section search finds the nine Hangzhou-named characters")
         revealResultCharacter("U+3021").tap()
-        assertCharacterProperty("name", equals: "Hangzhou Numeral One")
+        assertCharacterProperty("name", equals: "HANGZHOU NUMERAL ONE")
         assertCharacterProperty("section", contains: "Suzhou numerals")
         assertCharacterProperty("notes", contains: "misnomer")
         assertCharacterProperty("notes", contains: "Hangzhou")
@@ -246,7 +239,7 @@ final class UniboardUITests: XCTestCase {
 
     @discardableResult
     private func revealResultCharacter(_ codepoint: String) -> XCUIElement {
-        let results = app.scrollViews.containing(.textField, identifier: "unicodeSearch").firstMatch
+        let results = app.scrollViews["exploreResults"].firstMatch
         XCTAssertTrue(results.waitForExistence(timeout: 5))
         let result = character(codepoint)
         for _ in 0..<8 {
@@ -315,7 +308,7 @@ final class UniboardUITests: XCTestCase {
         // Edition survives ordinary test launches, so establish this fixture
         // through its real Settings UI rather than resetting shared storage.
         selectAppEdition("latest")
-        for tab in ["Explore", "Emojis", "Blocks", "Saved"] {
+        for tab in ["Explore", "Emoji", "Blocks", "Saved"] {
             appTab(tab).tap()
             XCTAssertFalse(app.descendants(matching: .any)["unicodeEdition"].firstMatch.exists,
                            "Only Settings may expose a catalog edition selector")
@@ -363,8 +356,8 @@ final class UniboardUITests: XCTestCase {
         app.buttons["Done"].tap()
     }
 
-    func testDefaultCodePointOrderAndExplicitNewestUsesNumericUnicodeAges() {
-        assertControlValue("unicodeSort", equals: "codePoint")
+    func testExploreListsCharactersInAscendingCodePointOrder() {
+        XCTAssertFalse(app.buttons["unicodeSort"].exists, "Characters are always listed from the lowest code point")
         let initialTiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "character-U+"))
             .allElementsBoundByAccessibilityElement.compactMap { tile -> (CGRect, UInt32)? in
                 let frame = tile.frame
@@ -374,40 +367,11 @@ final class UniboardUITests: XCTestCase {
             }.sorted { abs($0.0.minY - $1.0.minY) > 5 ? $0.0.minY < $1.0.minY : $0.0.minX < $1.0.minX }
         XCTAssertGreaterThan(initialTiles.count, 1)
         for (before, after) in zip(initialTiles, initialTiles.dropFirst()) { XCTAssertLessThan(before.1, after.1) }
-        attachScreenshot("Fresh Explore uses ascending code point order")
-        app.buttons["unicodeSort"].tap()
-        app.buttons["sort.newestFirst"].tap()
-        assertControlValue("unicodeSort", equals: "newestFirst")
-        searchUnicode("heart")
-        dismissAppSearchKeyboard()
-        XCTAssertTrue(character("U+1FA77").waitForExistence(timeout: 10), "Heart results should replace the initial discovery grid")
-
-        // These ages deliberately cross the lexical boundary: "6.0" sorts
-        // after "15.0" as text, but before it as a Unicode version.
-        // Each required name contains the complete word HEART, so this checks
-        // numeric ordering within the full-word tier, not across search tiers.
-        let samples = collectCharacterAges(until: ["U+1FA77", "U+1F49D", "U+2661"])
-        XCTAssertGreaterThanOrEqual(samples.count, 3)
-        attachScreenshot("Numeric newest-first heart results across Unicode ages")
-        for (newer, older) in zip(samples, samples.dropFirst()) {
-            XCTAssertFalse(version(newer.age, precedes: older.age),
-                "Newest-first must order numeric ages: \(newer.codepoint) \(newer.age) precedes \(older.codepoint) \(older.age)")
-        }
-        let required = [("U+1FA77", [15, 0]), ("U+1F49D", [6, 0]), ("U+2661", [1, 1])]
-        var previousIndex = -1
-        for (codepoint, age) in required {
-            guard let index = samples.firstIndex(where: { $0.codepoint == codepoint }) else {
-                XCTFail("Expected \(codepoint) in the heart results")
-                return
-            }
-            XCTAssertEqual(samples[index].age, age)
-            XCTAssertGreaterThan(index, previousIndex)
-            previousIndex = index
-        }
+        attachScreenshot("Explore uses ascending code point order")
     }
 
     func testEmojiDetailsAndScratchpadPreserveWholeZWJSequence() {
-        appTab("Emojis").tap()
+        appTab("Emoji").tap()
         search("woman technologist", fieldIdentifier: "emojiSearch")
         dismissAppSearchKeyboard()
         let emoji = app.buttons["emoji-1F469-200D-1F4BB"].firstMatch
@@ -503,7 +467,7 @@ final class UniboardUITests: XCTestCase {
         for text in ["Unifont", "Noto", "SIL OPEN FONT LICENSE"] {
             XCTAssertTrue(accessibleText(licenseText).contains(text), "Bundled font credits must include \(text)")
         }
-        app.navigationBars["Font licenses"].buttons.firstMatch.tap()
+        app.navigationBars["Font Licenses"].buttons.firstMatch.tap()
         setAppUnicodeFonts(false)
         app.terminate()
         app.launch()
@@ -904,27 +868,26 @@ final class UniboardUITests: XCTestCase {
 
     private func configureTopBar(symbols: Bool, search: Bool) {
         openAppSettings()
-        func set(_ identifier: String, _ enabled: Bool) {
-            let control = app.switches[identifier].firstMatch
-            XCTAssertTrue(control.waitForExistence(timeout: 5))
-            let scroll = app.scrollViews.containing(.any, identifier: "unicodeEdition").firstMatch
-            XCTAssertTrue(scroll.waitForExistence(timeout: 5))
-            for _ in 0..<10 {
-                let viewport = scroll.frame.intersection(app.frame)
-                let frame = control.frame
-                if usableHeightFrame(frame), viewport.contains(frame), control.isHittable { break }
-                if usableHeightFrame(frame), frame.minY < viewport.minY { scroll.swipeDown() }
-                else { scroll.swipeUp() }
-            }
-            XCTAssertTrue(scroll.frame.intersection(app.frame).contains(control.frame))
-            XCTAssertTrue(control.isHittable)
-            if (control.value as? String == "1") != enabled { control.tap() }
-            XCTAssertTrue(control.waitUntilValueEquals(enabled ? "1" : "0"))
+        let row = symbols ? (search ? "search" : "symbols") : "off"
+        let picker = app.descendants(matching: .any)["keyboardTopRow"].firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        let scroll = settingsList()
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        for _ in 0..<10 {
+            let viewport = scroll.frame.intersection(app.frame)
+            let frame = picker.frame
+            if usableHeightFrame(frame), viewport.contains(frame), picker.isHittable { break }
+            if usableHeightFrame(frame), frame.minY < viewport.minY { scroll.swipeDown() }
+            else { scroll.swipeUp() }
         }
-        set("showsSymbolBar", true)
-        set("searchBarInsteadOfSymbols", search)
-        set("showsSymbolBar", symbols)
-        XCTAssertEqual(app.switches["searchBarInsteadOfSymbols"].firstMatch.exists, symbols)
+        XCTAssertTrue(picker.isHittable)
+        if picker.value as? String != row {
+            picker.tap()
+            let option = app.descendants(matching: .any)["keyboardTopRow.option.\(row)"].firstMatch
+            XCTAssertTrue(option.waitForExistence(timeout: 5))
+            option.tap()
+        }
+        XCTAssertTrue(picker.waitUntilValueEquals(row))
     }
 
     func testSystemKeyboardDistinctLetterGesturesAndSystemShiftSlide() throws {
@@ -989,11 +952,11 @@ final class UniboardUITests: XCTestCase {
         star.tap()
         openUnicodeBrowse()
         selectKeyboardSection("symbols")
-        XCTAssertTrue(app.descendants(matching: .any)["keyboard.options"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["keyboard.options"].firstMatch.exists,
+                       "Unicode results are always in code point order, with no order menu")
         app.buttons["keyboard.openTyping"].firstMatch.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["keyboard.options"].firstMatch.waitUntilAbsent())
         XCTAssertEqual(input.value as? String, context + "£Iq")
-        attachScreenshot("Held-key gesture switching and contextual Unicode order control")
+        attachScreenshot("Held-key gesture switching without an order menu")
     }
 
     func testSystemKeyboardMacOptionCandidatesKeepCaseFlicksIndependent() throws {
@@ -1054,7 +1017,7 @@ final class UniboardUITests: XCTestCase {
         openAppSettings()
         for (identifier, value) in [("padLayout", layout), ("padSymbolMapping", mapping)] {
             let picker = app.descendants(matching: .any)[identifier].firstMatch
-            let scroll = app.scrollViews.containing(.any, identifier: "unicodeEdition").firstMatch
+            let scroll = settingsList()
             XCTAssertTrue(scroll.waitForExistence(timeout: 5))
             XCTAssertTrue(picker.waitForExistence(timeout: 5))
             for _ in 0..<8 {
@@ -1108,56 +1071,31 @@ final class UniboardUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["keyboard.typing.favorites"].exists, file: file, line: line)
     }
 
-    func testSystemKeyboardTapRemapsAndThreeIndependentGestures() throws {
+    func testSystemKeyboardThreeIndependentGesturesKeepPlainTaps() throws {
         try requireKeyboardIntegration()
-        configureAppKeyGesture(keyID: "letter.q", gesture: "tap", choices: ["w"])
-        configureAppKeyGesture(keyID: "letter.q", gesture: "shiftedTap", choices: ["Ω"])
         configureAppKeyGesture(keyID: "letter.q", gesture: "longPress", choices: ["h"])
         configureAppKeyGesture(keyID: "letter.q", gesture: "swipeUp", choices: ["u"])
         configureAppKeyGesture(keyID: "letter.q", gesture: "swipeDown", choices: ["d"])
-        configureAppKeyGesture(keyID: "digit.1", gesture: "tap", choices: ["2"])
         let input = openSystemKeyboardHost(unicodeBrowse: false)
         defer { restoreEnglishKeyboard() }
         let q = app.buttons["keyboard.typing.key.q"].firstMatch
         let shift = app.buttons["keyboard.typing.shift"].firstMatch
         XCTAssertTrue(shift.waitUntilValueEquals("uppercase"))
-        XCTAssertEqual(q.label, "Ω", "The keycap reflects its exact shifted tap mapping")
+        XCTAssertEqual(q.label, "Q", "A tap always types the key itself")
         q.tap()
-        XCTAssertTrue(input.waitUntilValueEquals("Ω"))
+        XCTAssertTrue(input.waitUntilValueEquals("Q"))
         XCTAssertTrue(shift.waitUntilValueEquals("lowercase"))
-        XCTAssertEqual(q.label, "w")
         q.tap()
         q.press(forDuration: 0.65)
         flickMainKey(q, up: true)
         flickMainKey(q, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals("Ωwhud"), "Tap, long press, up and down must each use only their own mapping")
-        app.buttons["keyboard.typing.number.1"].tap()
-        XCTAssertTrue(input.waitUntilValueEquals("Ωwhud2"), "Digit remaps apply to the auxiliary physical key too")
+        XCTAssertTrue(input.waitUntilValueEquals("Qqhud"), "Long press, up and down must each use only their own mapping")
         flickMainKey(app.buttons["keyboard.typing.key.w"].firstMatch, up: true)
         flickMainKey(app.buttons["keyboard.typing.key.p"].firstMatch, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals("Ωwhud2\\•"), "Visible digits replace W/P up-flicks with the complementary symbol-page characters")
-        attachScreenshot("Independent remapped tap hold up down and nonduplicate top letter flicks")
-        restoreEnglishKeyboard()
-        openAppSettings()
-        app.buttons["keyboardKeySettings"].tap()
-        app.buttons["keySettings.key.letter.q"].tap()
-        app.buttons["keySettings.gesture.tap"].tap()
-        app.segmentedControls["keySettings.behavior"].buttons["Off"].tap()
-        app.buttons["keySettings.save"].tap()
-        XCTAssertTrue(app.buttons["keySettings.gesture.tap"].waitUntilValueEquals("Off"))
-        app.navigationBars.buttons.firstMatch.tap()
-        app.navigationBars.buttons.firstMatch.tap()
-        let fresh = openSystemKeyboardHost(unicodeBrowse: false)
-        if shift.value as? String != "lowercase" { shift.tap() }
-        q.tap()
-        XCTAssertEqual(fresh.value as? String, "", "Disabled ordinary tap must not insert the original physical letter")
-        flickMainKey(q, up: true)
-        q.press(forDuration: 0.65)
-        flickMainKey(q, up: false)
-        XCTAssertTrue(fresh.waitUntilValueEquals("uhd"), "Disabling tap does not disable the three independent gestures")
+        XCTAssertTrue(input.waitUntilValueEquals("Qqhud\\•"), "Visible digits replace W/P up-flicks with the complementary symbol-page characters")
+        attachScreenshot("Plain taps with independent hold, up and down layers")
         restoreEnglishKeyboard()
         resetAppKey("letter.q")
-        resetAppKey("digit.1")
     }
 
     func testSystemKeyboardAppConfiguredFlicksPreserveLiteralTextAndShift() throws {
@@ -2590,7 +2528,7 @@ final class UniboardUITests: XCTestCase {
             if app.buttons["keyboard.query.u"].firstMatch.exists { closeKeyboardSearch() }
             restoreEnglishKeyboard()
         }
-        assertKeyboardSettingsMenuOnlyOrder()
+        assertKeyboardHasNoSettingsMenu()
         XCTAssertFalse(app.buttons["keyboard.collapse"].exists)
         enterKeyboardQuery("u+0558")
         let armenian = app.buttons["keyboard.character.U+0558"].firstMatch
@@ -2604,7 +2542,7 @@ final class UniboardUITests: XCTestCase {
         input = openSystemKeyboardHost()
         XCTAssertTrue(app.buttons["keyboard.collapse"].firstMatch.waitForExistence(timeout: 5),
                       "The keyboard reads its optional collapse-key choice from App Settings")
-        assertKeyboardSettingsMenuOnlyOrder()
+        assertKeyboardHasNoSettingsMenu()
         enterKeyboardQuery("u+0558")
         let enabledArmenian = app.buttons["keyboard.character.U+0558"].firstMatch
         XCTAssertTrue(enabledArmenian.waitUntilValueEquals("Preview font: GNU Unifont"))
@@ -2618,7 +2556,7 @@ final class UniboardUITests: XCTestCase {
         app.buttons["keyboard.properties.close"].tap()
         app.buttons.matching(identifier: "keyboard.character.U+0558").firstMatch.tap()
         XCTAssertTrue(input.waitUntilValueEquals("\u{0558}"))
-        assertKeyboardSettingsMenuOnlyOrder()
+        assertKeyboardHasNoSettingsMenu()
         attachScreenshot("Optional font preview inserts the original scalar with intact portrait toolbar")
         closeKeyboardSearch()
 
@@ -2628,7 +2566,7 @@ final class UniboardUITests: XCTestCase {
             return frame.width > frame.height
         }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 5), .completed)
-        assertKeyboardSettingsMenuOnlyOrder()
+        assertKeyboardHasNoSettingsMenu()
         enterKeyboardQuery("u+10940")
         assertKeyboardControlsAreVisible(isSearching: true)
         assertHostEditorIsVisibleAboveKeyboard(input)
@@ -2640,7 +2578,7 @@ final class UniboardUITests: XCTestCase {
         sidetic.tap()
         XCTAssertTrue(input.waitUntilValueEquals("\u{0558}\u{10940}"))
         XCTAssertEqual((input.value as? String)?.unicodeScalars.map { $0.value }, [0x0558, 0x10940])
-        assertKeyboardSettingsMenuOnlyOrder()
+        assertKeyboardHasNoSettingsMenu()
         attachScreenshot("Supplementary fallback glyph inserts exact text in compact landscape")
         closeKeyboardSearch()
         openUnicodeBrowse()
@@ -2697,7 +2635,7 @@ final class UniboardUITests: XCTestCase {
         disabledArmenian.tap()
         XCTAssertTrue(input.waitUntilValueEquals("\u{0558}"))
         XCTAssertEqual((input.value as? String)?.unicodeScalars.map(\.value), [0x0558])
-        assertKeyboardSettingsMenuOnlyOrder()
+        assertKeyboardHasNoSettingsMenu()
         attachScreenshot("App Settings fonts and collapse off are reflected by the relaunched keyboard")
     }
 
@@ -2709,7 +2647,7 @@ final class UniboardUITests: XCTestCase {
         let input = openSystemKeyboardHost(initialText: context)
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
 
-        assertKeyboardSettingsMenuOnlyOrder()
+        assertKeyboardHasNoSettingsMenu()
         assertCompactKeyboardGeometry("portrait.browse", input: input, searching: false)
         enterKeyboardQuery("u+1f680")
         XCTAssertEqual(input.value as? String, context)
@@ -2752,47 +2690,6 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(input.value as? String, context + "🚀", "Rotation and query controls never leak into the host")
         attachScreenshot("Compact glass keyboard returns to portrait without stale landscape layout")
         closeKeyboardSearch()
-    }
-
-
-    func testSystemKeyboardLandscapeOptionsAcceptsVisibleCenterTouch() throws {
-        try requirePhoneKeyboardIntegration()
-        configureTopBar(symbols: true, search: true)
-        let context = "Landscape menu preserves this document."
-        let input = openSystemKeyboardHost(initialText: context)
-        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard(); configureTopBar(symbols: true, search: false) }
-
-        enterKeyboardQuery("u+1f680")
-        closeKeyboardSearch()
-        openUnicodeBrowse()
-        let rocket = app.buttons["keyboard.character.U+1F680"].firstMatch
-        XCTAssertTrue(rocket.waitForExistence(timeout: 5))
-        rocket.tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context + "🚀"))
-        assertKeyboardSettingsMenuOnlyOrder()
-        XCUIDevice.shared.orientation = .landscapeLeft
-        let landscape = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            self.app.frame.width > self.app.frame.height
-        }, object: app)
-        XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 5), .completed)
-        let options = app.descendants(matching: .any)["keyboard.options"].firstMatch
-        XCTAssertTrue(options.waitForExistence(timeout: 5))
-        let probe = XCTAttachment(string: "type=\(options.elementType.rawValue) frame=\(options.frame) isHittable=\(options.isHittable)\n\(app.debugDescription)")
-        probe.name = "Original landscape options AX projection before the actual centre touch"
-        probe.lifetime = .keepAlways
-        add(probe)
-        attachScreenshot("Original landscape options before actual native menu interaction")
-        // Observe real popup opening, actions and dismissal rather than
-        // substituting an accessibility hitpoint prediction for the touch.
-        assertKeyboardSettingsMenuOnlyOrder()
-        XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("u+1f680"))
-        XCTAssertEqual(input.value as? String, context + "🚀")
-        for order in ["newest", "oldest", "codepoint"] {
-            selectKeyboardOrder(order)
-            XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals("u+1f680"))
-            XCTAssertEqual(input.value as? String, context + "🚀")
-        }
-        attachScreenshot("Direct sorting choices work and dismiss in portrait and landscape without changing input")
     }
 
 
@@ -2858,9 +2755,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(input.value as? String, context + "☃")
         app.buttons["keyboard.properties.close"].tap()
         assertKeyboardHasNoEditionSelector()
-        selectKeyboardOrder("codepoint")
-        assertKeyboardSettingsMenuOnlyOrder()
-        selectKeyboardOrder("newest")
+        assertKeyboardHasNoSettingsMenu()
         XCTAssertEqual(input.value as? String, context + "☃", "Menus must not enter text into the host")
         selectKeyboardSection("symbols")
         assertCompactKeyboardGeometry("portrait.menus.closed", input: input, searching: false)
@@ -2952,7 +2847,7 @@ final class UniboardUITests: XCTestCase {
             let input = openSystemKeyboardHost(initialText: context)
             // The keyboard has no edition readout or setter. Its actual
             // assigned/unassigned results below prove the app-owned choice.
-            assertKeyboardSettingsMenuOnlyOrder()
+            assertKeyboardHasNoSettingsMenu()
             for (codepoint, age) in fixtures {
                 enterKeyboardQuery("u+\(codepoint.lowercased())")
                 let result = app.buttons["keyboard.character.U+\(codepoint)"].firstMatch
@@ -2960,7 +2855,7 @@ final class UniboardUITests: XCTestCase {
                 XCTAssertTrue(result.waitUntilLabelHasSuffix(age.isEmpty ? ", Unassigned" : ", U\(age)"))
                 XCTAssertEqual(input.value as? String, context, "App edition synchronization must not edit the host")
                 closeKeyboardSearch()
-                assertKeyboardSettingsMenuOnlyOrder()
+                assertKeyboardHasNoSettingsMenu()
             }
             attachScreenshot("Real keyboard follows app Settings \(edition) without a catalog selector")
         }
@@ -2969,24 +2864,17 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func assertKeyboardHasNoEditionSelector() {
-        openKeyboardOptions()
-        guard let popup = nativeKeyboardOptionsPopup() else {
-            XCTFail("Require the actual native options menu before checking its available actions"); return
-        }
         for id in ["keyboard.edition", "keyboard.edition.latest", "keyboard.edition.previous",
                    "keyboard.edition.older", "keyboard.edition.draft"] {
             XCTAssertFalse(app.descendants(matching: .any)[id].firstMatch.exists,
                            "Edition selection belongs only to app Settings")
         }
-        closeKeyboardOptions(popup)
     }
 
     func testSystemKeyboardSearchAndInsertion() throws {
         try requireKeyboardIntegration()
         let input = openSystemKeyboardHost()
         defer { restoreEnglishKeyboard() }
-        selectKeyboardOrder("newest")
-        assertControlValue("keyboard.order", equals: "newestFirst")
         assertHeaderDeleteAtTopRight()
         assertKeyboardControlsAreVisible(isSearching: false)
         attachScreenshot("Single delete key at the top right of the real keyboard")
@@ -3110,73 +2998,6 @@ final class UniboardUITests: XCTestCase {
         assertControlValue("keyboard.section", equals: section)
     }
 
-    private func openKeyboardOptions() {
-        let option = keyboardSortOption("codepoint")
-        if option.exists { return }
-        ensureUnicodeToolbarVisible()
-        let menu = app.descendants(matching: .any)["keyboard.options"].firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 5), "The keyboard options trigger must return before opening another menu")
-        let input = app.textViews["keyboardTestInput"].firstMatch
-        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
-        XCTAssertTrue(input.waitForExistence(timeout: 5))
-        XCTAssertTrue(search.waitForExistence(timeout: 5))
-        let frame = menu.frame
-        XCTAssertTrue(frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0)
-        XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(frame), "The real options trigger must be on screen")
-        guard let hostText = input.value as? String,
-              let queryValue = search.value as? String,
-              let optionsValue = menu.value as? String else {
-            XCTFail("The options dismissal precondition must preserve readable host, query and options values")
-            return
-        }
-        guard let surface = measuredKeyboardSurfaceFrame(), usableHeightFrame(surface) else {
-            XCTFail("Menu dismissal needs the real keyboard surface before presentation"); return
-        }
-        let footer = app.buttons["keyboard.space"].firstMatch.frame
-        guard usableHeightFrame(footer), surface.contains(footer) else {
-            XCTFail("Menu dismissal needs the visible keyboard footer"); return
-        }
-        let gapY = footer.minY - 2
-        let points = [surface.minX + 2, surface.maxX - 2, surface.midX].map { CGPoint(x: $0, y: gapY) }
-        guard points.allSatisfy(surface.contains) else { XCTFail("Dismissal points must remain inside the keyboard"); return }
-        keyboardOptionsSnapshot = KeyboardOptionsSnapshot(dismissalPoints: points, hostText: hostText,
-                                                          queryValue: queryValue, optionsValue: optionsValue)
-        // iPad's observed accessibility tap point was near the rounded cap's
-        // corner. Target its centre explicitly while keeping real menu checks.
-        menu.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(option.waitForExistence(timeout: 5), "The actual options menu must open")
-    }
-
-    private func keyboardSortOption(_ order: String) -> XCUIElement {
-        let titles = ["newest": "Newest first", "oldest": "Oldest first", "codepoint": "Code point"]
-        guard let title = titles[order] else { XCTFail("Unknown test sort option"); return app.buttons["missing.sort.option"] }
-        // UIKit's remote menu drops custom SwiftUI identifiers on iOS 27.
-        return app.buttons[title].firstMatch
-    }
-
-    private func closeKeyboardOptions(_ nativePopup: XCUIElement) {
-        defer { keyboardOptionsSnapshot = nil }
-        let option = keyboardSortOption("codepoint")
-        if nativePopup.exists || option.exists {
-            guard let snapshot = keyboardOptionsSnapshot,
-                  usableHeightFrame(nativePopup.frame),
-                  let point = snapshot.dismissalPoints.first(where: { !nativePopup.frame.insetBy(dx: -4, dy: -4).contains($0) }) else {
-                XCTFail("Dismissal requires a measured blank keyboard gap outside the actual popup"); return
-            }
-            app.coordinate(withNormalizedOffset: .zero).withOffset(
-                CGVector(dx: point.x - app.frame.minX, dy: point.y - app.frame.minY)).tap()
-        }
-        XCTAssertTrue(nativePopup.waitUntilAbsent(), "The actual native popup must close")
-        XCTAssertTrue(option.waitUntilAbsent(), "The actual native options popup must close")
-        let menu = app.descendants(matching: .any)["keyboard.options"].firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        if let snapshot = keyboardOptionsSnapshot {
-            XCTAssertTrue(app.textViews["keyboardTestInput"].firstMatch.waitUntilValueEquals(snapshot.hostText))
-            XCTAssertTrue(app.descendants(matching: .any)["keyboard.search"].firstMatch.waitUntilValueEquals(snapshot.queryValue))
-            XCTAssertTrue(menu.waitUntilValueEquals(snapshot.optionsValue), "Dismissing must not select a menu action")
-        }
-    }
-
     private func assertValueRemainsAfterRelease(_ element: XCUIElement, equals expected: String,
                                                file: StaticString = #filePath, line: UInt = #line) {
         let changedAfterRelease = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -3186,18 +3007,6 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [changedAfterRelease], timeout: 0.6), .completed,
                        "A released delete press must not keep editing", file: file, line: line)
         XCTAssertEqual(element.value as? String, expected, file: file, line: line)
-    }
-
-    private func selectKeyboardOrder(_ order: String) {
-        openKeyboardOptions()
-        let option = keyboardSortOption(order)
-        XCTAssertTrue(option.waitForExistence(timeout: 5))
-        let frame = option.frame
-        XCTAssertTrue(usableHeightFrame(frame) && app.frame.contains(frame))
-        app.coordinate(withNormalizedOffset: .zero).withOffset(
-            CGVector(dx: frame.midX - app.frame.minX, dy: frame.midY - app.frame.minY)).tap()
-        let value = ["newest": "newestFirst", "oldest": "oldestFirst", "codepoint": "codePoint"][order]!
-        assertControlValue("keyboard.order", equals: value)
     }
 
     private func appTab(_ title: String) -> XCUIElement {
@@ -3220,8 +3029,14 @@ final class UniboardUITests: XCTestCase {
     private func setAppUnicodeFonts(_ enabled: Bool) {
         let fonts = appUnicodeFontsSwitch()
         let value = enabled ? "1" : "0"
-        if fonts.value as? String != value { fonts.tap() }
+        if fonts.value as? String != value { tapSwitch(fonts) }
         XCTAssertTrue(fonts.waitUntilValueEquals(value))
+    }
+
+    /// A Form toggle row spans its label, which does not flip the switch;
+    /// tap the trailing switch itself, as a person would.
+    private func tapSwitch(_ toggle: XCUIElement) {
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: -36, dy: 0)).tap()
     }
 
     private func setAppCollapseKey(_ enabled: Bool) {
@@ -3229,40 +3044,18 @@ final class UniboardUITests: XCTestCase {
         let collapse = app.switches["showKeyboardCollapseKey"].firstMatch
         revealByScrolling(collapse, in: app)
         let value = enabled ? "1" : "0"
-        if collapse.value as? String != value { collapse.tap() }
+        if collapse.value as? String != value { tapSwitch(collapse) }
         XCTAssertTrue(collapse.waitUntilValueEquals(value))
     }
 
-    private func nativeKeyboardOptionsPopup() -> XCUIElement? {
-        // Identify the actual popup through a stable visible sort action.
-        app.collectionViews.allElementsBoundByAccessibilityElement.first(where: {
-            $0.buttons["Code point"].firstMatch.exists
-        })
-    }
-
-    private func assertKeyboardSettingsMenuOnlyOrder(file: StaticString = #filePath, line: UInt = #line) {
-        openKeyboardOptions()
-        guard let popup = nativeKeyboardOptionsPopup() else {
-            XCTFail("Expected the native options popup collection", file: file, line: line)
-            return
+    /// Settings live only in the app, and results are always in code point
+    /// order, so the keyboard has no options menu at all.
+    private func assertKeyboardHasNoSettingsMenu(file: StaticString = #filePath, line: UInt = #line) {
+        for identifier in ["keyboard.options", "keyboard.edition", "keyboard.unicodeFonts", "keyboard.showCollapseKey", "keyboard.inspectLast",
+                           "keyboard.saveLast", "keyboard.openCompanionApp", "keyboard.openCompanionApp.guidance"] {
+            XCTAssertFalse(app.descendants(matching: .any)[identifier].firstMatch.exists, file: file, line: line)
         }
-        defer { closeKeyboardOptions(popup) }
-        for identifier in ["keyboard.edition", "keyboard.unicodeFonts", "keyboard.showCollapseKey", "keyboard.inspectLast", "keyboard.saveLast", "keyboard.openCompanionApp", "keyboard.openCompanionApp.guidance"] {
-            XCTAssertFalse(app.descendants(matching: .any)[identifier].firstMatch.exists,
-                           "Keyboard options contain only ordering", file: file, line: line)
-        }
-        XCTAssertFalse(app.buttons["Save to page"].firstMatch.exists)
-        let controls = ["newest", "oldest", "codepoint"].map { keyboardSortOption($0) }
-        for control in controls {
-            XCTAssertTrue(control.waitForExistence(timeout: 5), file: file, line: line)
-            XCTAssertTrue(control.isEnabled, file: file, line: line)
-            let frame = control.frame
-            XCTAssertTrue(usableHeightFrame(frame), file: file, line: line)
-            XCTAssertTrue(popup.frame.insetBy(dx: -1, dy: -1).contains(frame),
-                          "Each native menu action must be fully revealed in its actual scroll viewport", file: file, line: line)
-            XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(frame),
-                          "A keyboard setting must not be clipped: \(frame)", file: file, line: line)
-        }
+        XCTAssertFalse(app.buttons["Save to page"].firstMatch.exists, file: file, line: line)
     }
 
     private func requirePhoneKeyboardIntegration() throws {
@@ -3565,11 +3358,7 @@ final class UniboardUITests: XCTestCase {
         let toolbarOn = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch.value as? String == "on"
         var identifiers = ["keyboard.toggleUnicodeToolbar", "keyboard.openFavorites", "keyboard.space", "keyboard.return"]
         if toolbarOn { identifiers += ["keyboard.search", "keyboard.delete"] }
-        let pickerMode = app.buttons["keyboard.openTyping"].firstMatch.value as? String ?? ""
-        let hasPicker = toolbarOn && ["unicode", "query"].contains(pickerMode)
-            && !app.descendants(matching: .any)["keyboard.pages.pager"].firstMatch.exists
-        if hasPicker { identifiers += ["keyboard.options"] }
-        else { XCTAssertFalse(app.descendants(matching: .any)["keyboard.options"].firstMatch.exists, file: file, line: line) }
+        XCTAssertFalse(app.descendants(matching: .any)["keyboard.options"].firstMatch.exists, file: file, line: line)
         if isSearching {
             XCTAssertTrue(app.descendants(matching: .any)["keyboard.openTyping"].firstMatch.waitUntilValueEquals("query"), file: file, line: line)
             identifiers += ["keyboard.openTyping", "keyboard.section", "keyboard.query.q", "keyboard.query.p", "keyboard.query.u"]
@@ -3581,22 +3370,14 @@ final class UniboardUITests: XCTestCase {
             identifiers += ["keyboard.openTyping", "keyboard.section"]
         }
         let screen = app.frame.insetBy(dx: -1, dy: -1)
-        let verifyOptionsByTouch = hasPicker
         for identifier in identifiers {
             let control = app.descendants(matching: .any)[identifier].firstMatch
             XCTAssertTrue(control.waitForExistence(timeout: 5), "Expected keyboard control \(identifier)", file: file, line: line)
-            if identifier != "keyboard.options" || !verifyOptionsByTouch {
-                XCTAssertTrue(control.isHittable, "Keyboard control \(identifier) must remain tappable", file: file, line: line)
-            }
+            XCTAssertTrue(control.isHittable, "Keyboard control \(identifier) must remain tappable", file: file, line: line)
             let frame = control.frame
             XCTAssertTrue(frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0,
                           "Keyboard control \(identifier) must have a finite visible frame", file: file, line: line)
             XCTAssertTrue(screen.contains(frame), "Keyboard control \(identifier) is clipped outside the screen: \(frame)", file: file, line: line)
-        }
-        if verifyOptionsByTouch {
-            // Remote menus can report isHittable=false after rotation or a
-            // host relaunch. Require the physical centre touch to open the
-            // actual popup, then verify its items and dismissal.
         }
     }
 
@@ -3717,10 +3498,15 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Settings"].firstMatch.waitForExistence(timeout: 5))
     }
 
+    /// App Settings is a native Form, exposed as a collection view.
+    private func settingsList() -> XCUIElement {
+        app.collectionViews["settingsForm"].firstMatch
+    }
+
     private func selectAppEdition(_ edition: String) {
         openAppSettings()
         let selector = app.descendants(matching: .any)["unicodeEdition"].firstMatch
-        let settingsScroll = app.scrollViews.containing(.any, identifier: "unicodeEdition").firstMatch
+        let settingsScroll = settingsList()
         XCTAssertTrue(selector.waitForExistence(timeout: 5))
         XCTAssertTrue(settingsScroll.waitForExistence(timeout: 5))
         for _ in 0..<6 {
@@ -3763,15 +3549,6 @@ final class UniboardUITests: XCTestCase {
     }
 
     private func assertControlValue(_ identifier: String, equals expected: String) {
-        if identifier == "keyboard.order" {
-            // Selection dismisses the sorting menu before the toolbar reappears.
-            // The options trigger now exposes only its current ordering.
-            let options = app.descendants(matching: .any)["keyboard.options"].firstMatch
-            XCTAssertTrue(options.waitForExistence(timeout: 5), "Expected the visible options summary after selecting Order")
-            XCTAssertTrue(options.waitUntilValueEquals(expected),
-                          "Expected Order=\(expected), got \(accessibleText(options))")
-            return
-        }
         let control = app.descendants(matching: .any)[identifier].firstMatch
         XCTAssertTrue(control.waitForExistence(timeout: 5))
         let matches = NSPredicate(format: "value == %@ OR label == %@", expected, expected)
@@ -3781,51 +3558,6 @@ final class UniboardUITests: XCTestCase {
 
     private func accessibleText(_ element: XCUIElement) -> String {
         (element.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? element.label
-    }
-
-    private func collectCharacterAges(until required: Set<String>) -> [(codepoint: String, age: [Int])] {
-        var observations: [(codepoint: String, age: [Int])] = []
-        var seen: Set<String> = []
-        let pattern = try! NSRegularExpression(pattern: #"\d+\.\d+(?:\.\d+)?"#)
-        for _ in 0..<12 {
-            // AX property reads cross the process boundary. Snapshot each new
-            // tile once, then sort plain data rather than repeatedly resolving
-            // XCUIElements from inside a comparison closure.
-            let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "character-U+")).allElementsBoundByIndex
-                .compactMap { tile -> (codepoint: String, ageText: String, frame: CGRect)? in
-                    let codepoint = String(tile.identifier.dropFirst("character-".count))
-                    guard !seen.contains(codepoint), tile.isHittable else { return nil }
-                    let ageText = tile.value as? String ?? ""
-                    let frame = tile.frame
-                    return (codepoint, ageText, frame)
-                }
-                .sorted { lhs, rhs in
-                    abs(lhs.frame.minY - rhs.frame.minY) > 5 ? lhs.frame.minY < rhs.frame.minY : lhs.frame.minX < rhs.frame.minX
-                }
-            for tile in tiles {
-                let codepoint = tile.codepoint
-                guard seen.insert(codepoint).inserted else { continue }
-                let ageText = tile.ageText
-                guard let match = pattern.firstMatch(in: ageText, range: NSRange(ageText.startIndex..., in: ageText)),
-                    let range = Range(match.range, in: ageText) else {
-                    XCTFail("Character \(codepoint) must expose its Unicode age; value was \(ageText)")
-                    return observations
-                }
-                observations.append((codepoint, ageText[range].split(separator: ".").compactMap { Int($0) }))
-            }
-            if required.isSubset(of: seen) { break }
-            app.scrollViews.firstMatch.swipeUp()
-        }
-        return observations
-    }
-
-    private func version(_ lhs: [Int], precedes rhs: [Int]) -> Bool {
-        for index in 0..<max(lhs.count, rhs.count) {
-            let left = index < lhs.count ? lhs[index] : 0
-            let right = index < rhs.count ? rhs[index] : 0
-            if left != right { return left < right }
-        }
-        return false
     }
 
     private func enableUniboardInSettings() {

@@ -1,23 +1,56 @@
 import SwiftUI
 
-enum Palette {
-    static let accent = Color(light: 0xB94D2C, dark: 0xF39A73)
-    static let background = Color(light: 0xF7F5F0, dark: 0x171917)
-    static let surface = Color(light: 0xFFFFFF, dark: 0x252824)
-    static let soft = Color(light: 0xEEECE5, dark: 0x30352F)
-    static let ink = Color(light: 0x29332C, dark: 0xE8EAE2)
-    static let muted = Color(light: 0x6C736A, dark: 0xA3ADA0)
-    static let line = Color(light: 0xDEDFD5, dark: 0x3E453C)
+/// Screens use iOS semantic colors and the system tint so they follow Light,
+/// Dark and Increased Contrast exactly like built-in apps.
+extension Color {
+    static let groupedBackground = Color(uiColor: .systemGroupedBackground)
+    static let groupedSurface = Color(uiColor: .secondarySystemGroupedBackground)
+    /// Behind a preview whose glyph iOS and every installed fallback still
+    /// draws as a placeholder.
+    static let missingGlyph = Color.red.opacity(0.16)
+
+    static func previewSurface(missing: Bool) -> Color { missing ? .missingGlyph : .groupedSurface }
 }
 
-extension Color {
-    init(light: UInt32, dark: UInt32) {
-        self.init(uiColor: UIColor { traits in
-            let hex = traits.userInterfaceStyle == .dark ? dark : light
-            return UIColor(red: CGFloat((hex >> 16) & 255) / 255,
-                           green: CGFloat((hex >> 8) & 255) / 255,
-                           blue: CGFloat(hex & 255) / 255, alpha: 1)
-        })
+/// A colored corner ribbon naming the Unicode or Emoji version that added a
+/// character. Each version keeps its own hue everywhere it appears.
+struct VersionRibbon: View {
+    /// A version such as "18.0" or "15.1", or nil for draft additions.
+    let version: String?
+    var prefix = ""
+    var labeled = true
+
+    static func color(for version: String?) -> Color {
+        guard let version, let major = Double(version.split(separator: ".").first ?? "") else { return .purple }
+        // Golden-ratio steps keep neighbouring versions far apart in hue.
+        let hue = (major * 0.618_034 + 0.08).truncatingRemainder(dividingBy: 1)
+        return Color(hue: hue, saturation: 0.62, brightness: 0.78)
+    }
+    private var label: String {
+        guard let version else { return "draft" }
+        return prefix + (version.hasSuffix(".0") ? String(version.dropLast(2)) : version)
+    }
+
+    var body: some View {
+        if labeled {
+            Text(label)
+                .font(.system(size: 9, weight: .bold).monospacedDigit())
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .frame(width: 64, height: 15)
+                .background(Self.color(for: version))
+                // Centre the band 14pt in from the corner, along the diagonal.
+                .rotationEffect(.degrees(45))
+                .offset(x: 18, y: 6.5)
+                .accessibilityHidden(true)
+        } else {
+            Path { path in
+                path.move(to: .zero); path.addLine(to: CGPoint(x: 10, y: 0)); path.addLine(to: CGPoint(x: 10, y: 10))
+            }
+            .fill(Self.color(for: version))
+            .frame(width: 10, height: 10)
+            .accessibilityHidden(true)
+        }
     }
 }
 
@@ -25,10 +58,10 @@ struct SectionLabel: View {
     let title: String
     var trailing: String? = nil
     var body: some View {
-        HStack {
-            Text(title).font(.system(.headline, design: .rounded)).foregroundStyle(Palette.ink)
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.title3.weight(.semibold))
             Spacer()
-            if let trailing { Text(trailing).font(.caption.monospaced()).foregroundStyle(Palette.muted) }
+            if let trailing { Text(trailing).font(.subheadline).monospacedDigit().foregroundStyle(.secondary) }
         }
     }
 }
@@ -43,36 +76,39 @@ struct CharacterTile: View {
         if let age = character.age { return "Unicode " + age }
         return character.category == "Cn" ? "Unassigned" : "Age pending"
     }
+    private var missing: Bool {
+        UnicodeFontSupport.stockFontsMiss(character.displayText)
+    }
 
     var body: some View {
-            VStack(spacing: 5) {
-                Text(character.displayText)
-                    .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 31, enabled: preferences.useUnicodeFonts)))
-                    .foregroundStyle(Palette.ink)
-                    .frame(height: 39)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                Text(character.codePointLabel)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Palette.muted)
-                Text(character.name.capitalized)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(2).multilineTextAlignment(.center)
-                    .frame(height: 26)
-                Text(ageText)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(Palette.muted)
-                    .accessibilityIdentifier("age-\(character.codePointLabel)")
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 126)
-            .padding(.horizontal, 3)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 15))
+        VStack(spacing: 3) {
+            Text(character.displayText)
+                .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 32, enabled: preferences.useUnicodeFonts)))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .frame(height: 44)
+            Text(character.name)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(2).multilineTextAlignment(.center)
+                .frame(height: 28)
+            Text(character.codePointLabel)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 106)
+        .padding(.horizontal, 4)
+            .background(Color.previewSurface(missing: missing))
             .overlay(alignment: .topTrailing) {
-                if saved { Image(systemName: "star.fill").font(.system(size: 8)).foregroundStyle(Palette.accent).padding(8) }
+                if character.category != "Cn" { VersionRibbon(version: character.age) }
             }
-        .contentShape(RoundedRectangle(cornerRadius: 15))
+            .overlay(alignment: .topLeading) {
+                if saved { Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(.yellow).padding(7) }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .gesture(LongPressGesture(minimumDuration: 0.4).exclusively(before: TapGesture()).onEnded { _ in action() })
         .onHover { hovering in
             hoverTask?.cancel()
@@ -97,36 +133,49 @@ struct CharacterTile: View {
 
 struct CharacterGrid: View {
     let characters: [UnicodeCharacter]
+    /// Called when the last character scrolls into view, to load the next page.
+    var onReachEnd: (() -> Void)? = nil
     @EnvironmentObject private var store: CharacterStore
     var select: (UnicodeCharacter) -> Void
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: 9)], spacing: 9) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: 8)], spacing: 8) {
             ForEach(characters) { character in
                 CharacterTile(character: character, saved: store.isFavorite(character.codePoint)) { select(character) }
+                    .onAppear { if character.id == characters.last?.id { onReachEnd?() } }
             }
         }
     }
 }
 
+/// Drawn like the system search field; the text itself stays a UIKit field
+/// so the caret and literal input traits survive SwiftUI refreshes.
 struct SearchBar: View {
     @Binding var text: String
     let placeholder: String
     var identifier = "unicodeSearch"
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass").foregroundStyle(Palette.accent)
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
             AppSearchField(text: $text, placeholder: placeholder, identifier: identifier)
             if !text.isEmpty {
-                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Palette.muted) }
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Clear search")
             }
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 54)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Palette.line, lineWidth: 1))
+        .padding(.horizontal, Self.usesCapsule ? 14 : 8)
+        .frame(height: Self.usesCapsule ? 44 : 36)
+        .background(Color(uiColor: .tertiarySystemFill), in: Self.shape)
+    }
+
+    private static var usesCapsule: Bool {
+        if #available(iOS 26.0, *) { return true }
+        return false
+    }
+    private static var shape: AnyShape {
+        usesCapsule ? AnyShape(Capsule()) : AnyShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -135,12 +184,78 @@ struct EmptyCollection: View {
     let title: String
     let message: String
     var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: symbol).font(.system(size: 38, weight: .light)).foregroundStyle(Palette.accent)
-            Text(title).font(.title3.weight(.semibold)).foregroundStyle(Palette.ink)
-            Text(message).font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center).frame(maxWidth: 300)
+        ContentUnavailableView(title, systemImage: symbol, description: Text(message))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 24)
+    }
+}
+
+struct PropertyRow: Identifiable {
+    let title: String
+    let value: String
+    /// Accessibility identifier of the value text.
+    let identifier: String
+    var monospaced = true
+    /// Prose and multi-line values read better below their title.
+    var stacked = false
+    var id: String { identifier }
+}
+
+/// An inset grouped section that stays fully materialized inside a sheet's
+/// scroll view, so every property remains reachable by VoiceOver and tests.
+struct PropertyGroup: View {
+    let title: String
+    let rows: [PropertyRow]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(Self.headerFont).foregroundStyle(.secondary)
+                .textCase(Self.headerCase)
+                .padding(.horizontal, 16)
+                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { Divider().padding(.leading, 16) }
+                    cell(row)
+                }
+            }
+            .background(Color.groupedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 52)
+    }
+
+    // Match native Form section headers on each system generation.
+    private static var headerFont: Font {
+        if #available(iOS 26.0, *) { return .headline }
+        return .footnote
+    }
+    private static var headerCase: Text.Case? {
+        if #available(iOS 26.0, *) { return nil }
+        return .uppercase
+    }
+
+    @ViewBuilder private func cell(_ row: PropertyRow) -> some View {
+        let value = Text(row.value)
+            .font(row.monospaced ? .body.monospaced() : .body)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .accessibilityIdentifier(row.identifier)
+        Group {
+            if row.stacked {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(row.title).font(.subheadline).foregroundStyle(.secondary)
+                    value
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(row.title).fixedSize()
+                    Spacer(minLength: 8)
+                    value.foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
     }
 }

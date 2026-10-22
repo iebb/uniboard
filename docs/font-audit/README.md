@@ -60,7 +60,7 @@ Emoji fallback is decided at runtime on the device's own iOS version, not from t
 1. **Noto Color Emoji**, the unmodified sbix rebuild `noto.ttf` from [iebb/emojifonts release 2026.10](https://github.com/iebb/emojifonts/releases/tag/2026.10) (10,789,196 bytes, SHA-256 pinned, Emoji 17.0). sbix is Apple's own bitmap format, so it draws on every supported iOS version, and its GSUB ligatures cover sequences.
 2. The 31,848-byte Noto COLR subset for the nine standalone Unicode 18 emoji, which the sbix build does not yet contain.
 
-A candidate must draw the text completely and leave ink in a test render. That second check matters: COLR glyphs exist in the cmap on iOS 18.5 but draw nothing there, so the subset is used only where the runtime actually paints it. VS15 text presentation stays on text fonts.
+A candidate must draw the text completely and leave ink in a test render. That second check matters: COLR glyphs exist in the cmap on iOS 18.5 but draw nothing there, so the subset is used only where the runtime actually paints it. VS15 text presentation stays on text fonts. Anything still missing is tinted red.
 
 `Tests/UnicodeEmojiSequenceAuditTests.swift` (opt-in, `UNIBOARD_EMOJI_AUDIT=1`; add `UNIBOARD_EMOJI_AUDIT_INSTALL=1` with the pack files in the test host's `Documents/FontAuditAssets`) shapes all 3,963 fully qualified Unicode 18 emoji:
 

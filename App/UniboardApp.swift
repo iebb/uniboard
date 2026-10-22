@@ -34,7 +34,6 @@ struct UniboardApp: App {
         ContentView()
             .environmentObject(store)
             .environmentObject(preferences)
-            .tint(Palette.accent)
             .onAppear { store.refreshFavorites() }
             .onChange(of: scenePhase) { _, phase in if phase == .active { store.refreshFavorites() } }
     }

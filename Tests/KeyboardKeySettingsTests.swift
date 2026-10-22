@@ -33,10 +33,10 @@ final class KeyboardKeySettingsTests: XCTestCase {
         let hold = KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .longPress, mapping: .standard)
         XCTAssertEqual(hold.first, "e")
         XCTAssertTrue(hold.contains("é"))
-        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .swipeDown, mapping: .standard).first, "E")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .swipeDown, mapping: .standard).first, "ᵉ")
         XCTAssertFalse(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .standard).isEmpty)
         XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .none).isEmpty)
-        XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "digit.1", gesture: .swipeDown, mapping: .standard).isEmpty)
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "digit.1", gesture: .swipeDown, mapping: .standard).first, "¹")
         XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "utility.space", gesture: .longPress, mapping: .standard).isEmpty)
         for key in Settings.descriptors {
             for gesture in Settings.Gesture.customizable {

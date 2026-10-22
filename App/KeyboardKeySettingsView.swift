@@ -158,7 +158,9 @@ private struct KeyboardGestureSettingsView: View {
     private var explanation: String {
         switch gesture {
         case .swipeDown where descriptor.kind == .letter:
-            return "By default: the opposite case first, then its accented choices. Shift stays unchanged."
+            return "By default: other forms of the same letter in the current case: superscript, subscript, mathematical bold, italic, script, fraktur, double-struck, sans-serif and monospace, then circled, fullwidth and small capital. Shift stays unchanged."
+        case .swipeDown where descriptor.kind == .digit:
+            return "By default: other forms of the same digit: superscript, subscript, mathematical styles, circled, parenthesized and fullwidth."
         case .longPress:
             return "By default: familiar accents in the current case and stock symbol variants."
         case .swipeUp:

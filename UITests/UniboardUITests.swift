@@ -130,6 +130,7 @@ final class UniboardUITests: XCTestCase {
     }
 
     func testKeyboardKeySettingsSavesExactChoicesDisablesAndRestoresDefaults() {
+        resetAppKey("letter.q")
         openAppSettings()
         let settings = app.buttons["keyboardKeySettings"].firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
@@ -179,8 +180,8 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Q key"].waitForExistence(timeout: 5))
         XCTAssertTrue(gesture.waitUntilValueEquals("xy"), "Explicit key settings survive an ordinary app relaunch")
         gesture.tap()
+        XCTAssertTrue(app.buttons["keySettings.save"].firstMatch.waitForExistence(timeout: 5))
         let removeAllSaved = app.buttons["keySettings.removeAll"].firstMatch
-        XCTAssertTrue(removeAllSaved.waitForExistence(timeout: 5))
         revealByScrolling(removeAllSaved, in: app)
         removeAllSaved.tap()
         app.buttons["keySettings.save"].tap()
@@ -699,7 +700,7 @@ final class UniboardUITests: XCTestCase {
         app.buttons["keyboard.typing.delete"].tap()
         XCTAssertTrue(input.waitUntilValueEquals("\tAqq,."))
         // Up-flicks insert the printed secondary glyph; ordinary taps keep
-        // their letter and down-flicks keep opposite-case semantics.
+        // their letter and down-flicks offer presentation forms.
         flickMainKey(app.buttons["keyboard.typing.key.q"].firstMatch, up: true)
         XCTAssertTrue(input.waitUntilValueEquals("\tAqq,._"))
         flickMainKey(app.buttons["keyboard.typing.key.a"].firstMatch, up: true)
@@ -912,26 +913,26 @@ final class UniboardUITests: XCTestCase {
         flickMainKey(oKey, up: true)
         XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥"))
         flickMainKey(oKey, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥O"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥ᵒ"), "A down flick inserts the superscript, not the other case")
         chooseHeldKeyboardOption(iKey, optionCount: 7, selectedIndex: 1, extraActions: 0)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥Oì"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥ᵒì"))
         let shift = app.buttons["keyboard.typing.shift"].firstMatch
         let q = app.buttons["keyboard.typing.key.q"].firstMatch
         shift.press(forDuration: 0.6, thenDragTo: q)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥OìQ"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥ᵒìQ"))
         XCTAssertTrue(shift.waitUntilValueEquals("lowercase"))
         shift.press(forDuration: 0.6)
         XCTAssertTrue(shift.waitUntilValueEquals("uppercase"))
         q.tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥OìQQ"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥ᵒìQQ"))
         XCTAssertTrue(shift.waitUntilValueEquals("lowercase"))
         shift.doubleTap()
         XCTAssertTrue(shift.waitUntilValueEquals("capsLock"))
         typeHostTypingKeys("qw", layout: "letters")
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥OìQQQW"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥ᵒìQQQW"))
         shift.tap()
         XCTAssertTrue(shift.waitUntilValueEquals("lowercase"))
-        attachScreenshot("Distinct letter accents, case flicks, symbols, and system Shift gestures")
+        attachScreenshot("Distinct letter accents, presentation forms, symbols, and system Shift gestures")
     }
 
     func testSystemKeyboardHeldKeysCanChangeGestureGroupBeforeRelease() throws {
@@ -947,9 +948,9 @@ final class UniboardUITests: XCTestCase {
         flickMainKey(iKey, up: true, pressDuration: 0.65)
         XCTAssertTrue(input.waitUntilValueEquals(context + "£"), "An opened hold chooser can switch to symbols")
         flickMainKey(iKey, up: false, pressDuration: 0.65)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£I"), "An opened hold chooser can switch to opposite case")
+        XCTAssertTrue(input.waitUntilValueEquals(context + "£ⁱ"), "An opened hold chooser can switch to the presentation forms")
         app.buttons["keyboard.typing.key.q"].firstMatch.tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£Iq"), "Switching inserts once and leaves the next tap literal")
+        XCTAssertTrue(input.waitUntilValueEquals(context + "£ⁱq"), "Switching inserts once and leaves the next tap literal")
         let star = app.buttons["keyboard.openFavorites"].firstMatch
         star.tap()
         XCTAssertTrue(app.descendants(matching: .any)["keyboard.pages.pager"].firstMatch.waitForExistence(timeout: 5))
@@ -961,12 +962,13 @@ final class UniboardUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["keyboard.options"].firstMatch.exists,
                        "Unicode results are always in code point order, with no order menu")
         app.buttons["keyboard.openTyping"].firstMatch.tap()
-        XCTAssertEqual(input.value as? String, context + "£Iq")
+        XCTAssertEqual(input.value as? String, context + "£ⁱq")
         attachScreenshot("Held-key gesture switching without an order menu")
     }
 
     func testSystemKeyboardMacOptionCandidatesKeepCaseFlicksIndependent() throws {
         try requireKeyboardIntegration()
+        resetAppKey("letter.q")
         if UIDevice.current.userInterfaceIdiom == .pad { configurePadSettings(layout: "stock", mapping: "macOS") }
         let input = openSystemKeyboardHost(unicodeBrowse: false)
         defer { restoreEnglishKeyboard() }
@@ -984,16 +986,17 @@ final class UniboardUITests: XCTestCase {
         flickMainKey(q, up: true, horizontal: -36)
         XCTAssertTrue(input.waitUntilValueEquals("œŒ"), "Shift–Option stays literal, independent of Shift state")
         let displayedQ = q.label
-        XCTAssertTrue(["q", "Q"].contains(displayedQ), "The actual key label establishes the case-flick precondition")
-        let expected = "œŒ" + (displayedQ == "q" ? "Q" : "q")
+        XCTAssertTrue(["q", "Q"].contains(displayedQ), "The actual key label establishes the down-form case")
+        // Q has no superscript or subscript, so its first form is mathematical bold.
+        let expected = "œŒ" + (displayedQ == "q" ? "𝐪" : "𝐐")
         flickMainKey(q, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals(expected), "Down-flick inputs the opposite case of the displayed key")
+        XCTAssertTrue(input.waitUntilValueEquals(expected), "Down-flick inputs a form in the displayed case")
         if UIDevice.current.userInterfaceIdiom == .pad {
             flickMainKey(app.buttons["keyboard.typing.key.a"].firstMatch, up: true)
             XCTAssertTrue(input.waitUntilValueEquals(expected + "å"))
             assertPadFooter(pageID: "keyboard.typing.numbers")
         }
-        attachScreenshot("macOS Option and Shift Option candidates retain independent case flicks")
+        attachScreenshot("macOS Option and Shift Option candidates stay independent of down forms")
         if UIDevice.current.userInterfaceIdiom == .pad {
             restoreEnglishKeyboard()
             configurePadSettings(layout: "ansiNumbers", mapping: "standard")
@@ -1116,8 +1119,8 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(shift.waitForExistence(timeout: 5))
         XCTAssertTrue(shift.waitUntilValueEquals("uppercase"), "The fresh sentence-capitalizing host starts uppercase")
         flickMainKey(app.buttons["keyboard.typing.key.a"].firstMatch, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals("a"))
-        XCTAssertTrue(shift.waitUntilValueEquals("uppercase"), "A default opposite-case flick preserves automatic uppercase across host callbacks")
+        XCTAssertTrue(input.waitUntilValueEquals("ᴬ"), "The default down flick follows the visible uppercase")
+        XCTAssertTrue(shift.waitUntilValueEquals("uppercase"), "A default down flick preserves automatic uppercase across host callbacks")
         app.buttons["keyboard.typing.delete"].tap()
         XCTAssertTrue(input.waitUntilValueEquals(""))
         if shift.value as? String != "lowercase" { shift.tap() }
@@ -1145,17 +1148,17 @@ final class UniboardUITests: XCTestCase {
 
         let a = app.buttons["keyboard.typing.key.a"].firstMatch
         flickMainKey(a, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals("qxy_!A"), "The default down flick chooses the opposite case")
+        XCTAssertTrue(input.waitUntilValueEquals("qxy_!ᵃ"), "The default down flick chooses the superscript in the current case")
         XCTAssertTrue(shift.waitUntilValueEquals("lowercase"))
         flickMainKey(a, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals("qxy_!A@"), "The default upward flick inserts its mapped symbol without a letter tap")
+        XCTAssertTrue(input.waitUntilValueEquals("qxy_!ᵃ-"), "The default upward flick inserts its mapped symbol without a letter tap")
         shift.doubleTap()
         XCTAssertTrue(shift.waitUntilValueEquals("capsLock"))
         flickMainKey(a, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals("qxy_!A@a"))
-        XCTAssertTrue(shift.waitUntilValueEquals("capsLock"), "The opposite-case flick must not consume Caps Lock")
+        XCTAssertTrue(input.waitUntilValueEquals("qxy_!ᵃ-ᴬ"))
+        XCTAssertTrue(shift.waitUntilValueEquals("capsLock"), "A down flick must not consume Caps Lock")
         q.tap()
-        XCTAssertTrue(input.waitUntilValueEquals("qxy_!A@aQ"))
+        XCTAssertTrue(input.waitUntilValueEquals("qxy_!ᵃ-ᴬQ"))
         attachScreenshot("Real main-key flicks insert exact settings and retain lowercase or locked Shift")
 
         restoreEnglishKeyboard()
@@ -1170,8 +1173,12 @@ final class UniboardUITests: XCTestCase {
         revealByScrolling(key, in: app)
         key.tap()
         XCTAssertTrue(app.descendants(matching: .any)["keySettings.detail.\(keyID)"].firstMatch.waitForExistence(timeout: 5))
-        app.buttons["keySettings.resetKey"].tap()
-        app.buttons["Restore defaults"].tap()
+        // Restore is disabled when the key already has its defaults.
+        let restore = app.buttons["keySettings.resetKey"].firstMatch
+        if restore.isEnabled {
+            restore.tap()
+            app.buttons["Restore defaults"].tap()
+        }
         XCTAssertTrue(app.buttons["keySettings.gesture.swipeUp"].waitUntilValueEquals("Default"))
         app.navigationBars.buttons.firstMatch.tap()
         app.navigationBars.buttons.firstMatch.tap()
@@ -1214,8 +1221,9 @@ final class UniboardUITests: XCTestCase {
         key.tap()
         XCTAssertTrue(app.descendants(matching: .any)["keySettings.detail.\(keyID)"].firstMatch.waitForExistence(timeout: 5))
         app.buttons["keySettings.gesture.\(gesture)"].tap()
+        XCTAssertTrue(app.buttons["keySettings.save"].firstMatch.waitForExistence(timeout: 5))
+        // A long default list can leave Remove All below the fold, not yet created.
         let removeAll = app.buttons["keySettings.removeAll"].firstMatch
-        XCTAssertTrue(removeAll.waitForExistence(timeout: 5))
         revealByScrolling(removeAll, in: app)
         removeAll.tap()
         for (index, value) in choices.enumerated() {

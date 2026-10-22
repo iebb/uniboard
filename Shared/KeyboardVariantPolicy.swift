@@ -31,13 +31,75 @@ enum KeyboardVariantPolicy {
         return candidates(override: [macOSOption[index], macOSShiftOption[index]], defaults: [])
     }
 
+    /// Swipe down offers other presentation forms of the same character:
+    /// super- and subscripts, mathematical styles, then circled, fullwidth and
+    /// similar forms. Letters keep the current case; Shift is unchanged.
     static func defaultSwipeDown(for key: String, state: KeyboardTypingState) -> [String] {
-        guard state.layout == .letters, key.utf8.count == 1,
-              let byte = key.utf8.first, (97...122).contains(byte) else { return [] }
-        let uppercase = state.shift == .lowercase
-        let original = uppercase ? key.uppercased() : key
-        return options(text: original, variants: englishVariants(for: key, uppercase: uppercase))
+        guard key.unicodeScalars.count == 1, let value = key.unicodeScalars.first?.value else { return [] }
+        let forms: [String]
+        if state.layout == .letters, (0x61...0x7A).contains(value) {
+            forms = letterForms(Int(value - 0x61), uppercase: state.shift != .lowercase)
+        } else if (0x30...0x39).contains(value) {
+            forms = digitForms(Int(value - 0x30))
+        } else {
+            forms = symbolForms[key] ?? []
+        }
+        guard let first = forms.first else { return [] }
+        return options(text: first, variants: Array(forms.dropFirst()))
     }
+
+    private static func scalars(_ values: [UInt32]) -> [String] {
+        values.compactMap { $0 == 0 ? nil : Unicode.Scalar($0).map { String(Character($0)) } }
+    }
+    private static let superscriptLower: [UInt32] = [0x1D43, 0x1D47, 0x1D9C, 0x1D48, 0x1D49, 0x1DA0, 0x1D4D, 0x02B0, 0x2071,
+        0x02B2, 0x1D4F, 0x02E1, 0x1D50, 0x207F, 0x1D52, 0x1D56, 0, 0x02B3, 0x02E2, 0x1D57, 0x1D58, 0x1D5B, 0x02B7, 0x02E3, 0x02B8, 0x1DBB]
+    private static let superscriptUpper: [UInt32] = [0x1D2C, 0x1D2E, 0, 0x1D30, 0x1D31, 0, 0x1D33, 0x1D34, 0x1D35,
+        0x1D36, 0x1D37, 0x1D38, 0x1D39, 0x1D3A, 0x1D3C, 0x1D3E, 0, 0x1D3F, 0, 0x1D40, 0x1D41, 0x2C7D, 0x1D42, 0, 0, 0]
+    private static let subscriptLower: [UInt32] = [0x2090, 0, 0, 0, 0x2091, 0, 0, 0x2095, 0x1D62,
+        0x2C7C, 0x2096, 0x2097, 0x2098, 0x2099, 0x2092, 0x209A, 0, 0x1D63, 0x209B, 0x209C, 0x1D64, 0x1D65, 0, 0x2093, 0, 0]
+    private static let smallCapitals: [UInt32] = [0x1D00, 0x0299, 0x1D04, 0x1D05, 0x1D07, 0xA730, 0x0262, 0x029C, 0x026A,
+        0x1D0A, 0x1D0B, 0x029F, 0x1D0D, 0x0274, 0x1D0F, 0x1D18, 0, 0x0280, 0xA731, 0x1D1B, 0x1D1C, 0x1D20, 0x1D21, 0, 0x028F, 0x1D22]
+    /// Capital A of each Mathematical Alphanumeric style; lowercase follows 26 later.
+    private static let mathStyles: [UInt32] = [
+        0x1D400, 0x1D434, 0x1D468, // bold, italic, bold italic
+        0x1D49C, 0x1D4D0, 0x1D504, 0x1D538, // script, bold script, fraktur, double-struck
+        0x1D5D4, 0x1D670 // sans-serif bold, monospace
+    ]
+    /// Letters encoded earlier in Letterlike Symbols leave holes in those styles.
+    private static let mathHoles: [UInt32: UInt32] = [
+        0x1D455: 0x210E,
+        0x1D49D: 0x212C, 0x1D4A0: 0x2130, 0x1D4A1: 0x2131, 0x1D4A3: 0x210B, 0x1D4A4: 0x2110,
+        0x1D4A7: 0x2112, 0x1D4A8: 0x2133, 0x1D4AD: 0x211B, 0x1D4BA: 0x212F, 0x1D4BC: 0x210A, 0x1D4C4: 0x2134,
+        0x1D506: 0x212D, 0x1D50B: 0x210C, 0x1D50C: 0x2111, 0x1D515: 0x211C, 0x1D51D: 0x2128,
+        0x1D53A: 0x2102, 0x1D53F: 0x210D, 0x1D545: 0x2115, 0x1D547: 0x2119, 0x1D548: 0x211A,
+        0x1D549: 0x211D, 0x1D551: 0x2124
+    ]
+
+    static func letterForms(_ index: Int, uppercase: Bool) -> [String] {
+        guard (0..<26).contains(index) else { return [] }
+        let offset = UInt32(index) + (uppercase ? 0 : 26)
+        let math = mathStyles.map { base in mathHoles[base + offset] ?? base + offset }
+        let letter = UInt32(index)
+        if uppercase {
+            return scalars([superscriptUpper[index]] + math + [0x24B6 + letter, 0xFF21 + letter])
+        }
+        return scalars([superscriptLower[index], subscriptLower[index]] + math
+            + [0x24D0 + letter, 0x249C + letter, 0xFF41 + letter, smallCapitals[index]])
+    }
+
+    static func digitForms(_ digit: Int) -> [String] {
+        guard (0...9).contains(digit) else { return [] }
+        let d = UInt32(digit)
+        let superscript: UInt32 = digit < 4 ? [0x2070, 0x00B9, 0x00B2, 0x00B3][digit] : 0x2070 + d
+        return scalars([superscript, 0x2080 + d, 0x1D7CE + d, 0x1D7D8 + d, 0x1D7EC + d, 0x1D7F6 + d,
+            digit == 0 ? 0x24EA : 0x245F + d, digit == 0 ? 0x24FF : 0x2775 + d,
+            digit == 0 ? 0 : 0x2473 + d, digit == 0 ? 0 : 0x2487 + d, 0xFF10 + d])
+    }
+
+    private static let symbolForms: [String: [String]] = [
+        "+": ["⁺", "₊", "＋"], "-": ["⁻", "₋", "－"], "=": ["⁼", "₌", "＝"],
+        "(": ["⁽", "₍", "（"], ")": ["⁾", "₎", "）"]
+    ]
 
     static func defaultSwipeUp(for key: String, state: KeyboardTypingState, widePad: Bool, ansiPad: Bool = false,
                                  mapping: KeyboardPadSymbolMapping = .iPad, hasNumberRow: Bool = false) -> [String] {
@@ -87,7 +149,7 @@ enum KeyboardVariantPolicy {
                 defaultSwipeUp(for: key, state: state, widePad: widePad || !isAuxiliaryKey, ansiPad: ansiPad,
                                  mapping: mapping, hasNumberRow: hasNumberRow)
                 + macOSOptionCandidates(for: key)),
-            isAuxiliaryKey ? [] : defaultSwipeDown(for: key, state: state)
+            defaultSwipeDown(for: key, state: state)
         ]
         let overrides = gestures.map { settings.candidates(for: keyID, gesture: $0) }
         var choices = zip(overrides, defaults).map { candidates(override: $0.0, defaults: $0.1) }
@@ -109,8 +171,8 @@ enum KeyboardVariantPolicy {
         for index in [2, 1, 0] where overrides[index] == nil {
             if let first = choices[index].first { append(first, to: index) }
         }
-        // Preserve chooser ownership when swapping the default directions:
-        // current-case hold, opposite-case Down, then symbol Up alternatives.
+        // Preserve chooser ownership: current-case hold, Down's presentation
+        // forms, then symbol Up alternatives.
         for index in [0, 2, 1] where overrides[index] == nil {
             for text in choices[index].dropFirst() { append(text, to: index) }
         }

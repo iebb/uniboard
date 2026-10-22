@@ -44,7 +44,7 @@ struct SetupView: View {
                 } header: {
                     Text("iPad Keyboard")
                 } footer: {
-                    Text("The number row is always present. On a wide landscape iPad, choose iPad styling, compact ANSI punctuation, or a full ANSI number row. Symbols can follow the standard, iPad or macOS U.S. Option layout; macOS offers Option first and Shift–Option next. Hold shows accents, Up offers symbols and Down shows opposite-case letters. Reopen the keyboard to apply; Full Access is not required.")
+                    Text("The number row is always present. On a wide landscape iPad, choose iPad styling, compact ANSI punctuation, or a full ANSI number row. Symbols can follow the standard, iPad or macOS U.S. Option layout; macOS offers Option first and Shift–Option next. Hold shows accents, Up offers symbols and Down offers other forms such as superscripts and mathematical letters. Reopen the keyboard to apply; Full Access is not required.")
                 }
             }
 

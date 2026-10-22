@@ -95,9 +95,7 @@ enum KeyboardTypingLayoutPolicy {
 
     static func usesShiftedTap(for key: String, state: KeyboardTypingState, ansiPad: Bool) -> Bool {
         guard state.layout == .letters else { return false }
-        if key.utf8.count == 1, let byte = key.utf8.first, (97...122).contains(byte) {
-            return state.shift != .lowercase
-        }
+        if state.alphabet.isCasedLetter(key) { return state.shift != .lowercase }
         return ansiPad && state.shiftsANSISymbols && shiftedANSI[key] != nil
     }
 
@@ -114,17 +112,20 @@ enum KeyboardTypingLayoutPolicy {
 
     /// The expanded number page is entered from QWERTY's persistent digit
     /// row. Its own main rows supply symbols instead of repeating any digits.
-    static func rows(for layout: KeyboardTypingLayout, hasAuxiliaryRow: Bool, widePad: Bool = false, ansiPad: Bool = false, padLayout: KeyboardPadLayout = .ansiNumbers) -> [[String]] {
+    static func rows(for layout: KeyboardTypingLayout, hasAuxiliaryRow: Bool, widePad: Bool = false, ansiPad: Bool = false,
+                     padLayout: KeyboardPadLayout = .ansiNumbers, alphabet: KeyboardAlphabet = .english) -> [[String]] {
         if layout == .letters && widePad && ansiPad && padLayout != .stock { return padLayout == .ansiNumbers ? ansiRows : compactANSIRows }
-        if layout == .letters && widePad { return Array(layout.rows.prefix(2)) + [layout.rows[2] + [",", "."]] }
-        guard layout == .numbers && hasAuxiliaryRow else { return layout.rows }
-        return [secondarySymbols] + layout.rows.dropFirst()
+        let base = layout.rows(for: alphabet)
+        if layout == .letters && widePad { return Array(base.prefix(2)) + [base[2] + [",", "."]] }
+        guard layout == .numbers && hasAuxiliaryRow else { return base }
+        return [secondarySymbols] + base.dropFirst()
     }
 
     /// Membership follows the rendered core rows. Auxiliary keys remain a
     /// separate route, and a stale three-row digit button cannot broaden it.
     static func output(for key: String, state: KeyboardTypingState, hasAuxiliaryRow: Bool, widePad: Bool = false, ansiPad: Bool = false, padLayout: KeyboardPadLayout = .ansiNumbers) -> String? {
-        guard rows(for: state.layout, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout)
+        guard rows(for: state.layout, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout,
+                   alphabet: state.alphabet)
             .contains(where: { row in row.contains { $0.utf16.elementsEqual(key.utf16) } }) else { return nil }
         if ansiPad && widePad && padLayout != .stock && state.shiftsANSISymbols, let shifted = shiftedANSI[key] { return shifted }
         return state.label(for: key)

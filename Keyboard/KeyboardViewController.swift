@@ -2311,7 +2311,8 @@ private struct KeyboardTypingView: View {
                         if pad.isANSI { ansiRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0) }
                         else { padRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0) }
                     } else {
-                        ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: typing.state.layout, hasAuxiliaryRow: plan.numberRowCount > 0, ansiPad: ansiStyle, padLayout: padLayout).enumerated()), id: \.offset) { index, keys in
+                        ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: typing.state.layout, hasAuxiliaryRow: plan.numberRowCount > 0, ansiPad: ansiStyle, padLayout: padLayout,
+                                alphabet: typing.state.alphabet).enumerated()), id: \.offset) { index, keys in
                             HStack(spacing: isPad ? 7 : 5) {
                                 if index == 2 { typingLeadingKey(height: plan.keyHeight) }
                                 ForEach(keys, id: \.self) { key in
@@ -2341,7 +2342,8 @@ private struct KeyboardTypingView: View {
     }
 
     private func padRows(_ pad: KeyboardPadTypingLayoutPlan, height: CGFloat, hasAuxiliaryRow: Bool) -> some View {
-        ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: .letters, hasAuxiliaryRow: false, widePad: true).enumerated()), id: \.offset) { row, keys in
+        ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: .letters, hasAuxiliaryRow: false, widePad: true,
+                                                              alphabet: typing.state.alphabet).enumerated()), id: \.offset) { row, keys in
             HStack(spacing: pad.keySpacing) {
                 if row == 0 {
                     KeyboardTouchKey(title: "tab", identifier: "keyboard.typing.tab", label: "Tab", fontSize: 13, contentPosition: .bottomLeft,

@@ -3,12 +3,14 @@ import Foundation
 enum KeyboardTypingLayout: CaseIterable {
     case letters, numbers, symbols
 
-    var rows: [[String]] {
+    /// English rows. Typing reads `rows(for:)` with the current alphabet.
+    var rows: [[String]] { rows(for: .english) }
+
+    /// The letters page comes from the alphabet; the other pages are shared.
+    func rows(for alphabet: KeyboardAlphabet) -> [[String]] {
         switch self {
         case .letters:
-            return [Array("qwertyuiop").map(String.init),
-                    Array("asdfghjkl").map(String.init),
-                    Array("zxcvbnm").map(String.init)]
+            return alphabet.rows
         case .numbers:
             return [Array("1234567890").map(String.init),
                     ["-", "/", ":", ";", "(", ")", "$", "&", "@", "\""],
@@ -29,6 +31,7 @@ enum KeyboardShiftState {
 /// reads or changes the receiving document through this policy.
 struct KeyboardTypingState: Equatable {
     private(set) var layout: KeyboardTypingLayout = .letters
+    private(set) var alphabet: KeyboardAlphabet = .english
     private(set) var shift: KeyboardShiftState = .lowercase
     private var lastShiftTap: TimeInterval?
     private var manualShiftOverride = false
@@ -37,7 +40,7 @@ struct KeyboardTypingState: Equatable {
     static let capsLockTapInterval: TimeInterval = 0.35
 
     func label(for key: String) -> String {
-        layout == .letters && shift != .lowercase ? key.uppercased() : key
+        layout == .letters && shift != .lowercase ? alphabet.uppercase(key) : key
     }
 
     /// A Shift-origin slide changes only this key's output. It cannot become a
@@ -52,7 +55,7 @@ struct KeyboardTypingState: Equatable {
 
     /// Reject stale page buttons and arbitrary strings before inserting them.
     func output(for key: String) -> String? {
-        guard layout.rows.contains(where: { $0.contains(key) }) else { return nil }
+        guard layout.rows(for: alphabet).contains(where: { $0.contains(key) }) else { return nil }
         return label(for: key)
     }
 

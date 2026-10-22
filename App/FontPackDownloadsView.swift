@@ -30,10 +30,16 @@ private final class FontDownloadBudget: NSObject, URLSessionDownloadDelegate, @u
 private final class FontPackDownloads: ObservableObject {
     static let shared = FontPackDownloads()
     @Published private(set) var activePack: String?
+    /// Packs waiting their turn, in the order they were requested.
+    @Published private(set) var queue: [String] = []
     @Published private(set) var progress: Double = 0
+    @Published private(set) var receivedBytes: Int64 = 0
     @Published private(set) var installed: [String: Int] = [:]
     @Published private(set) var stored: Set<String> = []
+    /// The last failure of each pack, shown on the pack with a Retry button.
+    @Published private(set) var failures: [String: String] = [:]
     @Published private(set) var message: String?
+    private var cancelledActive = false
     private let store = UnicodeFontDownloadStore.shared
     private let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -72,19 +78,55 @@ private final class FontPackDownloads: ObservableObject {
         })
     }
 
+    var packs: [UnicodeFontPack] { UnicodeFontPackCatalog.bundled.packs }
+
+    func isComplete(_ pack: UnicodeFontPack) -> Bool { installed[pack.id, default: 0] == pack.fonts.count }
+
+    /// Bytes still to download for every pack that is not yet complete.
+    var remainingBytes: Int64 {
+        packs.filter { !isComplete($0) }.reduce(0) { total, pack in
+            total + pack.fonts.filter { store.installedURL(for: $0) == nil }.reduce(0) { $0 + $1.bytes }
+        }
+    }
+    var downloadedBytes: Int64 {
+        packs.reduce(0) { total, pack in
+            total + pack.fonts.filter { store.installedURL(for: $0) != nil }.reduce(0) { $0 + $1.bytes }
+        }
+    }
+
+    /// Queues a pack; packs download one at a time in request order.
     func download(_ pack: UnicodeFontPack) {
-        guard activePack == nil, !pack.fonts.isEmpty else { return }
+        guard !pack.fonts.isEmpty, activePack != pack.id, !queue.contains(pack.id) else { return }
         guard store.directory != nil else {
             message = "Shared font storage is unavailable. Reopen the app and try again."
             return
         }
         // Downloading a pack is a request to use it: turn previews on.
         if !CatalogPreferences.shared.useUnicodeFonts { CatalogPreferences.shared.selectUnicodeFonts(true) }
+        failures[pack.id] = nil
+        message = nil
+        queue.append(pack.id)
+        startNextIfIdle()
+    }
+
+    func downloadAll() {
+        for pack in packs where !isComplete(pack) { download(pack) }
+    }
+
+    private func startNextIfIdle() {
+        guard activePack == nil, !queue.isEmpty else { return }
+        let id = queue.removeFirst()
+        guard let pack = packs.first(where: { $0.id == id }) else { startNextIfIdle(); return }
+        run(pack)
+    }
+
+    private func run(_ pack: UnicodeFontPack) {
         let id = UUID()
         runID = id
         activePack = pack.id
-        message = nil
+        cancelledActive = false
         progress = 0
+        receivedBytes = 0
         let store = store, session = session
         task = Task {
             let existing = pack.fonts.filter { store.installedURL(for: $0) != nil }
@@ -122,9 +164,10 @@ private final class FontPackDownloads: ObservableObject {
                 progress = 1
                 message = "Downloaded. The app and keyboard now use these fonts for previews iOS can’t draw."
             } catch {
-                if Task.isCancelled {
+                if Task.isCancelled || cancelledActive {
                     message = "Download cancelled. Completed fonts are kept; retry to download the rest."
                 } else {
+                    failures[pack.id] = "Couldn’t download or verify this pack. Completed fonts are kept."
                     message = "The font download could not be verified. Check your connection and try again; completed fonts are kept."
                 }
             }
@@ -134,19 +177,29 @@ private final class FontPackDownloads: ObservableObject {
             activePack = nil
             runID = nil
             task = nil
+            startNextIfIdle()
         }
     }
 
     private func recordProgress(font: UnicodeFontDownload, received: Int64, pack: UnicodeFontPack, run: UUID) {
         guard runID == run, UnicodeFontPackCatalog.acceptsProgress(received, expected: font.bytes) else { return }
         receivedByFont[font.asset.filename] = max(receivedByFont[font.asset.filename, default: 0], received)
-        progress = min(1, Double(receivedByFont.values.reduce(0, +)) / Double(pack.bytes))
+        receivedBytes = min(pack.bytes, receivedByFont.values.reduce(0, +))
+        progress = min(1, Double(receivedBytes) / Double(pack.bytes))
     }
 
-    func cancel() { task?.cancel() }
+    /// Cancels a queued or downloading pack; other queued packs continue.
+    func cancel(_ pack: UnicodeFontPack) {
+        if let index = queue.firstIndex(of: pack.id) { queue.remove(at: index); return }
+        guard activePack == pack.id else { return }
+        cancelledActive = true
+        task?.cancel()
+    }
 
     func remove(_ pack: UnicodeFontPack) {
-        guard activePack == nil else { return }
+        guard activePack != pack.id else { return }
+        queue.removeAll { $0 == pack.id }
+        failures[pack.id] = nil
         do {
             for font in pack.fonts { try store.remove(font) }
             message = "Download removed. Bundled fonts remain available."
@@ -183,42 +236,40 @@ struct FontPackDownloadsView: View {
                 Toggle("Extra Unicode Fonts", isOn: Binding(get: { preferences.useUnicodeFonts },
                     set: { preferences.selectUnicodeFonts($0) }))
                     .accessibilityIdentifier("fontDownloads.enable")
-            } footer: {
-                Text("Keep the built-in fonts, or download just the extra previews you need. Downloads are optional, stored on this device, and work offline in both the app and keyboard without Full Access. Measured against iOS 27; some newer characters still have no suitable glyph.")
-            }
-            ForEach(UnicodeFontPackCatalog.bundled.packs) { pack in
-                Section {
-                    VStack(alignment: .leading, spacing: 10) {
-                        let count = downloads.installed[pack.id, default: 0]
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(pack.title).font(.headline)
-                            Text(pack.detail).font(.subheadline).foregroundStyle(.secondary)
-                            Text("\(ByteCountFormatter.string(fromByteCount: pack.bytes, countStyle: .file)) · \(count)/\(pack.fonts.count) fonts downloaded")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
-                        if downloads.activePack == pack.id {
-                            ProgressView(value: downloads.progress)
-                                .accessibilityIdentifier("fontDownloads.progress.\(pack.id)")
-                            Button("Cancel download") { downloads.cancel() }
-                        } else {
-                            HStack {
-                                if count < pack.fonts.count {
-                                    Button(count == 0 ? "Download" : "Download remaining fonts") { downloads.download(pack) }
-                                        .accessibilityIdentifier("fontDownloads.download.\(pack.id)")
-                                } else { Label("Available offline", systemImage: "checkmark.circle.fill").foregroundStyle(.secondary) }
-                                Spacer()
-                                if downloads.stored.contains(pack.id) {
-                                    Button("Remove", role: .destructive) { downloads.remove(pack) }
-                                        .accessibilityIdentifier("fontDownloads.remove.\(pack.id)")
-                                }
-                            }.disabled(downloads.activePack != nil)
+                if downloads.remainingBytes > 0 {
+                    Button {
+                        downloads.downloadAll()
+                    } label: {
+                        LabeledContent {
+                            Text(size(downloads.remainingBytes)).foregroundStyle(.secondary)
+                        } label: {
+                            Label("Download All", systemImage: "arrow.down.circle")
                         }
                     }
-                    .buttonStyle(.borderless)
-                    .padding(.vertical, 4)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("fontDownloads.pack.\(pack.id)")
+                    .disabled(downloads.packs.filter { !downloads.isComplete($0) }.allSatisfy {
+                        downloads.activePack == $0.id || downloads.queue.contains($0.id)
+                    })
+                    .accessibilityIdentifier("fontDownloads.downloadAll")
                 }
+                if downloads.downloadedBytes > 0 {
+                    LabeledContent("Downloaded", value: size(downloads.downloadedBytes))
+                }
+            } footer: {
+                Text("When iOS can’t draw a character or emoji, these fonts draw its preview in the app and keyboard. Downloads are optional, stored on this device and work offline, without Full Access. Other apps keep their own fonts.")
+            }
+            Section {
+                ForEach(downloads.packs) { pack in
+                    row(pack)
+                        .swipeActions {
+                            if downloads.stored.contains(pack.id) && downloads.activePack != pack.id {
+                                Button("Remove", role: .destructive) { downloads.remove(pack) }
+                            }
+                        }
+                }
+            } header: {
+                Text("Packs")
+            } footer: {
+                Text("Cancelling keeps completed fonts, and a retry downloads only what’s missing.")
             }
             Section {
                 if let message = downloads.message {
@@ -232,5 +283,64 @@ struct FontPackDownloadsView: View {
         .navigationTitle("Font Downloads")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { downloads.reload() }
+    }
+
+    private func size(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
+
+    @ViewBuilder private func row(_ pack: UnicodeFontPack) -> some View {
+        let active = downloads.activePack == pack.id
+        let queued = downloads.queue.contains(pack.id)
+        let complete = downloads.isComplete(pack)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(pack.title).font(.headline)
+                    Text(pack.detail).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                if active || queued {
+                    Button { downloads.cancel(pack) } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Cancel download")
+                } else if complete {
+                    Image(systemName: "checkmark.circle.fill").font(.title2).foregroundStyle(.green)
+                        .accessibilityHidden(true)
+                } else {
+                    Button { downloads.download(pack) } label: { Image(systemName: "arrow.down.circle").font(.title2) }
+                        .accessibilityLabel(downloads.installed[pack.id, default: 0] == 0 ? "Download" : "Download remaining fonts")
+                        .accessibilityIdentifier("fontDownloads.download.\(pack.id)")
+                }
+            }
+            if active {
+                ProgressView(value: downloads.progress)
+                    .accessibilityIdentifier("fontDownloads.progress.\(pack.id)")
+                Text("\(size(downloads.receivedBytes)) of \(size(pack.bytes))")
+                    .font(.footnote).monospacedDigit().foregroundStyle(.secondary)
+            } else if queued {
+                Text("Waiting · \(size(pack.bytes))").font(.footnote).foregroundStyle(.secondary)
+            } else if let failure = downloads.failures[pack.id] {
+                HStack {
+                    Text(failure).font(.footnote).foregroundStyle(.red)
+                    Spacer()
+                    Button("Retry") { downloads.download(pack) }.font(.footnote.weight(.semibold))
+                }
+            } else if complete {
+                HStack {
+                    Text("Available offline · \(size(pack.bytes))").font(.footnote).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Remove", role: .destructive) { downloads.remove(pack) }
+                        .font(.footnote)
+                        .accessibilityIdentifier("fontDownloads.remove.\(pack.id)")
+                }
+            } else {
+                let count = downloads.installed[pack.id, default: 0]
+                Text(count == 0 ? size(pack.bytes) : "\(count) of \(pack.fonts.count) fonts · \(size(pack.bytes))")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.borderless)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("fontDownloads.pack.\(pack.id)")
     }
 }

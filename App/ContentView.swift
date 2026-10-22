@@ -246,6 +246,7 @@ struct ExploreView: View {
             pages = 1
             search.update(query, catalog: catalog)
         }
+        .onChange(of: catalog.usesConScript) { _, _ in search.update(query, catalog: catalog) }
         .sheet(isPresented: $showScratchpad) { ScratchpadView(text: $scratchpad) }
     }
 

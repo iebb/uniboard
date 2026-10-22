@@ -105,6 +105,8 @@ struct BlockDetailView: View {
         }
         .onAppear { if characters.isEmpty && hasMore { loadMore() } }
         .onChange(of: preferences.edition) { _, _ in reload() }
+        // Preferring ConScript renames its characters.
+        .onChange(of: preferences.catalog.usesConScript) { _, _ in reload() }
         .sheet(isPresented: $showNavigator) {
             BlockNavigator(blocks: preferences.catalog.blocks, current: block.start) { chosen in
                 block = chosen

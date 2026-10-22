@@ -1329,6 +1329,13 @@ enum KeyboardPalette {
     static let accent = Color(uiColor: accentUI)
     static let background = Color(uiColor: backgroundUI)
     static let key = Color(uiColor: keyUI)
+    static let ucsur = Color(uiColor: ucsurUI)
+    /// The blue key for one ConScript character while ConScript is on.
+    static func conscriptFill(_ text: String, shows: Bool) -> Color? {
+        guard shows, text.unicodeScalars.count == 1, let scalar = text.unicodeScalars.first,
+              UCSUR.block(containing: scalar.value) != nil else { return nil }
+        return ucsur
+    }
     static let separator = Color(uiColor: borderUI)
     static let secondary = Color.secondary
     static let action = Color(uiColor: actionUI)
@@ -1336,8 +1343,8 @@ enum KeyboardPalette {
 }
 
 private extension View {
-    func keyboardKeySurface(radius: CGFloat = 10, modifier: Bool = false) -> some View {
-        self.modifier(KeyboardKeySurface(radius: radius, isModifier: modifier))
+    func keyboardKeySurface(radius: CGFloat = 10, modifier: Bool = false, fill: Color? = nil) -> some View {
+        self.modifier(KeyboardKeySurface(radius: radius, isModifier: modifier, fill: fill))
     }
 
     func keyboardControlSurface(radius: CGFloat = 12) -> some View {
@@ -1348,10 +1355,11 @@ private extension View {
 private struct KeyboardKeySurface: ViewModifier {
     let radius: CGFloat
     var isModifier = false
+    var fill: Color? = nil
     @Environment(\.colorSchemeContrast) private var contrast
 
     func body(content: Content) -> some View {
-        content.background(isModifier ? Color(uiColor: KeyboardPalette.modifierUI) : KeyboardPalette.key,
+        content.background(fill ?? (isModifier ? Color(uiColor: KeyboardPalette.modifierUI) : KeyboardPalette.key),
                            in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(KeyboardPalette.separator, lineWidth: contrast == .increased ? 1 : 0.4))
     }
@@ -1582,7 +1590,7 @@ private struct UnicodeKeyboardView: View {
                 keyHeight: model.typingKeyHeight,
                 keyWidth: max(1, (geometry.size.width - 9 * (model.isPadLayout ? 7 : 5)) / 10),
                 columnSpacing: model.isPadLayout ? 7 : 5, useUnicodeFonts: model.useUnicodeFonts,
-                enabled: !model.showsUnicode, actionFactory: boardKeyActions)
+                showsUCSUR: model.showsUCSUR, enabled: !model.showsUnicode, actionFactory: boardKeyActions)
         }
     }
 
@@ -1924,7 +1932,7 @@ private struct UnicodeKeyboardView: View {
                 fontSize: 23, useUnicodeFonts: model.useUnicodeFonts, showsInspection: true, showsEditing: true,
                 factory: { [mode = model.inputModeID, boardID = board.id] in boardKeyActions(mode, boardID, key) })
                 .frame(width: keyWidth, height: savedKeyHeight)
-                .keyboardKeySurface(radius: 7)
+                .keyboardKeySurface(radius: 7, fill: KeyboardPalette.conscriptFill(key.text, shows: model.showsUCSUR))
                 .accessibilityHidden(!model.isShowingSymbolPages || !model.showFavorites || symbolBoards.activeBoardID != board.id)
         } else {
             Color.clear.frame(width: SymbolPageLayout.gapWidth(cell, keyWidth: keyWidth, spacing: spacing), height: savedKeyHeight)
@@ -2120,6 +2128,17 @@ private struct UnicodeKeyboardView: View {
             }
             property("Unicode age", value: character.age.map { "Unicode \($0)" } ?? (character.category == "Cn" ? "Unassigned" : "Age pending"), identifier: "age")
             property("Block", value: character.blockName, identifier: "block")
+            // ConScript on but not preferred: the registry's own data, beside Unicode's.
+            if model.showsUCSUR, !model.prefersUCSUR, let block = UCSUR.block(containing: character.codePoint) {
+                property("ConScript block", value: block.name, identifier: "ucsur")
+                if let entry = UCSUR.entry(at: character.codePoint) {
+                    property("ConScript name", value: entry.name, identifier: "ucsurName")
+                    if let section = entry.section { property("ConScript section", value: section, identifier: "ucsurSection") }
+                    if !entry.aliases.isEmpty { property("ConScript aliases", value: entry.aliases.joined(separator: "\n"), identifier: "ucsurAliases") }
+                    property("ConScript category", value: "\(UnicodeCharacter.categoryName(entry.category)) (\(entry.category))",
+                             identifier: "ucsurCategory")
+                }
+            }
             property("Category", value: "\(character.categoryName) (\(character.category))", identifier: "category")
             property("UTF-8", value: utf8(character.text), identifier: "utf8", monospaced: true)
             property("Decimal", value: String(character.codePoint), identifier: "decimal", monospaced: true)
@@ -2542,13 +2561,14 @@ private struct KeyboardTypingFavoriteRow: View, Equatable {
     let keyWidth: CGFloat
     let columnSpacing: CGFloat
     let useUnicodeFonts: Bool
+    let showsUCSUR: Bool
     let enabled: Bool
     let actionFactory: (UUID, String, SymbolBoardKey) -> KeyboardVariantActions?
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.route == rhs.route && lhs.keyHeight == rhs.keyHeight
             && lhs.keyWidth == rhs.keyWidth && lhs.columnSpacing == rhs.columnSpacing
-            && lhs.useUnicodeFonts == rhs.useUnicodeFonts && lhs.enabled == rhs.enabled
+            && lhs.useUnicodeFonts == rhs.useUnicodeFonts && lhs.showsUCSUR == rhs.showsUCSUR && lhs.enabled == rhs.enabled
             && lhs.board == rhs.board
     }
 
@@ -2562,7 +2582,7 @@ private struct KeyboardTypingFavoriteRow: View, Equatable {
                         fontSize: 23, useUnicodeFonts: useUnicodeFonts, showsInspection: true, showsEditing: true,
                         factory: { [route = route] in actionFactory(route, board.id, key) })
                         .frame(width: keyWidth, height: keyHeight)
-                        .keyboardKeySurface(radius: 7)
+                        .keyboardKeySurface(radius: 7, fill: KeyboardPalette.conscriptFill(key.text, shows: showsUCSUR))
                 }
             }
         }

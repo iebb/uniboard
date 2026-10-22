@@ -2296,7 +2296,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["keyboard.typing.symbols"].firstMatch.waitUntilValueEquals("numbers"))
         openUnicodeBrowse()
         let abc = app.descendants(matching: .any)["keyboard.openTyping"].firstMatch
-        XCTAssertTrue(abc.waitUntilValueEquals("unicode"))
+        XCTAssertTrue(abc.waitUntilValueEquals("query"), "Unicode opens straight into search")
         abc.tap()
         assertHostTypingPanel()
         XCTAssertTrue(q.waitUntilValueEquals("letters"), "ABC must restore letter keys instead of the prior number page")
@@ -2696,7 +2696,8 @@ final class UniboardUITests: XCTestCase {
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
 
         assertKeyboardHasNoSettingsMenu()
-        assertCompactKeyboardGeometry("portrait.browse", input: input, searching: false)
+        // Unicode opens straight into search, with its keys.
+        assertCompactKeyboardGeometry("portrait.opened", input: input, searching: true)
         enterKeyboardQuery("u+1f680")
         XCTAssertEqual(input.value as? String, context)
         assertCompactKeyboardGeometry("portrait.search", input: input, searching: true)
@@ -3452,9 +3453,10 @@ final class UniboardUITests: XCTestCase {
             let query = search.value as? String
             XCTAssertTrue(browse.waitUntilValueEquals("typing"))
             browse.tap()
-            XCTAssertTrue(app.descendants(matching: .any)["keyboard.openTyping"].firstMatch.waitUntilValueEquals("unicode"))
-            XCTAssertTrue(input.waitUntilValueEquals(host ?? ""), "Opening Browse must preserve host text")
-            XCTAssertTrue(search.waitUntilValueEquals(query ?? "No query"), "Opening Browse must retain the local query")
+            // Unicode opens search with its keys, never the browse grid.
+            XCTAssertTrue(app.descendants(matching: .any)["keyboard.openTyping"].firstMatch.waitUntilValueEquals("query"))
+            XCTAssertTrue(input.waitUntilValueEquals(host ?? ""), "Opening Unicode must preserve host text")
+            XCTAssertTrue(search.waitUntilValueEquals(query ?? "No query"), "Opening Unicode must retain the local query")
         } else {
             let typing = app.descendants(matching: .any)["keyboard.openTyping"].firstMatch
             XCTAssertTrue(typing.waitForExistence(timeout: 5), "Expected the real Unicode/query/inspection panel")

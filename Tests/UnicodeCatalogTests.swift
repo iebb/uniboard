@@ -802,6 +802,17 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertEqual(rows.reduce(0) { $0 + $1.assigned.nonzeroBitCount }, 11_328)
     }
 
+    func testRangePagesStayWithinTheirPlane() throws {
+        let catalog = UnicodeEdition.latest.catalog
+        let smp = catalog.orderedCharacters(in: 0x10000...0x1FFFF, limit: 300)
+        XCTAssertEqual(smp.first?.codePoint, 0x10000)
+        XCTAssertTrue(smp.allSatisfy { (0x10000...0x1FFFF).contains($0.codePoint) })
+        XCTAssertEqual(smp.map(\.codePoint), smp.map(\.codePoint).sorted())
+        let next = catalog.orderedCharacters(in: 0x10000...0x1FFFF, offset: 300, limit: 1)
+        XCTAssertGreaterThan(try XCTUnwrap(next.first).codePoint, try XCTUnwrap(smp.last).codePoint)
+        XCTAssertEqual(catalog.orderedCharacters(in: 0xF0000...0xF0001, limit: 10).map(\.codePoint), [0xF0000, 0xF0001])
+    }
+
     func testChartRowsMarkAssignedColumnsWithoutCreatingCharacters() throws {
         let directory = try fixture(records: [0, 0x41, 0x1F680], ranges: [(0xAC00, 0xAC05, 1)])
         let fixture = UnicodeCatalog(resourceURL: directory)

@@ -10,7 +10,9 @@ struct UniboardApp: App {
         if ProcessInfo.processInfo.arguments.contains("--uitesting") {
             CharacterStore.shared.reset()
             UserDefaults.standard.removeObject(forKey: "scratchpad")
-            UserDefaults.standard.removeObject(forKey: "exploreGridDensity")
+            for key in ["exploreGridDensity", "explorePlane", "exploreShowsPrivateUse"] {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
             CatalogPreferences.shared.reset(preservingEdition: true)
         }
     }

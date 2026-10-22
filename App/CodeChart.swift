@@ -1,6 +1,47 @@
 import SwiftUI
 import UIKit
 
+/// Which code points Explore shows: one plane, or all of them. The two
+/// Supplementary Private Use planes hold no published characters, so they
+/// are hidden unless the viewer asks for them.
+struct ExploreScope: Equatable {
+    /// A plane number from 0 to 16, or nil for every plane.
+    var plane: Int?
+    var showsPrivateUse: Bool
+
+    static let privateUsePlanes: Set<Int> = [15, 16]
+
+    static func name(of plane: Int) -> String {
+        switch plane {
+        case 0: return "Basic Multilingual Plane"
+        case 1: return "Supplementary Multilingual Plane"
+        case 2: return "Supplementary Ideographic Plane"
+        case 3: return "Tertiary Ideographic Plane"
+        case 14: return "Supplementary Special-purpose Plane"
+        case 15: return "Supplementary Private Use Area-A"
+        case 16: return "Supplementary Private Use Area-B"
+        default: return "Plane \(plane)"
+        }
+    }
+
+    /// Planes with at least one block, offered in the plane menu.
+    static func planes(in catalog: UnicodeCatalog, showsPrivateUse: Bool) -> [Int] {
+        Array(Set(catalog.blocks.map { Int($0.start >> 16) }))
+            .filter { showsPrivateUse || !privateUsePlanes.contains($0) }
+            .sorted()
+    }
+
+    /// The code points in view, as one contiguous range.
+    var range: ClosedRange<UInt32> {
+        if let plane { return UInt32(plane) << 16...(UInt32(plane) << 16 | 0xFFFF) }
+        return 0...(showsPrivateUse ? 0x10FFFF : 0xEFFFF)
+    }
+
+    func includes(_ block: UnicodeBlock) -> Bool {
+        range.contains(block.start)
+    }
+}
+
 /// The blocks of a chart, each as rows of `columns` code points. Built from
 /// assigned spans; characters are created only as rows are shown.
 struct CodeChartBlock: Identifiable {
@@ -9,8 +50,9 @@ struct CodeChartBlock: Identifiable {
     var id: UInt32 { block.start }
 
     /// With `addedOnly`, the chart holds only what this edition adds.
-    static func blocks(in catalog: UnicodeCatalog, columns: Int, addedOnly: Bool = false) -> [CodeChartBlock] {
-        catalog.blocks.compactMap { block in
+    static func blocks(in catalog: UnicodeCatalog, columns: Int, addedOnly: Bool = false,
+                       scope: ExploreScope = ExploreScope(plane: nil, showsPrivateUse: true)) -> [CodeChartBlock] {
+        catalog.blocks.filter(scope.includes).compactMap { block in
             let rows = catalog.chartRows(in: block, columns: columns, addedOnly: addedOnly)
             return rows.isEmpty ? nil : CodeChartBlock(block: block, rows: rows)
         }
@@ -35,6 +77,7 @@ struct CodeChartView: UIViewRepresentable {
     let catalog: UnicodeCatalog
     let density: GridDensity
     var addedOnly = false
+    var scope = ExploreScope(plane: nil, showsPrivateUse: true)
     let controller: CodeChartController
     /// Content shown above the chart, scrolling with it.
     var leading: AnyView? = nil
@@ -73,9 +116,9 @@ struct CodeChartView: UIViewRepresentable {
         let previous = coordinator.parent
         coordinator.parent = self
         controller.coordinator = coordinator
-        if previous.map({ $0.catalog !== catalog || $0.density != density || $0.addedOnly != addedOnly }) ?? true {
-            // A new density keeps the block being read; a new edition starts over.
-            coordinator.reload(keepingTopBlock: previous?.catalog === catalog)
+        if previous.map({ $0.catalog !== catalog || $0.density != density || $0.addedOnly != addedOnly || $0.scope != scope }) ?? true {
+            // A new density keeps the block being read; a new edition or plane starts over.
+            coordinator.reload(keepingTopBlock: previous?.catalog === catalog && previous?.scope == scope)
         } else {
             coordinator.refreshLeading()
         }
@@ -177,7 +220,8 @@ struct CodeChartView: UIViewRepresentable {
         func reload(keepingTopBlock: Bool) {
             guard let parent, let dataSource else { return }
             let kept = keepingTopBlock ? parent.controller.topBlock : nil
-            blocks = CodeChartBlock.blocks(in: parent.catalog, columns: parent.density.rawValue, addedOnly: parent.addedOnly)
+            blocks = CodeChartBlock.blocks(in: parent.catalog, columns: parent.density.rawValue,
+                                           addedOnly: parent.addedOnly, scope: parent.scope)
             var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
             if hasLeading {
                 snapshot.appendSections([.leading])

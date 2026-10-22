@@ -98,6 +98,9 @@ struct ExploreView: View {
     @State private var query = ""
     @State private var pages = 1
     @AppStorage("exploreGridDensity") private var density: GridDensity = .three
+    /// A plane number, or -1 for every plane.
+    @AppStorage("explorePlane") private var plane = -1
+    @AppStorage("exploreShowsPrivateUse") private var showsPrivateUse = false
     @State private var showScratchpad = false
     @State private var showNavigator = false
     @State private var openedBlock: UnicodeBlock?
@@ -111,8 +114,12 @@ struct ExploreView: View {
     private var catalog: UnicodeCatalog { preferences.catalog }
     /// 8 and 16 per row form a code chart of every block, in code-point order.
     private var usesChart: Bool { query.isEmpty && density != .three }
+    private var scope: ExploreScope {
+        let selected = plane >= 0 && (showsPrivateUse || !ExploreScope.privateUsePlanes.contains(plane)) ? plane : nil
+        return ExploreScope(plane: selected, showsPrivateUse: showsPrivateUse)
+    }
     private var displayedCharacters: [UnicodeCharacter] {
-        catalog.orderedCharacters(limit: pages * density.pageSize)
+        catalog.orderedCharacters(in: scope.range, limit: pages * density.pageSize)
     }
 
     var body: some View {
@@ -121,7 +128,11 @@ struct ExploreView: View {
             VStack(alignment: .leading, spacing: 12) {
                 SearchBar(text: $query, placeholder: "Names, blocks or U+ codes")
                 HStack {
-                    CatalogControls()
+                    if let plane = scope.plane {
+                        Text(ExploreScope.name(of: plane)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    } else {
+                        CatalogControls()
+                    }
                     Spacer()
                     NavigationLink {
                         NewInEditionView(select: select, selectEmoji: selectEmoji)
@@ -136,7 +147,7 @@ struct ExploreView: View {
             .frame(maxWidth: 780)
 
             if usesChart {
-                CodeChartView(catalog: catalog, density: density, controller: chart,
+                CodeChartView(catalog: catalog, density: density, scope: scope, controller: chart,
                               navigate: { showNavigator = true }, select: select)
             } else {
                 ScrollView {
@@ -184,8 +195,16 @@ struct ExploreView: View {
                     Picker("Characters per Row", selection: $density) {
                         ForEach(GridDensity.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
                     }
+                    Picker("Plane", selection: $plane) {
+                        Text("All Planes").tag(-1)
+                        ForEach(ExploreScope.planes(in: catalog, showsPrivateUse: showsPrivateUse), id: \.self) { number in
+                            Text("\(number) · \(ExploreScope.name(of: number))").tag(number)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Toggle("Show Supplementary Private Use", isOn: $showsPrivateUse)
                 } label: { Image(systemName: density.symbol) }
-                .accessibilityLabel("Characters per row")
+                .accessibilityLabel("View options")
                 .accessibilityValue("\(density.rawValue)")
                 .accessibilityIdentifier("exploreDensity")
             }
@@ -199,11 +218,12 @@ struct ExploreView: View {
             if let block = pendingJump { chart.jump(to: block) }
             pendingJump = nil
         }) {
-            BlockNavigator(blocks: catalog.blocks, current: usesChart ? chart.topBlock : nil) { block in
+            BlockNavigator(blocks: catalog.blocks.filter(scope.includes), current: usesChart ? chart.topBlock : nil) { block in
                 if usesChart { pendingJump = block.start } else { openedBlock = block }
             }
         }
         .onChange(of: density) { _, _ in pages = 1 }
+        .onChange(of: scope) { _, _ in pages = 1 }
         .onChange(of: query) { _, value in search.update(value, catalog: catalog) }
         .onChange(of: preferences.edition) { _, _ in
             pages = 1

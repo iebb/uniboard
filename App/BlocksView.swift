@@ -59,23 +59,40 @@ struct BlocksView: View {
 }
 
 struct BlockDetailView: View {
-    let block: UnicodeBlock
     var select: (UnicodeCharacter) -> Void
+    /// The block on show; the navigator at the top switches it.
+    @State private var block: UnicodeBlock
     @State private var characters: [UnicodeCharacter] = []
     @State private var hasMore = true
+    @State private var showNavigator = false
     @EnvironmentObject private var preferences: CatalogPreferences
+
+    init(block: UnicodeBlock, select: @escaping (UnicodeCharacter) -> Void) {
+        _block = State(initialValue: block)
+        self.select = select
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text(block.rangeLabel).font(.subheadline.monospaced()).foregroundStyle(.secondary)
+                Button { showNavigator = true } label: {
+                    HStack(spacing: 6) {
+                        Text(block.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
+                        Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.semibold)).foregroundStyle(.tint)
+                        Spacer(minLength: 8)
+                        Text(block.rangeLabel).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(block.name), \(block.rangeLabel)")
+                .accessibilityHint("Jump to another block")
+                .accessibilityIdentifier("blockNavigator")
                 CatalogControls()
                 CharacterGrid(characters: characters, onReachEnd: { if hasMore { loadMore() } }, select: select)
                 if characters.isEmpty && !hasMore {
                     EmptyCollection(symbol: "square.dashed", title: "No Assigned Characters", message: block.name.contains("Surrogate") ? "Surrogate code points encode other characters and cannot be inserted on their own." : "This block has no assigned characters in the selected Unicode edition.")
                 }
-                Text("Some characters may need a font that supports their script. Combining marks are previewed on a dotted circle; only the mark is copied.")
-                    .font(.footnote).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16).padding(.vertical, 8)
             .frame(maxWidth: 780).frame(maxWidth: .infinity)
@@ -85,6 +102,12 @@ struct BlockDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { if characters.isEmpty && hasMore { loadMore() } }
         .onChange(of: preferences.edition) { _, _ in reload() }
+        .sheet(isPresented: $showNavigator) {
+            BlockNavigator(blocks: preferences.catalog.blocks, current: block.start) { chosen in
+                block = chosen
+                reload()
+            }
+        }
     }
 
     private func loadMore() {

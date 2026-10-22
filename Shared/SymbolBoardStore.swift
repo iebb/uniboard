@@ -247,6 +247,48 @@ final class SymbolBoardStore: ObservableObject {
         next[board].keys.swapAt(index, target)
         return commit(next)
     }
+    /// A page file another app install can import: each custom page's name,
+    /// keys, variants and rows. Favorites and the built-in Symbols page stay out.
+    private struct PageFile: Codable {
+        struct Page: Codable {
+            let name: String
+            let keys: [Key]
+            var layout: String?
+        }
+        struct Key: Codable {
+            let text: String
+            let variants: [String]
+        }
+        let schemaVersion: Int
+        let pages: [Page]
+    }
+
+    var customPages: [SymbolBoard] { boards.filter { $0.id != Self.stockID && $0.id != Self.favoritesID } }
+
+    func exportedPages() -> Data? {
+        let file = PageFile(schemaVersion: 1, pages: customPages.map { board in
+            PageFile.Page(name: board.name, keys: board.keys.map { PageFile.Key(text: $0.text, variants: $0.variants) },
+                          layout: board.layout)
+        })
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try? encoder.encode(file)
+    }
+
+    /// Adds a file's pages as new pages, returning how many. nil when the file
+    /// is not a page file, is invalid, or the pages would not fit.
+    @discardableResult func importPages(_ data: Data) -> Int? {
+        guard data.count <= Self.maximumPayloadBytes, let file = try? JSONDecoder().decode(PageFile.self, from: data),
+              file.schemaVersion == 1, !file.pages.isEmpty, boards.count + file.pages.count <= Self.maximumBoards else { return nil }
+        let imported = file.pages.map { page in
+            SymbolBoard(id: UUID().uuidString.lowercased(), name: page.name, keys: page.keys.map {
+                SymbolBoardKey(id: UUID().uuidString.lowercased(), text: $0.text, variants: $0.variants)
+            }, layout: page.layout)
+        }
+        // Committing validates every name, key, variant and row.
+        return commit(boards + imported) ? imported.count : nil
+    }
+
     /// Saves a page's rows, nil for rows of ten, and reorders its keys when a
     /// key moved to another slot, as one change.
     @discardableResult func setLayout(boardID: String, layout: SymbolPageLayout?, keyMove: SymbolPageLayout.KeyMove? = nil) -> Bool {

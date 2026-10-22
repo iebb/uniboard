@@ -81,8 +81,8 @@ struct CodeChartView: UIViewRepresentable {
     let controller: CodeChartController
     /// Content shown above the chart, scrolling with it.
     var leading: AnyView? = nil
-    /// Opens the block navigator from a header; nil for a static header.
-    var navigate: (() -> Void)? = nil
+    /// Opens a block from its header; nil for a static header.
+    var navigate: ((UnicodeBlock) -> Void)? = nil
     let select: (UnicodeCharacter) -> Void
     @EnvironmentObject private var store: CharacterStore
     @EnvironmentObject private var preferences: CatalogPreferences
@@ -283,15 +283,15 @@ struct CodeChartHeader: View {
     let block: UnicodeBlock
     let density: GridDensity
     let side: CGFloat
-    let navigate: (() -> Void)?
+    let navigate: ((UnicodeBlock) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let navigate {
-                Button(action: navigate) { title(chevron: true) }
+                Button { navigate(block) } label: { title(chevron: true) }
                     .buttonStyle(.plain)
                     .accessibilityLabel("\(block.name), \(block.rangeLabel)")
-                    .accessibilityHint("Jump to another block")
+                    .accessibilityHint("Open this block")
                     .accessibilityIdentifier("chartBlockNavigator")
             } else {
                 title(chevron: false)
@@ -316,7 +316,7 @@ struct CodeChartHeader: View {
         HStack(spacing: 6) {
             Text(block.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
             if chevron {
-                Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.semibold)).foregroundStyle(.tint)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tint)
             }
             Spacer(minLength: 8)
             Text(block.rangeLabel).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)

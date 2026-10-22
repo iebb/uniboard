@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The keyboard's pages, configured here and shown there in this order:
 /// Favorites, the Symbols page and any custom pages.
@@ -9,6 +10,8 @@ struct PagesView: View {
     @State private var naming = false
     @State private var newName = ""
     @State private var failed = false
+    @State private var exporting = false
+    @State private var importing = false
 
     var body: some View {
         List {
@@ -33,7 +36,7 @@ struct PagesView: View {
                 }
             }
             if failed {
-                Text("This change could not be saved. Check the page name and storage limits.")
+                Text("This change could not be saved. Check the page file, name and storage limits.")
                     .foregroundStyle(.red).accessibilityIdentifier("pages.error")
             }
             if let issue = boards.loadIssue {
@@ -43,6 +46,15 @@ struct PagesView: View {
         .navigationTitle("Pages")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { EditButton() }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button { exporting = true } label: { Label("Export Pages", systemImage: "square.and.arrow.up") }
+                        .disabled(boards.customPages.isEmpty)
+                    Button { importing = true } label: { Label("Import Pages", systemImage: "square.and.arrow.down") }
+                        .disabled(!boards.canEdit)
+                } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel("More").accessibilityIdentifier("pages.more")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { newName = ""; naming = true } label: { Image(systemName: "plus") }
                     .accessibilityLabel("New page").accessibilityIdentifier("pages.new")
@@ -55,11 +67,30 @@ struct PagesView: View {
             Button("Create") { failed = boards.createBoard(named: newName) == nil }
         }
         .onAppear { boards.refreshPages() }
+        .fileExporter(isPresented: $exporting, document: boards.exportedPages().map(PagesDocument.init),
+                      contentType: .json, defaultFilename: "Uniboard Pages") { result in
+            if case .failure = result { failed = true }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+            guard case .success(let url) = result else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            failed = (try? Data(contentsOf: url)).flatMap(boards.importPages) == nil
+        }
     }
 
     private static func removable(_ id: String) -> Bool {
         id != SymbolBoardStore.stockID && id != SymbolBoardStore.favoritesID
     }
+}
+
+/// A page file for the share sheet and Files.
+private struct PagesDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    let data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
 
 private struct PageRow: View {
@@ -140,9 +171,10 @@ struct PageEditorView: View {
             ToolbarItem(placement: .bottomBar) { EditButton() }
         }
         .alert("Add Text", isPresented: $typing) {
-            TextField("Character or sequence", text: $typed).accessibilityIdentifier("page.addText.field")
+            TextField("Characters", text: $typed).accessibilityIdentifier("page.addText.field")
             Button("Cancel", role: .cancel) {}
-            Button("Add") { failed = boards.add(text: typed, to: boardID) == nil }
+            // Each character becomes a key of its own.
+            Button("Add") { failed = !singleCharacters(typed).allSatisfy { boards.add(text: $0, to: boardID) != nil } }
         }
         .alert("Rename Page", isPresented: $renaming) {
             TextField("Name", text: $name)
@@ -223,19 +255,24 @@ struct KeyVariantsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .bottomBar) { EditButton() } }
         .alert("Add Variant", isPresented: $typing) {
-            TextField("Character or sequence", text: $typed)
+            TextField("Characters", text: $typed)
             Button("Cancel", role: .cancel) {}
-            Button("Add") { add(typed) }
+            Button("Add") { add(singleCharacters(typed)) }
         }
-        .sheet(isPresented: $picking) { KeyboardKeyUnicodePicker { add($0) } }
+        .sheet(isPresented: $picking) { KeyboardKeyUnicodePicker { add([$0]) } }
     }
 
-    private func add(_ text: String) {
-        guard let key else { return }
-        failed = !boards.setVariants(boardID: boardID, keyID: keyID, variants: key.variants + [text])
+    private func add(_ texts: [String]) {
+        guard let key, !texts.isEmpty else { return }
+        failed = !boards.setVariants(boardID: boardID, keyID: keyID, variants: key.variants + texts)
     }
 }
 
+
+/// Typed text as separate characters, without line breaks.
+func singleCharacters(_ text: String) -> [String] {
+    text.filter { !$0.isNewline }.map(String.init)
+}
 
 /// Spaces, controls and lone combining marks need a visible stand-in.
 func symbolKeyPreview(_ text: String) -> String {

@@ -121,6 +121,40 @@ final class SymbolBoardStoreTests: XCTestCase {
         }
     }
 
+    func testCustomPagesExportAndImportAsNewPages() throws {
+        try withDefaults { source in
+            try withDefaults { target in
+                let from = SymbolBoardStore(defaults: source, pages: try sharedPages().settings, configuresPages: true)
+                let id = try XCTUnwrap(from.createBoard(named: "Math"))
+                for text in ["∑", "∞"] { XCTAssertNotNil(from.add(text: text, to: id)) }
+                let sum = try XCTUnwrap(from.boards.last?.keys.first?.id)
+                XCTAssertTrue(from.setVariants(boardID: id, keyID: sum, variants: ["∏"]))
+                XCTAssertTrue(from.setLayout(boardID: id, layout: SymbolPageLayout("hk/k")))
+                XCTAssertNotNil(from.add(text: "★", to: SymbolBoardStore.favoritesID))
+                let file = try XCTUnwrap(from.exportedPages())
+                let to = SymbolBoardStore(defaults: target, pages: try sharedPages().settings, configuresPages: true)
+                XCTAssertEqual(to.importPages(file), 1)
+                let page = try XCTUnwrap(to.customPages.first)
+                XCTAssertEqual(page.name, "Math")
+                XCTAssertNotEqual(page.id, id, "Imported pages get new identities")
+                XCTAssertEqual(page.keys.map(\.text), ["∑", "∞"])
+                XCTAssertEqual(page.keys.first?.variants, ["∏"])
+                XCTAssertEqual(page.layout, "hk/k")
+                XCTAssertTrue(to.favoriteTexts.isEmpty, "Favorites are not part of a page file")
+                XCTAssertEqual(to.importPages(file), 1, "Importing again adds another copy")
+                for bad in [Data("not json".utf8), Data(#"{"schemaVersion":2,"pages":[]}"#.utf8),
+                            Data(#"{"schemaVersion":1,"pages":[]}"#.utf8),
+                            Data(#"{"schemaVersion":1,"pages":[{"name":"","keys":[]}]}"#.utf8),
+                            Data(#"{"schemaVersion":1,"pages":[{"name":"Rows","keys":[],"layout":"x"}]}"#.utf8)] {
+                    XCTAssertNil(to.importPages(bad))
+                }
+                let many = Data(("{\"schemaVersion\":1,\"pages\":[" + Array(repeating: #"{"name":"P","keys":[]}"#, count: SymbolBoardStore.maximumBoards).joined(separator: ",") + "]}").utf8)
+                XCTAssertNil(to.importPages(many), "Pages that would not fit are refused")
+                XCTAssertEqual(to.customPages.count, 2)
+            }
+        }
+    }
+
     func testPagesMadeInsideAnEarlierKeyboardAreNotCarriedOver() throws {
         let pages = try sharedPages().settings
         try withDefaults { defaults in

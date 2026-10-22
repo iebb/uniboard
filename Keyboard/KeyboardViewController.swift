@@ -291,7 +291,7 @@ final class KeyboardViewController: UIInputViewController {
             compactVertical: traitCollection.verticalSizeClass == .compact,
             showsSymbolBar: model.showsSymbolBar,
             showsNumberRow: model.showsNumberRow || (landscapePad && model.padLayout == .ansiNumbers),
-            searching: model.isSearching)
+            searching: model.isSearching, browsing: model.showsUnicode && !model.isSearching)
         if model.isCompactLayout != metrics.isCompactLayout { model.isCompactLayout = metrics.isCompactLayout }
         if model.isPadLayout != pad { model.isPadLayout = pad }
         let typingHeight = metrics.typingKeyHeight
@@ -452,11 +452,6 @@ final class KeyboardViewController: UIInputViewController {
             guard let self, current() else { return false }
             self.doubleSpaceState.reset(); self.expectedHostEdit = nil
             return self.model.toggleFavorites()
-        }, hold: { [weak self] in
-            guard let self, current() else { return false }
-            self.doubleSpaceState.reset(); self.expectedHostEdit = nil
-            self.model.openSymbolBoardManager()
-            return true
         })
     }
 
@@ -969,12 +964,6 @@ private final class KeyboardModel: ObservableObject {
         symbolBoardActionError = nil
         return true
     }
-    /// Pages are configured in the app; the keyboard lists them to open one.
-    func openSymbolBoardManager() {
-        symbolBoardActionError = nil
-        openFavorites()
-        symbolBoardManagerPresented = true
-    }
     /// Save in the keyboard's details adds to Favorites, or removes from it.
     @discardableResult
     func toggleFavorite(_ text: String) -> Bool {
@@ -1441,21 +1430,6 @@ private struct UnicodeKeyboardView: View {
             .padding(.bottom, 6)
             .allowsHitTesting(!model.hasSymbolBoardOverlay)
             .accessibilityHidden(model.hasSymbolBoardOverlay)
-            .overlay {
-                Group {
-                    if model.symbolBoardManagerPresented {
-                        SymbolPageListPanel(store: symbolBoards,
-                            guardFactory: { [mode = model.inputModeID] in boardConfigurationGuard(mode) },
-                            open: { id in
-                                model.symbolBoardManagerPresented = false
-                                _ = model.selectSymbolPage(.board(id))
-                            },
-                            close: { model.symbolBoardManagerPresented = false })
-                            .padding(8).background(KeyboardPalette.background)
-                            .id(model.inputModeID)
-                    }
-                }
-            }
 
         }
         .accessibilityElement(children: .contain)
@@ -1668,11 +1642,12 @@ private struct UnicodeKeyboardView: View {
         } else {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 5) {
-                    ForEach(model.section == .emojis ? model.emojiResults.map(KeyboardItem.emoji) : model.results.map(KeyboardItem.character), id: \.keyIdentifier) { item in
+                    ForEach(model.section == .emojis ? model.emojiResults.map(KeyboardItem.emoji) : searchItems(model.results), id: \.keyIdentifier) { item in
                         InspectableCharacterKey(item: item, favorite: isFavorite(item), compact: true,
-                            useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.isSearching,
+                            useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.isSearching, showsName: true,
                             actionFactory: { [mode = model.inputModeID] in keyActions(mode, item) })
                             .frame(width: 58, height: model.typingKeyHeight)
+                            .keyboardKeySurface(radius: 7)
                     }
                 }
             }
@@ -1714,7 +1689,34 @@ private struct UnicodeKeyboardView: View {
             else { emojiGrid(model.emojiResults) }
         } else if model.results.isEmpty {
             emptyState(icon: "magnifyingglass", title: "No characters found", detail: "Try a shorter name or a code point such as U+2192.")
-        } else { characterGrid(model.results) }
+        } else {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 6) {
+                    ForEach(searchItems(model.results), id: \.keyIdentifier) { item in
+                        InspectableCharacterKey(item: item, favorite: isFavorite(item), compact: model.isCompactLayout,
+                            useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.showsUnicode, showsName: true,
+                            actionFactory: { [mode = model.inputModeID] in keyActions(mode, item) })
+                            .frame(height: keyHeight)
+                            .keyboardKeySurface(radius: 7)
+                    }
+                }.padding(.bottom, 2)
+            }
+            .scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
+        }
+    }
+
+    /// A searched character with both a text and an emoji form appears twice,
+    /// as its exact text (VS15) and emoji (VS16) sequences, so either can be picked.
+    private func searchItems(_ characters: [UnicodeCharacter]) -> [KeyboardItem] {
+        characters.flatMap { character -> [KeyboardItem] in
+            guard character.hasPresentationForms else { return [.character(character)] }
+            return [0xFE0E, 0xFE0F].map { selector in
+                .emoji(UnicodeEmojiEntry(id: String(format: "%04X-%04X", character.codePoint, selector),
+                    codePoints: [character.codePoint, UInt32(selector)], name: character.name,
+                    emojiVersion: character.age ?? "", unicodeVersion: character.age ?? "",
+                    group: character.blockName, subgroup: character.blockName))
+            }
+        }
     }
 
     @ViewBuilder private var blockContent: some View {
@@ -1798,10 +1800,21 @@ private struct UnicodeKeyboardView: View {
                     .onChange(of: selectedSymbolPage) { _, page in proxy.scrollTo(page, anchor: .center) }
                     .onAppear { proxy.scrollTo(selectedSymbolPage, anchor: .center) }
                 }
-                Button { model.openSymbolBoardManager() } label: {
+                // Pages are set up in the app; the keyboard only opens them.
+                Menu {
+                    ForEach(symbolBoards.boards) { board in
+                        Button { _ = model.selectSymbolPage(.board(board.id)) } label: {
+                            if selectedSymbolPage == .board(board.id) { Label(board.name, systemImage: "checkmark") } else { Text(board.name) }
+                        }
+                        .accessibilityIdentifier("keyboard.boards.page.\(board.id)")
+                    }
+                    Button { _ = model.selectSymbolPage(.recent) } label: {
+                        if selectedSymbolPage == .recent { Label("Recent", systemImage: "checkmark") } else { Text("Recent") }
+                    }
+                    .accessibilityIdentifier("keyboard.boards.page.recent")
+                } label: {
                     Image(systemName: "list.bullet").frame(width: 30, height: 28)
                 }
-                .buttonStyle(KeyboardPressStyle())
                 .accessibilityLabel("All pages").accessibilityIdentifier("keyboard.boards.open")
             }
             if let issue = symbolBoards.loadIssue {
@@ -1919,8 +1932,9 @@ private struct UnicodeKeyboardView: View {
         return LazyVGrid(columns: columns, spacing: 6) {
             ForEach(characters) { character in
                 InspectableCharacterKey(item: .character(character), favorite: store.isFavorite(character.codePoint), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.showsUnicode,
-                    actionFactory: { [mode = model.inputModeID] in keyActions(mode, .character(character)) })
+                    showsName: true, actionFactory: { [mode = model.inputModeID] in keyActions(mode, .character(character)) })
                     .frame(height: keyHeight)
+                    .keyboardKeySurface(radius: 7)
                     .onAppear { if character.id == characters.last?.id { pagination?() } }
             }
         }
@@ -1929,8 +1943,9 @@ private struct UnicodeKeyboardView: View {
         return LazyVGrid(columns: columns, spacing: 6) {
             ForEach(emojis) { emoji in
                 InspectableCharacterKey(item: .emoji(emoji), favorite: store.isFavoriteEmoji(emoji.id), compact: model.isCompactLayout, useUnicodeFonts: model.useUnicodeFonts, route: model.inputModeID, enabled: model.showsUnicode,
-                    actionFactory: { [mode = model.inputModeID] in keyActions(mode, .emoji(emoji)) })
+                    showsName: true, actionFactory: { [mode = model.inputModeID] in keyActions(mode, .emoji(emoji)) })
                     .frame(height: keyHeight)
+                    .keyboardKeySurface(radius: 7)
                     .onAppear { if emoji.id == emojis.last?.id { pagination?() } }
             }
         }
@@ -2206,7 +2221,7 @@ private struct UnicodeKeyboardView: View {
                 value: model.isShowingSymbolPages ? "favorites" : model.modeValue,
                 symbol: model.isShowingSymbolPages ? "arrow.left" : "star", route: model.inputModeID,
                 enabled: true, fontSize: 20,
-                contentPosition: usesPadKeyPositions ? .bottomLeft : .center, holdLabel: "Manage pages",
+                contentPosition: usesPadKeyPositions ? .bottomLeft : .center,
                 factory: { [mode = model.inputModeID] in favoritesActions(mode) })
                 .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
             if model.layouts.count > 1 && !model.isSearching {
@@ -2557,13 +2572,15 @@ private struct InspectableCharacterKey: UIViewRepresentable {
     let route: UUID
     let enabled: Bool
     var glyphOnly = false
+    /// A result key: the page keys' rounded surface, with the name in small text below the glyph.
+    var showsName = false
     var identifier: String? = nil
     let actionFactory: KeyboardInspectableInteraction.ActionFactory
 
     func makeUIView(context: Context) -> InspectableKeyButton { InspectableKeyButton() }
     func updateUIView(_ uiView: InspectableKeyButton, context: Context) {
-        uiView.configure(item: item, favorite: favorite, compact: compact, useUnicodeFonts: useUnicodeFonts, glyphOnly: glyphOnly,
-            route: route, enabled: enabled, actionFactory: actionFactory)
+        uiView.configure(item: item, favorite: favorite, compact: compact, useUnicodeFonts: useUnicodeFonts, glyphOnly: glyphOnly || showsName,
+            showsName: showsName, route: route, enabled: enabled, actionFactory: actionFactory)
         uiView.accessibilityIdentifier = identifier ?? item.keyIdentifier
     }
 }
@@ -2571,6 +2588,8 @@ private struct InspectableCharacterKey: UIViewRepresentable {
 private final class InspectableKeyButton: UIControl {
     private let glyph = UILabel()
     private let code = UILabel()
+    private let name = UILabel()
+    private var stackCenter: NSLayoutConstraint!
     private let star = UIImageView(image: UIImage(systemName: "star.fill"))
     private var glyphHeight: NSLayoutConstraint!
     private var codeHeight: NSLayoutConstraint!
@@ -2598,6 +2617,14 @@ private final class InspectableKeyButton: UIControl {
         code.minimumScaleFactor = 0.7
         code.textColor = .secondaryLabel
         code.lineBreakMode = .byTruncatingTail
+        // The name overlays the bottom edge, so the glyph keeps its place.
+        name.font = .systemFont(ofSize: 7, weight: .medium)
+        name.textColor = .secondaryLabel
+        name.textAlignment = .center
+        name.lineBreakMode = .byTruncatingTail
+        name.isUserInteractionEnabled = false
+        name.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(name)
         let stack = UIStackView(arrangedSubviews: [glyph, code])
         // Touches must reach this control rather than the decorative label stack.
         stack.isUserInteractionEnabled = false
@@ -2611,12 +2638,16 @@ private final class InspectableKeyButton: UIControl {
         star.translatesAutoresizingMaskIntoConstraints = false
         star.tintColor = KeyboardPalette.accentUI
         glyphHeight = glyph.heightAnchor.constraint(equalToConstant: 34)
+        stackCenter = stack.centerYAnchor.constraint(equalTo: centerYAnchor)
         codeHeight = code.heightAnchor.constraint(equalToConstant: 11)
         addSubview(star)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor), glyphHeight,
+            stackCenter, glyphHeight,
+            name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 3),
+            name.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3),
+            name.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
             codeHeight,
             star.widthAnchor.constraint(equalToConstant: 9),
             star.heightAnchor.constraint(equalToConstant: 9),
@@ -2644,7 +2675,7 @@ private final class InspectableKeyButton: UIControl {
     override var isHighlighted: Bool {
         didSet { pressFeedback.setPressed(isHighlighted) }
     }
-    func configure(item: KeyboardItem, favorite: Bool, compact: Bool, useUnicodeFonts: Bool, glyphOnly: Bool,
+    func configure(item: KeyboardItem, favorite: Bool, compact: Bool, useUnicodeFonts: Bool, glyphOnly: Bool, showsName: Bool = false,
                    route: UUID, enabled: Bool, actionFactory: @escaping KeyboardInspectableInteraction.ActionFactory) {
         if usesExternalKeySurface != glyphOnly {
             usesExternalKeySurface = glyphOnly
@@ -2673,6 +2704,9 @@ private final class InspectableKeyButton: UIControl {
         backgroundColor = glyphOnly ? (missing ? UIColor.systemRed.withAlphaComponent(0.18) : .clear)
             : missing ? KeyboardPalette.missingGlyphUI : KeyboardPalette.keyUI
         code.text = item.footer
+        name.text = showsName ? item.name : nil
+        name.isHidden = !showsName
+        stackCenter.constant = showsName ? -3 : 0
         codeHeight.isActive = !glyphOnly
         code.isHidden = glyphOnly
         star.isHidden = glyphOnly || !favorite

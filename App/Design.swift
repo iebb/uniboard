@@ -70,7 +70,7 @@ struct SectionLabel: View {
 enum GridDensity: Int, CaseIterable, Identifiable {
     case three = 3, eight = 8, sixteen = 16
     var id: Int { rawValue }
-    var title: String { "\(rawValue) per Row" }
+    var title: String { self == .three ? "Tiles" : "\(rawValue) per Row" }
     var symbol: String {
         switch self {
         case .three: return "square.grid.3x3"
@@ -122,6 +122,8 @@ struct CharacterTile: View {
     var density: GridDensity = .three
     /// A code chart labels rows and columns, so its tiles omit the code point.
     var showsCodePoint = true
+    /// Narrow tiles leave out the name.
+    var showsName = true
     /// Square side for dense rows, measured from the available width.
     var side: CGFloat = 40
     var action: () -> Void
@@ -199,17 +201,20 @@ struct CharacterTile: View {
         case .three:
             VStack(spacing: 3) {
                 glyph.frame(height: 44)
-                Text(character.name)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2).multilineTextAlignment(.center)
-                    .frame(height: 28)
+                if showsName {
+                    Text(character.name)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2).multilineTextAlignment(.center)
+                        .frame(height: 28)
+                }
                 Text(character.codePointLabel)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.6)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 106)
+            .frame(height: showsName ? 106 : 72)
             .padding(.horizontal, 4)
         case .eight:
             VStack(spacing: 1) {
@@ -239,7 +244,11 @@ struct CharacterGrid: View {
     /// Called when the last character scrolls into view, to load the next page.
     var onReachEnd: (() -> Void)? = nil
     @EnvironmentObject private var store: CharacterStore
+    /// Tiles per row, shared by every tile grid; pinch to change it.
+    @AppStorage("tileColumns") private var tileColumns = 3
+    @State private var pinch: CGFloat = 1
     var select: (UnicodeCharacter) -> Void
+    static let tileColumnRange = 2...7
 
     var body: some View {
         if let density, density != .three, width > 0 {
@@ -268,17 +277,28 @@ struct CharacterGrid: View {
                 }
             }
         } else {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96, maximum: 150), spacing: 8)], spacing: 8) {
+            let columns = min(Self.tileColumnRange.upperBound, max(Self.tileColumnRange.lowerBound, tileColumns))
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
                 ForEach(characters) { character in
-                    tile(character, density: .three, side: 0)
+                    tile(character, density: .three, side: 0, showsName: columns <= 4)
                         .onAppear { if character.id == characters.last?.id { onReachEnd?() } }
                 }
             }
+            .simultaneousGesture(MagnifyGesture()
+                .onChanged { pinch = $0.magnification }
+                .onEnded { _ in
+                    // Spreading the fingers zooms in to fewer, larger tiles.
+                    let step = pinch > 1.15 ? -1 : pinch < 0.87 ? 1 : 0
+                    tileColumns = min(Self.tileColumnRange.upperBound, max(Self.tileColumnRange.lowerBound, columns + step))
+                    pinch = 1
+                })
+            .animation(.snappy, value: columns)
         }
     }
 
-    private func tile(_ character: UnicodeCharacter, density: GridDensity, side: CGFloat) -> some View {
-        CharacterTile(character: character, saved: store.isFavorite(character.codePoint), density: density, side: side) { select(character) }
+    private func tile(_ character: UnicodeCharacter, density: GridDensity, side: CGFloat, showsName: Bool = true) -> some View {
+        CharacterTile(character: character, saved: store.isFavorite(character.codePoint), density: density,
+                      showsName: showsName, side: side) { select(character) }
     }
 }
 

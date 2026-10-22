@@ -153,7 +153,7 @@ struct ExploreView: View {
 
             if usesChart {
                 CodeChartView(catalog: catalog, density: density, scope: scope, controller: chart,
-                              navigate: { showNavigator = true }, select: select)
+                              navigate: { openedBlock = $0 }, select: select)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {

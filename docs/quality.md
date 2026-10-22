@@ -17,7 +17,7 @@ generator checks. Tests do not contact App Store Connect or send typing data.
 | Character search | Code-point syntax and bounds, 4 KiB UTF-8 limit, repeated AND terms, Unicode word boundaries, complete-word tier before substring tier, ascending defaults, preserved explicit sort, names/aliases/blocks, Suzhou/Hangzhou terminology, numeric age order, global pagination, cancellation | `UnicodeCatalogTests` |
 | Complete emoji | Exact scalar sequence and ID, VS16/ZWJ/flags/keycaps/tones, duplicate IDs/text, malformed queries, ordering before limits | `EmojiCatalogTests` |
 | Background work | Normal results, cancellation before start and during a detached scan, no stale UI results | `CatalogWorkerTests` plus UI revision guards |
-| Data generation | Four-edition atomic generation, rolling historical release slots, official historical emoji URLs, partial download/retry failure, malformed ranges/duplicates, edition identity, failed publication retaining prior artifacts | `Scripts/tests/test_generate_unicode.py` |
+| Data generation | Draft-only atomic generation labelled with the three final editions, their versions checked against the draft's ages, emoji variation sequences, partial download/retry failure, malformed ranges/duplicates, edition identity, failed publication retaining prior artifacts | `Scripts/tests/test_generate_unicode.py` |
 | Local collections | Wrong preference types, negative/fractional/overflow values, surrogates, duplicate IDs, order, 60-item recents, reset scope, sandbox separation | `CharacterStoreTests` |
 | Optional font preferences | Absent/corrupt/non-Boolean values stay off; app-only selection reaches the read-only keyboard | `LocalPreferencePolicyTests`, `UnicodeFontSupportTests` |
 | Height policy | Fixed row count, portrait/landscape/iPad, scene caps, fractional and nonfinite dimensions; search reserves full typing-height rows and a separate result strip or side pane | `KeyboardInteractionPolicyTests`, `KeyboardTypingLayoutPolicyTests` |
@@ -100,7 +100,10 @@ Each edition's `emoji-variation-sequences.txt` supplies the characters with both
 
 The Unicode edition selector exists only in the app’s Settings tab. Latest
 release 18 is the default; 16 and 17 are historical releases and 19 is an
-explicit draft choice. All four character and emoji catalogs are offline. The
+explicit draft choice. Only the draft's character and emoji catalogs are bundled;
+each final edition is the draft limited by Unicode Age and Emoji version, so a
+later character reads as unassigned and is absent from search, charts, blocks
+and What's New there. The
 keyboard reads the bounded App Group snapshot without Full Access and never
 writes it. Edition and Boolean font/collapse preferences use one bounded file;
 explicitly configured per-key gesture choices use a separate bounded file.
@@ -109,7 +112,7 @@ fall back safely. Only app Settings changes these choices. The keyboard … menu
 contains only Order; sort, recents and custom boards remain local. Explicit Favorites share a separate bounded file. An unavailable or malformed setting falls back
 to the latest release; tests must distinguish that fallback from successful
 non-default app-to-keyboard delivery. Settings labels and preference resolution
-read only bounded small manifests, not all four full catalogs.
+read only the draft's bounded manifest, never a full catalog.
 
 The app navigation includes Settings → Customize Keys, Settings →
 Try Your Keyboard and Settings → Font Licenses. Privacy declarations remain

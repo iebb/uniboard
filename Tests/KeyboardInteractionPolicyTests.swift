@@ -50,6 +50,10 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
                     let gap: CGFloat = pad && width >= 666 ? 6 : 4
                     XCTAssertEqual(result.typingKeyHeight, key, accuracy: 0.000001)
                     XCTAssertEqual(result.height, key * (bar ? 6 : 5) + gap * 3 + 18, accuracy: 0.000001)
+                    let browsing = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                        isPad: pad, compactVertical: false, showsSymbolBar: bar, browsing: true)
+                    XCTAssertEqual(browsing.height - result.height, key * 2, accuracy: 0.000001, "Browsing shows two more rows")
+                    XCTAssertEqual(browsing.typingKeyHeight, key, accuracy: 0.000001)
                 }
             }
         }

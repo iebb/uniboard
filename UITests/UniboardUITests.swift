@@ -1480,8 +1480,25 @@ final class UniboardUITests: XCTestCase {
         }
     }
 
+    func testSystemKeyboardSearchOffersTextAndEmojiFormsSeparately() throws {
+        try requirePhoneKeyboardIntegration()
+        configureTopBar(symbols: true, search: false)
+        let input = openSystemKeyboardHost(unicodeBrowse: true)
+        defer { restoreEnglishKeyboard() }
+        enterKeyboardQuery("snowman")
+        let text = app.buttons["keyboard.emoji.2603-FE0E"].firstMatch, emoji = app.buttons["keyboard.emoji.2603-FE0F"].firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 10), "The text form is its own result")
+        XCTAssertTrue(emoji.exists, "So is the emoji form")
+        attachScreenshot("A searched character with both forms appears twice")
+        emoji.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("☃\u{FE0F}"))
+        text.tap()
+        XCTAssertEqual((input.value as? String)?.unicodeScalars.map(\.value), [0x2603, 0xFE0F, 0x2603, 0xFE0E])
+    }
+
     func testSystemKeyboardPageInsertsTextAndEmojiFormsExactly() throws {
         try requirePhoneKeyboardIntegration()
+        configureTopBar(symbols: true, search: false)
         deleteAppPages(named: "qaforms")
         addTeardownBlock { @MainActor [self] in restoreEnglishKeyboard(); deleteAppPages(named: "qaforms") }
         _ = createAppPage("qaforms")
@@ -1545,6 +1562,7 @@ final class UniboardUITests: XCTestCase {
 
     func testSystemKeyboardListsAppConfiguredPagesAndKeepsTheStarPage() throws {
         try requirePhoneKeyboardIntegration()
+        configureTopBar(symbols: true, search: false)
         deleteAppPages(named: "qaone")
         let page = createAppPage("qaone")
         addAppPageKey(query: "infinity", codepoint: "U+221E")
@@ -1566,16 +1584,14 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(infinity.waitForExistence(timeout: 5))
         chooseHeldKeyboardOption(infinity, optionCount: 2, selectedIndex: 1)
         XCTAssertTrue(input.waitUntilValueEquals(context + "≈"), "Holding a page key offers its app-configured variants")
-        starKey.press(forDuration: 1)
-        let list = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
-        XCTAssertTrue(list.waitForExistence(timeout: 5))
-        for id in ["stock-symbols", "migrated-favorites"] {
-            XCTAssertTrue(app.buttons["keyboard.boards.page.\(id)"].firstMatch.exists, id)
+        // The page menu drops down over the keyboard instead of a separate screen.
+        app.buttons["keyboard.boards.open"].firstMatch.tap()
+        let favorites = app.buttons.matching(NSPredicate(format: "label == %@", "Favorites")).element(boundBy: 1)
+        for name in ["Symbols", "Favorites", "Recent"] {
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == %@", name)).count >= 2, "The menu lists \(name)")
         }
-        XCTAssertFalse(app.buttons["keyboard.boards.create"].firstMatch.exists, "The keyboard only lists pages")
-        attachScreenshot("The keyboard's page list opens pages configured in the app")
-        app.buttons["keyboard.boards.page.migrated-favorites"].firstMatch.tap()
-        XCTAssertTrue(list.waitUntilAbsent())
+        attachScreenshot("The keyboard's page menu opens pages configured in the app")
+        favorites.tap()
         XCTAssertTrue(app.buttons["Favorites"].firstMatch.waitUntilSelected())
         starKey.tap()
         assertHostTypingPanel()
@@ -1868,20 +1884,11 @@ final class UniboardUITests: XCTestCase {
     private func selectSymbolBoard(_ boardID: String, input: XCUIElement, context: String, returnToTyping: Bool = false) {
         let footer = app.buttons["keyboard.openFavorites"].firstMatch
         XCTAssertTrue(footer.waitForExistence(timeout: 5))
-        footer.press(forDuration: 1)
-        let list = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
-        XCTAssertTrue(list.waitForExistence(timeout: 5))
-        let choice = app.buttons["keyboard.boards.page.\(boardID)"].firstMatch
-        let scroll = app.scrollViews["keyboard.boards.scroll"].firstMatch
-        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
-        for _ in 0..<8 {
-            if choice.exists, usableHeightFrame(choice.frame), scroll.frame.intersection(app.frame).contains(choice.frame), choice.isHittable { break }
-            scroll.swipeUp()
-        }
-        XCTAssertTrue(choice.exists && usableHeightFrame(choice.frame) && scroll.frame.intersection(app.frame).contains(choice.frame))
-        XCTAssertTrue(choice.isHittable)
-        choice.tap()
-        XCTAssertTrue(list.waitUntilAbsent())
+        if footer.value as? String != "favorites" { footer.tap() }
+        let tab = app.buttons["keyboard.pages.tab.\(boardID)"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 5))
+        tab.tap()
+        XCTAssertTrue(tab.waitUntilSelected())
         XCTAssertEqual(input.value as? String, context, "Opening a page must not type into the host")
         if returnToTyping {
             XCTAssertTrue(footer.waitUntilValueEquals("favorites"))

@@ -1,30 +1,28 @@
 Uniboard 1.3 beta.
 
 LAYOUTS
-App Settings > Layouts adds base keyboards from a searchable list grouped as Latin, Greek and Cyrillic, with your device's languages suggested first. Reorder by dragging and swipe to remove; one layout always stays. Try English, Greek and Russian together.
+Settings > Layouts adds base keyboards (Latin, Greek, Cyrillic), with your device's languages first. Drag to reorder, swipe to remove; one always stays. With two or more, the space bar names the current one: hold it, slide and lift to switch. A tap still types a space. Check Shift and Caps Lock across a switch, Turkish i/İ, Greek ς and Ά, 12-key Ukrainian and Hungarian rows, and that the keyboard remembers the layout with Full Access OFF.
 
-With two or more layouts the space bar shows the current one. Hold Space, slide to a layout and lift to switch; lifting on the current one changes nothing and types nothing. A tap still types a space, and double Space still adds a period. Check Shift and Caps Lock across a switch, Turkish i/İ and ı/I, Greek ς and accented capitals such as Ά, and that reopening the keyboard keeps the last layout, including with Full Access OFF. Removing the current layout in the app falls back to the first.
-
-Check rows on iPhone and iPad in both orientations, especially 12-key Ukrainian and Hungarian rows. iPad's ANSI presets apply to English only; other layouts use the iPad arrangement. Unicode search keys stay English. Spell check and dictation in the host should follow the layout.
-
-GESTURES PER LAYOUT
-Hold gives the layout's accents first: French é è ê ë on e, Czech ě, Russian ё on е, Ukrainian ґ on г, Greek ά ί ϊ. Latin layouts then add the familiar English accents. Up gives superscript then subscript (Greek ᵝ ᵦ on β, Cyrillic ᵸ on н). Down gives styled forms: Latin mathematical, circled, fullwidth and small-capital letters; Greek 𝛂 𝛼 𝜶 𝝰 𝞪, plus double-struck and small capitals where they exist; Cyrillic related letters such as є э on е and й і ї ѝ on и. Forms follow the current case and never repeat across Hold, Up and Down. Once a chooser shows, the press keeps that group; slide sideways to pick.
-
-Customize Keys has a layout menu listing that layout's letters in keyboard order. A letter's choices apply in every layout with that letter; check that editor defaults match the keyboard.
+GESTURES
+Hold gives the layout's accents first (French é è ê ë, Russian ё, Greek ά). Up gives superscript then subscript; Down gives styled forms: mathematical Latin, mathematical Greek (𝛂), or related Cyrillic letters (є э for е). Groups never repeat across Hold, Up and Down. Customize Keys has a layout menu.
 
 PAGES
-The Pages tab replaces Saved. Create, rename, reorder and delete pages; open a page to add keys from Unicode search or as typed text, reorder or remove them, and give each key hold variants. Toggle which page Star opens. Arrange Keys, also in Favorites, draws the page as the keyboard does: select a key or gap to move it, start a new row, or add a half-width or full-width gap before it; drag keys too. Check the keyboard draws the same rows and gaps, and Rows of Ten resets. In the keyboard, Star opens that page and hold Star shows a plain list of pages to open; there is no editing there. Pages made inside earlier keyboards are not carried over; Favorites are kept. Check that changes reach the keyboard with Full Access OFF after reopening it.
+The Pages tab sets up pages: keys, variants and the page Star opens. Add Text adds each typed character as its own key. Arrange Keys places keys in rows with half-width and full-width gaps; check the keyboard draws the same rows. The Pages menu exports custom pages to a file and imports one as new pages. In the keyboard, the list button in the page strip drops down a menu of pages.
 
 TEXT AND EMOJI FORMS
-Characters with both presentations, such as ☃ and ⌚, show as text in charts and side by side in details, with a copy button for each. Add from Unicode lists each form separately, so a page can hold both; each key inserts its exact sequence, and holding one offers the other form.
+Characters with both presentations (☃, ⌚) show as text in charts and side by side in details, with a copy button each. The picker adds each form separately. In keyboard search they appear twice, once per form; each inserts its exact sequence, and holding a page key offers the other form.
 
-SEARCH, SAVE AND TYPING
-Save in a result's details adds to or removes from Favorites. Both Delete keys edit before the search caret and never the host. Done restores host typing and keeps the query. App Settings can turn off the number row; the 123 page and search keep digits. Shift: tap for one capital, double-tap for Caps Lock, touch Shift then slide for one capital.
+KEYBOARD UNICODE
+Result and browse keys use rounded keycaps with the character's name in small text, no U+ code. Browsing without keys makes the keyboard two rows taller; search and typing keep their height.
+
+EXPLORE
+Tiles are 2 to 7 per row: pinch to change. Tapping a block's name in the chart opens that block, with a block navigator at its top.
+
+EDITIONS AND SIZE
+Only the Unicode 19 draft is bundled. Unicode 18, 17 and 16 show the draft limited to characters and emoji of that version: check that a newer character reads as unassigned, What's New lists only that version, and newer blocks are absent. The app is much smaller.
+
+FONTS
+Preview basics (Unifont, Noto Sans Symbols 2) now download on demand in Settings > Font Downloads, like the other packs. With Extra Unicode fonts on and the pack downloaded, check U+0558 previews in app and keyboard with Full Access OFF. Test cancel, retry, remove and offline use.
 
 PRIVACY AND FAVORITES
-App Favorites reach the keyboard with Full Access OFF; keyboard saves wait locally until optional Full Access permits writing back. Test both directions, removal, relaunch and unavailable storage without data loss. Typing, queries and favorites are never sent over a network.
-
-Unicode 18 defaults; 16/17 previous, 19 DRAFT. Verify exact whole-emoji insertion, light/dark and Reduce Transparency.
-
-OPTIONAL FONT DOWNLOADS
-Download single packs or Download All. Test cancel, retry, remove/re-download and offline use. With Full Access OFF, try U+16A70 (Tangsa) after the historic pack. Files are size/SHA-256 verified; no typed content is included in requests.
+App Favorites reach the keyboard with Full Access OFF; keyboard saves wait locally until optional Full Access permits writing back. Typing, queries, pages and favorites are never sent over a network.

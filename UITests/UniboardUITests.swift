@@ -651,7 +651,7 @@ final class UniboardUITests: XCTestCase {
     func testSystemKeyboardWidePadHasStockFunctionsAndExactTypingAcrossRotation() throws {
         try requireKeyboardIntegration()
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "Wide iPad layout requires the owned iPad QA device")
-        configurePadSettings(layout: "ansiNumbers", mapping: "standard")
+        configurePadLayout("ansiNumbers")
         let input = openSystemKeyboardHost(unicodeBrowse: false)
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
         let caps = app.buttons["keyboard.typing.capsLock"].firstMatch
@@ -687,29 +687,30 @@ final class UniboardUITests: XCTestCase {
         app.buttons["keyboard.typing.key.a"].tap()
         XCTAssertTrue(input.waitUntilValueEquals("\tA"))
         flickMainKey(app.buttons["keyboard.typing.key.q"].firstMatch, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals("\tAq"))
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐"), "Down inserts a styled capital, not the other case")
         XCTAssertTrue(caps.waitUntilValueEquals("on"))
         rightShift.tap()
         XCTAssertTrue(caps.waitUntilValueEquals("off"))
         app.buttons["keyboard.typing.key.q"].tap()
         app.buttons["keyboard.typing.key.,"].tap()
         app.buttons["keyboard.typing.key.."].tap()
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,."))
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,."))
         app.buttons["keyboard.return"].tap()
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.\n"))
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,.\n"))
         app.buttons["keyboard.typing.delete"].tap()
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,."))
-        // Up-flicks insert the printed secondary glyph; ordinary taps keep
-        // their letter and down-flicks offer presentation forms.
-        flickMainKey(app.buttons["keyboard.typing.key.q"].firstMatch, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,._"))
-        flickMainKey(app.buttons["keyboard.typing.key.a"].firstMatch, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,._-"))
-        flickMainKey(app.buttons["keyboard.typing.key.."].firstMatch, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,._-?"))
-        for _ in 0..<3 { app.buttons["keyboard.typing.delete"].tap() }
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,."))
-        attachScreenshot("Stock iPad three letter rows secondary flick hints gray modifiers blue Return")
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,."))
+        // Letters carry no symbol hints: Up inserts the modifier letter in the shown case.
+        let aKey = app.buttons["keyboard.typing.key.a"].firstMatch
+        let modifierA = aKey.label == "A" ? "ᴬ" : "ᵃ"
+        flickMainKey(aKey, up: true)
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,." + modifierA))
+        let eKey = app.buttons["keyboard.typing.key.e"].firstMatch
+        let modifierE = eKey.label == "E" ? "ᴱ" : "ᵉ"
+        flickMainKey(eKey, up: true)
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,." + modifierA + modifierE))
+        for _ in 0..<2 { app.buttons["keyboard.typing.delete"].tap() }
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,."))
+        attachScreenshot("Stock iPad three letter rows without symbol hints, gray modifiers, blue Return")
         app.buttons["keyboard.typing.numbers"].tap()
         XCTAssertTrue(app.buttons["keyboard.typing.letters"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons.matching(identifier: "keyboard.return").count, 1)
@@ -729,24 +730,24 @@ final class UniboardUITests: XCTestCase {
         geometry()
         settleKeyboardOrientation(.landscapeLeft, toolbarVisible: false)
         assertLandscapePadGeometry(numberRow: true, ansi: true)
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,."))
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,."))
         let shift = app.buttons["keyboard.typing.shift"].firstMatch
         if shift.value as? String != "lowercase" { shift.tap() }
         app.buttons["keyboard.typing.key.1"].tap()
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1"))
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,.1"))
         shift.tap()
         app.buttons["keyboard.typing.key.1"].tap()
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1!"))
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,.1!"))
         shift.tap()
         app.buttons["keyboard.typing.key.["].tap()
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1!{"))
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,.1!{"))
         caps.tap()
         app.buttons["keyboard.typing.key.1"].tap()
-        XCTAssertTrue(input.waitUntilValueEquals("\tAqq,.1!{1"), "Caps Lock changes letters, not digits")
+        XCTAssertTrue(input.waitUntilValueEquals("\tA𝐐q,.1!{1"), "Caps Lock changes letters, not digits")
         caps.tap()
         app.buttons["keyboard.return"].tap()
         app.buttons["keyboard.typing.key.1"].tap()
-        let expected = "\tAqq,.1!{1\n1"
+        let expected = "\tA𝐐q,.1!{1\n1"
         XCTAssertTrue(input.waitUntilValueEquals(expected), "Sentence capitalization must not shift a digit into punctuation")
         attachScreenshot("Landscape ANSI equal keycaps with number row tinted modifiers and two right Space controls")
         app.buttons["keyboard.typing.numbers"].tap()
@@ -768,38 +769,38 @@ final class UniboardUITests: XCTestCase {
         geometry()
     }
 
-    func testSystemKeyboardPadAppPresetsAndSymbolMappingsApplyWithoutFullAccess() throws {
+    func testSystemKeyboardPadAppPresetsApplyWithoutFullAccess() throws {
         try requireKeyboardIntegration()
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "iPad settings require the owned iPad QA device")
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
-        for (layout, mapping, symbol) in [("ansi", "none", ""), ("stock", "iPad", "@"), ("ansiNumbers", "standard", "-"), ("stock", "macOS", "å")] {
+        for layout in ["ansi", "stock", "ansiNumbers"] {
             XCUIDevice.shared.orientation = .portrait
-            configurePadSettings(layout: layout, mapping: mapping)
+            configurePadLayout(layout)
             let input = openSystemKeyboardHost(unicodeBrowse: false)
             settleKeyboardOrientation(.landscapeLeft, toolbarVisible: false)
             assertLandscapePadGeometry(numberRow: layout == "ansiNumbers", ansi: layout != "stock")
             let a = app.buttons["keyboard.typing.key.a"].firstMatch
             a.tap()
-            XCTAssertTrue(input.waitUntilValueEquals("A"), "Ordinary taps stay QWERTY for every symbol mapping")
+            XCTAssertTrue(input.waitUntilValueEquals("A"), "Ordinary taps stay QWERTY for every preset")
             flickMainKey(a, up: true)
-            XCTAssertTrue(input.waitUntilValueEquals("A" + symbol))
+            XCTAssertTrue(input.waitUntilValueEquals("Aᵃ"), "Up inserts the modifier letter on every preset")
             app.buttons["keyboard.typing.numbers"].tap()
             XCTAssertEqual(app.buttons.matching(identifier: "keyboard.return").count, 1)
             XCTAssertTrue(app.buttons["keyboard.return"].firstMatch.isHittable)
             XCTAssertFalse(app.buttons["keyboard.typing.key.1"].exists)
             app.buttons["keyboard.typing.letters"].tap()
             assertLandscapePadGeometry(numberRow: layout == "ansiNumbers", ansi: layout != "stock")
-            attachScreenshot("App-only iPad preset \(layout) symbol mapping \(mapping) with Full Access off")
+            attachScreenshot("App-only iPad preset \(layout) with Full Access off")
             settleKeyboardOrientation(.portrait, toolbarVisible: false)
             restoreEnglishKeyboard()
         }
-        configurePadSettings(layout: "ansiNumbers", mapping: "standard")
+        configurePadLayout("ansiNumbers")
     }
 
     func testSystemKeyboardPadFixedTemplateKeepsNumberRowAndShiftSlideAcrossRotation() throws {
         try requireKeyboardIntegration()
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom != .pad, "Owned iPad QA fixture")
-        configurePadSettings(layout: "ansiNumbers", mapping: "standard")
+        configurePadLayout("ansiNumbers")
         let input = openSystemKeyboardHost(initialText: "Pad ", unicodeBrowse: false)
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
         for landscape in [false, true] {
@@ -907,57 +908,61 @@ final class UniboardUITests: XCTestCase {
         let iKey = app.buttons["keyboard.typing.key.i"].firstMatch
         let oKey = app.buttons["keyboard.typing.key.o"].firstMatch
         flickMainKey(iKey, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "ⁱ"), "Up inserts the modifier letter, not a symbol")
         flickMainKey(iKey, up: true, horizontal: 36)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "ⁱᵢ"), "Sliding sideways reaches the subscript")
         flickMainKey(oKey, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "ⁱᵢᵒ"))
         flickMainKey(oKey, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥ᵒ"), "A down flick inserts the superscript, not the other case")
+        XCTAssertTrue(input.waitUntilValueEquals(context + "ⁱᵢᵒ𝐨"), "Down inserts a styled form, not the other case")
         chooseHeldKeyboardOption(iKey, optionCount: 7, selectedIndex: 1, extraActions: 0)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥ᵒì"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "ⁱᵢᵒ𝐨ì"))
         let shift = app.buttons["keyboard.typing.shift"].firstMatch
         let q = app.buttons["keyboard.typing.key.q"].firstMatch
         shift.press(forDuration: 0.6, thenDragTo: q)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥ᵒìQ"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "ⁱᵢᵒ𝐨ìQ"))
         XCTAssertTrue(shift.waitUntilValueEquals("lowercase"))
         shift.press(forDuration: 0.6)
         XCTAssertTrue(shift.waitUntilValueEquals("uppercase"))
         q.tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥ᵒìQQ"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "ⁱᵢᵒ𝐨ìQQ"))
         XCTAssertTrue(shift.waitUntilValueEquals("lowercase"))
         shift.doubleTap()
         XCTAssertTrue(shift.waitUntilValueEquals("capsLock"))
         typeHostTypingKeys("qw", layout: "letters")
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ˆ¥ᵒìQQQW"))
+        XCTAssertTrue(input.waitUntilValueEquals(context + "ⁱᵢᵒ𝐨ìQQQW"))
         shift.tap()
         XCTAssertTrue(shift.waitUntilValueEquals("lowercase"))
-        attachScreenshot("Distinct letter accents, presentation forms, symbols, and system Shift gestures")
+        attachScreenshot("Distinct letter accents, modifier and styled forms, and system Shift gestures")
     }
 
-    func testSystemKeyboardWithoutNumberRowSwipesUpToDigitsAndKeepsThe123Page() throws {
+    func testSystemKeyboardWithoutNumberRowKeepsDigitsOnThe123PageAndInSearch() throws {
         try requirePhoneKeyboardIntegration()
-        resetAppKey("letter.q")
+        resetAppKey("letter.w")
         setAppNumberRow(false)
         // A failed assertion stops the test, so restore the default in teardown rather than a defer.
         addTeardownBlock { @MainActor [self] in restoreEnglishKeyboard(); setAppNumberRow(true) }
         let input = openSystemKeyboardHost(unicodeBrowse: false)
-        let q = app.buttons["keyboard.typing.key.q"].firstMatch
-        XCTAssertTrue(q.waitForExistence(timeout: 5))
+        let w = app.buttons["keyboard.typing.key.w"].firstMatch
+        XCTAssertTrue(w.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["keyboard.typing.number.1"].firstMatch.exists, "Settings hid the number row")
         attachScreenshot("Keyboard without the number row")
-        flickMainKey(q, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals("1"), "Q swipes up to 1 when the number row is hidden")
+        flickMainKey(w, up: true)
+        XCTAssertTrue(input.waitUntilValueEquals("ᵂ"), "W swipes up to its modifier letter, not a digit")
         let numbers = app.buttons["keyboard.typing.numbers"].firstMatch
         XCTAssertEqual(numbers.label, "Numbers", "Without digits on screen, the page key offers the 123 page")
         numbers.tap()
         let one = app.buttons["keyboard.typing.key.1"].firstMatch
         XCTAssertTrue(one.waitForExistence(timeout: 5), "The 123 page keeps its stock digit row")
         one.tap()
-        XCTAssertTrue(input.waitUntilValueEquals("11"))
+        XCTAssertTrue(input.waitUntilValueEquals("ᵂ1"))
+        app.buttons["keyboard.typing.letters"].firstMatch.tap()
+        reopenKeyboardSearch(expectedQuery: "No query")
+        XCTAssertTrue(app.buttons["keyboard.query.1"].firstMatch.exists, "Unicode search keeps its own digit row")
+        closeKeyboardSearch()
     }
 
-    func testSystemKeyboardHeldKeysCanChangeGestureGroupBeforeRelease() throws {
+    func testSystemKeyboardOpenHoldChooserKeepsItsGroup() throws {
         try requirePhoneKeyboardIntegration()
         configureTopBar(symbols: true, search: true)
         let context = "Literal "
@@ -967,12 +972,13 @@ final class UniboardUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["keyboard.options"].firstMatch.exists,
                        "Character order is unavailable while ordinary typing replaces the picker")
         let iKey = app.buttons["keyboard.typing.key.i"].firstMatch
-        flickMainKey(iKey, up: true, pressDuration: 0.65)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£"), "An opened hold chooser can switch to symbols")
+        // Before, dragging down from an open hold switched to the Down forms.
+        // Now the accents stay, and lifting away from them inserts nothing.
         flickMainKey(iKey, up: false, pressDuration: 0.65)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ⁱ"), "An opened hold chooser can switch to the presentation forms")
+        sleep(1)
+        XCTAssertEqual(input.value as? String, context, "An open hold chooser does not switch to the Down forms")
         app.buttons["keyboard.typing.key.q"].firstMatch.tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context + "£ⁱq"), "Switching inserts once and leaves the next tap literal")
+        XCTAssertTrue(input.waitUntilValueEquals(context + "q"), "The next tap stays literal")
         let star = app.buttons["keyboard.openFavorites"].firstMatch
         star.tap()
         XCTAssertTrue(app.descendants(matching: .any)["keyboard.pages.pager"].firstMatch.waitForExistence(timeout: 5))
@@ -984,45 +990,8 @@ final class UniboardUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["keyboard.options"].firstMatch.exists,
                        "Unicode results are always in code point order, with no order menu")
         app.buttons["keyboard.openTyping"].firstMatch.tap()
-        XCTAssertEqual(input.value as? String, context + "£ⁱq")
-        attachScreenshot("Held-key gesture switching without an order menu")
-    }
-
-    func testSystemKeyboardMacOptionCandidatesKeepCaseFlicksIndependent() throws {
-        try requireKeyboardIntegration()
-        resetAppKey("letter.q")
-        if UIDevice.current.userInterfaceIdiom == .pad { configurePadSettings(layout: "stock", mapping: "macOS") }
-        let input = openSystemKeyboardHost(unicodeBrowse: false)
-        defer { restoreEnglishKeyboard() }
-        let q = app.buttons["keyboard.typing.key.q"].firstMatch
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            let ordinary = q.label
-            XCTAssertTrue(["q", "Q"].contains(ordinary))
-            q.tap()
-            XCTAssertTrue(input.waitUntilValueEquals(ordinary), "Wide letter taps use the actual visible number-row state")
-            app.buttons["keyboard.typing.delete"].firstMatch.tap()
-            XCTAssertTrue(input.waitUntilValueEquals(""))
-        }
-        flickMainKey(q, up: true, horizontal: 36)
-        XCTAssertTrue(input.waitUntilValueEquals("œ"))
-        flickMainKey(q, up: true, horizontal: -36)
-        XCTAssertTrue(input.waitUntilValueEquals("œŒ"), "Shift–Option stays literal, independent of Shift state")
-        let displayedQ = q.label
-        XCTAssertTrue(["q", "Q"].contains(displayedQ), "The actual key label establishes the down-form case")
-        // Q has no superscript or subscript, so its first form is mathematical bold.
-        let expected = "œŒ" + (displayedQ == "q" ? "𝐪" : "𝐐")
-        flickMainKey(q, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals(expected), "Down-flick inputs a form in the displayed case")
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            flickMainKey(app.buttons["keyboard.typing.key.a"].firstMatch, up: true)
-            XCTAssertTrue(input.waitUntilValueEquals(expected + "å"))
-            assertPadFooter(pageID: "keyboard.typing.numbers")
-        }
-        attachScreenshot("macOS Option and Shift Option candidates stay independent of down forms")
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            restoreEnglishKeyboard()
-            configurePadSettings(layout: "ansiNumbers", mapping: "standard")
-        }
+        XCTAssertEqual(input.value as? String, context + "q")
+        attachScreenshot("An open hold keeps its accents, with no order menu")
     }
 
     private func assertPadFooter(pageID: String, file: StaticString = #filePath, line: UInt = #line) {
@@ -1044,9 +1013,9 @@ final class UniboardUITests: XCTestCase {
         XCTAssertGreaterThan(hide.frame.minX, page.frame.maxX, file: file, line: line)
     }
 
-    private func configurePadSettings(layout: String, mapping: String) {
+    private func configurePadLayout(_ layout: String) {
         openAppSettings()
-        for (identifier, value) in [("padLayout", layout), ("padSymbolMapping", mapping)] {
+        for (identifier, value) in [("padLayout", layout)] {
             let picker = app.descendants(matching: .any)[identifier].firstMatch
             let scroll = settingsList()
             XCTAssertTrue(scroll.waitForExistence(timeout: 5))
@@ -1123,7 +1092,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(input.waitUntilValueEquals("Qqhud"), "Long press, up and down must each use only their own mapping")
         flickMainKey(app.buttons["keyboard.typing.key.w"].firstMatch, up: true)
         flickMainKey(app.buttons["keyboard.typing.key.p"].firstMatch, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals("Qqhud\\•"), "Visible digits replace W/P up-flicks with the complementary symbol-page characters")
+        XCTAssertTrue(input.waitUntilValueEquals("Qqhudʷᵖ"), "W and P flick up to their modifier letters")
         attachScreenshot("Plain taps with independent hold, up and down layers")
         restoreEnglishKeyboard()
         resetAppKey("letter.q")
@@ -1141,7 +1110,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(shift.waitForExistence(timeout: 5))
         XCTAssertTrue(shift.waitUntilValueEquals("uppercase"), "The fresh sentence-capitalizing host starts uppercase")
         flickMainKey(app.buttons["keyboard.typing.key.a"].firstMatch, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals("ᴬ"), "The default down flick follows the visible uppercase")
+        XCTAssertTrue(input.waitUntilValueEquals("𝐀"), "The default down flick follows the visible uppercase")
         XCTAssertTrue(shift.waitUntilValueEquals("uppercase"), "A default down flick preserves automatic uppercase across host callbacks")
         app.buttons["keyboard.typing.delete"].tap()
         XCTAssertTrue(input.waitUntilValueEquals(""))
@@ -1170,17 +1139,17 @@ final class UniboardUITests: XCTestCase {
 
         let a = app.buttons["keyboard.typing.key.a"].firstMatch
         flickMainKey(a, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals("qxy_!ᵃ"), "The default down flick chooses the superscript in the current case")
+        XCTAssertTrue(input.waitUntilValueEquals("qxy_!𝐚"), "The default down flick chooses a styled form in the current case")
         XCTAssertTrue(shift.waitUntilValueEquals("lowercase"))
         flickMainKey(a, up: true)
-        XCTAssertTrue(input.waitUntilValueEquals("qxy_!ᵃ-"), "The default upward flick inserts its mapped symbol without a letter tap")
+        XCTAssertTrue(input.waitUntilValueEquals("qxy_!𝐚ᵃ"), "The default upward flick inserts the modifier letter without a letter tap")
         shift.doubleTap()
         XCTAssertTrue(shift.waitUntilValueEquals("capsLock"))
         flickMainKey(a, up: false)
-        XCTAssertTrue(input.waitUntilValueEquals("qxy_!ᵃ-ᴬ"))
+        XCTAssertTrue(input.waitUntilValueEquals("qxy_!𝐚ᵃ𝐀"))
         XCTAssertTrue(shift.waitUntilValueEquals("capsLock"), "A down flick must not consume Caps Lock")
         q.tap()
-        XCTAssertTrue(input.waitUntilValueEquals("qxy_!ᵃ-ᴬQ"))
+        XCTAssertTrue(input.waitUntilValueEquals("qxy_!𝐚ᵃ𝐀Q"))
         attachScreenshot("Real main-key flicks insert exact settings and retain lowercase or locked Shift")
 
         restoreEnglishKeyboard()

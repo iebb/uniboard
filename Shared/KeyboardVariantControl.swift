@@ -41,8 +41,6 @@ final class KeyboardVariantInteraction {
     private var inspectedIndex = 0
     private var swipeOriginX: CGFloat = 0
     private var swipeHasLateralIntent = false
-    private var gestureAnchor = CGPoint.zero
-    private var previousGestureDelta = CGPoint.zero
     private var popupAllowsCommands = true
     private var tapText = ""
     private var activeGesture: KeyboardKeySettings.Gesture?
@@ -161,12 +159,7 @@ final class KeyboardVariantInteraction {
     }
 
     private func openPopup(id: UUID) {
-        guard token == id, let actions else { return }
-        if popupVisible {
-            popupVisible = false
-            hide?()
-            guard token == id else { return }
-        }
+        guard token == id, let actions, !popupVisible else { return }
         popupVisible = true
         guard show?(pressOptions, popupAllowsCommands && actions.inspect != nil,
                     popupAllowsCommands && actions.edit != nil) == true else {
@@ -185,35 +178,14 @@ final class KeyboardVariantInteraction {
         return true
     }
 
-    /// Reversing a continuous vertical drag changes groups after a deliberate
-    /// movement, without requiring a return past the original key.
-    /// Sideways selection starts a new vertical reference and keeps its group.
-    /// A held key keeps its long-press choices until the touch leaves the
-    /// key's own vertical span.
-    private func gestureDirection(at delta: CGPoint, insideKeyHeight: Bool) -> KeyboardKeySettings.Gesture? {
-        let step = CGPoint(x: delta.x - previousGestureDelta.x, y: delta.y - previousGestureDelta.y)
-        previousGestureDelta = delta
-        guard step.x.isFinite, step.y.isFinite else { cancel(ending: false); return nil }
-        guard popupVisible else { return KeyboardVariantPolicy.swipeDirection(delta: delta) }
-        if abs(step.x) > abs(step.y) {
-            gestureAnchor = delta
-            return nil
-        }
-        if swipeSelecting, (activeGesture == .swipeUp && delta.y < gestureAnchor.y
-            || activeGesture == .swipeDown && delta.y > gestureAnchor.y) {
-            gestureAnchor = delta
-            return nil
-        }
-        if activeGesture == .longPress, insideKeyHeight { return nil }
-        let travel = CGPoint(x: delta.x - gestureAnchor.x, y: delta.y - gestureAnchor.y)
-        // A diagonal slide into the open accent row remains a hold choice.
-        // Changing its group requires a clearly vertical gesture instead.
-        if activeGesture == .longPress, abs(travel.x) > abs(travel.y) / 4 { return nil }
-        return KeyboardVariantPolicy.swipeDirection(delta: travel)
+    /// A swipe picks its group before any choices appear. Once a hold or a
+    /// swipe shows its choices, the press keeps that group: vertical motion
+    /// never switches to another one, and sideways motion selects within it.
+    private func gestureDirection(at delta: CGPoint) -> KeyboardKeySettings.Gesture? {
+        popupVisible ? nil : KeyboardVariantPolicy.swipeDirection(delta: delta)
     }
 
-    func move(owner: AnyObject, index: Int?, movedBeforeHold: Bool, delta: CGPoint? = nil, directPopupIndex: Int? = nil,
-              insideKeyHeight: Bool = false) {
+    func move(owner: AnyObject, index: Int?, movedBeforeHold: Bool, delta: CGPoint? = nil, directPopupIndex: Int? = nil) {
         guard tracking, self.owner === owner, let id = token, let actions else { return }
         let current = actions.isCurrent()
         guard token == id else { return }
@@ -224,29 +196,21 @@ final class KeyboardVariantInteraction {
             if movedBeforeHold { cancel(ending: false) }
             return
         }
-        if let delta, let direction = gestureDirection(at: delta, insideKeyHeight: insideKeyHeight), direction != activeGesture {
+        if let delta, let direction = gestureDirection(at: delta) {
             let configured = direction == .swipeUp ? actions.swipeUp : actions.swipeDown
             let choices = configured.map { KeyboardVariantPolicy.candidates(override: $0, defaults: []) } ?? []
-            if choices.isEmpty {
-                if !popupVisible { cancel(ending: false); return }
-                gestureAnchor = delta
-                if swipeSelecting { return }
-                // Pages may offer Inspect/Edit without any swipe mapping.
-                // Keep their existing direct hold-choice selection usable.
-            } else {
-                timer?.invalidate(); timer = nil
-                pressOptions = choices
-                popupAllowsCommands = false
-                swipeSelecting = true
-                activeGesture = direction
-                gestureAnchor = delta
-                swipeOriginX = delta.x
-                swipeHasLateralIntent = false
-                selected = 0
-                inspectedIndex = 0
-                openPopup(id: id)
-                return
-            }
+            guard !choices.isEmpty else { cancel(ending: false); return }
+            timer?.invalidate(); timer = nil
+            pressOptions = choices
+            popupAllowsCommands = false
+            swipeSelecting = true
+            activeGesture = direction
+            swipeOriginX = delta.x
+            swipeHasLateralIntent = false
+            selected = 0
+            inspectedIndex = 0
+            openPopup(id: id)
+            return
         }
         guard token == id else { return }
         if swipeSelecting {
@@ -323,8 +287,6 @@ final class KeyboardVariantInteraction {
         swipeSelecting = false
         swipeOriginX = 0
         swipeHasLateralIntent = false
-        gestureAnchor = .zero
-        previousGestureDelta = .zero
         popupAllowsCommands = true
         tapText = ""
         activeGesture = nil
@@ -592,7 +554,7 @@ final class KeyboardVariantButton: UIControl {
         interaction.move(owner: primary, index: index,
             movedBeforeHold: abs(local.x - initialPoint.x) > 10 || abs(local.y - initialPoint.y) > 10,
             delta: CGPoint(x: local.x - initialPoint.x, y: local.y - initialPoint.y),
-            directPopupIndex: directPopupIndex(at: point), insideKeyHeight: insideKeyHeight(local))
+            directPopupIndex: directPopupIndex(at: point))
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches { activeIDs.remove(ObjectIdentifier(touch)) }
@@ -603,7 +565,7 @@ final class KeyboardVariantButton: UIControl {
             let index = selectedIndex(at: point)
             interaction.move(owner: primary, index: index, movedBeforeHold: false,
                 delta: CGPoint(x: local.x - initialPoint.x, y: local.y - initialPoint.y),
-                directPopupIndex: directPopupIndex(at: point), insideKeyHeight: insideKeyHeight(local))
+                directPopupIndex: directPopupIndex(at: point))
             let inside = interaction.swipeSelecting ? capturedContainer.map { contains(point, in: $0.bounds) } == true
                 : interaction.popupVisible ? index != nil : contains(local, in: bounds)
             _ = interaction.end(owner: primary, inside: inside)
@@ -648,9 +610,6 @@ final class KeyboardVariantButton: UIControl {
     private func clearGeometry() { capturedWindow = nil; capturedContainer = nil; removePopup() }
     private func same(_ a: CGRect, _ b: CGRect) -> Bool {
         a.origin.x == b.origin.x && a.origin.y == b.origin.y && a.width == b.width && a.height == b.height
-    }
-    private func insideKeyHeight(_ local: CGPoint) -> Bool {
-        local.y.isFinite && local.y >= bounds.minY && local.y <= bounds.maxY
     }
     private func contains(_ point: CGPoint, in rect: CGRect) -> Bool {
         point.x.isFinite && point.y.isFinite && point.x >= rect.minX && point.x <= rect.maxX

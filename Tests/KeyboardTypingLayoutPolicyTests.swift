@@ -61,22 +61,19 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
         var state = KeyboardTypingState()
         for (key, expected) in zip(keys, shifted) {
             XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: key, state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true), key)
-            XCTAssertEqual(KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: key, state: state), expected)
+            XCTAssertNotEqual(key, expected)
         }
         state.pressShift(at: 1)
         for (key, expected) in zip(keys, shifted) {
             XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: key, state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true), expected)
-            XCTAssertEqual(KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: key, state: state), key)
         }
         XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "a", state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true), "A")
         state.toggleCapsLock()
         for key in keys { XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: key, state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true), key) }
         for invalid in ["", "aa", "A", "é", "\t", "\n", "11"] {
-            XCTAssertNil(KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: invalid, state: state))
             XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: invalid, state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true))
         }
         state.selectLayout(.numbers)
-        XCTAssertNil(KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: "1", state: state))
         XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: "`", state: state, hasAuxiliaryRow: false, widePad: true, ansiPad: true))
         XCTAssertEqual(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "§", layout: .symbols, ansiPad: true), "§")
         XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "1", layout: .symbols, ansiPad: true))

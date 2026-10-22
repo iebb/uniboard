@@ -32,7 +32,7 @@ struct SetupView: View {
             } header: {
                 Text("Keyboard")
             } footer: {
-                Text("Top Row adds a row of symbols or a Unicode search field above the keys. Turn off Number Row for a shorter keyboard; swipe up on Q to P for 1 to 0, and the 123 page keeps its digits. Hide Keyboard Key adds a key that closes the keyboard; wide iPad layouts always have one.")
+                Text("Top Row adds a row of symbols or a Unicode search field above the keys. Turn off Number Row for a shorter keyboard; digits stay on the 123 page and in Unicode search. Hide Keyboard Key adds a key that closes the keyboard; wide iPad layouts always have one.")
             }
 
             if UIDevice.current.userInterfaceIdiom == .pad {
@@ -40,13 +40,10 @@ struct SetupView: View {
                     Picker("Landscape Layout", selection: Binding(get: { preferences.padLayout }, set: { preferences.selectPadLayout($0) })) {
                         ForEach(KeyboardPadLayout.allCases, id: \.rawValue) { Text($0.title).tag($0).accessibilityIdentifier("padLayout.option.\($0.rawValue)") }
                     }.pickerStyle(.menu).accessibilityIdentifier("padLayout").accessibilityValue(preferences.padLayout.rawValue)
-                    Picker("Swipe-Up Symbols", selection: Binding(get: { preferences.padSymbolMapping }, set: { preferences.selectPadSymbolMapping($0) })) {
-                        ForEach(KeyboardPadSymbolMapping.allCases, id: \.rawValue) { Text($0.title).tag($0).accessibilityIdentifier("padSymbolMapping.option.\($0.rawValue)") }
-                    }.pickerStyle(.menu).accessibilityIdentifier("padSymbolMapping").accessibilityValue(preferences.padSymbolMapping.rawValue)
                 } header: {
                     Text("iPad Keyboard")
                 } footer: {
-                    Text("On a wide landscape iPad, choose iPad styling, compact ANSI punctuation, or a full ANSI number row, which stays even with Number Row off. Symbols can follow the standard, iPad or macOS U.S. Option layout; macOS offers Option first and Shift–Option next. Hold shows accents, Up offers symbols and Down offers other forms such as superscripts and mathematical letters. Reopen the keyboard to apply; Full Access is not required.")
+                    Text("On a wide landscape iPad, choose iPad styling, compact ANSI punctuation, or a full ANSI number row, which stays even with Number Row off. Reopen the keyboard to apply; Full Access is not required.")
                 }
             }
 

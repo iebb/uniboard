@@ -29,8 +29,9 @@ final class CatalogPreferencesTests: XCTestCase {
         try withDefaults { defaults in
             let storage = try SharedFile(.previous)
             let preferences = CatalogPreferences(editionSettings: storage.settings)
+            XCTAssertTrue(storage.settings.save(.init(edition: .previous, padSymbolMapping: .none)))
+            preferences.refreshEdition()
             preferences.selectPadLayout(.ansi)
-            preferences.selectPadSymbolMapping(.none)
             preferences.selectUnicodeFonts(true)
             preferences.selectCollapseKey(true)
             preferences.selectEdition(.older)
@@ -41,7 +42,6 @@ final class CatalogPreferencesTests: XCTestCase {
             XCTAssertEqual(storage.settings.loadSnapshot(), expected)
             storage.failWrites = true
             preferences.selectPadLayout(.stock)
-            preferences.selectPadSymbolMapping(.standard)
             XCTAssertEqual(preferences.padLayout, .ansi)
             XCTAssertEqual(preferences.padSymbolMapping, .none)
             XCTAssertNotNil(preferences.editionSaveError)

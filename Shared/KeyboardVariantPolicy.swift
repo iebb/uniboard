@@ -8,42 +8,34 @@ enum KeyboardVariantPolicy {
     static let maximumScalars = 64
     static let swipeThreshold: CGFloat = 12
     static let horizontalChoiceStride: CGFloat = 36
-    private static let standardPadSymbols: [String: String] = {
-        let keys = KeyboardTypingLayout.letters.rows.flatMap { $0 }
-        let rows = KeyboardTypingLayout.numbers.rows
-        let top = rows[0]
-        let home = Array(rows[1].prefix(9))
-        let bottom = rows[2] + Array(rows[1].suffix(1)) + [KeyboardTypingLayout.symbols.rows[0][0]]
-        return Dictionary(uniqueKeysWithValues: zip(keys, top + home + bottom))
-    }()
-
-    // Snapshot of Apple's com.apple.keylayout.US, ANSI keyboard type 40.
-    // Option dead keys use their literal spacing forms, never composition.
-    // Keep Shift–Option outputs exact: e.g. Option-S = ß, Shift–Option-S = Í.
-    private static let macOSKeys = Array("`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./").map(String.init)
-    private static let macOSShiftedKeys = Array("~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?").map(String.init)
-    private static let macOSOption = Array("`¡™£¢∞§¶•ªº–≠œ∑´®†¥¨ˆøπ“‘«åß∂ƒ©˙∆˚¬…æΩ≈ç√∫˜µ≤≥÷").map(String.init)
-    private static let macOSShiftOption = Array("`⁄€‹›ﬁﬂ‡°·‚—±Œ„´‰ˇÁ¨ˆØ∏”’»ÅÍÎÏ˝ÓÔ\u{F8FF}ÒÚÆ¸˛Ç◊ı˜Â¯˘¿").map(String.init)
-
-    static func macOSOptionCandidates(for key: String) -> [String] {
-        guard let index = macOSKeys.firstIndex(of: key) ?? macOSShiftedKeys.firstIndex(of: key),
-              macOSOption.indices.contains(index), macOSShiftOption.indices.contains(index) else { return [] }
-        return candidates(override: [macOSOption[index], macOSShiftOption[index]], defaults: [])
+    /// Swipe up offers the modifier forms of the same character: its
+    /// superscript, then its subscript. Letters keep the current case.
+    static func defaultSwipeUp(for key: String, state: KeyboardTypingState) -> [String] {
+        forms(for: key, state: state).modifiers
     }
 
-    /// Swipe down offers other presentation forms of the same character:
-    /// super- and subscripts, mathematical styles, then circled, fullwidth and
-    /// similar forms. Letters keep the current case; Shift is unchanged.
+    /// Swipe down offers styled forms of the same character: mathematical
+    /// styles, then circled, parenthesized, fullwidth and small-capital forms.
+    /// Letters keep the current case; Shift is unchanged.
     static func defaultSwipeDown(for key: String, state: KeyboardTypingState) -> [String] {
-        guard key.unicodeScalars.count == 1, let value = key.unicodeScalars.first?.value else { return [] }
-        let forms: [String]
+        forms(for: key, state: state).styled
+    }
+
+    private static func forms(for key: String, state: KeyboardTypingState) -> (modifiers: [String], styled: [String]) {
+        guard key.unicodeScalars.count == 1, let value = key.unicodeScalars.first?.value else { return ([], []) }
         if state.layout == .letters, (0x61...0x7A).contains(value) {
-            forms = letterForms(Int(value - 0x61), uppercase: state.shift != .lowercase)
-        } else if (0x30...0x39).contains(value) {
-            forms = digitForms(Int(value - 0x30))
-        } else {
-            forms = symbolForms[key] ?? []
+            let index = Int(value - 0x61), uppercase = state.shift != .lowercase
+            return (list(letterModifiers(index, uppercase: uppercase)), list(letterStyles(index, uppercase: uppercase)))
         }
+        if (0x30...0x39).contains(value) {
+            let digit = Int(value - 0x30)
+            return (list(digitModifiers(digit)), list(digitStyles(digit)))
+        }
+        let forms = symbolForms[key]
+        return (list(forms?.modifiers ?? []), list(forms?.styled ?? []))
+    }
+
+    private static func list(_ forms: [String]) -> [String] {
         guard let first = forms.first else { return [] }
         return options(text: first, variants: Array(forms.dropFirst()))
     }
@@ -75,58 +67,39 @@ enum KeyboardVariantPolicy {
         0x1D549: 0x211D, 0x1D551: 0x2124
     ]
 
-    static func letterForms(_ index: Int, uppercase: Bool) -> [String] {
+    static func letterModifiers(_ index: Int, uppercase: Bool) -> [String] {
+        guard (0..<26).contains(index) else { return [] }
+        return scalars(uppercase ? [superscriptUpper[index]] : [superscriptLower[index], subscriptLower[index]])
+    }
+
+    static func letterStyles(_ index: Int, uppercase: Bool) -> [String] {
         guard (0..<26).contains(index) else { return [] }
         let offset = UInt32(index) + (uppercase ? 0 : 26)
         let math = mathStyles.map { base in mathHoles[base + offset] ?? base + offset }
         let letter = UInt32(index)
-        if uppercase {
-            return scalars([superscriptUpper[index]] + math + [0x24B6 + letter, 0xFF21 + letter])
-        }
-        return scalars([superscriptLower[index], subscriptLower[index]] + math
-            + [0x24D0 + letter, 0x249C + letter, 0xFF41 + letter, smallCapitals[index]])
+        if uppercase { return scalars(math + [0x24B6 + letter, 0xFF21 + letter]) }
+        return scalars(math + [0x24D0 + letter, 0x249C + letter, 0xFF41 + letter, smallCapitals[index]])
     }
 
-    static func digitForms(_ digit: Int) -> [String] {
+    static func digitModifiers(_ digit: Int) -> [String] {
         guard (0...9).contains(digit) else { return [] }
         let d = UInt32(digit)
         let superscript: UInt32 = digit < 4 ? [0x2070, 0x00B9, 0x00B2, 0x00B3][digit] : 0x2070 + d
-        return scalars([superscript, 0x2080 + d, 0x1D7CE + d, 0x1D7D8 + d, 0x1D7EC + d, 0x1D7F6 + d,
+        return scalars([superscript, 0x2080 + d])
+    }
+
+    static func digitStyles(_ digit: Int) -> [String] {
+        guard (0...9).contains(digit) else { return [] }
+        let d = UInt32(digit)
+        return scalars([0x1D7CE + d, 0x1D7D8 + d, 0x1D7EC + d, 0x1D7F6 + d,
             digit == 0 ? 0x24EA : 0x245F + d, digit == 0 ? 0x24FF : 0x2775 + d,
             digit == 0 ? 0 : 0x2473 + d, digit == 0 ? 0 : 0x2487 + d, 0xFF10 + d])
     }
 
-    private static let symbolForms: [String: [String]] = [
-        "+": ["⁺", "₊", "＋"], "-": ["⁻", "₋", "－"], "=": ["⁼", "₌", "＝"],
-        "(": ["⁽", "₍", "（"], ")": ["⁾", "₎", "）"]
+    private static let symbolForms: [String: (modifiers: [String], styled: [String])] = [
+        "+": (["⁺", "₊"], ["＋"]), "-": (["⁻", "₋"], ["－"]), "=": (["⁼", "₌"], ["＝"]),
+        "(": (["⁽", "₍"], ["（"]), ")": (["⁾", "₎"], ["）"])
     ]
-
-    static func defaultSwipeUp(for key: String, state: KeyboardTypingState, widePad: Bool, ansiPad: Bool = false,
-                                 mapping: KeyboardPadSymbolMapping = .iPad, hasNumberRow: Bool = false) -> [String] {
-        guard (widePad || hasNumberRow), state.layout == .letters, (!widePad || mapping != .none) else { return [] }
-        if hasNumberRow, let index = KeyboardTypingLayout.letters.rows[0].firstIndex(of: key) {
-            let symbols = KeyboardTypingLayoutPolicy.rows(for: .numbers, hasAuxiliaryRow: true)[0]
-            guard symbols.indices.contains(index) else { return [] }
-            let text = symbols[index]
-            // A letter's secondary legend is one mapped symbol. Expanding the
-            // currency family here made U/I/O display the same chooser; those
-            // families remain available by holding the actual symbol keys.
-            return [text]
-        }
-        guard widePad else { return [] }
-        if mapping == .macOS { return macOSOptionCandidates(for: key) }
-        if ansiPad, let text = KeyboardTypingLayoutPolicy.ansiAlternateOutput(for: key, state: state) {
-            return options(text: text, variants: stockVariants(for: text))
-        }
-        if mapping == .standard, let text = standardPadSymbols[key] {
-            return options(text: text, variants: stockVariants(for: text))
-        }
-        let keys = Array("qwertyuiopasdfghjklzxcvbnm,.").map(String.init)
-        let values = Array("1234567890@#¥&*()'\"%-+=/;:!?").map(String.init)
-        guard let index = keys.firstIndex(of: key) else { return [] }
-        let text = values[index]
-        return options(text: text, variants: stockVariants(for: text))
-    }
 
     struct GestureCandidates {
         let longPress: [String]
@@ -138,28 +111,16 @@ enum KeyboardVariantPolicy {
     /// followed by each default's primary action, then unused alternatives.
     /// Persistence is untouched; exact Unicode spellings remain distinct.
     static func gestureCandidates(for key: String, original: String, state: KeyboardTypingState,
-                                  isAuxiliaryKey: Bool, widePad: Bool, ansiPad: Bool,
-                                  mapping: KeyboardPadSymbolMapping, hasNumberRow: Bool,
                                   settings: KeyboardKeySettings.Snapshot) -> GestureCandidates {
         let keyID = KeyboardKeySettings.identifier(forCharacter: key) ?? ""
         let gestures: [KeyboardKeySettings.Gesture] = [.longPress, .swipeUp, .swipeDown]
         let defaults = [
             options(text: original, variants: englishVariants(for: key, uppercase: state.shift != .lowercase)),
-            mapping == .none ? [] : candidates(override: nil, defaults:
-                defaultSwipeUp(for: key, state: state, widePad: widePad || !isAuxiliaryKey, ansiPad: ansiPad,
-                                 mapping: mapping, hasNumberRow: hasNumberRow)
-                + macOSOptionCandidates(for: key)),
+            defaultSwipeUp(for: key, state: state),
             defaultSwipeDown(for: key, state: state)
         ]
         let overrides = gestures.map { settings.candidates(for: keyID, gesture: $0) }
-        var choices = zip(overrides, defaults).map { candidates(override: $0.0, defaults: $0.1) }
-        if KeyboardKeySettings.descriptor(for: keyID)?.kind != .letter, overrides[1] == nil {
-            // Currency/punctuation keys keep their complete stock hold family.
-            // A default Option output already in that family is not a second
-            // action on Up. Explicit Up mappings still take priority.
-            let held = choices[0]
-            choices[1].removeAll { contains($0, in: held) }
-        }
+        let choices = zip(overrides, defaults).map { candidates(override: $0.0, defaults: $0.1) }
         var seen = Set<[UInt16]>()
         var result = [[String]](repeating: [], count: 3)
         func append(_ text: String, to index: Int) {
@@ -171,31 +132,25 @@ enum KeyboardVariantPolicy {
         for index in [2, 1, 0] where overrides[index] == nil {
             if let first = choices[index].first { append(first, to: index) }
         }
-        // Preserve chooser ownership: current-case hold, Down's presentation
-        // forms, then symbol Up alternatives.
+        // Preserve chooser ownership: current-case hold, Down's styled forms,
+        // then Up's modifier forms.
         for index in [0, 2, 1] where overrides[index] == nil {
             for text in choices[index].dropFirst() { append(text, to: index) }
         }
         return GestureCandidates(longPress: result[0], swipeUp: result[1], swipeDown: result[2])
     }
 
-    /// A key's built-in candidates for one gesture, as the iPhone keyboard
-    /// offers them in lowercase: letters from the letter page, digits from the
-    /// number row (or the 123 page without it), and symbols from the first
-    /// page that has them.
-    static func defaultCandidates(for keyID: String, gesture: KeyboardKeySettings.Gesture,
-                                  mapping: KeyboardPadSymbolMapping, hasNumberRow: Bool = true) -> [String] {
+    /// A key's built-in candidates for one gesture, as the keyboard offers
+    /// them in lowercase: letters from the letter page and symbols from the
+    /// first page that has them.
+    static func defaultCandidates(for keyID: String, gesture: KeyboardKeySettings.Gesture) -> [String] {
         guard let descriptor = KeyboardKeySettings.descriptor(for: keyID), let key = descriptor.text else { return [] }
         var state = KeyboardTypingState()
         if descriptor.kind == .character,
            let layout = KeyboardTypingLayout.allCases.first(where: { $0.rows.flatMap { $0 }.contains(key) }) {
             state.selectLayout(layout)
         }
-        let auxiliary = descriptor.kind == .digit && hasNumberRow
-        if descriptor.kind == .digit && !hasNumberRow { state.selectLayout(.numbers) }
-        let groups = gestureCandidates(for: key, original: key, state: state, isAuxiliaryKey: auxiliary,
-                                       widePad: false, ansiPad: false, mapping: mapping,
-                                       hasNumberRow: hasNumberRow && state.layout == .letters, settings: .defaults)
+        let groups = gestureCandidates(for: key, original: key, state: state, settings: .defaults)
         switch gesture {
         case .longPress: return groups.longPress
         case .swipeUp: return groups.swipeUp

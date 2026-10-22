@@ -357,23 +357,19 @@ final class KeyboardViewController: UIInputViewController {
               let keyID = KeyboardKeySettings.identifier(forCharacter: key) else { return nil }
         let captured = model.typingState
         let padLayout = model.padLayout
-        let mapping = model.padSymbolMapping
         let original = isAuxiliaryKey
             ? (hasAuxiliaryRow ? KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: key, layout: captured.layout, ansiPad: ansiPad) : nil)
             : KeyboardTypingLayoutPolicy.output(for: key, state: captured, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout)
         guard let original else { return nil }
         let settings = model.keySettings
-        let hasNumberRow = captured.layout == .letters && (hasAuxiliaryRow || (ansiPad && padLayout == .ansiNumbers))
         let tapText = settings.tapOutput(for: keyID, defaultText: original,
             shifted: KeyboardTypingLayoutPolicy.usesShiftedTap(for: key, state: captured, ansiPad: ansiPad))
         let choices = KeyboardVariantPolicy.options(text: original,
             variants: KeyboardVariantPolicy.englishVariants(for: key, uppercase: captured.shift != .lowercase))
-        let gestures = KeyboardVariantPolicy.gestureCandidates(for: key, original: original, state: captured,
-            isAuxiliaryKey: isAuxiliaryKey, widePad: widePad, ansiPad: ansiPad, mapping: mapping,
-            hasNumberRow: hasNumberRow, settings: settings)
+        let gestures = KeyboardVariantPolicy.gestureCandidates(for: key, original: original, state: captured, settings: settings)
         let accepts: () -> Bool = { [weak self] in
             current() && self?.model.showsUnicode == false && self?.model.hasSymbolBoardOverlay == false
-                && self?.model.keySettings == settings && self?.model.padLayout == padLayout && self?.model.padSymbolMapping == mapping
+                && self?.model.keySettings == settings && self?.model.padLayout == padLayout
                 && (self?.model.typingAuxiliaryRowVisible.map({ $0 == hasAuxiliaryRow }) ?? true)
                 && (self?.model.typingWidePadVisible.map({ $0 == widePad }) ?? !widePad)
                 && (self?.model.typingANSIPadVisible.map({ $0 == ansiPad }) ?? !ansiPad)
@@ -765,7 +761,6 @@ private final class KeyboardModel: ObservableObject {
     let typing = KeyboardTypingModel()
     @Published private(set) var keySettings: KeyboardKeySettings.Snapshot
     @Published private(set) var padLayout: KeyboardPadLayout
-    @Published private(set) var padSymbolMapping: KeyboardPadSymbolMapping
     var typingState: KeyboardTypingState { typing.state }
     // The view acknowledges its current row budget without publishing a
     // second typing state or changing Shift for a geometry-only update.
@@ -1109,7 +1104,6 @@ private final class KeyboardModel: ObservableObject {
         showsNumberRow = appSettings.showsNumberRow
         showsCollapseKey = appSettings.showsCollapseKey
         padLayout = appSettings.padLayout
-        padSymbolMapping = appSettings.padSymbolMapping
     }
 
     func refreshEditionFromAppSettings() {
@@ -1119,7 +1113,6 @@ private final class KeyboardModel: ObservableObject {
         if useUnicodeFonts != selected.useUnicodeFonts { useUnicodeFonts = selected.useUnicodeFonts }
         if showsCollapseKey != selected.showsCollapseKey { showsCollapseKey = selected.showsCollapseKey }
         if padLayout != selected.padLayout { padLayout = selected.padLayout; invalidateInputMode(); presentationChanged?() }
-        if padSymbolMapping != selected.padSymbolMapping { padSymbolMapping = selected.padSymbolMapping; invalidateInputMode() }
         if showsSymbolBar != selected.showsSymbolBar || searchBarInsteadOfSymbols != selected.searchBarInsteadOfSymbols {
             showsSymbolBar = selected.showsSymbolBar; searchBarInsteadOfSymbols = selected.searchBarInsteadOfSymbols
             invalidateInputMode(); presentationChanged?()
@@ -1621,7 +1614,7 @@ private struct UnicodeKeyboardView: View {
 
     private var typingContent: some View {
         return KeyboardTypingView(typing: model.typing, mode: model.inputModeID,
-            isPad: model.isPadLayout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout, symbolMapping: model.padSymbolMapping, compact: model.isCompactLayout,
+            isPad: model.isPadLayout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout, compact: model.isCompactLayout,
             showsNumberRow: model.showsNumberRow, enabled: !model.showsUnicode, useUnicodeFonts: model.useUnicodeFonts,
             delete: delete, variants: typingVariantActions,
             keySettings: model.keySettings, returnTitle: model.returnTitle, action: action, shiftSlide: shiftSlide)
@@ -2281,7 +2274,6 @@ private struct KeyboardTypingView: View {
     let isPad: Bool
     let isLandscape: Bool
     let padLayout: KeyboardPadLayout
-    let symbolMapping: KeyboardPadSymbolMapping
     let compact: Bool
     let showsNumberRow: Bool
     let enabled: Bool
@@ -2441,10 +2433,7 @@ private struct KeyboardTypingView: View {
         let original = isAuxiliaryKey ? key : KeyboardTypingLayoutPolicy.output(for: key, state: typing.state, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout) ?? key
         let text = keySettings.tapOutput(for: keyID, defaultText: original,
             shifted: KeyboardTypingLayoutPolicy.usesShiftedTap(for: key, state: typing.state, ansiPad: ansiPad))
-        let hasNumberRow = typing.state.layout == .letters && (hasAuxiliaryRow || (ansiPad && padLayout == .ansiNumbers))
-        let gestures = KeyboardVariantPolicy.gestureCandidates(for: key, original: original, state: typing.state,
-            isAuxiliaryKey: isAuxiliaryKey, widePad: widePad, ansiPad: ansiPad, mapping: symbolMapping,
-            hasNumberRow: hasNumberRow, settings: keySettings)
+        let gestures = KeyboardVariantPolicy.gestureCandidates(for: key, original: original, state: typing.state, settings: keySettings)
         return KeyboardVariantKey(text: text ?? original,
             variants: KeyboardVariantPolicy.englishVariants(for: key, uppercase: typing.state.shift != .lowercase),
             identifier: identifier, value: layoutValue, route: mode, enabled: enabled, fontSize: fontSize,
@@ -2453,8 +2442,6 @@ private struct KeyboardTypingView: View {
             useUnicodeFonts: useUnicodeFonts,
             preservesPressAcrossTextChanges: true,
             longPressOptions: gestures.longPress, swipeUp: gestures.swipeUp, swipeDown: gestures.swipeDown,
-            // Letters always show their swipe-up symbol, or digit when the number row is off.
-            secondaryText: widePad || typing.state.layout == .letters ? gestures.swipeUp.first.map(symbolBoardPreview) : nil,
             factory: { [mode = mode] in variants(mode, key, hasAuxiliaryRow, isAuxiliaryKey, widePad, ansiPad) })
     }
 

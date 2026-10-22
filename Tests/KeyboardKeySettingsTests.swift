@@ -30,23 +30,18 @@ final class KeyboardKeySettingsTests: XCTestCase {
     }
 
     func testDefaultCandidatesMatchTheKeyboardsOwnGroups() {
-        let hold = KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .longPress, mapping: .standard)
+        let hold = KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .longPress)
         XCTAssertEqual(hold.first, "e")
         XCTAssertTrue(hold.contains("é"))
-        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .swipeDown, mapping: .standard).first, "ᵉ")
-        XCTAssertFalse(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .standard).isEmpty)
-        XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .none).isEmpty)
-        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "digit.1", gesture: .swipeDown, mapping: .standard).first, "¹")
-        // Without the number row, Q to P swipe up to the digits instead.
-        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .standard).first, "_")
-        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .standard,
-                                                               hasNumberRow: false).first, "1")
-        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.p", gesture: .swipeUp, mapping: .standard,
-                                                               hasNumberRow: false).first, "0")
-        XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "utility.space", gesture: .longPress, mapping: .standard).isEmpty)
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .swipeUp), ["ᵉ", "ₑ"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.e", gesture: .swipeDown).first, "𝐞")
+        XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp).isEmpty, "Q has no modifier form")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "digit.1", gesture: .swipeUp), ["¹", "₁"])
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "digit.1", gesture: .swipeDown).first, "𝟏")
+        XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "utility.space", gesture: .longPress).isEmpty)
         for key in Settings.descriptors {
             for gesture in Settings.Gesture.customizable {
-                let values = KeyboardVariantPolicy.defaultCandidates(for: key.id, gesture: gesture, mapping: .standard)
+                let values = KeyboardVariantPolicy.defaultCandidates(for: key.id, gesture: gesture)
                 XCTAssertEqual(Set(values.map { Array($0.utf16) }).count, values.count, "\(key.id) \(gesture)")
             }
         }

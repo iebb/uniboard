@@ -88,11 +88,6 @@ enum KeyboardTypingLayoutPolicy {
         isPad && isLandscape && availableWidth.isFinite && availableWidth >= 980 && padLayout != .stock
     }
 
-    static func ansiAlternateOutput(for key: String, state: KeyboardTypingState) -> String? {
-        guard state.layout == .letters, let alternate = shiftedANSI[key] else { return nil }
-        return state.shiftsANSISymbols ? key : alternate
-    }
-
     static func usesShiftedTap(for key: String, state: KeyboardTypingState, ansiPad: Bool) -> Bool {
         guard state.layout == .letters else { return false }
         if state.alphabet.isCasedLetter(key) { return state.shift != .lowercase }

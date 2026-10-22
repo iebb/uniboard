@@ -147,8 +147,7 @@ private struct KeyboardGestureSettingsView: View {
         _choices = State(initialValue: (current ?? []).map { Choice(text: $0) })
     }
     private var defaults: [String] {
-        KeyboardVariantPolicy.defaultCandidates(for: descriptor.id, gesture: gesture, mapping: preferences.padSymbolMapping,
-                                                hasNumberRow: preferences.showsNumberRow)
+        KeyboardVariantPolicy.defaultCandidates(for: descriptor.id, gesture: gesture)
     }
     private var candidates: [String]? {
         usesDefaults ? nil : choices.map(\.text).filter { !$0.isEmpty }
@@ -159,13 +158,13 @@ private struct KeyboardGestureSettingsView: View {
     private var explanation: String {
         switch gesture {
         case .swipeDown where descriptor.kind == .letter:
-            return "By default: other forms of the same letter in the current case: superscript, subscript, mathematical bold, italic, script, fraktur, double-struck, sans-serif and monospace, then circled, fullwidth and small capital. Shift stays unchanged."
-        case .swipeDown where descriptor.kind == .digit:
-            return "By default: other forms of the same digit: superscript, subscript, mathematical styles, circled, parenthesized and fullwidth."
+            return "By default: styled forms of the same letter in the current case: mathematical bold, italic, script, fraktur, double-struck, sans-serif and monospace, then circled, parenthesized, fullwidth and small capital. Shift stays unchanged."
+        case .swipeDown:
+            return "By default: styled forms of the same character, such as mathematical, circled, parenthesized and fullwidth forms, where Unicode has them."
         case .longPress:
             return "By default: familiar accents in the current case and stock symbol variants."
         case .swipeUp:
-            return "By default: the mapped symbol, then unused macOS U.S. Option and Shift–Option characters. Dead-key accents insert their literal spacing form."
+            return "By default: the superscript, then the subscript form of the same character, where Unicode has them."
         default:
             return ""
         }

@@ -57,7 +57,6 @@ final class CatalogPreferences: ObservableObject {
         }
     }
     func selectPadLayout(_ layout: KeyboardPadLayout) { edit { $0.padLayout = layout } }
-    func selectPadSymbolMapping(_ mapping: KeyboardPadSymbolMapping) { edit { $0.padSymbolMapping = mapping } }
     private func edit(_ change: (inout UnicodeEditionSettings.Snapshot) -> Void) {
         var value = UnicodeEditionSettings.Snapshot(edition: edition, useUnicodeFonts: useUnicodeFonts,
             showsCollapseKey: showsCollapseKey, showsSymbolBar: showsSymbolBar, searchBarInsteadOfSymbols: searchBarInsteadOfSymbols,

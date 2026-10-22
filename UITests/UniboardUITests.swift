@@ -129,6 +129,90 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["U+2603"].exists)
     }
 
+    func testLayoutsAreAddedRemovedAndKeepAtLeastOne() {
+        resetAppLayouts()
+        addTeardownBlock { @MainActor [self] in resetAppLayouts() }
+        openAppLayouts()
+        let english = app.descendants(matching: .any)["layouts.enabled.en"].firstMatch
+        XCTAssertTrue(english.waitForExistence(timeout: 5))
+        english.swipeLeft()
+        XCTAssertFalse(app.buttons["Delete"].firstMatch.waitForExistence(timeout: 1), "The only layout cannot be removed")
+        addAppLayout("Greek", id: "el")
+        addAppLayout("Russian", id: "ru")
+        // A row's identifier also reaches its texts; keep each row once, in order.
+        func enabled() -> [String] {
+            app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "layouts.enabled."))
+                .allElementsBoundByIndex.map(\.identifier).reduce(into: []) { ids, id in if ids.last != id { ids.append(id) } }
+        }
+        XCTAssertEqual(enabled(), ["layouts.enabled.en", "layouts.enabled.el", "layouts.enabled.ru"])
+        attachScreenshot("Layouts lists the enabled keyboards in switching order")
+        removeAppLayout("en")
+        XCTAssertEqual(enabled(), ["layouts.enabled.el", "layouts.enabled.ru"])
+        app.navigationBars.buttons.firstMatch.tap()
+        let link = app.buttons["keyboardLayouts"].firstMatch
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        XCTAssertTrue(link.label.contains("Ελληνικά, Русский"), link.label)
+        let keys = app.buttons["keyboardKeySettings"].firstMatch
+        revealByScrolling(keys, in: app)
+        keys.tap()
+        let menu = app.descendants(matching: .any)["keySettings.layout"].firstMatch
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        let alpha = app.buttons["keySettings.key.letter.03B1"].firstMatch
+        XCTAssertTrue(alpha.waitForExistence(timeout: 5), "Customize Keys shows the first layout's letters")
+        XCTAssertFalse(app.buttons["keySettings.key.letter.q"].exists)
+        menu.tap()
+        let russian = app.buttons["Русский"].firstMatch
+        XCTAssertTrue(russian.waitForExistence(timeout: 5))
+        russian.tap()
+        XCTAssertTrue(app.buttons["keySettings.key.letter.0436"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(alpha.exists)
+        attachScreenshot("Customize Keys lists the chosen layout's letters")
+        app.navigationBars.buttons.firstMatch.tap()
+    }
+
+    private func openAppLayouts() {
+        openAppSettings()
+        let link = app.buttons["keyboardLayouts"].firstMatch
+        revealByScrolling(link, in: app)
+        link.tap()
+        XCTAssertTrue(app.navigationBars["Layouts"].waitForExistence(timeout: 5))
+    }
+
+    private func addAppLayout(_ query: String, id: String) {
+        app.buttons["layouts.add"].firstMatch.tap()
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText(query)
+        let row = app.buttons["layouts.catalog.\(id)"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Search finds \(query)")
+        row.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["layouts.enabled.\(id)"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    private func removeAppLayout(_ id: String) {
+        let row = app.descendants(matching: .any)["layouts.enabled.\(id)"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.swipeLeft()
+        let delete = app.buttons["Delete"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        delete.tap()
+        XCTAssertTrue(row.waitUntilAbsent())
+    }
+
+    /// Leaves English as the only layout, as a fresh install has it.
+    private func resetAppLayouts() {
+        openAppLayouts()
+        if !app.descendants(matching: .any)["layouts.enabled.en"].firstMatch.exists { addAppLayout("English", id: "en") }
+        let others = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier != %@",
+                                                                            "layouts.enabled.", "layouts.enabled.en"))
+        for _ in 0..<8 where others.firstMatch.exists {
+            removeAppLayout(String(others.firstMatch.identifier.dropFirst("layouts.enabled.".count)))
+        }
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+    }
+
     func testKeyboardKeySettingsSavesExactChoicesDisablesAndRestoresDefaults() {
         resetAppKey("letter.q")
         openAppSettings()

@@ -17,6 +17,10 @@ struct SetupView: View {
             }
 
             Section {
+                NavigationLink { KeyboardLayoutsView() } label: {
+                    LabeledContent("Layouts", value: preferences.alphabets.map(\.nativeName).joined(separator: ", "))
+                }
+                .accessibilityIdentifier("keyboardLayouts")
                 NavigationLink("Customize Keys") { KeyboardKeySettingsView() }
                     .accessibilityIdentifier("keyboardKeySettings")
                 Picker("Top Row", selection: Binding(get: { preferences.topRow }, set: { preferences.selectTopRow($0) })) {

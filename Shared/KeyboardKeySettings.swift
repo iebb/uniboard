@@ -183,7 +183,18 @@ struct KeyboardKeySettings {
     ]
 
     static let descriptors: [Descriptor] = {
-        let letters = Array("abcdefghijklmnopqrstuvwxyz").map { Descriptor(id: "letter.\($0)", title: String($0).uppercased(), text: String($0), kind: .letter) }
+        let ascii = Array("abcdefghijklmnopqrstuvwxyz").map { Descriptor(id: "letter.\($0)", title: String($0).uppercased(), text: String($0), kind: .letter) }
+        // Letters of the other layouts. ASCII letters keep their original IDs;
+        // the rest are named by their lowercase scalar, such as letter.03B1.
+        var seen = Set(ascii.compactMap(\.text))
+        let international = KeyboardAlphabet.catalog.flatMap { alphabet in
+            alphabet.keys.compactMap { key -> Descriptor? in
+                guard alphabet.isCasedLetter(key), key.unicodeScalars.count == 1, let scalar = key.unicodeScalars.first,
+                      seen.insert(key).inserted else { return nil }
+                return Descriptor(id: String(format: "letter.%04X", scalar.value), title: alphabet.uppercase(key), text: key, kind: .letter)
+            }
+        }
+        let letters = ascii + international
         let digits = Array("0123456789").map { Descriptor(id: "digit.\($0)", title: String($0), text: String($0), kind: .digit) }
         // These are physical core/auxiliary keys, not the optional variants.
         let texts = KeyboardTypingLayout.allCases.flatMap { layout in
@@ -198,12 +209,34 @@ struct KeyboardKeySettings {
     }()
     private static let descriptorsByID = Dictionary(uniqueKeysWithValues: descriptors.map { ($0.id, $0) })
     static func descriptor(for keyID: String) -> Descriptor? { descriptorsByID[keyID] }
+    /// Non-ASCII letters and capitals in every layout, such as Turkish İ for
+    /// the i key. A capital that is ASCII, like Turkish I, keeps the ASCII
+    /// key's settings; one that lowercases to another key, like Σ for ς,
+    /// belongs to that key.
+    private static let internationalLetterIDs: [String: String] = {
+        var ids: [String: String] = [:]
+        for descriptor in descriptors where descriptor.kind == .letter && descriptor.id.count > "letter.x".count {
+            if let text = descriptor.text { ids[text] = descriptor.id }
+        }
+        for alphabet in KeyboardAlphabet.catalog {
+            for key in alphabet.keys {
+                let capital = alphabet.uppercase(key)
+                let ascii = key.count == 1 && key.allSatisfy { ("a"..."z").contains($0) } ? "letter." + key : nil
+                guard let id = ids[key] ?? ascii, ids[capital] == nil,
+                      capital.unicodeScalars.count == 1, !capital.unicodeScalars.allSatisfy(\.isASCII),
+                      alphabet.lowercase(capital) == key else { continue }
+                ids[capital] = id
+            }
+        }
+        return ids
+    }()
     static func identifier(forCharacter text: String) -> String? {
         guard text.unicodeScalars.count == 1, let scalar = text.unicodeScalars.first else { return nil }
         let value = scalar.value
         if (65...90).contains(value) { return "letter." + String(Unicode.Scalar(value + 32)!) }
         if (97...122).contains(value) { return "letter." + text }
         if (48...57).contains(value) { return "digit." + text }
+        if let id = internationalLetterIDs[text] { return id }
         let id = String(format: "symbol.%04X", value)
         return descriptorsByID[id] == nil ? nil : id
     }

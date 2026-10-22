@@ -43,6 +43,11 @@ final class UnicodeEditionSettingsTests: XCTestCase {
                     XCTAssertEqual(UnicodeEditionSettings(containerURL: { self.injectedContainer }, readPrefix: { _, _ in data }).loadSnapshot(), .init(edition: .latest))
                 }
             }
+            // Schema 5 predates layouts, so only English is enabled.
+            malformed["schemaVersion"] = 5
+            malformed.removeValue(forKey: "layouts")
+            bytes = try JSONSerialization.data(withJSONObject: malformed)
+            XCTAssertEqual(settings.loadSnapshot(), value)
             // Schema 4 predates the number-row setting, which then stays on.
             malformed["schemaVersion"] = 4
             malformed.removeValue(forKey: "showsNumberRow")
@@ -55,6 +60,36 @@ final class UnicodeEditionSettingsTests: XCTestCase {
             XCTAssertTrue(legacy.showsSymbolBar); XCTAssertFalse(legacy.searchBarInsteadOfSymbols)
             XCTAssertEqual(legacy.edition, .previous)
         } }
+    }
+
+    func testLayoutListRoundTripsInOrderAndRejectsMalformedLists() throws {
+        var bytes = try payload("latest")
+        let settings = UnicodeEditionSettings(containerURL: { self.injectedContainer }, readPrefix: { _, _ in bytes },
+            writeAtomically: { data, _ in bytes = data })
+        XCTAssertEqual(UnicodeEditionSettings.Snapshot(edition: .latest).layouts, ["en"], "English is the default layout")
+        let value = UnicodeEditionSettings.Snapshot(edition: .latest, layouts: ["el", "en", "sr-Cyrl", "tr"])
+        XCTAssertTrue(settings.save(value)); XCTAssertEqual(settings.loadSnapshot(), value)
+        let all = KeyboardAlphabet.catalog.prefix(UnicodeEditionSettings.maximumLayouts).map(\.id)
+        XCTAssertTrue(settings.save(.init(edition: .latest, layouts: all)))
+        XCTAssertLessThanOrEqual(bytes.count, UnicodeEditionSettings.maximumPayloadBytes)
+        XCTAssertEqual(settings.loadSnapshot().layouts, all)
+        for invalid in [[], ["en", "en"], ["xx"], Array(KeyboardAlphabet.catalog.prefix(9).map(\.id))] {
+            XCTAssertFalse(settings.save(.init(edition: .draft, layouts: invalid)), "\(invalid)")
+        }
+        XCTAssertEqual(settings.loadSnapshot().layouts, all, "A rejected list leaves the saved one alone")
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        // A newer version's layout is skipped while known ones are kept.
+        var future = object; future["layouts"] = ["ja-Kana", "ru"]
+        bytes = try JSONSerialization.data(withJSONObject: future)
+        XCTAssertEqual(settings.loadSnapshot().layouts, ["ru"])
+        for invalid: Any in [[], ["xx"], ["en", "en"], ["en", 1], "en", NSNull(), [:], Array(repeating: "en", count: 9)] {
+            var copy = object; copy["layouts"] = invalid
+            bytes = try JSONSerialization.data(withJSONObject: copy)
+            XCTAssertEqual(settings.loadSnapshot(), .init(edition: .latest), "\(invalid)")
+        }
+        var missing = object; missing.removeValue(forKey: "layouts")
+        bytes = try JSONSerialization.data(withJSONObject: missing)
+        XCTAssertEqual(settings.loadSnapshot(), .init(edition: .latest), "Schema 6 requires its layouts")
     }
 
     func testNumberRowChoiceRoundTripsAndSurvivesEditionChanges() throws {
@@ -135,8 +170,9 @@ final class UnicodeEditionSettingsTests: XCTestCase {
         let data = try XCTUnwrap(observedData)
         XCTAssertLessThanOrEqual(data.count, UnicodeEditionSettings.maximumPayloadBytes)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual(Set(object.keys), ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping", "showsSymbolBar", "searchBarInsteadOfSymbols", "showsNumberRow"])
-        XCTAssertEqual(object["schemaVersion"] as? Int, 5)
+        XCTAssertEqual(Set(object.keys), ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping", "showsSymbolBar", "searchBarInsteadOfSymbols", "showsNumberRow", "layouts"])
+        XCTAssertEqual(object["schemaVersion"] as? Int, 6)
+        XCTAssertEqual(object["layouts"] as? [String], ["en"])
         XCTAssertEqual(object["selectionIdentifier"] as? String, "draft")
         XCTAssertEqual(object["useUnicodeFonts"] as? Bool, false)
         XCTAssertEqual(object["showsCollapseKey"] as? Bool, false)

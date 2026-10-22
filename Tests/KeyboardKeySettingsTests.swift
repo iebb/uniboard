@@ -100,7 +100,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
     func testDescriptorCatalogCoversCharacterKeysWithStableASCIIIdentifiersAndExcludesFunctions() {
         XCTAssertEqual(Set(Settings.descriptors.map(\.id)).count, Settings.descriptors.count)
         XCTAssertTrue(Settings.descriptors.allSatisfy { !$0.title.isEmpty && $0.id.utf8.allSatisfy { $0 < 128 } })
-        XCTAssertEqual(Settings.descriptors.filter { $0.kind == .letter }.count, 26)
+        XCTAssertEqual(Settings.descriptors.filter { $0.kind == .letter && $0.id.count == "letter.a".count }.count, 26)
         XCTAssertEqual(Settings.descriptors.filter { $0.kind == .digit }.count, 10)
         XCTAssertEqual(Settings.descriptor(for: "letter.a")?.text, "a")
         XCTAssertEqual(Settings.descriptor(for: "digit.0")?.text, "0")
@@ -118,7 +118,28 @@ final class KeyboardKeySettingsTests: XCTestCase {
             XCTAssertEqual(Settings.identifier(forCharacter: letter), "letter." + letter)
             XCTAssertEqual(Settings.identifier(forCharacter: letter.uppercased()), "letter." + letter)
         }
-        for text in ["", "ab", "é", "e\u{301}", "👩‍💻", " ", "\n"] { XCTAssertNil(Settings.identifier(forCharacter: text)) }
+        for text in ["", "ab", "ê", "e\u{301}", "👩‍💻", " ", "\n"] { XCTAssertNil(Settings.identifier(forCharacter: text)) }
+    }
+
+    func testEveryLayoutsLettersHaveStableIdentifiersForBothCases() throws {
+        XCTAssertEqual(Settings.identifier(forCharacter: "α"), "letter.03B1")
+        XCTAssertEqual(Settings.identifier(forCharacter: "Α"), "letter.03B1")
+        XCTAssertEqual(Settings.identifier(forCharacter: "ς"), "letter.03C2")
+        XCTAssertEqual(Settings.identifier(forCharacter: "Σ"), "letter.03C3", "Σ is the capital of σ")
+        XCTAssertEqual(Settings.identifier(forCharacter: "ж"), "letter.0436")
+        XCTAssertEqual(Settings.identifier(forCharacter: "Ж"), "letter.0436")
+        XCTAssertEqual(Settings.identifier(forCharacter: "ı"), "letter.0131")
+        XCTAssertEqual(Settings.identifier(forCharacter: "İ"), "letter.i", "Turkish İ shares the i key")
+        XCTAssertEqual(Settings.identifier(forCharacter: "I"), "letter.i")
+        XCTAssertEqual(Settings.descriptor(for: "letter.00FC")?.title, "Ü")
+        XCTAssertEqual(Settings.identifier(forCharacter: ";"), "symbol.003B", "The Greek question mark shares the semicolon's settings")
+        for alphabet in KeyboardAlphabet.catalog {
+            for key in alphabet.keys where alphabet.isCasedLetter(key) {
+                let id = try XCTUnwrap(Settings.identifier(forCharacter: key), "\(alphabet.id) \(key)")
+                XCTAssertEqual(Settings.descriptor(for: id)?.kind, .letter)
+                XCTAssertTrue(id.utf8.allSatisfy { $0 < 128 })
+            }
+        }
     }
 
     func testEveryRetiredFunctionOverrideIsIgnoredWithoutLosingExactCharacterChoicesOrWriting() throws {

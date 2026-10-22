@@ -10,6 +10,7 @@ final class CatalogPreferences: ObservableObject {
     @Published private(set) var showsSymbolBar: Bool
     @Published private(set) var searchBarInsteadOfSymbols: Bool
     @Published private(set) var showsNumberRow: Bool
+    @Published private(set) var layouts: [String]
     @Published private(set) var padLayout: KeyboardPadLayout
     @Published private(set) var padSymbolMapping: KeyboardPadSymbolMapping
     private let editionSettings: UnicodeEditionSettings
@@ -23,6 +24,7 @@ final class CatalogPreferences: ObservableObject {
         showsSymbolBar = snapshot.showsSymbolBar
         searchBarInsteadOfSymbols = snapshot.searchBarInsteadOfSymbols
         showsNumberRow = snapshot.showsNumberRow
+        layouts = snapshot.layouts
         padLayout = snapshot.padLayout
         padSymbolMapping = snapshot.padSymbolMapping
     }
@@ -45,6 +47,14 @@ final class CatalogPreferences: ObservableObject {
     func selectSymbolBar(_ enabled: Bool) { edit { $0.showsSymbolBar = enabled } }
     func selectSearchBarInsteadOfSymbols(_ enabled: Bool) { edit { $0.searchBarInsteadOfSymbols = enabled } }
     func selectNumberRow(_ enabled: Bool) { edit { $0.showsNumberRow = enabled } }
+    /// The keyboard's base layouts in switching order. False when the list is
+    /// empty, too long, repeats a layout or could not be saved.
+    @discardableResult func selectLayouts(_ ids: [String]) -> Bool {
+        guard UnicodeEditionSettings.layouts(ids) == ids else { return false }
+        edit { $0.layouts = ids }
+        return layouts == ids
+    }
+    var alphabets: [KeyboardAlphabet] { layouts.compactMap(KeyboardAlphabet.alphabet(id:)) }
     /// The keyboard's optional row above the keys, as one choice.
     var topRow: KeyboardTopRow {
         guard showsSymbolBar else { return .off }
@@ -60,7 +70,7 @@ final class CatalogPreferences: ObservableObject {
     private func edit(_ change: (inout UnicodeEditionSettings.Snapshot) -> Void) {
         var value = UnicodeEditionSettings.Snapshot(edition: edition, useUnicodeFonts: useUnicodeFonts,
             showsCollapseKey: showsCollapseKey, showsSymbolBar: showsSymbolBar, searchBarInsteadOfSymbols: searchBarInsteadOfSymbols,
-            showsNumberRow: showsNumberRow, padLayout: padLayout, padSymbolMapping: padSymbolMapping)
+            showsNumberRow: showsNumberRow, layouts: layouts, padLayout: padLayout, padSymbolMapping: padSymbolMapping)
         change(&value)
         save(value)
     }
@@ -82,6 +92,7 @@ final class CatalogPreferences: ObservableObject {
         if showsSymbolBar != snapshot.showsSymbolBar { showsSymbolBar = snapshot.showsSymbolBar }
         if searchBarInsteadOfSymbols != snapshot.searchBarInsteadOfSymbols { searchBarInsteadOfSymbols = snapshot.searchBarInsteadOfSymbols }
         if showsNumberRow != snapshot.showsNumberRow { showsNumberRow = snapshot.showsNumberRow }
+        if layouts != snapshot.layouts { layouts = snapshot.layouts }
         if padLayout != snapshot.padLayout { padLayout = snapshot.padLayout }
         if padSymbolMapping != snapshot.padSymbolMapping { padSymbolMapping = snapshot.padSymbolMapping }
     }

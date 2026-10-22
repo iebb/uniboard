@@ -16,11 +16,14 @@ struct UnicodeEditionSettings {
         var showsSymbolBar = true
         var searchBarInsteadOfSymbols = false
         var showsNumberRow = true
+        /// Enabled base keyboards in switching order; the first is the default.
+        var layouts: [String] = [KeyboardAlphabet.english.id]
         var padLayout: KeyboardPadLayout = .ansiNumbers
         var padSymbolMapping: KeyboardPadSymbolMapping = .standard
     }
     static let groupIdentifier = "group.ad.neko.uniboard"
     static let maximumPayloadBytes = 512
+    static let maximumLayouts = 8
     static let filename = "unicode-edition-v1.json"
     static let shared = UnicodeEditionSettings()
 
@@ -66,24 +69,38 @@ struct UnicodeEditionSettings {
         }
         let legacyKeys: Set<String> = ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping"]
         let barKeys = legacyKeys.union(["showsSymbolBar", "searchBarInsteadOfSymbols"])
-        let modernKeys = barKeys.union(["showsNumberRow"])
+        let numberRowKeys = barKeys.union(["showsNumberRow"])
+        let modernKeys = numberRowKeys.union(["layouts"])
         guard (schema == NSNumber(value: 3) && Set(dictionary.keys) == legacyKeys)
                 || (schema == NSNumber(value: 4) && Set(dictionary.keys) == barKeys)
-                || (schema == NSNumber(value: 5) && Set(dictionary.keys) == modernKeys),
+                || (schema == NSNumber(value: 5) && Set(dictionary.keys) == numberRowKeys)
+                || (schema == NSNumber(value: 6) && Set(dictionary.keys) == modernKeys),
               let layout = dictionary["padLayout"] as? String, let pad = KeyboardPadLayout(rawValue: layout),
               let mapping = dictionary["padSymbolMapping"] as? String, let symbols = KeyboardPadSymbolMapping(rawValue: mapping) else { return Snapshot(edition: .latest) }
         var value = Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse,
             padLayout: pad, padSymbolMapping: symbols)
-        if schema == NSNumber(value: 4) || schema == NSNumber(value: 5) {
+        if schema.intValue >= 4 {
             guard let bar = Self.strictBoolean(dictionary["showsSymbolBar"]),
                   let search = Self.strictBoolean(dictionary["searchBarInsteadOfSymbols"]) else { return Snapshot(edition: .latest) }
             value.showsSymbolBar = bar; value.searchBarInsteadOfSymbols = search
         }
-        if schema == NSNumber(value: 5) {
+        if schema.intValue >= 5 {
             guard let numbers = Self.strictBoolean(dictionary["showsNumberRow"]) else { return Snapshot(edition: .latest) }
             value.showsNumberRow = numbers
         }
+        if schema.intValue >= 6 {
+            guard let ids = dictionary["layouts"] as? [String], let layouts = Self.layouts(ids) else { return Snapshot(edition: .latest) }
+            value.layouts = layouts
+        }
         return value
+    }
+
+    /// Unknown layouts, perhaps from a newer version, are skipped; at least
+    /// one known layout must remain.
+    static func layouts(_ ids: [String]) -> [String]? {
+        guard (1...maximumLayouts).contains(ids.count), Set(ids).count == ids.count else { return nil }
+        let known = ids.filter { KeyboardAlphabet.alphabet(id: $0) != nil }
+        return known.isEmpty ? nil : known
     }
 
     /// Only the containing app calls this method. A failure is reported to the
@@ -98,9 +115,10 @@ struct UnicodeEditionSettings {
     func save(_ snapshot: Snapshot) -> Bool {
         let identifier = snapshot.edition.selectionIdentifier
         guard UnicodeEdition.resolve(selectionIdentifier: identifier) == snapshot.edition,
+              Self.layouts(snapshot.layouts) == snapshot.layouts,
               let container = containerURL(), container.isFileURL,
               let data = try? JSONSerialization.data(withJSONObject: [
-                "schemaVersion": 5, "selectionIdentifier": identifier,
+                "schemaVersion": 6, "selectionIdentifier": identifier, "layouts": snapshot.layouts,
                 "useUnicodeFonts": snapshot.useUnicodeFonts, "showsCollapseKey": snapshot.showsCollapseKey,
                 "showsSymbolBar": snapshot.showsSymbolBar, "searchBarInsteadOfSymbols": snapshot.searchBarInsteadOfSymbols,
                 "showsNumberRow": snapshot.showsNumberRow,

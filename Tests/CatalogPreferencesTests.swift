@@ -25,6 +25,24 @@ final class CatalogPreferencesTests: XCTestCase {
         }
     }
 
+    func testLayoutsPersistInOrderAndRejectEmptyOrUnknownLists() throws {
+        try withDefaults { _ in
+            let storage = try SharedFile(.previous)
+            let value = CatalogPreferences(editionSettings: storage.settings)
+            XCTAssertEqual(value.layouts, ["en"]); XCTAssertEqual(value.alphabets, [.english])
+            XCTAssertTrue(value.selectLayouts(["ru", "en", "el"]))
+            XCTAssertEqual(value.alphabets.map(\.nativeName), ["Русский", "English", "Ελληνικά"])
+            XCTAssertEqual(storage.settings.loadSnapshot().layouts, ["ru", "en", "el"])
+            XCTAssertEqual(storage.settings.loadSnapshot().edition, .previous, "Layouts keep the edition")
+            for invalid in [[], ["ru", "ru"], ["en", "xx"]] { XCTAssertFalse(value.selectLayouts(invalid)) }
+            storage.failWrites = true
+            XCTAssertFalse(value.selectLayouts(["el"]))
+            XCTAssertEqual(value.layouts, ["ru", "en", "el"])
+            storage.failWrites = false
+            XCTAssertEqual(CatalogPreferences(editionSettings: storage.settings).layouts, ["ru", "en", "el"])
+        }
+    }
+
     func testPadSettingsPreserveOtherFieldsAcrossSavesRefreshesAndFailedWrites() throws {
         try withDefaults { defaults in
             let storage = try SharedFile(.previous)

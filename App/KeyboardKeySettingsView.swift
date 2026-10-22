@@ -11,15 +11,28 @@ private extension KeyboardKeySettings.Gesture {
 
 struct KeyboardKeySettingsView: View {
     @StateObject private var keys = KeyboardKeyPreferences.shared
+    @EnvironmentObject private var preferences: CatalogPreferences
     @State private var query = ""
     @State private var resetConfirmation = false
     @State private var selectedKeyID: String?
+    @State private var layoutID: String?
     private var groups: [(String, KeyboardKeySettings.Kind)] {
         [("Letters", .letter), ("Numbers", .digit), ("Symbols", .character)]
+    }
+    private var alphabet: KeyboardAlphabet {
+        layoutID.flatMap(KeyboardAlphabet.alphabet(id:)) ?? preferences.alphabets.first ?? .english
     }
     private func matches(_ descriptor: KeyboardKeySettings.Descriptor) -> Bool {
         query.isEmpty || descriptor.title.localizedCaseInsensitiveContains(query)
             || descriptor.id.localizedCaseInsensitiveContains(query)
+    }
+    /// English lists A to Z; other layouts list their letters in keyboard order.
+    private func descriptors(_ kind: KeyboardKeySettings.Kind) -> [KeyboardKeySettings.Descriptor] {
+        guard kind == .letter else { return KeyboardKeySettings.descriptors.filter { $0.kind == kind && matches($0) } }
+        let letters = alphabet == .english ? KeyboardKeySettings.descriptors.filter { $0.kind == .letter && $0.id.count == "letter.a".count }
+            : alphabet.keys.compactMap { KeyboardKeySettings.identifier(forCharacter: $0) }.compactMap(KeyboardKeySettings.descriptor(for:))
+                .filter { $0.kind == .letter }
+        return letters.filter(matches)
     }
     var body: some View {
         List {
@@ -31,8 +44,19 @@ struct KeyboardKeySettingsView: View {
                 Text("A tap always types the key itself. Each layer can hold several literal choices.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if preferences.alphabets.count > 1 {
+                Section {
+                    Picker("Layout", selection: Binding(get: { alphabet.id }, set: { layoutID = $0 })) {
+                        ForEach(preferences.alphabets) { Text($0.nativeName).tag($0.id) }
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("keySettings.layout")
+                } footer: {
+                    Text("A letter's choices apply in every layout that has that letter.")
+                }
+            }
             ForEach(groups, id: \.0) { title, kind in
-                let descriptors = KeyboardKeySettings.descriptors.filter { $0.kind == kind && matches($0) }
+                let descriptors = descriptors(kind)
                 if !descriptors.isEmpty {
                     Section(title) {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 46), spacing: 8)], spacing: 8) {

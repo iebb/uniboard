@@ -23,17 +23,17 @@ enum KeyboardLayoutPolicy {
         } else { compact = compactVertical }
         let key = KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: viewWidth - 16, isPad: isPad)
         let spacing: CGFloat = isPad && viewWidth.isFinite && viewWidth >= 666 ? 6 : 4
-        let chrome: CGFloat = 18
-        let sideResults = searchUsesSideResults(availableWidth: viewWidth - 16, isPad: isPad, isCompact: compact)
-        // Search owns four full-height input rows, its toolbar and footer.
-        // Portrait adds one horizontal result row instead of shrinking keys.
+        // The optional text preview is one more row with a gap below it,
+        // while typing and searching but not while browsing.
+        let preview = showsTextPreview && !browsing
+        let chrome: CGFloat = preview ? 22 : 18
+        // Search owns four full-height input rows, a result row above them,
+        // its toolbar and footer, instead of shrinking keys.
         // Without the number row, typing is one row and one gap shorter.
         let typingRows: CGFloat = showsNumberRow ? 5 : 4
         // Browsing Unicode without keys shows two more rows of characters.
-        // The optional text preview is one more row while typing.
-        let rows: CGFloat = searching ? (sideResults ? 6 : 7) : (showsSymbolBar ? typingRows + 1 : typingRows) + (browsing ? 2 : 0)
-            + (showsTextPreview && !browsing ? 1 : 0)
-        let gaps: CGFloat = searching && !sideResults ? 4 : searching || showsNumberRow ? 3 : 2
+        let rows: CGFloat = (searching ? 7 : (showsSymbolBar ? typingRows + 1 : typingRows) + (browsing ? 2 : 0)) + (preview ? 1 : 0)
+        let gaps: CGFloat = searching ? 4 : showsNumberRow ? 3 : 2
         let rowSpacing: CGFloat = searching ? 4 : spacing
         let target = key * rows + rowSpacing * gaps + chrome
         // Keep all rows and the footer equal if a host supplies a short scene.
@@ -42,10 +42,6 @@ enum KeyboardLayoutPolicy {
         let height = min(target, sceneCap ?? target)
         let actualKey = max(1, (height - chrome - rowSpacing * gaps) / rows)
         return Metrics(isCompactLayout: compact, height: height, typingKeyHeight: min(key, actualKey))
-    }
-
-    static func searchUsesSideResults(availableWidth: CGFloat, isPad: Bool, isCompact: Bool) -> Bool {
-        isCompact || (isPad && availableWidth.isFinite && availableWidth >= 520)
     }
 }
 

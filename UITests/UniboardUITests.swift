@@ -1112,6 +1112,22 @@ final class UniboardUITests: XCTestCase {
         _ = reopened
     }
 
+    func testUnicodeKeyOpensSearchUnderTheTextPreview() throws {
+        try requirePhoneKeyboardIntegration()
+        setAppTextPreview(true)
+        addTeardownBlock { @MainActor [self] in restoreEnglishKeyboard(); setAppTextPreview(false) }
+        _ = openSystemKeyboardHost(initialText: "ab", unicodeBrowse: false)
+        let toggle = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        toggle.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["keyboard.openTyping"].firstMatch.waitUntilValueEquals("query"),
+                      "U opens search with its keys, not the browse grid")
+        XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitForExistence(timeout: 5))
+        let preview = app.descendants(matching: .any)["keyboard.textPreview"].firstMatch
+        XCTAssertTrue(preview.exists, "The text preview stays above search")
+        attachScreenshot("U opens search under the text preview")
+    }
+
     func testSystemKeyboardWithoutNumberRowKeepsDigitsOnThe123PageAndInSearch() throws {
         try requirePhoneKeyboardIntegration()
         resetAppKey("letter.w")
@@ -3161,6 +3177,15 @@ final class UniboardUITests: XCTestCase {
         let value = enabled ? "1" : "0"
         if numbers.value as? String != value { tapSwitch(numbers) }
         XCTAssertTrue(numbers.waitUntilValueEquals(value))
+    }
+
+    private func setAppTextPreview(_ enabled: Bool) {
+        openAppSettings()
+        let preview = app.switches["showKeyboardTextPreview"].firstMatch
+        revealByScrolling(preview, in: app)
+        let value = enabled ? "1" : "0"
+        if preview.value as? String != value { tapSwitch(preview) }
+        XCTAssertTrue(preview.waitUntilValueEquals(value))
     }
 
     private func setAppCollapseKey(_ enabled: Bool) {

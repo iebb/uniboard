@@ -14,18 +14,14 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
                     for bar in [false, true] {
                         let metrics = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1400,
                             isPad: pad, compactVertical: compact, showsSymbolBar: bar, searching: true)
-                        let side = KeyboardLayoutPolicy.searchUsesSideResults(availableWidth: width - 16, isPad: pad, isCompact: metrics.isCompactLayout)
                         let key = KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: width - 16, isPad: pad)
                         XCTAssertEqual(metrics.typingKeyHeight, key, accuracy: 0.000001)
-                        XCTAssertEqual(metrics.height, key * (side ? 6 : 7) + (side ? 30 : 34), accuracy: 0.000001)
+                        XCTAssertEqual(metrics.height, key * 7 + 34, accuracy: 0.000001, "Results stay in a row above the keys")
                     }
                 }
             }
         }
         for width: CGFloat in [.nan, .infinity, -.infinity, -1, 0, 519, 520] {
-            XCTAssertEqual(KeyboardLayoutPolicy.searchUsesSideResults(availableWidth: width, isPad: true, isCompact: false), width == 520)
-            XCTAssertFalse(KeyboardLayoutPolicy.searchUsesSideResults(availableWidth: width, isPad: false, isCompact: false))
-            XCTAssertTrue(KeyboardLayoutPolicy.searchUsesSideResults(availableWidth: width, isPad: false, isCompact: true))
             for scene: CGFloat in [.nan, .infinity, -.infinity, -1, 0, 10, 200] {
                 let result = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: scene,
                     isPad: true, compactVertical: false, showsSymbolBar: false, searching: true)
@@ -56,12 +52,15 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
                     XCTAssertEqual(browsing.typingKeyHeight, key, accuracy: 0.000001)
                     let preview = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
                         isPad: pad, compactVertical: false, showsSymbolBar: bar, showsTextPreview: true)
-                    XCTAssertEqual(preview.height - result.height, key, accuracy: 0.000001, "The text preview is one row")
+                    XCTAssertEqual(preview.height - result.height, key + 4, accuracy: 0.000001, "The text preview is one row and a gap")
                     let previewSearch = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
                         isPad: pad, compactVertical: false, showsSymbolBar: bar, searching: true, showsTextPreview: true)
                     let search = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
                         isPad: pad, compactVertical: false, showsSymbolBar: bar, searching: true)
-                    XCTAssertEqual(previewSearch.height, search.height, accuracy: 0.000001, "Search hides the preview")
+                    XCTAssertEqual(previewSearch.height - search.height, key + 4, accuracy: 0.000001, "Search keeps the preview")
+                    let previewBrowsing = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                        isPad: pad, compactVertical: false, showsSymbolBar: bar, browsing: true, showsTextPreview: true)
+                    XCTAssertEqual(previewBrowsing.height, browsing.height, accuracy: 0.000001, "Browsing hides the preview")
                 }
             }
         }

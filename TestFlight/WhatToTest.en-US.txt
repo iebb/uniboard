@@ -13,7 +13,7 @@ TEXT AND EMOJI FORMS
 Characters with both presentations (☃, ⌚) show as text in charts and side by side in details, with a copy button each. The picker adds each form separately. In keyboard search they appear twice, once per form; each inserts its exact sequence, and holding a page key offers the other form.
 
 KEYBOARD UNICODE
-Result and browse keys use rounded keycaps with the character's name in small text, no U+ code. Browsing without keys makes the keyboard two rows taller; search and typing keep their height.
+U opens search with its keys directly. Results stay in a row above the keys, also in landscape. With Text Preview on, the preview row stays above search. Result and browse keys use rounded keycaps with the character's name in small text, no U+ code. Browsing without keys makes the keyboard two rows taller; search and typing keep their height.
 
 EXPLORE
 Tiles are 2 to 7 per row: pinch to change. Tapping a block's name in the chart opens that block, with a block navigator at its top.

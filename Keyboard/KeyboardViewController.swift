@@ -929,12 +929,6 @@ private final class KeyboardModel: ObservableObject {
         catalogLoaded = true
         refreshCatalog()
     }
-    func openUnicode() {
-        ensureCatalogLoaded()
-        symbolPagesToolbarVisible = nil
-        panel = .unicode
-        presentationChanged?()
-    }
     @discardableResult
     func toggleFavorites() -> Bool {
         symbolBoardActionError = nil
@@ -955,7 +949,7 @@ private final class KeyboardModel: ObservableObject {
             presentationChanged?()
             return
         }
-        if showsUnicode { openTyping() } else { openUnicode() }
+        if showsUnicode { openTyping() } else { beginSearch() }
     }
     func openFavorites() {
         let toolbarWasVisible = showsUnicodeToolbar
@@ -1433,8 +1427,9 @@ private struct UnicodeKeyboardView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
-                if model.showsTextPreview && !model.showsUnicode {
+                if model.showsTextPreview && (!model.showsUnicode || model.isSearching) {
                     textPreviewRow.frame(height: headerHeight)
+                    Color.clear.frame(height: 4).accessibilityHidden(true)
                 }
                 // Hidden native controls must leave the remote AX hierarchy.
                 // The model restores the exact query and caret when shown.
@@ -1543,7 +1538,7 @@ private struct UnicodeKeyboardView: View {
     private var panelButton: some View {
         Button {
             if model.showsUnicode { model.openTyping() }
-            else { model.openUnicode() }
+            else { model.beginSearch() }
         } label: {
             HStack(spacing: 4) {
                 if model.showsUnicode { Text("ABC").font(.system(size: 12, weight: .semibold)) }
@@ -1638,26 +1633,14 @@ private struct UnicodeKeyboardView: View {
         GeometryReader { geometry in
             let width = geometry.size.width.isFinite ? max(0, geometry.size.width) : 0
             let height = geometry.size.height.isFinite ? max(0, geometry.size.height) : 0
-            if KeyboardLayoutPolicy.searchUsesSideResults(availableWidth: width, isPad: model.isPadLayout, isCompact: model.isCompactLayout) {
-                let available = max(2, width - 12)
-                let resultsWidth = available * 0.35
-                HStack(spacing: 12) {
-                    searchResults
-                        .frame(width: resultsWidth, height: height)
-                    queryKeys(rowHeight: model.typingKeyHeight)
-                        .frame(width: available - resultsWidth, height: height)
-                }
-                .frame(width: width, height: height)
-            } else {
-                let queryHeight = model.typingKeyHeight * 4 + 12
-                VStack(spacing: 4) {
-                    searchResultStrip
-                        .frame(width: width, height: max(0, height - queryHeight - 4))
-                    queryKeys(rowHeight: model.typingKeyHeight)
-                        .frame(width: width, height: queryHeight)
-                }
-                .frame(width: width, height: height)
+            let queryHeight = model.typingKeyHeight * 4 + 12
+            VStack(spacing: 4) {
+                searchResultStrip
+                    .frame(width: width, height: max(0, height - queryHeight - 4))
+                queryKeys(rowHeight: model.typingKeyHeight)
+                    .frame(width: width, height: queryHeight)
             }
+            .frame(width: width, height: height)
         }
         .clipped()
     }

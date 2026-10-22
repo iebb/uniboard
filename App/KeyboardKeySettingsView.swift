@@ -269,7 +269,7 @@ private struct KeyboardGestureSettingsView: View {
     }
 }
 
-private struct KeyboardKeyUnicodePicker: View {
+struct KeyboardKeyUnicodePicker: View {
     let select: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var preferences: CatalogPreferences
@@ -279,7 +279,7 @@ private struct KeyboardKeyUnicodePicker: View {
         NavigationStack {
             List {
                 if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Search a name, description, block or code point. You can also paste a complete sequence in the choice editor.")
+                    Text("Search a name, description, block or code point. To use a whole sequence, type or paste it instead.")
                         .foregroundStyle(.secondary)
                 } else if search.searching { ProgressView() }
                 else if search.results.isEmpty { Text("No characters found").foregroundStyle(.secondary) }
@@ -293,8 +293,11 @@ private struct KeyboardKeyUnicodePicker: View {
                                 Text(character.name).foregroundStyle(.primary)
                                 Text(character.codePointLabel).font(.caption.monospaced()).foregroundStyle(.secondary)
                             }
+                            Spacer(minLength: 0)
                         }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .navigationTitle("Choose a character").navigationBarTitleDisplayMode(.inline)

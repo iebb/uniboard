@@ -59,7 +59,7 @@ struct SetupView: View {
             } header: {
                 Text("Set Up Uniboard")
             } footer: {
-                Text("Saved and the keyboard’s Favorites page share your favorites on this device. Allow Full Access to sync saves and removals made in the keyboard back to the app, and for light haptics on supported iPhones. Without it, app favorites still reach the keyboard. Custom pages and Recently Used stay separate.")
+                Text("The keyboard shows the pages you set up in Pages, including Favorites. Allow Full Access to sync favorites saved in the keyboard back to the app, and for light haptics on supported iPhones. Without it, pages and app favorites still reach the keyboard. Recently Used stays separate.")
             }
 
             Section {

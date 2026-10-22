@@ -275,7 +275,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(favorite.waitUntilLabelEquals("Remove from favorites"))
         app.buttons["Done"].tap()
 
-        appTab("Saved").tap()
+        openAppFavorites()
         let favorites = app.otherElements["savedFavorites"].firstMatch
         XCTAssertTrue(favorites.waitForExistence(timeout: 5))
         let savedSnowman = favorites.buttons["character-U+2603"].firstMatch
@@ -315,7 +315,7 @@ final class UniboardUITests: XCTestCase {
         // Edition survives ordinary test launches, so establish this fixture
         // through its real Settings UI rather than resetting shared storage.
         selectAppEdition("latest")
-        for tab in ["Explore", "Emoji", "Blocks", "Saved"] {
+        for tab in ["Explore", "Emoji", "Blocks", "Pages"] {
             appTab(tab).tap()
             XCTAssertFalse(app.descendants(matching: .any)["unicodeEdition"].firstMatch.exists,
                            "Only Settings may expose a catalog edition selector")
@@ -1242,6 +1242,74 @@ final class UniboardUITests: XCTestCase {
         }
     }
 
+    func testPagesAreConfiguredInTheAppWithKeysVariantsAndTheStarPage() {
+        deleteAppPages(named: "qaone")
+        addTeardownBlock { @MainActor [self] in deleteAppPages(named: "qaone") }
+        let page = createAppPage("qaone")
+        addAppPageKey(query: "snowman", codepoint: "U+2603")
+        let key = app.buttons["page.key.0"].firstMatch
+        XCTAssertTrue(key.waitForExistence(timeout: 5))
+        XCTAssertTrue(key.label.contains("U+2603"))
+        key.tap()
+        app.buttons["variants.addUnicode"].tap()
+        pickAppUnicode(query: "comet", codepoint: "U+2604")
+        XCTAssertTrue(app.staticTexts["variants.item.0"].waitForExistence(timeout: 5))
+        attachScreenshot("A page key's variants are edited in the app")
+        app.navigationBars.buttons.firstMatch.tap()
+        let star = app.switches["page.star"].firstMatch
+        XCTAssertTrue(star.waitForExistence(timeout: 5))
+        tapSwitch(star)
+        XCTAssertTrue(star.waitUntilValueEquals("1"))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(page.waitForExistence(timeout: 5))
+        XCTAssertTrue(page.label.contains("Opens with ★"), page.label)
+        attachScreenshot("Pages lists Favorites, Symbols and custom pages in keyboard order")
+        deleteAppPage(page)
+        let favorites = app.buttons["pages.page.migrated-favorites"].firstMatch
+        XCTAssertTrue(favorites.label.contains("Opens with ★"), "Deleting the Star page returns ★ to Favorites")
+    }
+
+    func testSystemKeyboardListsAppConfiguredPagesAndKeepsTheStarPage() throws {
+        try requirePhoneKeyboardIntegration()
+        deleteAppPages(named: "qaone")
+        let page = createAppPage("qaone")
+        addAppPageKey(query: "snowman", codepoint: "U+2603")
+        app.buttons["page.key.0"].firstMatch.tap()
+        app.buttons["variants.addUnicode"].tap()
+        pickAppUnicode(query: "comet", codepoint: "U+2604")
+        app.navigationBars.buttons.firstMatch.tap()
+        let star = app.switches["page.star"].firstMatch
+        tapSwitch(star)
+        XCTAssertTrue(star.waitUntilValueEquals("1"))
+        addTeardownBlock { @MainActor [self] in deleteAppPages(named: "qaone") }
+        _ = page
+        let context = "Pages come from the app."
+        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
+        let starKey = app.buttons["keyboard.openFavorites"].firstMatch
+        starKey.tap()
+        XCTAssertTrue(app.buttons["qaone"].firstMatch.waitUntilSelected(), "★ opens the page the app marked")
+        let snowman = symbolBoardKey("☃")
+        XCTAssertTrue(snowman.waitForExistence(timeout: 5))
+        chooseHeldKeyboardOption(snowman, optionCount: 2, selectedIndex: 1)
+        XCTAssertTrue(input.waitUntilValueEquals(context + "☄"), "Holding a page key offers its app-configured variants")
+        starKey.press(forDuration: 1)
+        let list = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        for id in ["stock-symbols", "migrated-favorites"] {
+            XCTAssertTrue(app.buttons["keyboard.boards.page.\(id)"].firstMatch.exists, id)
+        }
+        XCTAssertFalse(app.buttons["keyboard.boards.create"].firstMatch.exists, "The keyboard only lists pages")
+        attachScreenshot("The keyboard's page list opens pages configured in the app")
+        app.buttons["keyboard.boards.page.migrated-favorites"].firstMatch.tap()
+        XCTAssertTrue(list.waitUntilAbsent())
+        XCTAssertTrue(app.buttons["Favorites"].firstMatch.waitUntilSelected())
+        starKey.tap()
+        assertHostTypingPanel()
+        starKey.tap()
+        XCTAssertTrue(app.buttons["qaone"].firstMatch.waitUntilSelected(), "Opening another page keeps the Star page")
+        XCTAssertEqual(input.value as? String, context + "☄")
+    }
+
     func testSystemKeyboardFavoritesKeyPreservesQueryCaretAndExactHost() throws {
         try requirePhoneKeyboardIntegration()
         configureTopBar(symbols: true, search: true)
@@ -1252,8 +1320,7 @@ final class UniboardUITests: XCTestCase {
             restoreEnglishKeyboard()
             configureTopBar(symbols: true, search: false)
         }
-        selectSymbolBoard("migrated-favorites", input: input, context: context, returnToTyping: true,
-                          preferredStarBoardID: "migrated-favorites")
+        selectSymbolBoard("migrated-favorites", input: input, context: context, returnToTyping: true)
         let favoriteKey = app.buttons["keyboard.openFavorites"].firstMatch
         let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
         let favorites = app.buttons["Favorites"].firstMatch
@@ -1292,7 +1359,7 @@ final class UniboardUITests: XCTestCase {
         let snowman = app.buttons["keyboard.character.U+2603"].firstMatch
         XCTAssertTrue(snowman.waitForExistence(timeout: 10))
         snowman.press(forDuration: 1)
-        saveInspectedKeyToBoard("migrated-favorites", input: input, context: context)
+        saveInspectedTextToFavorites(input: input, context: context)
         XCTAssertEqual(input.value as? String, context, "Inspection and saving must not insert a character")
         app.buttons["keyboard.properties.close"].tap()
         enterKeyboardQuery("cat")
@@ -1445,7 +1512,7 @@ final class UniboardUITests: XCTestCase {
         favorite.tap()
         XCTAssertTrue(favorite.waitUntilLabelEquals("Remove from favorites"))
         app.buttons["Done"].tap()
-        appTab("Saved").tap()
+        openAppFavorites()
         XCTAssertTrue(app.otherElements["savedFavorites"].buttons["character-U+2603"].firstMatch.waitForExistence(timeout: 5))
         func reopenHost() -> XCUIElement {
             appTab("Settings").tap()
@@ -1465,7 +1532,7 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("App Saved favorite appears in the real keyboard with Full Access off")
         restoreEnglishKeyboard()
         app.navigationBars["Try Uniboard"].buttons["Settings"].tap()
-        appTab("Saved").tap()
+        openAppFavorites()
         app.otherElements["savedFavorites"].buttons["character-U+2603"].firstMatch.tap()
         revealByScrolling(favorite, in: app); favorite.tap()
         XCTAssertTrue(favorite.waitUntilLabelEquals("Add to favorites"))
@@ -1481,7 +1548,7 @@ final class UniboardUITests: XCTestCase {
         saveKeyboardFavoriteFixture(section: "symbols", query: "u+2665", identifier: "keyboard.character.U+2665", input: input, context: "")
         restoreEnglishKeyboard()
         app.navigationBars["Try Uniboard"].buttons["Settings"].tap()
-        appTab("Saved").tap()
+        openAppFavorites()
         XCTAssertTrue(app.otherElements["savedFavorites"].buttons["character-U+2665"].firstMatch.waitForExistence(timeout: 5),
                       "Keyboard save must reach Saved when Full Access permits shared writes")
         attachScreenshot("Keyboard favorite returns to companion Saved with Full Access on")
@@ -1514,7 +1581,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(item.waitForExistence(timeout: 10))
         XCTAssertTrue(item.isHittable)
         item.press(forDuration: 1)
-        saveInspectedKeyToBoard("migrated-favorites", input: input, context: context)
+        saveInspectedTextToFavorites(input: input, context: context)
         XCTAssertEqual(input.value as? String, context)
         app.buttons["keyboard.properties.close"].tap()
         let abc = app.descendants(matching: .any)["keyboard.openTyping"].firstMatch
@@ -1524,17 +1591,13 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(input.value as? String, context)
     }
 
-    private func selectSymbolBoard(_ boardID: String, input: XCUIElement, context: String,
-                                   returnToTyping: Bool = false, preferredStarBoardID: String? = nil) {
+    private func selectSymbolBoard(_ boardID: String, input: XCUIElement, context: String, returnToTyping: Bool = false) {
         let footer = app.buttons["keyboard.openFavorites"].firstMatch
         XCTAssertTrue(footer.waitForExistence(timeout: 5))
         footer.press(forDuration: 1)
-        let manager = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
-        XCTAssertTrue(manager.waitForExistence(timeout: 5))
-        if let preferredStarBoardID {
-            setPreferredSymbolBoardInManager(preferredStarBoardID, input: input, context: context)
-        }
-        let choice = app.buttons["keyboard.boards.select.\(boardID)"].firstMatch
+        let list = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        let choice = app.buttons["keyboard.boards.page.\(boardID)"].firstMatch
         let scroll = app.scrollViews["keyboard.boards.scroll"].firstMatch
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
         for _ in 0..<8 {
@@ -1544,8 +1607,8 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(choice.exists && usableHeightFrame(choice.frame) && scroll.frame.intersection(app.frame).contains(choice.frame))
         XCTAssertTrue(choice.isHittable)
         choice.tap()
-        XCTAssertTrue(manager.waitUntilAbsent())
-        XCTAssertEqual(input.value as? String, context, "Selecting a board must not type into the host")
+        XCTAssertTrue(list.waitUntilAbsent())
+        XCTAssertEqual(input.value as? String, context, "Opening a page must not type into the host")
         if returnToTyping {
             XCTAssertTrue(footer.waitUntilValueEquals("favorites"))
             footer.tap()
@@ -1553,104 +1616,12 @@ final class UniboardUITests: XCTestCase {
         }
     }
 
-    private func setPreferredSymbolBoardInManager(_ boardID: String, input: XCUIElement, context: String) {
-        let selected = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@",
-            "keyboard.boards.select.", "Selected")).firstMatch
-        XCTAssertTrue(selected.waitForExistence(timeout: 5))
-        let previousSelection = selected.identifier
-        let target = app.buttons["keyboard.boards.makeDefault.\(boardID)"].firstMatch
-        // The current default is deliberately disabled; reveal its selectable
-        // board row, then require the actual action's geometry before tapping.
-        revealSymbolBoardControl(app.buttons["keyboard.boards.select.\(boardID)"].firstMatch)
-        let viewport = app.scrollViews["keyboard.boards.scroll"].firstMatch.frame.intersection(app.frame)
-        XCTAssertTrue(target.exists && usableHeightFrame(target.frame) && viewport.contains(target.frame))
-        if target.value as? String != "Star default" {
-            XCTAssertTrue(target.isEnabled && target.isHittable)
-            target.tap()
-        }
-        XCTAssertTrue(target.waitUntilValueEquals("Star default"))
-        XCTAssertFalse(target.isEnabled, "The chosen Star default is visibly distinct from a temporary selection")
-        XCTAssertTrue(app.buttons[previousSelection].firstMatch.waitUntilValueEquals("Selected"),
-                      "Changing the Star default must leave the current board selected")
-        XCTAssertEqual(input.value as? String, context, "Changing the Star default must not insert into the host")
-    }
-
-    func testSystemKeyboardPreferredStarBoardSurvivesTemporaryChoiceRelaunchAndDeletion() throws {
-        try requirePhoneKeyboardIntegration()
-        let context = "Star preference preserves this host."
-        var input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
-        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
-        selectSymbolBoard("migrated-favorites", input: input, context: context,
-                          preferredStarBoardID: "migrated-favorites")
-        let star = app.buttons["keyboard.openFavorites"].firstMatch
-        star.press(forDuration: 1)
-        assertSymbolBoardOverlay(input: input, context: context)
-        app.buttons["keyboard.boards.create"].tap()
-        typeSymbolBoardLocalPad("starpref")
-        revealSymbolBoardControl(app.buttons["keyboard.boards.pad.save"].firstMatch)
-        app.buttons["keyboard.boards.pad.save"].tap()
-        let selected = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@",
-            "keyboard.boards.select.", "Selected")).firstMatch
-        XCTAssertTrue(selected.waitForExistence(timeout: 5))
-        let boardID = String(selected.identifier.dropFirst("keyboard.boards.select.".count))
-        XCTAssertFalse(["stock-symbols", "migrated-favorites"].contains(boardID))
-        setPreferredSymbolBoardInManager(boardID, input: input, context: context)
-        let stock = app.buttons["keyboard.boards.select.stock-symbols"].firstMatch
-        revealSymbolBoardControl(stock)
-        stock.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch.waitUntilAbsent())
-        XCTAssertTrue(app.buttons["Symbols"].firstMatch.waitUntilSelected())
-        XCTAssertEqual(input.value as? String, context)
-        star.tap()
-        assertHostTypingPanel()
-        star.tap()
-        XCTAssertTrue(app.buttons["starpref"].firstMatch.waitUntilSelected(),
-                      "A temporary stock choice cannot replace the configured Star target")
-        XCTAssertEqual(input.value as? String, context)
-        attachScreenshot("The Star default and temporary active board are independent choices")
-
-        // An ordinary receiving-app relaunch must keep the saved Star choice.
-        app.terminate()
-        app.launchArguments = []
-        app.launch()
-        input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
-        star.tap()
-        XCTAssertTrue(app.buttons["starpref"].firstMatch.waitUntilSelected())
-        star.press(forDuration: 1)
-        assertSymbolBoardOverlay(input: input, context: context)
-        revealSymbolBoardControl(app.buttons["keyboard.boards.select.\(boardID)"].firstMatch)
-        XCTAssertTrue(app.buttons["keyboard.boards.makeDefault.\(boardID)"].firstMatch.waitUntilValueEquals("Star default"))
-        let edit = app.buttons["keyboard.boards.edit.\(boardID)"].firstMatch
-        revealSymbolBoardControl(edit)
-        edit.tap()
-        let remove = app.buttons["keyboard.boards.delete"].firstMatch
-        revealSymbolBoardControl(remove)
-        remove.tap()
-        XCTAssertTrue(app.buttons["keyboard.boards.select.\(boardID)"].firstMatch.waitUntilAbsent())
-        let fallback = app.buttons["keyboard.boards.makeDefault.migrated-favorites"].firstMatch
-        revealSymbolBoardControl(app.buttons["keyboard.boards.select.migrated-favorites"].firstMatch)
-        XCTAssertTrue(fallback.waitUntilValueEquals("Star default"))
-        XCTAssertEqual(input.value as? String, context)
-        app.buttons["keyboard.boards.close"].tap()
-        star.tap()
-        assertHostTypingPanel()
-        star.tap()
-        XCTAssertTrue(app.buttons["Favorites"].firstMatch.waitUntilSelected(),
-                      "Deleting the configured board must restore Favorites as the Star target")
-        XCTAssertEqual(input.value as? String, context)
-        attachScreenshot("Deleting the preferred board restores the Favorites Star default")
-    }
-
-    private func saveInspectedKeyToBoard(_ boardID: String, input: XCUIElement, context: String) {
+    private func saveInspectedTextToFavorites(input: XCUIElement, context: String) {
         let save = app.buttons["keyboard.properties.favorite"].firstMatch
         XCTAssertTrue(save.waitForExistence(timeout: 5))
-        save.tap()
-        let choice = app.buttons["keyboard.boards.save.\(boardID)"].firstMatch
-        XCTAssertTrue(choice.waitForExistence(timeout: 5))
-        XCTAssertTrue(choice.isHittable)
-        choice.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["keyboard.boards.saveTarget"].firstMatch.waitUntilAbsent())
-        XCTAssertEqual(input.value as? String, context, "The save target chooser never inserts the selected Unicode text")
+        if save.value as? String != "saved" { save.tap() }
+        XCTAssertTrue(save.waitUntilValueEquals("saved"))
+        XCTAssertEqual(input.value as? String, context, "Saving never inserts the inspected Unicode text")
     }
 
     private func swipeSymbolPage(left: Bool, file: StaticString = #filePath, line: UInt = #line) {
@@ -1685,19 +1656,19 @@ final class UniboardUITests: XCTestCase {
     private func inspectSymbolBoardKey(_ key: XCUIElement, optionCount: Int,
                                        input: XCUIElement, context: String) {
         chooseHeldKeyboardOption(key, optionCount: optionCount, selectedIndex: optionCount,
-                                 extraActions: 2)
+                                 extraActions: 1)
         XCTAssertTrue(app.buttons["keyboard.properties.close"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(input.value as? String, context, "Selecting Inspect from a held key must never insert its original or variants")
     }
 
     private func chooseHeldKeyboardOption(_ key: XCUIElement, optionCount: Int, selectedIndex: Int,
-                                          extraActions: Int = 2) {
+                                          extraActions: Int = 1) {
         XCTAssertTrue(key.waitForExistence(timeout: 5))
         guard let root = measuredKeyboardSurfaceFrame(), usableHeightFrame(key.frame), app.frame.contains(key.frame) else {
             XCTFail("A hold-and-slide needs the actual visible key and keyboard root"); return
         }
-        // The native popup has original/variants then Inspect and Edit. Choose
-        // its documented Inspect cell with one continuous real held gesture.
+        // The native popup has original/variants then Inspect. Choose a cell
+        // with one continuous real held gesture.
         let count = optionCount + extraActions
         XCTAssertTrue((0..<count).contains(selectedIndex))
         let columns = min(count, max(1, Int(((root.width - 8) / 42).rounded(.down))))
@@ -1873,239 +1844,6 @@ final class UniboardUITests: XCTestCase {
         star.tap(); assertHostTypingPanel()
     }
 
-    func testSystemKeyboardSymbolPagesCreateSwipeAndDeleteWithToolbarHidden() throws {
-        try requirePhoneKeyboardIntegration()
-        configureTopBar(symbols: true, search: false)
-        let context = "Pages preserve this host."
-        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
-        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
-        let star = app.buttons["keyboard.openFavorites"].firstMatch
-        let toggle = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch
-        XCTAssertTrue(toggle.waitUntilValueEquals("off"))
-        star.press(forDuration: 1)
-        assertSymbolBoardOverlay(input: input, context: context)
-        var created: [String] = []
-        for name in ["qaone", "qatwo"] {
-            let create = app.buttons["keyboard.boards.create"].firstMatch
-            tapSymbolBoardControl(create)
-            let add = app.buttons["keyboard.boards.pad.save"].firstMatch
-            XCTAssertTrue(add.waitForExistence(timeout: 5)); XCTAssertFalse(add.isEnabled)
-            let entryHierarchy = XCTAttachment(string: app.debugDescription)
-            entryHierarchy.name = "New page keyboard and local letter control identities"
-            entryHierarchy.lifetime = .keepAlways; self.add(entryHierarchy)
-            assertSymbolBoardOverlay(input: input, context: context)
-            typeSymbolBoardLocalPad(name)
-            XCTAssertTrue(add.isEnabled)
-            assertSymbolBoardOverlay(input: input, context: context)
-            attachScreenshot("New page has a contained name field, keycaps and Add action")
-            tapSymbolBoardControl(add)
-            let selected = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@", "keyboard.boards.select.", "Selected")).firstMatch
-            XCTAssertTrue(selected.waitForExistence(timeout: 5))
-            created.append(String(selected.identifier.dropFirst("keyboard.boards.select.".count)))
-        }
-        let lastCreated = try XCTUnwrap(created.last)
-        let later = app.buttons["keyboard.boards.later.\(lastCreated)"].firstMatch
-        revealSymbolBoardControl(later)
-        XCTAssertFalse(later.isEnabled, "The final page cannot move past the end")
-        tapSymbolBoardControl(app.buttons["keyboard.boards.earlier.\(lastCreated)"].firstMatch)
-        XCTAssertTrue(app.buttons["keyboard.boards.select.\(lastCreated)"].firstMatch.waitUntilValueEquals("Selected"),
-                      "Reordering must keep the selected page")
-        XCTAssertTrue(later.isEnabled, "Moving earlier makes the reverse action available")
-        let firstEarlier = app.buttons["keyboard.boards.earlier.stock-symbols"].firstMatch
-        revealSymbolBoardControl(firstEarlier)
-        XCTAssertFalse(firstEarlier.isEnabled, "The first page cannot move before the beginning")
-        let ids = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "keyboard.boards.select."))
-            .allElementsBoundByAccessibilityElement.map { String($0.identifier.dropFirst("keyboard.boards.select.".count)) }
-        XCTAssertGreaterThanOrEqual(ids.count, 4)
-        XCTAssertLessThan(try XCTUnwrap(ids.firstIndex(of: lastCreated)), try XCTUnwrap(ids.firstIndex(of: created[0])),
-                          "The page list adopts the reordered sequence")
-        let first = app.buttons["keyboard.boards.select.\(ids[0])"].firstMatch
-        tapSymbolBoardControl(first)
-        XCTAssertTrue(waitForSymbolPage(ids[0]))
-        XCTAssertTrue(toggle.waitUntilValueEquals("off"), "Opening or editing pages must preserve U-off")
-        XCTAssertFalse(app.descendants(matching: .any)["keyboard.search"].firstMatch.exists)
-        for id in Array(ids.dropFirst()) + ["recent"] {
-            swipeSymbolPage(left: true)
-            XCTAssertTrue(waitForSymbolPage(id), "Each horizontal gesture advances exactly one page")
-            XCTAssertTrue(toggle.waitUntilValueEquals("off"))
-            XCTAssertEqual(input.value as? String, context, "Swiping cancels key presses instead of inserting")
-        }
-        swipeSymbolPage(left: true)
-        XCTAssertTrue(waitForSymbolPage("recent"), "The last page does not wrap or lose selection")
-        swipeSymbolPage(left: false)
-        XCTAssertTrue(waitForSymbolPage(ids.last!))
-        attachScreenshot("All saved pages and Recent are reachable with one-page horizontal swipes")
-        for id in created {
-            star.press(forDuration: 1)
-            let edit = app.buttons["keyboard.boards.edit.\(id)"].firstMatch
-            tapSymbolBoardControl(edit)
-            let remove = app.buttons["keyboard.boards.delete"].firstMatch
-            tapSymbolBoardControl(remove)
-            XCTAssertTrue(app.buttons["keyboard.boards.select.\(id)"].firstMatch.waitUntilAbsent())
-            tapSymbolBoardControl(app.buttons["keyboard.boards.close"].firstMatch)
-            XCTAssertTrue(toggle.waitUntilValueEquals("off"))
-        }
-        star.tap()
-        assertHostTypingPanel()
-        XCTAssertTrue(toggle.waitUntilValueEquals("off"))
-        XCTAssertEqual(input.value as? String, context)
-    }
-
-    func testSystemKeyboardSymbolBoardsPreserveExactVariantsAndLocalConfiguration() throws {
-        try requirePhoneKeyboardIntegration()
-        configureTopBar(symbols: true, search: false)
-        let context = "Symbol boards preserve this host."
-        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
-        defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
-        selectSymbolBoard("stock-symbols", input: input, context: context, returnToTyping: true)
-
-
-        let first = symbolBoardKey("!", typing: true)
-        XCTAssertTrue(first.waitForExistence(timeout: 5))
-        let stripMatches = app.scrollViews.matching(identifier: "keyboard.typing.favorites")
-        let strip = stripMatches.firstMatch
-        XCTAssertTrue(strip.waitForExistence(timeout: 5))
-        XCTAssertEqual(stripMatches.count, 1, "The inline board needs one stable scroll viewport, independent of its lazy keys")
-        let last = symbolBoardKey("|", typing: true)
-        var dragCount = 0
-        for _ in 0..<8 {
-            if last.exists, usableHeightFrame(last.frame), strip.frame.intersection(app.frame).contains(last.frame), last.isHittable { break }
-            strip.swipeLeft(); dragCount += 1
-            XCTAssertEqual(input.value as? String, context, "Horizontal scrolling must cancel the underlying key press")
-            XCTAssertTrue(strip.exists, "Virtualizing the first key must not invalidate the scroll viewport")
-            XCTAssertEqual(stripMatches.count, 1)
-        }
-        XCTAssertGreaterThan(dragCount, 0, "The stock board must overflow the one-row inline viewport")
-        XCTAssertTrue(last.exists)
-        XCTAssertTrue(strip.frame.intersection(app.frame).contains(last.frame))
-        let firstRemainsVisible = first.exists && usableHeightFrame(first.frame)
-            && strip.frame.intersection(app.frame).contains(first.frame)
-        XCTAssertFalse(firstRemainsVisible, "The final viewport must remain usable after the original first-key anchor scrolls away")
-        XCTAssertEqual(last.frame.height, 41.4, accuracy: 1)
-        XCTAssertTrue(last.isHittable)
-        attachScreenshot("Glyph-only normal keycaps reveal all stock symbols through horizontal scrolling")
-        last.tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context + "|"))
-        app.buttons["keyboard.typing.delete"].tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context))
-        inspectSymbolBoardKey(symbolBoardKey("|", typing: true), optionCount: 2, input: input, context: context)
-        XCTAssertEqual(accessibleText(app.staticTexts["keyboard.properties.codepoints"].firstMatch), "U+007C")
-        app.buttons["keyboard.properties.close"].tap()
-        app.buttons["keyboard.openTyping"].tap()
-
-        openUnicodeBrowse()
-        enterKeyboardQuery("cat")
-        let search = app.descendants(matching: .any)["keyboard.search"].firstMatch
-        search.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 36, dy: search.frame.height / 2)).tap()
-        typeKeyboardQueryKeys("arrow ")
-        XCTAssertTrue(search.waitUntilValueEquals("arrow cat"))
-        closeKeyboardSearch()
-        app.buttons["keyboard.openFavorites"].press(forDuration: 1)
-        assertSymbolBoardOverlay(input: input, context: context)
-        XCTAssertTrue(app.buttons["keyboard.boards.create"].waitForExistence(timeout: 5))
-        app.buttons["keyboard.boards.create"].tap()
-        assertSymbolBoardOverlay(input: input, context: context)
-        typeSymbolBoardLocalPad("qaboard")
-
-        revealSymbolBoardControl(app.buttons["keyboard.boards.pad.save"].firstMatch)
-        app.buttons["keyboard.boards.pad.save"].tap()
-        let selected = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@", "keyboard.boards.select.", "Selected")).firstMatch
-        XCTAssertTrue(selected.waitForExistence(timeout: 5))
-        let boardID = String(selected.identifier.dropFirst("keyboard.boards.select.".count))
-        XCTAssertFalse(["stock-symbols", "migrated-favorites"].contains(boardID))
-        app.buttons["keyboard.boards.edit.\(boardID)"].tap()
-        app.buttons["keyboard.boards.addKey"].tap()
-        XCTAssertTrue(app.descendants(matching: .any)["keyboard.boards.picker"].firstMatch.waitForExistence(timeout: 5))
-        enterKeyboardQuery("u+2603")
-        let snowman = app.buttons["keyboard.character.U+2603"].firstMatch
-        XCTAssertTrue(snowman.waitForExistence(timeout: 10))
-        snowman.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch.waitForExistence(timeout: 5))
-        XCTAssertEqual(input.value as? String, context, "The Unicode picker saves into a board without inserting into the host")
-        app.buttons["keyboard.boards.edit.\(boardID)"].tap()
-        let editKey = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "keyboard.boards.key.")).firstMatch
-        XCTAssertTrue(editKey.waitForExistence(timeout: 5))
-        editKey.tap()
-        assertSymbolBoardOverlay(input: input, context: context)
-        revealSymbolBoardControl(app.buttons["keyboard.boards.addVariantUnicode"].firstMatch)
-        app.buttons["keyboard.boards.addVariantUnicode"].tap()
-        selectKeyboardSection("emojis")
-        enterKeyboardQuery("woman technologist")
-        let emoji = app.buttons["keyboard.emoji.1F469-200D-1F4BB"].firstMatch
-        XCTAssertTrue(emoji.waitForExistence(timeout: 10))
-        emoji.tap()
-        XCTAssertTrue(app.buttons["keyboard.boards.close"].waitForExistence(timeout: 5))
-        assertSymbolBoardOverlay(input: input, context: context)
-        XCTAssertEqual(input.value as? String, context)
-        app.buttons["keyboard.boards.close"].tap()
-        settleKeyboardOrientation(.landscapeLeft, toolbarVisible: false)
-        app.buttons["keyboard.openFavorites"].press(forDuration: 1)
-        assertSymbolBoardOverlay(input: input, context: context)
-        app.buttons["keyboard.boards.edit.\(boardID)"].tap()
-        let compactKeyEdit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "keyboard.boards.key.")).firstMatch
-        revealSymbolBoardControl(compactKeyEdit)
-        compactKeyEdit.tap()
-        assertSymbolBoardOverlay(input: input, context: context)
-        let localVariant = app.buttons["keyboard.boards.addVariantLocal"].firstMatch
-        revealSymbolBoardControl(localVariant)
-        localVariant.tap()
-        assertSymbolBoardOverlay(input: input, context: context)
-        typeSymbolBoardLocalPad("v")
-        revealSymbolBoardControl(app.buttons["keyboard.boards.pad.save"].firstMatch)
-        app.buttons["keyboard.boards.pad.save"].tap()
-        let removeTemporaryVariant = app.buttons["keyboard.boards.variant.remove.1"].firstMatch
-        revealSymbolBoardControl(removeTemporaryVariant)
-        removeTemporaryVariant.tap()
-        XCTAssertTrue(removeTemporaryVariant.waitUntilAbsent(), "A real local variant edit must save without touching the host")
-        app.buttons["keyboard.boards.back"].tap()
-        assertSymbolBoardOverlay(input: input, context: context)
-        app.buttons["keyboard.boards.back"].tap()
-        assertSymbolBoardOverlay(input: input, context: context)
-        app.buttons["keyboard.boards.close"].tap()
-        settleKeyboardOrientation(.portrait, toolbarVisible: false)
-        let toolbarToggle = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch
-        XCTAssertTrue(toolbarToggle.waitUntilValueEquals("off"))
-        XCTAssertFalse(search.exists)
-        toolbarToggle.tap()
-        XCTAssertTrue(waitForSymbolPage(boardID))
-        XCTAssertTrue(search.waitUntilValueEquals("arrow cat"))
-        let configured = symbolBoardKey("☃")
-        XCTAssertTrue(configured.waitForExistence(timeout: 5))
-        XCTAssertEqual(configured.frame.height, 41.4, accuracy: 1)
-        chooseHeldKeyboardOption(configured, optionCount: 2, selectedIndex: 1)
-        XCTAssertTrue(input.waitUntilValueEquals(context + "👩‍💻"))
-        XCTAssertEqual((input.value as? String)?.unicodeScalars.map(\.value), context.unicodeScalars.map(\.value) + [0x1F469, 0x200D, 0x1F4BB])
-        app.buttons["keyboard.openFavorites"].tap()
-        assertHostTypingPanel()
-        app.buttons["keyboard.typing.delete"].tap()
-        XCTAssertTrue(input.waitUntilValueEquals(context))
-
-        app.buttons["keyboard.openFavorites"].press(forDuration: 1)
-        app.buttons["keyboard.boards.edit.\(boardID)"].tap()
-        app.buttons["keyboard.boards.rename"].tap()
-        for _ in 0..<7 {
-            revealSymbolBoardControl(app.buttons["keyboard.boards.pad.delete"].firstMatch)
-            app.buttons["keyboard.boards.pad.delete"].tap()
-        }
-        typeSymbolBoardLocalPad("renamed")
-        revealSymbolBoardControl(app.buttons["keyboard.boards.pad.save"].firstMatch)
-        app.buttons["keyboard.boards.pad.save"].tap()
-        XCTAssertTrue(app.staticTexts["renamed"].firstMatch.waitForExistence(timeout: 5))
-        app.buttons["keyboard.boards.delete"].tap()
-        XCTAssertTrue(app.buttons["keyboard.boards.select.\(boardID)"].waitUntilAbsent())
-        app.buttons["keyboard.boards.close"].tap()
-        app.buttons["keyboard.openFavorites"].tap()
-        assertHostTypingPanel()
-        ensureUnicodeToolbarVisible()
-        XCTAssertTrue(search.waitUntilValueEquals("arrow cat"))
-        search.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 20, dy: search.frame.height / 2)).tap()
-        typeKeyboardQueryKeys("x")
-        XCTAssertTrue(search.waitUntilValueEquals("arrow xcat"), "Configuration, variants and board deletion restore the exact retained middle caret")
-        XCTAssertEqual(input.value as? String, context)
-        attachScreenshot("Local symbol-board configuration preserves exact Unicode variants and the host document")
-        closeKeyboardSearch()
-    }
-
     private func assertRecentKeycaps(in grid: XCUIElement, referenceWidth: CGFloat,
                                      file: StaticString = #filePath, line: UInt = #line) {
         let viewport = grid.frame.intersection(app.frame)
@@ -2124,83 +1862,6 @@ final class UniboardUITests: XCTestCase {
         for (left, right) in zip(ordered, ordered.dropFirst()) where abs(left.minY-right.minY) <= 1 {
             XCTAssertEqual(right.minX-left.maxX, 5, accuracy: 1, "Recent preserves normal phone key spacing", file: file, line: line)
         }
-    }
-
-    private func assertSymbolBoardOverlay(input: XCUIElement, context: String,
-                                          file: StaticString = #filePath, line: UInt = #line) {
-        let manager = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
-        let header = app.descendants(matching: .any)["keyboard.boards.header"].firstMatch
-        XCTAssertTrue(manager.waitForExistence(timeout: 5), file: file, line: line)
-        let entry = app.descendants(matching: .any)["keyboard.boards.entryPanel"].firstMatch
-        let scroll = app.scrollViews["keyboard.boards.scroll"].firstMatch
-        let content = entry.exists ? entry : scroll
-        guard usableHeightFrame(manager.frame), app.frame.contains(manager.frame),
-              header.exists, content.exists, usableHeightFrame(header.frame), usableHeightFrame(content.frame) else {
-            XCTFail("Page editing needs an on-screen opaque panel, header and bounded content", file: file, line: line); return
-        }
-        let panel = manager.frame
-        XCTAssertTrue(panel.insetBy(dx: -1, dy: -1).contains(header.frame), file: file, line: line)
-        XCTAssertTrue(panel.insetBy(dx: -1, dy: -1).contains(content.frame), file: file, line: line)
-        XCTAssertLessThanOrEqual(header.frame.maxY, content.frame.minY + 1, file: file, line: line)
-        for control in header.buttons.allElementsBoundByAccessibilityElement {
-            XCTAssertTrue(panel.contains(control.frame), "Every header action stays inside the keyboard", file: file, line: line)
-        }
-        if entry.exists {
-            for control in entry.buttons.allElementsBoundByAccessibilityElement {
-                XCTAssertTrue(usableHeightFrame(control.frame) && panel.contains(control.frame),
-                              "The naming pad must fit without scrolling or clipping", file: file, line: line)
-            }
-        }
-        XCTAssertTrue(input.waitUntilValueEquals(context), file: file, line: line)
-        attachScreenshot("Page configuration and its local keyboard stay inside the extension")
-    }
-
-    private func typeSymbolBoardLocalPad(_ text: String) {
-        let field = app.descendants(matching: .any)["keyboard.boards.entry"].firstMatch
-        var expected = field.value as? String ?? ""
-        for character in text {
-            let key = app.buttons["keyboard.boards.pad.\(character)"].firstMatch
-            XCTAssertTrue(key.waitForExistence(timeout: 5))
-            tapSymbolBoardControl(key)
-            expected.append(character)
-            XCTAssertTrue(field.waitUntilValueEquals(expected), "Every real local-key tap must edit the name/variant, never the receiving document")
-        }
-    }
-
-    private func revealSymbolBoardControl(_ control: XCUIElement) {
-        let manager = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
-        if control.exists, manager.exists, usableHeightFrame(control.frame), manager.frame.contains(control.frame) { return }
-        let scroll = app.scrollViews["keyboard.boards.scroll"].firstMatch
-        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
-        for step in 0..<8 {
-            let viewport = scroll.frame.intersection(app.frame)
-            guard usableHeightFrame(viewport) else { XCTFail("Expected the actual configuration viewport"); return }
-            print("UNIBOARD_EDITOR_REVEAL step=\(step) target=\(control.identifier) viewport=\(viewport) targetFrame=\(control.exists ? String(describing: control.frame) : "absent")")
-            if control.exists, usableHeightFrame(control.frame), viewport.contains(control.frame) { return }
-            let down = control.exists && usableHeightFrame(control.frame) && control.frame.minY < viewport.minY
-            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            let end = start.withOffset(CGVector(dx: 0, dy: min(44, viewport.height * 0.3) * (down ? 1 : -1)))
-            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
-        }
-        let revealed = control.exists && usableHeightFrame(control.frame) && scroll.frame.intersection(app.frame).contains(control.frame)
-        if !revealed {
-            attachScreenshot("Original symbol-board target reveal failure")
-            let diagnostic = XCTAttachment(string: "target=\(control.identifier) frame=\(control.exists ? String(describing: control.frame) : "absent") viewport=\(scroll.frame)\n\(app.debugDescription)")
-            diagnostic.name = "Original symbol-board viewport and target after bounded physical scrolling"
-            diagnostic.lifetime = .keepAlways
-            add(diagnostic)
-        }
-        XCTAssertTrue(revealed)
-    }
-
-    private func tapSymbolBoardControl(_ control: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
-        revealSymbolBoardControl(control)
-        let manager = app.descendants(matching: .any)["keyboard.boards.manager"].firstMatch
-        let frame = control.frame
-        guard manager.exists, usableHeightFrame(frame), manager.frame.contains(frame), app.frame.contains(frame), control.isEnabled else {
-            XCTFail("A configuration tap needs an enabled, fully visible control inside the current panel", file: file, line: line); return
-        }
-        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX - app.frame.minX, dy: frame.midY - app.frame.minY)).tap()
     }
 
     private func assertExpandedSymbolPageHasNoDigits(file: StaticString = #filePath, line: UInt = #line) {
@@ -2406,16 +2067,16 @@ final class UniboardUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(save.frame.width, 76)
         XCTAssertGreaterThanOrEqual(save.frame.height, 44)
         XCTAssertTrue(app.frame.contains(save.frame))
+        var saved = save.value as? String == "saved"
         for offset in [CGVector(dx: 4, dy: 4), CGVector(dx: 72, dy: 40), CGVector(dx: 38, dy: 22)] {
             save.coordinate(withNormalizedOffset: .zero).withOffset(offset).tap()
-            let target = app.descendants(matching: .any)["keyboard.boards.saveTarget"].firstMatch
-            XCTAssertTrue(target.waitForExistence(timeout: 5), "The entire Save keycap must respond, including its corners")
+            saved.toggle()
+            XCTAssertTrue(save.waitUntilValueEquals(saved ? "saved" : "not saved"),
+                          "The entire Save keycap must toggle Favorites, including its corners")
             XCTAssertEqual(input.value as? String, context)
-            app.buttons["keyboard.boards.save.cancel"].tap()
-            XCTAssertTrue(target.waitUntilAbsent())
             XCTAssertTrue(search.waitUntilValueEquals("u+0021"))
         }
-        saveInspectedKeyToBoard("stock-symbols", input: input, context: context)
+        if saved { save.tap(); XCTAssertTrue(save.waitUntilValueEquals("not saved")) }
         attachScreenshot("Save has a bounded 76 by 44 point native touch target")
         app.buttons["keyboard.properties.close"].tap()
         app.buttons["keyboard.query.delete"].tap()
@@ -2733,7 +2394,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(input.value as? String, context, "Holding inspects the scalar without inserting it")
         assertCompactKeyboardGeometry("portrait.properties", input: input, searching: false, inspecting: true)
         attachScreenshot("Compact glass Unicode properties keep host context visible without insertion")
-        saveInspectedKeyToBoard("migrated-favorites", input: input, context: context)
+        saveInspectedTextToFavorites(input: input, context: context)
         app.buttons["keyboard.properties.close"].tap()
         selectKeyboardSection("blocks")
         XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitUntilAbsent(), "Blocks must exit query mode")
@@ -2757,9 +2418,10 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["keyboard.properties.name"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(accessibleText(app.staticTexts["keyboard.properties.codepoints"].firstMatch), "U+2603")
         XCTAssertEqual(input.value as? String, context + "☃")
-        app.buttons["keyboard.properties.favorite"].tap()
-        XCTAssertTrue(app.buttons["keyboard.boards.save.cancel"].waitForExistence(timeout: 5))
-        app.buttons["keyboard.boards.save.cancel"].tap()
+        let save = app.buttons["keyboard.properties.favorite"].firstMatch
+        XCTAssertTrue(save.waitUntilValueEquals("saved"), "The snowman saved above is a favorite")
+        save.tap()
+        XCTAssertTrue(save.waitUntilValueEquals("not saved"), "Save toggles the favorite off again")
         XCTAssertEqual(input.value as? String, context + "☃")
         app.buttons["keyboard.properties.close"].tap()
         assertKeyboardHasNoEditionSelector()
@@ -3015,6 +2677,85 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [changedAfterRelease], timeout: 0.6), .completed,
                        "A released delete press must not keep editing", file: file, line: line)
         XCTAssertEqual(element.value as? String, expected, file: file, line: line)
+    }
+
+    private func openAppPages() {
+        if app.navigationBars["Try Uniboard"].exists {
+            restoreEnglishKeyboard()
+            let back = app.navigationBars["Try Uniboard"].buttons.firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 5))
+            back.tap()
+        }
+        dismissAppSearchKeyboard()
+        let tab = appTab("Pages")
+        XCTAssertTrue(tab.waitForExistence(timeout: 5))
+        tab.tap()
+        for _ in 0..<3 {
+            let back = app.navigationBars.buttons["Pages"].firstMatch
+            guard back.exists else { break }
+            back.tap()
+        }
+        XCTAssertTrue(app.navigationBars["Pages"].waitForExistence(timeout: 5))
+    }
+
+    /// Favorites is the first stop under the app's Pages tab.
+    private func openAppFavorites() {
+        openAppPages()
+        let favorites = app.buttons["pages.page.migrated-favorites"].firstMatch
+        XCTAssertTrue(favorites.waitForExistence(timeout: 5))
+        favorites.tap()
+        XCTAssertTrue(app.navigationBars["Favorites"].waitForExistence(timeout: 5))
+    }
+
+    /// Creates a page in the app and opens it; returns its row in Pages.
+    private func createAppPage(_ name: String) -> XCUIElement {
+        openAppPages()
+        app.buttons["pages.new"].firstMatch.tap()
+        let field = app.alerts.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.typeText(name)
+        app.alerts.buttons["Create"].firstMatch.tap()
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "pages.page.", name)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 5))
+        return row
+    }
+
+    private func addAppPageKey(query: String, codepoint: String) {
+        let add = app.buttons["page.addUnicode"].firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
+        add.tap()
+        pickAppUnicode(query: query, codepoint: codepoint)
+    }
+
+    private func pickAppUnicode(query: String, codepoint: String) {
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText(query)
+        let result = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", codepoint)).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 10), "Expected \(codepoint) for \(query)")
+        result.tap()
+        XCTAssertTrue(field.waitUntilAbsent())
+    }
+
+    /// Removes pages an earlier, interrupted run may have left, so ★ opens Favorites again.
+    private func deleteAppPages(named name: String) {
+        openAppPages()
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "pages.page.", name))
+        for _ in 0..<5 where rows.firstMatch.exists {
+            deleteAppPage(app.buttons[rows.firstMatch.identifier].firstMatch)
+        }
+    }
+
+    private func deleteAppPage(_ row: XCUIElement) {
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.swipeLeft()
+        let delete = app.buttons["Delete"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        delete.tap()
+        XCTAssertTrue(row.waitUntilAbsent())
     }
 
     private func appTab(_ title: String) -> XCUIElement {

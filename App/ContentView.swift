@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    private enum AppTab: Hashable { case explore, emojis, blocks, saved, settings }
+    private enum AppTab: Hashable { case explore, emojis, blocks, pages, settings }
     @State private var selectedTab: AppTab = .explore
     @State private var settingsPresentationID = UUID()
     @AppStorage("scratchpad") private var scratchpad = ""
@@ -26,9 +26,9 @@ struct ContentView: View {
                 .tabItem { Label("Blocks", systemImage: "rectangle.stack") }
                 .tag(AppTab.blocks)
 
-            NavigationStack { SavedView(select: select, scratchpad: $scratchpad) }
-                .tabItem { Label("Saved", systemImage: "star") }
-                .tag(AppTab.saved)
+            NavigationStack { PagesView(select: select, scratchpad: $scratchpad) }
+                .tabItem { Label("Pages", systemImage: "star") }
+                .tag(AppTab.pages)
 
             NavigationStack { SetupView() }
                 .id(settingsPresentationID)

@@ -31,11 +31,14 @@ struct SymbolBoardPickerTarget: Equatable {
     let keyID: String?
 }
 
-/// Custom pages stay local. The built-in Favorites page shares only explicit
-/// saved symbols through the App Group, with a local three-way merge baseline.
+/// Pages are configured in the app and shared through `SymbolPageSettings`;
+/// the keyboard only reads them. The built-in Favorites page shares only
+/// explicit saved symbols through the App Group, with a local three-way merge
+/// baseline. The open page stays local to each process.
 @MainActor
 final class SymbolBoardStore: ObservableObject {
-    static let shared = SymbolBoardStore(sync: .shared, sharedWriteAllowed: Bundle.main.bundleURL.pathExtension != "appex")
+    private static let isApp = Bundle.main.bundleURL.pathExtension != "appex"
+    static let shared = SymbolBoardStore(sync: .shared, pages: .shared, sharedWriteAllowed: isApp, configuresPages: isApp)
     static let storageKey = "keyboard.symbolBoards.v1"
     static let stockID = "stock-symbols"
     static let favoritesID = "migrated-favorites"
@@ -69,6 +72,10 @@ final class SymbolBoardStore: ObservableObject {
     enum SyncStatus { case local, current, fullAccessRequired, unavailable }
     @Published private(set) var syncStatus: SyncStatus = .local
     private let sync: FavoriteSync?
+    private let pages: SymbolPageSettings?
+    /// Only the app creates, edits and orders pages; the keyboard keeps its
+    /// own open page and Favorites edits.
+    let configuresPages: Bool
     private var sharedWriteAllowed: Bool
     private var favoriteBaseline: [String] = []
     private var syncing = false
@@ -86,10 +93,13 @@ final class SymbolBoardStore: ObservableObject {
     var canEdit: Bool { loadIssue == nil }
 
     init(defaults: UserDefaults = .standard, persist: ((Data) -> Bool)? = nil,
-         sync: FavoriteSync? = nil, sharedWriteAllowed: Bool = false) {
+         sync: FavoriteSync? = nil, pages: SymbolPageSettings? = nil,
+         sharedWriteAllowed: Bool = false, configuresPages: Bool = true) {
         self.sync = sync
+        self.pages = pages
+        self.configuresPages = configuresPages
         self.sharedWriteAllowed = sharedWriteAllowed
-        defer { refreshFavorites() }
+        defer { refreshPages(); refreshFavorites() }
         self.persist = persist ?? { data in
             defaults.set(data, forKey: SymbolBoardStore.storageKey)
             // UserDefaults offers no durable-disk acknowledgement. Readback
@@ -178,6 +188,25 @@ final class SymbolBoardStore: ObservableObject {
         next.swapAt(index, target)
         return commit(next)
     }
+    /// List-style reordering, as the app's Pages screen offers it.
+    @discardableResult func moveBoards(fromOffsets source: IndexSet, toOffset destination: Int) -> Bool {
+        guard canEdit, let next = Self.moving(boards, fromOffsets: source, toOffset: destination) else { return false }
+        return next.map(\.id) == boards.map(\.id) || commit(next)
+    }
+    @discardableResult func moveKeys(boardID: String, fromOffsets source: IndexSet, toOffset destination: Int) -> Bool {
+        guard let index = boards.firstIndex(where: { $0.id == boardID }),
+              let keys = Self.moving(boards[index].keys, fromOffsets: source, toOffset: destination) else { return false }
+        var next = boards
+        next[index].keys = keys
+        return next == boards || commit(next)
+    }
+    private static func moving<T>(_ items: [T], fromOffsets source: IndexSet, toOffset destination: Int) -> [T]? {
+        guard !source.isEmpty, source.allSatisfy(items.indices.contains), (0...items.count).contains(destination) else { return nil }
+        let moved = source.sorted().map { items[$0] }
+        var rest = items.enumerated().filter { !source.contains($0.offset) }.map(\.element)
+        rest.insert(contentsOf: moved, at: destination - source.filter { $0 < destination }.count)
+        return rest
+    }
     @discardableResult func add(text: String, to boardID: String) -> String? {
         if boardID == Self.favoritesID { refreshFavorites() }
         guard canEdit, Self.validText(text), let index = boards.firstIndex(where: { $0.id == boardID }) else { return nil }
@@ -221,7 +250,12 @@ final class SymbolBoardStore: ObservableObject {
         let selectedPreferred = preferred ?? preferredStarBoardID
         let state = State(version: 2, activeBoardID: active ?? activeBoardID,
                           preferredStarBoardID: selectedPreferred, boards: next, favoriteBaseline: sync == nil ? nil : favoriteBaseline)
-        guard let data = Self.encoded(state), persist(data) else { return false }
+        guard let data = Self.encoded(state) else { return false }
+        if let pages, Self.shareable(next) != Self.shareable(boards) || selectedPreferred != preferredStarBoardID {
+            // A page change is published to the shared file before it is adopted.
+            guard configuresPages, pages.save(.init(pages: Self.shareable(next), starPageID: selectedPreferred)) else { return false }
+        }
+        guard persist(data) else { return false }
         let favoritesChanged = boards.first { $0.id == Self.favoritesID }?.keys != next.first { $0.id == Self.favoritesID }?.keys
         boards = next
         activeBoardID = state.activeBoardID
@@ -230,6 +264,33 @@ final class SymbolBoardStore: ObservableObject {
         return true
     }
     var favoriteTexts: [String] { boards.filter { $0.id == Self.favoritesID }.flatMap(\.keys).map(\.text) }
+    func isFavorite(_ text: String) -> Bool { favoriteTexts.contains { SymbolBoardKey.exact($0, text) } }
+
+    /// Adopts the app's pages, keeping this process's Favorites keys and open
+    /// page. Without a shared file there are no custom pages: pages made
+    /// inside earlier keyboards are not carried over.
+    func refreshPages() {
+        guard let pages, canEdit else { return }
+        let favorites = boards.first { $0.id == Self.favoritesID }?.keys ?? []
+        let snapshot = pages.load()
+        var next = snapshot?.pages ?? Self.initialBoards(favorites: [])
+        var preferred = snapshot?.starPageID ?? Self.favoritesID
+        if let index = next.firstIndex(where: { $0.id == Self.favoritesID }) { next[index].keys = favorites }
+        let candidate = State(version: 2, activeBoardID: Self.stockID, preferredStarBoardID: preferred, boards: next)
+        if !Self.valid(candidate) {
+            next = Self.initialBoards(favorites: favorites)
+            preferred = Self.favoritesID
+        }
+        let active = next.contains { $0.id == activeBoardID } ? activeBoardID : Self.stockID
+        if boards != next { boards = next }
+        if preferredStarBoardID != preferred { preferredStarBoardID = preferred }
+        if activeBoardID != active { activeBoardID = active }
+    }
+
+    /// Pages as shared with the keyboard: Favorites keys sync separately.
+    private static func shareable(_ boards: [SymbolBoard]) -> [SymbolBoard] {
+        boards.map { $0.id == favoritesID ? SymbolBoard(id: $0.id, name: $0.name, keys: []) : $0 }
+    }
 
     /// Called on presentation and foregrounding; never on each layout or key tap.
     func refreshFavorites(canWrite: Bool? = nil) {

@@ -59,13 +59,13 @@ struct SavedView: View {
                         .font(.footnote).foregroundStyle(.red)
                         .accessibilityIdentifier("favorites.syncError")
                 }
-                Text("Favorites are shared with the keyboard on this device. To sync favorites saved in the keyboard back to this app, enable Allow Full Access in iOS keyboard settings. Recently Used stays separate. Nothing is sent to a server.")
+                Text("Favorites are the keyboard's Favorites page. To sync favorites saved in the keyboard back to this app, enable Allow Full Access in iOS keyboard settings. Recently Used stays separate. Nothing is sent to a server.")
                     .font(.footnote).foregroundStyle(.secondary)
             }.padding(.horizontal, 16).padding(.bottom, 24).frame(maxWidth: 780).frame(maxWidth: .infinity)
         }
         .onAppear { store.refreshFavorites() }
         .background(Color.groupedBackground)
-        .navigationTitle("Saved")
+        .navigationTitle("Favorites")
         .sheet(item: $selectedEmoji) { EmojiDetailView(emoji: $0, scratchpad: $scratchpad) }
     }
 }

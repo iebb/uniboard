@@ -24,6 +24,82 @@ final class SymbolBoardStoreTests: XCTestCase {
         defaults.set(data, forKey: SymbolBoardStore.storageKey)
         return data
     }
+    private func sharedPages() throws -> (settings: SymbolPageSettings, directory: URL) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SymbolPages-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return (SymbolPageSettings(containerURL: { directory }), directory)
+    }
+
+    func testAppConfiguresPagesThatTheKeyboardReadsButCannotEdit() throws {
+        let pages = try sharedPages().settings
+        try withDefaults { appDefaults in
+            try withDefaults { keyboardDefaults in
+                let app = SymbolBoardStore(defaults: appDefaults, pages: pages, configuresPages: true)
+                let id = try XCTUnwrap(app.createBoard(named: "Math"))
+                XCTAssertNotNil(app.add(text: "∑", to: id))
+                XCTAssertTrue(app.setPreferredStarBoard(id))
+                XCTAssertNotNil(app.add(text: "☃", to: SymbolBoardStore.favoritesID))
+                let shared = try XCTUnwrap(pages.load())
+                XCTAssertEqual(shared.pages.map(\.name), ["Symbols", "Favorites", "Math"])
+                XCTAssertEqual(shared.starPageID, id)
+                XCTAssertTrue(shared.pages.first { $0.id == SymbolBoardStore.favoritesID }?.keys.isEmpty == true,
+                              "Favorites keys sync separately")
+
+                let keyboard = SymbolBoardStore(defaults: keyboardDefaults, pages: pages, configuresPages: false)
+                XCTAssertEqual(keyboard.boards.map(\.name), ["Symbols", "Favorites", "Math"])
+                XCTAssertEqual(keyboard.preferredStarBoardID, id)
+                XCTAssertEqual(keyboard.key(boardID: id, keyID: try XCTUnwrap(keyboard.boards.last?.keys.first?.id))?.text, "∑")
+                XCTAssertNil(keyboard.createBoard(named: "Local"), "Pages are configured in the app")
+                XCTAssertNil(keyboard.add(text: "π", to: id))
+                XCTAssertFalse(keyboard.renameBoard(id, to: "Other"))
+                XCTAssertFalse(keyboard.setPreferredStarBoard(SymbolBoardStore.favoritesID))
+                XCTAssertTrue(keyboard.selectBoard(id), "The open page stays local to the keyboard")
+                XCTAssertNotNil(keyboard.add(text: "★", to: SymbolBoardStore.favoritesID), "Save goes to Favorites")
+                XCTAssertEqual(try XCTUnwrap(pages.load()).pages.map(\.name), ["Symbols", "Favorites", "Math"])
+
+                XCTAssertTrue(app.moveBoards(fromOffsets: [2], toOffset: 0))
+                keyboard.refreshPages()
+                XCTAssertEqual(keyboard.boards.map(\.name), ["Math", "Symbols", "Favorites"])
+                XCTAssertEqual(keyboard.activeBoardID, id)
+                XCTAssertEqual(keyboard.favoriteTexts, ["★"])
+            }
+        }
+    }
+
+    func testPagesMadeInsideAnEarlierKeyboardAreNotCarriedOver() throws {
+        let pages = try sharedPages().settings
+        try withDefaults { defaults in
+            let legacy = SymbolBoardStore(defaults: defaults)
+            let id = try XCTUnwrap(legacy.createBoard(named: "Old"))
+            XCTAssertTrue(legacy.setPreferredStarBoard(id))
+            XCTAssertNotNil(legacy.add(text: "☃", to: SymbolBoardStore.favoritesID))
+            let keyboard = SymbolBoardStore(defaults: defaults, pages: pages, configuresPages: false)
+            XCTAssertEqual(keyboard.boards.map(\.id), [SymbolBoardStore.stockID, SymbolBoardStore.favoritesID])
+            XCTAssertEqual(keyboard.preferredStarBoardID, SymbolBoardStore.favoritesID)
+            XCTAssertEqual(keyboard.activeBoardID, SymbolBoardStore.stockID)
+            XCTAssertEqual(keyboard.favoriteTexts, ["☃"], "Favorites are kept")
+        }
+    }
+
+    func testListMovesReorderPagesAndKeysAndRejectBadOffsets() throws {
+        try withDefaults { defaults in
+            let store = SymbolBoardStore(defaults: defaults)
+            let math = try XCTUnwrap(store.createBoard(named: "Math"))
+            let arrows = try XCTUnwrap(store.createBoard(named: "Arrows"))
+            XCTAssertTrue(store.moveBoards(fromOffsets: [3], toOffset: 0))
+            XCTAssertEqual(store.boards.map(\.id), [arrows, SymbolBoardStore.stockID, SymbolBoardStore.favoritesID, math])
+            XCTAssertTrue(store.moveBoards(fromOffsets: [0, 1], toOffset: 4))
+            XCTAssertEqual(store.boards.map(\.id), [SymbolBoardStore.favoritesID, math, arrows, SymbolBoardStore.stockID])
+            XCTAssertFalse(store.moveBoards(fromOffsets: [9], toOffset: 0))
+            XCTAssertFalse(store.moveBoards(fromOffsets: [0], toOffset: 9))
+            for text in ["a", "b", "c"] { XCTAssertNotNil(store.add(text: text, to: math)) }
+            XCTAssertTrue(store.moveKeys(boardID: math, fromOffsets: [2], toOffset: 0))
+            XCTAssertEqual(store.boards.first { $0.id == math }?.keys.map(\.text), ["c", "a", "b"])
+            XCTAssertFalse(store.moveKeys(boardID: "missing", fromOffsets: [0], toOffset: 1))
+        }
+    }
+
     func testEmptyBoardUsesStockStripWithoutChangingStarPreference() async throws {
         try withDefaults { defaults in
             let store = SymbolBoardStore(defaults: defaults)

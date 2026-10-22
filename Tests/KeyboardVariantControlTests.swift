@@ -6,6 +6,7 @@ import XCTest
 @MainActor
 final class KeyboardVariantControlTests: XCTestCase {
     func testSecondaryUnicodeHintKeepsItsFallbackFontWhenTheKeyChangesSize() throws {
+        guard UnicodeFontSupport.resourceURL("unifont_upper-18.0.01.otf") != nil else { throw XCTSkip("Preview basics are downloaded on demand") }
         let preview = "\u{25CC}\u{10D69}"
         let button = KeyboardVariantButton()
         button.configure(context: UUID(), key: "q", text: "q", variants: [], enabled: true,

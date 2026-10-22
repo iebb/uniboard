@@ -10,7 +10,7 @@ enum KeyboardLayoutPolicy {
     }
     static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
                         compactVertical: Bool, showsSymbolBar: Bool, showsNumberRow: Bool = true,
-                        searching: Bool = false, browsing: Bool = false) -> Metrics {
+                        searching: Bool = false, browsing: Bool = false, showsTextPreview: Bool = false) -> Metrics {
         let size = displaySize.flatMap { value -> CGSize? in
             guard value.width.isFinite, value.height.isFinite, value.width > 0, value.height > 0 else { return nil }
             return value
@@ -30,7 +30,9 @@ enum KeyboardLayoutPolicy {
         // Without the number row, typing is one row and one gap shorter.
         let typingRows: CGFloat = showsNumberRow ? 5 : 4
         // Browsing Unicode without keys shows two more rows of characters.
+        // The optional text preview is one more row while typing.
         let rows: CGFloat = searching ? (sideResults ? 6 : 7) : (showsSymbolBar ? typingRows + 1 : typingRows) + (browsing ? 2 : 0)
+            + (showsTextPreview && !browsing ? 1 : 0)
         let gaps: CGFloat = searching && !sideResults ? 4 : searching || showsNumberRow ? 3 : 2
         let rowSpacing: CGFloat = searching ? 4 : spacing
         let target = key * rows + rowSpacing * gaps + chrome

@@ -48,9 +48,19 @@ enum UnicodeFontSupport {
         return manifest.fonts
     }()
 
+    /// Fonts the person added come first, then the packs. The list changes
+    /// only together with a cache reset, so its indices stay valid.
+    static var assets: [Asset] { customAssets + packAssets }
+    private static var customAssets: [Asset] = loadCustomAssets()
+    private static func loadCustomAssets() -> [Asset] {
+        CustomFontStore.shared.fonts.map {
+            Asset(filename: $0.filename, displayName: $0.displayName, postScriptName: $0.postScriptName,
+                  sha256: $0.sha256, sourceURL: "", licenseFilename: "", ranges: $0.ranges)
+        }
+    }
     /// The preview basics listed in `manifest.json` download on demand like
     /// the other packs; they keep their place in the fallback order.
-    static let assets: [Asset] = {
+    private static let packAssets: [Asset] = {
         let basics = Set(bundledAssets.map(\.filename))
         let downloads = UnicodeFontPackCatalog.bundled.packs.flatMap(\.fonts).map(\.asset).filter { !basics.contains($0.filename) }
         let noto = downloads.filter { $0.displayName.hasPrefix("Noto") }
@@ -74,9 +84,10 @@ enum UnicodeFontSupport {
         let now = ProcessInfo.processInfo.systemUptime
         guard force || now - lastRevisionCheck >= 0.5 else { return false }
         lastRevisionCheck = now
-        let revision = UnicodeFontDownloadStore.shared.revision
+        let revision = UnicodeFontDownloadStore.shared.revision + "|" + CustomFontStore.shared.revision
         guard revision != downloadRevision else { return false }
         downloadRevision = revision
+        customAssets = loadCustomAssets()
         clearCache()
         return true
     }
@@ -84,6 +95,7 @@ enum UnicodeFontSupport {
     static func resourceURL(_ filename: String) -> URL? {
         guard Asset.isResourceFilename(filename) else { return nil }
         if let bundled = Bundle.main.url(forResource: filename, withExtension: nil, subdirectory: "Fonts") { return bundled }
+        if let custom = CustomFontStore.shared.url(forFilename: filename) { return custom }
         guard let font = downloadable[filename] else { return nil }
         return UnicodeFontDownloadStore.shared.installedURL(for: font)
     }
@@ -334,6 +346,7 @@ enum UnicodeFontSupport {
     }
 
     static var licenseText: String {
+        let assets = packAssets
         guard !assets.isEmpty else { return "Bundled font license information is unavailable." }
         let heading = "Extra Unicode fonts\n\nDownloaded preview fonts are used only when Extra Unicode fonts is enabled. Downloads are managed in the app and work offline afterwards. They do not change fonts in other apps.\n\n"
         let names = assets.map { "\($0.displayName)\nSource: \($0.sourceURL)" }.joined(separator: "\n\n")

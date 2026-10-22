@@ -24,5 +24,8 @@ Only the Unicode 19 draft is bundled. Unicode 18, 17 and 16 show the draft limit
 FONTS
 Preview basics (Unifont, Noto Sans Symbols 2) now download on demand in Settings > Font Downloads, like the other packs. With Extra Unicode fonts on and the pack downloaded, check U+0558 previews in app and keyboard with Full Access OFF. Test cancel, retry, remove and offline use.
 
+YOUR FONTS AND TEXT PREVIEW
+Font Downloads > Add Font adds a TTF or OTF file; it previews characters first, including Private Use, in the app and keyboard. Settings > Text Preview adds a keyboard row showing the text around the caret as Uniboard draws it.
+
 PRIVACY AND FAVORITES
 App Favorites reach the keyboard with Full Access OFF; keyboard saves wait locally until optional Full Access permits writing back. Typing, queries, pages and favorites are never sent over a network.

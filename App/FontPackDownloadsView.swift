@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 private final class FontDownloadBudget: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     let expected: Int64
@@ -229,6 +230,9 @@ private final class FontPackDownloads: ObservableObject {
 struct FontPackDownloadsView: View {
     @EnvironmentObject private var preferences: CatalogPreferences
     @StateObject private var downloads = FontPackDownloads.shared
+    @State private var customFonts = CustomFontStore.shared.fonts
+    @State private var importing = false
+    @State private var importFailed = false
 
     var body: some View {
         Form {
@@ -272,6 +276,30 @@ struct FontPackDownloadsView: View {
                 Text("Cancelling keeps completed fonts, and a retry downloads only what’s missing.")
             }
             Section {
+                ForEach(customFonts) { font in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(font.displayName)
+                        Text(font.postScriptName).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    }
+                    .swipeActions {
+                        Button("Remove", role: .destructive) {
+                            try? CustomFontStore.shared.remove(font)
+                            reloadCustomFonts()
+                        }
+                    }
+                    .accessibilityIdentifier("fontDownloads.custom.\(font.filename)")
+                }
+                Button { importing = true } label: { Label("Add Font", systemImage: "plus") }
+                    .disabled(customFonts.count >= CustomFontStore.maximumFonts)
+                    .accessibilityIdentifier("fontDownloads.addFont")
+                if importFailed {
+                    Text("This file could not be added as a font.").foregroundStyle(.red)
+                        .accessibilityIdentifier("fontDownloads.addFont.error")
+                }
+            } header: {
+                Text("Your Fonts")
+            }
+            Section {
                 if let message = downloads.message {
                     Text(message)
                         .accessibilityIdentifier("fontDownloads.message")
@@ -282,7 +310,22 @@ struct FontPackDownloadsView: View {
         }
         .navigationTitle("Font Downloads")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { downloads.reload() }
+        .onAppear { downloads.reload(); reloadCustomFonts() }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.font]) { result in
+            guard case .success(let url) = result else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let added = (try? Data(contentsOf: url)).flatMap { try? CustomFontStore.shared.add($0) }
+            importFailed = added == nil
+            if added != nil { preferences.selectUnicodeFonts(true) }
+            reloadCustomFonts()
+        }
+    }
+
+    /// Your fonts are tried before the packs, in the app and the keyboard.
+    private func reloadCustomFonts() {
+        customFonts = CustomFontStore.shared.fonts
+        preferences.fontFilesChanged()
     }
 
     private func size(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }

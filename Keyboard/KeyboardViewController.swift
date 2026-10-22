@@ -144,6 +144,7 @@ final class KeyboardViewController: UIInputViewController {
         doubleSpaceState.reset()
         expectedHostEdit = nil
         model.symbolBoardManagerPresented = false
+        refreshTextPreview()
         model.hostDidEdit(invalidateMode: true)
         synchronizeHostTraits()
     }
@@ -152,7 +153,18 @@ final class KeyboardViewController: UIInputViewController {
         KeyboardDocumentIdentity.read(from: textDocumentProxy)
     }
 
+    /// The host's text either side of the caret, when the preview row shows it.
+    private func refreshTextPreview() {
+        guard model.showsTextPreview else { return }
+        let proxy = textDocumentProxy
+        let before = String((proxy.documentContextBeforeInput ?? "").suffix(48))
+        let after = String((proxy.documentContextAfterInput ?? "").prefix(24))
+        if model.hostTextBefore != before { model.hostTextBefore = before }
+        if model.hostTextAfter != after { model.hostTextAfter = after }
+    }
+
     private func synchronizeHostTraits() {
+        refreshTextPreview()
         // UIKit can ask again during a remote resize. Do not invalidate every
         // character key when neither input trait has changed.
         if model.needsInputModeSwitchKey != needsInputModeSwitchKey { model.needsInputModeSwitchKey = needsInputModeSwitchKey }
@@ -291,7 +303,8 @@ final class KeyboardViewController: UIInputViewController {
             compactVertical: traitCollection.verticalSizeClass == .compact,
             showsSymbolBar: model.showsSymbolBar,
             showsNumberRow: model.showsNumberRow || (landscapePad && model.padLayout == .ansiNumbers),
-            searching: model.isSearching, browsing: model.showsUnicode && !model.isSearching)
+            searching: model.isSearching, browsing: model.showsUnicode && !model.isSearching,
+            showsTextPreview: model.showsTextPreview)
         if model.isCompactLayout != metrics.isCompactLayout { model.isCompactLayout = metrics.isCompactLayout }
         if model.isPadLayout != pad { model.isPadLayout = pad }
         let typingHeight = metrics.typingKeyHeight
@@ -815,6 +828,10 @@ private final class KeyboardModel: ObservableObject {
     @Published private(set) var showsSymbolBar: Bool
     @Published private(set) var searchBarInsteadOfSymbols: Bool
     @Published private(set) var showsNumberRow: Bool
+    @Published private(set) var showsTextPreview: Bool
+    /// The host's text either side of the caret, for the text preview row.
+    @Published var hostTextBefore = ""
+    @Published var hostTextAfter = ""
     @Published private(set) var symbolPagesToolbarVisible: Bool?
     var showsUnicodeToolbar: Bool { symbolPagesToolbarVisible ?? (showsUnicode || (showsSymbolBar && searchBarInsteadOfSymbols)) }
     @Published private(set) var results: [UnicodeCharacter] = []
@@ -1038,6 +1055,7 @@ private final class KeyboardModel: ObservableObject {
         showsSymbolBar = appSettings.showsSymbolBar
         searchBarInsteadOfSymbols = appSettings.searchBarInsteadOfSymbols
         showsNumberRow = appSettings.showsNumberRow
+        showsTextPreview = appSettings.showsTextPreview
         showsCollapseKey = appSettings.showsCollapseKey
         selectedPadLayout = appSettings.padLayout
         adoptLayouts(appSettings.layouts, keepingCurrent: false)
@@ -1085,6 +1103,10 @@ private final class KeyboardModel: ObservableObject {
         }
         if showsNumberRow != selected.showsNumberRow {
             showsNumberRow = selected.showsNumberRow
+            invalidateInputMode(); presentationChanged?()
+        }
+        if showsTextPreview != selected.showsTextPreview {
+            showsTextPreview = selected.showsTextPreview
             invalidateInputMode(); presentationChanged?()
         }
         let keys = KeyboardKeySettings.shared.loadSnapshot()
@@ -1403,6 +1425,9 @@ private struct UnicodeKeyboardView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
+                if model.showsTextPreview && !model.showsUnicode {
+                    textPreviewRow.frame(height: headerHeight)
+                }
                 // Hidden native controls must leave the remote AX hierarchy.
                 // The model restores the exact query and caret when shown.
                 if model.showsUnicodeToolbar {
@@ -1627,6 +1652,34 @@ private struct UnicodeKeyboardView: View {
             }
         }
         .clipped()
+    }
+
+    /// The host's text around the caret, each character in the font Uniboard
+    /// would preview it with, so Private Use and unsupported characters show
+    /// as this keyboard draws them.
+    private var textPreviewRow: some View {
+        HStack(spacing: 0) {
+            Text(previewText(model.hostTextBefore)).lineLimit(1).truncationMode(.head).layoutPriority(1)
+            Rectangle().fill(KeyboardPalette.accent).frame(width: 2, height: 22)
+            Text(previewText(model.hostTextAfter)).lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(KeyboardPalette.key.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Text preview")
+        .accessibilityValue(model.hostTextBefore + model.hostTextAfter)
+        .accessibilityIdentifier("keyboard.textPreview")
+    }
+    private func previewText(_ text: String) -> AttributedString {
+        var result = AttributedString()
+        for character in text {
+            var run = AttributedString(String(character))
+            run.font = Font(UnicodeFontSupport.font(for: String(character), size: 18, enabled: true))
+            result += run
+        }
+        return result
     }
 
     @ViewBuilder private var searchResultStrip: some View {

@@ -63,6 +63,7 @@
 		5EE324656AD3EE3A5F997F59 /* SymbolBoardPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 350238133BBBDB8EA8F5D143 /* SymbolBoardPanel.swift */; };
 		5FA6C207B06E5C5AA1CDBEE3 /* UnicodeFontAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71146EC4A5A77E523CF62174 /* UnicodeFontAssets.swift */; };
 		609E4B7B7F744C132B45FC34 /* KeyboardKeyPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35E72DCBE969D27B17EAA639 /* KeyboardKeyPreferencesTests.swift */; };
+		60B860D48CEBA21B80778F55 /* CustomFontStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9C3E9D468A589CA9967CE7 /* CustomFontStore.swift */; };
 		62C22BC51D0E64E2BCBB9602 /* KeyboardInspectableInteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9420A3065ECF654CED653517 /* KeyboardInspectableInteractionTests.swift */; };
 		6783A41FD89C94923C68B70E /* KeyboardQueryControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3A2114FE5F9FD1F7E15F2FA /* KeyboardQueryControl.swift */; };
 		684FEAFDBAAB8CF191567249 /* KeyboardQueryInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10E5756E6D891356DCF060A /* KeyboardQueryInteraction.swift */; };
@@ -76,6 +77,7 @@
 		74CF8CAC8E72CBD805879C53 /* KeyboardVariantPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2678F5E3055C4580B17553FF /* KeyboardVariantPolicyTests.swift */; };
 		78768285C1D49F9A586E54BE /* UnicodeCatalog.ucd in Resources */ = {isa = PBXBuildFile; fileRef = B903935E407B193EAB9B2386 /* UnicodeCatalog.ucd */; };
 		7B29071466AD3A55676FA54B /* UnicodeFontSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FCD917B7BA585375F02ACA /* UnicodeFontSupport.swift */; };
+		7C0B99D4CD0034922D1FD0E7 /* CustomFontStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A227BA6A535E33809F3B2A90 /* CustomFontStoreTests.swift */; };
 		7E55272B18E78B677E56B22E /* KeyboardTouchActionControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08F3EDF9E8B39B534FABD8F /* KeyboardTouchActionControl.swift */; };
 		7ED97EDEAEE79E1970CC096D /* KeyboardKeyGestureRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89C04A8353B7457EB1B83F0B /* KeyboardKeyGestureRegressionTests.swift */; };
 		806F6DC27EE1488E68BACEA2 /* KeyboardSymbolPagesPagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F33EAD28A958AEDB2765D76 /* KeyboardSymbolPagesPagerTests.swift */; };
@@ -87,6 +89,7 @@
 		8F7AF965AC9EDDE7615E6BA0 /* UnicodeSources.json in Resources */ = {isa = PBXBuildFile; fileRef = 8D5B7115CD4B36E26395CAAF /* UnicodeSources.json */; };
 		90117207CA59BB25334A5E85 /* CompanionAppRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EB5240DA35F8434A42325F5 /* CompanionAppRouteTests.swift */; };
 		915F4383C87AB64D135A6B5C /* UnicodeProperties.json in Resources */ = {isa = PBXBuildFile; fileRef = A24745F2DC10363D8E1053AA /* UnicodeProperties.json */; };
+		9364EE774EA80C6EEBB3DF20 /* CustomFontStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9C3E9D468A589CA9967CE7 /* CustomFontStore.swift */; };
 		93C4D52C9F879198F8426C63 /* BlocksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B9C9852B09C3E3FC2537C2F /* BlocksView.swift */; };
 		944525D0E50EFA1C422995C0 /* KeyboardVariantControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D4EF80295F07AF583781860 /* KeyboardVariantControl.swift */; };
 		96A8D82A490A9BB52C923A9C /* KeyboardHostInputTraits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B24597D0441646A33610D5F /* KeyboardHostInputTraits.swift */; };
@@ -239,6 +242,7 @@
 		663AD2F7AA4B19119C73F049 /* PrivacyManifestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyManifestTests.swift; sourceTree = "<group>"; };
 		66B0D93D77F880C230230AD1 /* UnicodeFontCoverageProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeFontCoverageProbeTests.swift; sourceTree = "<group>"; };
 		6BB4C414ACEAE381B235681F /* KeyboardEnglishInputPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardEnglishInputPolicyTests.swift; sourceTree = "<group>"; };
+		6E9C3E9D468A589CA9967CE7 /* CustomFontStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomFontStore.swift; sourceTree = "<group>"; };
 		6F65D9FA7FA2978537D685DD /* KeyboardFooterLayoutPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardFooterLayoutPolicyTests.swift; sourceTree = "<group>"; };
 		71146EC4A5A77E523CF62174 /* UnicodeFontAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeFontAssets.swift; sourceTree = "<group>"; };
 		760B04D640BC742FC838C0D9 /* FontPackDownloadsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontPackDownloadsView.swift; sourceTree = "<group>"; };
@@ -260,6 +264,7 @@
 		9A2BD99F4D2B39ED86269C4F /* UnicodeEmojiSequenceAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeEmojiSequenceAuditTests.swift; sourceTree = "<group>"; };
 		9DE2EED824EF59350BC7F5E4 /* KeyboardSelfSizingInputView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardSelfSizingInputView.swift; sourceTree = "<group>"; };
 		9F721983462BBAEACEAC27A0 /* CatalogWorkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogWorkerTests.swift; sourceTree = "<group>"; };
+		A227BA6A535E33809F3B2A90 /* CustomFontStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomFontStoreTests.swift; sourceTree = "<group>"; };
 		A24745F2DC10363D8E1053AA /* UnicodeProperties.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = UnicodeProperties.json; sourceTree = "<group>"; };
 		A40798C86153763E01FAE0D7 /* UnicodeCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnicodeCatalog.swift; sourceTree = "<group>"; };
 		A41D3D251CE076E09EF76D3B /* SymbolBoardStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SymbolBoardStore.swift; sourceTree = "<group>"; };
@@ -380,6 +385,7 @@
 				9F721983462BBAEACEAC27A0 /* CatalogWorkerTests.swift */,
 				D736B529369E279CBA7EF9D6 /* CharacterStoreTests.swift */,
 				1EB5240DA35F8434A42325F5 /* CompanionAppRouteTests.swift */,
+				A227BA6A535E33809F3B2A90 /* CustomFontStoreTests.swift */,
 				1B6F9FAEABD4F15AA4EDC7AD /* EmojiCatalogTests.swift */,
 				F334022E9B3AF0015245C1A7 /* FavoriteSyncTests.swift */,
 				110A9DF5EB090A2C3889C44A /* KeyboardAlphabetTests.swift */,
@@ -436,6 +442,7 @@
 				15E8034D4526F95C6B7DCC1E /* CatalogWorker.swift */,
 				D36C0B886711536D6C72D540 /* CharacterStore.swift */,
 				49CC0A642A0BD0AF6C9CAD61 /* CompanionAppRoute.swift */,
+				6E9C3E9D468A589CA9967CE7 /* CustomFontStore.swift */,
 				2F3DCCA512819F343E378874 /* EmojiCatalog.swift */,
 				D1976A65554D1A801D23D24A /* FavoriteSync.swift */,
 				23D460E264F1A94CC2C3B58F /* KeyboardAlphabet.swift */,
@@ -651,6 +658,7 @@
 				1B92A66F31CF3F3E4856237F /* CatalogWorkerTests.swift in Sources */,
 				8DC50D89E92F82490FDEBB2B /* CharacterStoreTests.swift in Sources */,
 				90117207CA59BB25334A5E85 /* CompanionAppRouteTests.swift in Sources */,
+				7C0B99D4CD0034922D1FD0E7 /* CustomFontStoreTests.swift in Sources */,
 				4F5823B90C266C49C2557168 /* EmojiCatalogTests.swift in Sources */,
 				1F8D3DA1D9609735B3DE44D8 /* FavoriteSyncTests.swift in Sources */,
 				F76E38E9640AC7F05139148A /* KeyboardAlphabetTests.swift in Sources */,
@@ -694,6 +702,7 @@
 				E57B36AD8CA9033B6ADC4A3B /* CatalogWorker.swift in Sources */,
 				40048BDF4538EC75565F2215 /* CharacterStore.swift in Sources */,
 				293155C4DFDAF3A39AFA7C82 /* CompanionAppRoute.swift in Sources */,
+				9364EE774EA80C6EEBB3DF20 /* CustomFontStore.swift in Sources */,
 				44D6271BB541B1F1A9EC55F5 /* EmojiCatalog.swift in Sources */,
 				C3DA7E542A9B5174E00D44B3 /* FavoriteSync.swift in Sources */,
 				161A15011E12E2D259E688A9 /* KeyboardAlphabet.swift in Sources */,
@@ -743,6 +752,7 @@
 				44FC68A9D032718A8D997D03 /* CodeChart.swift in Sources */,
 				A1A003808C73EF04DD957659 /* CompanionAppRoute.swift in Sources */,
 				5A2291389771B024DE549E33 /* ContentView.swift in Sources */,
+				60B860D48CEBA21B80778F55 /* CustomFontStore.swift in Sources */,
 				6E9C637749D4AA9EC16A7D1B /* Design.swift in Sources */,
 				FE07DF89E53353E8E507EB1E /* EmojiCatalog.swift in Sources */,
 				AA26193F861F3E54D40A3DD4 /* EmojisView.swift in Sources */,

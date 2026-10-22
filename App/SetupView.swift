@@ -31,6 +31,8 @@ struct SetupView: View {
                 .accessibilityValue(preferences.topRow.rawValue)
                 Toggle("Number Row", isOn: Binding(get: { preferences.showsNumberRow }, set: { preferences.selectNumberRow($0) }))
                     .accessibilityIdentifier("showKeyboardNumberRow")
+                Toggle("Text Preview", isOn: Binding(get: { preferences.showsTextPreview }, set: { preferences.selectTextPreview($0) }))
+                    .accessibilityIdentifier("showKeyboardTextPreview")
                 Toggle("Hide Keyboard Key", isOn: Binding(get: { preferences.showsCollapseKey }, set: { preferences.selectCollapseKey($0) }))
                     .accessibilityIdentifier("showKeyboardCollapseKey")
             } header: {

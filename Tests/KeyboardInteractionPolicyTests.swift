@@ -54,6 +54,14 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
                         isPad: pad, compactVertical: false, showsSymbolBar: bar, browsing: true)
                     XCTAssertEqual(browsing.height - result.height, key * 2, accuracy: 0.000001, "Browsing shows two more rows")
                     XCTAssertEqual(browsing.typingKeyHeight, key, accuracy: 0.000001)
+                    let preview = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                        isPad: pad, compactVertical: false, showsSymbolBar: bar, showsTextPreview: true)
+                    XCTAssertEqual(preview.height - result.height, key, accuracy: 0.000001, "The text preview is one row")
+                    let previewSearch = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                        isPad: pad, compactVertical: false, showsSymbolBar: bar, searching: true, showsTextPreview: true)
+                    let search = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                        isPad: pad, compactVertical: false, showsSymbolBar: bar, searching: true)
+                    XCTAssertEqual(previewSearch.height, search.height, accuracy: 0.000001, "Search hides the preview")
                 }
             }
         }

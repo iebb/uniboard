@@ -18,6 +18,9 @@ struct UnicodeEditionSettings {
         var showsNumberRow = true
         /// Enabled base keyboards in switching order; the first is the default.
         var layouts: [String] = [KeyboardAlphabet.english.id]
+        /// A row above the keys that draws the host's text around the caret
+        /// with Uniboard's preview fonts.
+        var showsTextPreview = false
         var padLayout: KeyboardPadLayout = .ansiNumbers
         var padSymbolMapping: KeyboardPadSymbolMapping = .standard
     }
@@ -70,11 +73,13 @@ struct UnicodeEditionSettings {
         let legacyKeys: Set<String> = ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping"]
         let barKeys = legacyKeys.union(["showsSymbolBar", "searchBarInsteadOfSymbols"])
         let numberRowKeys = barKeys.union(["showsNumberRow"])
-        let modernKeys = numberRowKeys.union(["layouts"])
+        let layoutKeys = numberRowKeys.union(["layouts"])
+        let modernKeys = layoutKeys.union(["showsTextPreview"])
         guard (schema == NSNumber(value: 3) && Set(dictionary.keys) == legacyKeys)
                 || (schema == NSNumber(value: 4) && Set(dictionary.keys) == barKeys)
                 || (schema == NSNumber(value: 5) && Set(dictionary.keys) == numberRowKeys)
-                || (schema == NSNumber(value: 6) && Set(dictionary.keys) == modernKeys),
+                || (schema == NSNumber(value: 6) && Set(dictionary.keys) == layoutKeys)
+                || (schema == NSNumber(value: 7) && Set(dictionary.keys) == modernKeys),
               let layout = dictionary["padLayout"] as? String, let pad = KeyboardPadLayout(rawValue: layout),
               let mapping = dictionary["padSymbolMapping"] as? String, let symbols = KeyboardPadSymbolMapping(rawValue: mapping) else { return Snapshot(edition: .latest) }
         var value = Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse,
@@ -91,6 +96,10 @@ struct UnicodeEditionSettings {
         if schema.intValue >= 6 {
             guard let ids = dictionary["layouts"] as? [String], let layouts = Self.layouts(ids) else { return Snapshot(edition: .latest) }
             value.layouts = layouts
+        }
+        if schema.intValue >= 7 {
+            guard let preview = Self.strictBoolean(dictionary["showsTextPreview"]) else { return Snapshot(edition: .latest) }
+            value.showsTextPreview = preview
         }
         return value
     }
@@ -118,7 +127,8 @@ struct UnicodeEditionSettings {
               Self.layouts(snapshot.layouts) == snapshot.layouts,
               let container = containerURL(), container.isFileURL,
               let data = try? JSONSerialization.data(withJSONObject: [
-                "schemaVersion": 6, "selectionIdentifier": identifier, "layouts": snapshot.layouts,
+                "schemaVersion": 7, "selectionIdentifier": identifier, "layouts": snapshot.layouts,
+                "showsTextPreview": snapshot.showsTextPreview,
                 "useUnicodeFonts": snapshot.useUnicodeFonts, "showsCollapseKey": snapshot.showsCollapseKey,
                 "showsSymbolBar": snapshot.showsSymbolBar, "searchBarInsteadOfSymbols": snapshot.searchBarInsteadOfSymbols,
                 "showsNumberRow": snapshot.showsNumberRow,

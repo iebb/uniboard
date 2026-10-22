@@ -18,17 +18,25 @@ final class UnicodeFontSupportTests: XCTestCase {
         XCTAssertEqual(UnicodeFontSupport.loadedFontCount, 0)
     }
 
-    func testEveryBundledFaceAndLicenseIsUsable() throws {
+    func testPreviewBasicsDownloadOnDemandAndTheirLicensesShip() throws {
         XCTAssertEqual(UnicodeFontSupport.bundledAssets.count, 4)
+        let basics = try XCTUnwrap(UnicodeFontPackCatalog.bundled.packs.first)
+        XCTAssertEqual(basics.id, "preview-basics")
+        XCTAssertEqual(basics.fonts.map(\.asset.filename), UnicodeFontSupport.bundledAssets.map(\.filename))
+        XCTAssertNil(Bundle.main.url(forResource: "unifont-18.0.01.otf", withExtension: nil, subdirectory: "Fonts"),
+                     "Preview fonts are not bundled")
+        XCTAssertEqual(UnicodeFontSupport.assets.count, Set(UnicodeFontSupport.assets.map(\.filename)).count)
+        XCTAssertEqual(UnicodeFontSupport.assets.last?.postScriptName, "UnifontUpper", "Unifont stays the last fallback")
         for asset in UnicodeFontSupport.bundledAssets {
-            let url = try XCTUnwrap(UnicodeFontSupport.resourceURL(asset.filename))
+            let licenseURL = try XCTUnwrap(UnicodeFontSupport.resourceURL(asset.licenseFilename))
+            XCTAssertTrue(try String(contentsOf: licenseURL).contains("SIL OPEN FONT LICENSE"))
+            // Only an installed download opens; check its identity when present.
+            guard let url = UnicodeFontSupport.resourceURL(asset.filename) else { continue }
             let provider = try XCTUnwrap(CGDataProvider(url: url as CFURL))
             let graphics = try XCTUnwrap(CGFont(provider))
             XCTAssertEqual(graphics.postScriptName as String?, asset.postScriptName)
             let font = CTFontCreateWithGraphicsFont(graphics, 32, nil, nil)
             XCTAssertEqual(CTFontCopyPostScriptName(font) as String, asset.postScriptName)
-            let licenseURL = try XCTUnwrap(UnicodeFontSupport.resourceURL(asset.licenseFilename))
-            XCTAssertTrue(try String(contentsOf: licenseURL).contains("SIL OPEN FONT LICENSE"))
             XCTAssertFalse(asset.ranges.isEmpty)
             XCTAssertTrue(asset.ranges.allSatisfy { $0.count == 2 && $0[0] <= $0[1] })
         }
@@ -42,6 +50,7 @@ final class UnicodeFontSupportTests: XCTestCase {
         let system = UIFont.systemFont(ofSize: 32)
         let missingBefore = UnicodeFontSupport.missingCodePoints(in: text, font: system)
         guard !missingBefore.isEmpty else { throw XCTSkip("This iOS runtime already renders the fixture; coverage probe records it separately.") }
+        guard UnicodeFontSupport.resourceURL("unifont-18.0.01.otf") != nil else { throw XCTSkip("Preview basics are downloaded on demand") }
         let fallback = UnicodeFontSupport.font(for: text, size: 32, enabled: true)
         XCTAssertNotNil(UnicodeFontSupport.sourceName(for: text, size: 32, enabled: true))
         XCTAssertNotEqual(fallback.fontName, system.fontName)

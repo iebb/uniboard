@@ -79,7 +79,7 @@ struct UnicodeFontPackCatalog: Decodable, Sendable {
     /// supported iOS version; pinned to a dated release, never `latest`.
     static let emojiDownloadBase = "https://github.com/iebb/emojifonts/releases/download/2026.10/"
     static let downloadBases = [downloadBase, completionDownloadBase, emojiDownloadBase]
-    static let maximumTotalBytes: Int64 = 80 * 1024 * 1024
+    static let maximumTotalBytes: Int64 = 96 * 1024 * 1024
     static let maximumCatalogBytes = 2 * 1024 * 1024
     let schemaVersion: Int
     let unicodeVersion: String

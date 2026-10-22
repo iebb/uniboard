@@ -76,7 +76,7 @@ struct SetupView: View {
             } header: {
                 Text("Preview Fonts")
             } footer: {
-                Text("Off by default. When iOS can’t draw a character or emoji, Uniboard previews it with a bundled or downloaded font instead. Characters iOS can’t draw itself are tinted red either way, since other apps use their own fonts. Applies to the app and keyboard without Full Access.")
+                Text("Off by default. When iOS can’t draw a character or emoji, Uniboard previews it with a downloaded font instead. Characters iOS can’t draw itself are tinted red either way, since other apps use their own fonts. Applies to the app and keyboard without Full Access.")
             }
 
             Section {

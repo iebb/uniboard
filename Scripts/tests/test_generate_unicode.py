@@ -307,6 +307,7 @@ class DownloadTests(unittest.TestCase):
                         "https://raw.githubusercontent.com/unicode-org/unicodetools/pinned/",
                         {"sourceKind": "unicode-development-draft"})), \
                     mock.patch.object(generator.sys, "argv", ["generate_unicode.py", "--source", "draft", "--refresh"]), \
+                    mock.patch.object(generator, "edition_labels", return_value={"latest": "18.0.0", "previous": "17.0.0", "older": "16.0.0"}), \
                     mock.patch.object(generator.urllib.request, "urlopen", return_value=partial) as open_url, \
                     mock.patch.object(generator.time, "sleep") as sleep, \
                     contextlib.redirect_stderr(io.StringIO()):
@@ -318,49 +319,32 @@ class DownloadTests(unittest.TestCase):
             for name, content in originals.items():
                 self.assertEqual((resources / name).read_bytes(), content)
 
-    def test_all_four_editions_validate_before_any_resource_replacement(self):
+    def test_only_the_draft_is_generated_and_labelled_with_three_final_editions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            resources = root / "Shared" / "Resources"
-            resources.mkdir(parents=True)
-            originals = {name: ("old " + name).encode() for name in (
-                "UnicodeCatalog.ucd", "UnicodeCatalog-latest.ucd", "UnicodeProperties.json",
-                "UnicodeProperties-latest.json", "EmojiCatalog-draft.json", "EmojiCatalog-latest.json",
-                "UnicodeCatalog-previous.ucd", "UnicodeCatalog-older.ucd")}
-            for name, content in originals.items():
-                (resources / name).write_bytes(content)
+            labels = {"latest": "18.0.0", "previous": "17.0.0", "older": "16.0.0"}
             with mock.patch.object(generator, "ROOT", root), \
                     mock.patch.object(generator.sys, "argv", ["generate_unicode.py", "--source", "all", "--refresh"]), \
-                    mock.patch.object(generator, "resolve_source", return_value=(
-                        "https://www.unicode.org/Public/18.0.0/ucd/", {"sourceKind": "unicode-release"})), \
-                    mock.patch.object(generator, "generate_catalog", side_effect=[
-                        {"UnicodeCatalog-latest.ucd": b"new final edition"},
-                        {"UnicodeCatalog-previous.ucd": b"new previous edition"},
-                        {"UnicodeCatalog-older.ucd": b"new older edition"}, ValueError("invalid draft")]) as generate:
-                with self.assertRaisesRegex(ValueError, "invalid draft"):
-                    generator.main()
-            self.assertEqual([call.args[0] for call in generate.call_args_list], ["latest", "17.0.0", "16.0.0", "draft"])
-            self.assertEqual([call.kwargs["slot"] for call in generate.call_args_list], ["latest", "previous", "older", "draft"])
-            for name, content in originals.items():
-                self.assertEqual((resources / name).read_bytes(), content)
+                    mock.patch.object(generator, "edition_labels", return_value=labels), \
+                    mock.patch.object(generator, "generate_catalog", return_value={"UnicodeCatalog.ucd": b"draft"}) as generate, \
+                    mock.patch.object(generator, "replace_artifacts") as replace:
+                generator.main()
+            generate.assert_called_once()
+            self.assertEqual(generate.call_args.args[0], "draft")
+            self.assertEqual(generate.call_args.kwargs["slot"], "draft")
+            self.assertEqual(generate.call_args.kwargs["editions"], labels)
+            self.assertIn("UnicodeCatalog.ucd", replace.call_args.args[1])
 
-    def test_rolling_release_slots_pin_one_latest_identity_and_advance_history(self):
-        for latest, expected in [("18.0.0", ["latest", "17.0.0", "16.0.0", "draft"]),
-                                 ("19.0.0", ["latest", "18.0.0", "17.0.0", "draft"])]:
+    def test_edition_labels_follow_the_latest_final_release(self):
+        for latest, expected in [("18.0.0", ("17.0.0", "16.0.0")), ("19.0.0", ("18.0.0", "17.0.0"))]:
             resolved = (f"https://www.unicode.org/Public/{latest}/ucd/", {"sourceKind": "unicode-release"})
             with self.subTest(latest=latest), mock.patch.object(generator, "resolve_source", return_value=resolved) as resolve:
-                plan = generator.generation_plan("all")
-                self.assertEqual([item[0] for item in plan], expected)
-                self.assertEqual([item[1] for item in plan], ["latest", "previous", "older", "draft"])
-                self.assertIs(plan[0][2], resolved)
+                self.assertEqual(generator.edition_labels(),
+                                 {"latest": latest, "previous": expected[0], "older": expected[1]})
                 resolve.assert_called_once_with("latest")
-                self.assertEqual(generator.generation_plan("previous")[0][:2], (expected[1], "previous"))
-                self.assertEqual(generator.generation_plan("older")[0][:2], (expected[2], "older"))
-        self.assertEqual(generator.generation_plan("draft"), [("draft", "draft", None)])
-        self.assertEqual(generator.generation_plan("16.0.0"), [("16.0.0", "latest", None)])
         for base in ["https://example.invalid/18.0.0/", "https://www.unicode.org/Public/2.0.0/ucd/"]:
             with mock.patch.object(generator, "resolve_source", return_value=(base, {})), self.assertRaises(ValueError):
-                generator.generation_plan("all")
+                generator.edition_labels()
 
     def test_historical_emoji_archive_is_versioned_independently_before_unicode_17(self):
         provenance = {"sourceKind": "unicode-release"}

@@ -94,25 +94,20 @@ def resolve_source(source: str) -> tuple[str, dict]:
              "sourceRepository": "https://github.com/unicode-org/unicodetools"})
 
 
-def generation_plan(source: str) -> list[tuple[str, str, tuple[str, dict] | None]]:
-    """Resolve the rolling release slots once, before any catalog is generated.
+def edition_labels() -> dict[str, str]:
+    """The latest final release and the two before it.
 
-    Since Unicode 16, final major editions are annual. Pin the latest final's
-    immutable directory, and independently validate the two preceding finals.
-    A missing historical source fails the entire transaction; it never reuses
-    a different edition in a historical slot.
+    Only the development draft is bundled. The app shows each final edition by
+    limiting the draft to characters and emoji of that version or earlier, so
+    these labels are all a final edition needs. Since Unicode 16, final major
+    editions are annual.
     """
-    if source not in {"all", "previous", "older"}:
-        return [(source, "draft" if source == "draft" else "latest", None)]
-    latest = resolve_source("latest")
-    match = re.fullmatch(r"https://www\.unicode\.org/Public/([0-9]+)\.([0-9]+)\.([0-9]+)/ucd/", latest[0])
+    base, _ = resolve_source("latest")
+    match = re.fullmatch(r"https://www\.unicode\.org/Public/([0-9]+)\.([0-9]+)\.([0-9]+)/ucd/", base)
     if match is None or int(match[1]) < 3:
         raise ValueError("Cannot determine the preceding final Unicode releases")
     major = int(match[1])
-    releases = [("latest", "latest", latest), (f"{major - 1}.0.0", "previous", None),
-                (f"{major - 2}.0.0", "older", None)]
-    return releases + [("draft", "draft", None)] if source == "all" else [
-        item for item in releases if item[1] == source]
+    return {"latest": f"{match[1]}.{match[2]}.{match[3]}", "previous": f"{major - 1}.0.0", "older": f"{major - 2}.0.0"}
 
 
 def emoji_source_base(base: str, provenance: dict) -> str:
@@ -399,7 +394,8 @@ def replace_artifacts(output: Path, artifacts: dict[str, bytes]) -> None:
 
 
 def generate_catalog(source: str, cache: Path | None, refresh: bool, *, slot: str | None = None,
-                     resolved_source: tuple[str, dict] | None = None) -> dict[str, bytes]:
+                     resolved_source: tuple[str, dict] | None = None,
+                     editions: dict[str, str] | None = None) -> dict[str, bytes]:
     args = argparse.Namespace(source=source, cache=cache, refresh=refresh)
     slot = slot or ("draft" if source == "draft" else "latest")
     if slot not in {"latest", "previous", "older", "draft"} or (slot == "draft") != (source == "draft"):
@@ -718,6 +714,12 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool, *, slot: st
                                   "group": group, "subgroup": subgroup})
     if not emoji_entries or len({entry["id"] for entry in emoji_entries}) != len(emoji_entries):
         raise ValueError("Emoji catalog is empty or has duplicate fully-qualified sequences")
+    if editions is not None:
+        # Each final edition is the draft limited by Age, so its version must be an Age the draft has.
+        known = {item["value"] for item in ages}
+        if set(editions) != {"latest", "previous", "older"} or any(
+                ".".join(label.split(".")[:2]) not in known for label in editions.values()):
+            raise ValueError("Final editions must be versions the draft's ages include")
     properties["presentationSequences"] = presentation_sequences(
         lines("emoji/emoji-variation-sequences.txt"),
         lambda cp: cp in records or any(start <= cp <= end for start, end, *_ in ranges))
@@ -735,6 +737,7 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool, *, slot: st
                 "fullyQualifiedEmoji": len(emoji_entries), "emojiVersion": emoji["version"],
                 "assignedScalarsWithPendingDraftAge": sum(item["end"] - item["start"] + 1 for item in assigned_spans if item["draftAddition"]),
                 "sources": sources,
+                **({"editions": editions} if editions is not None else {}),
                 "annotatedCharacters": sum(bool(detail_payload(record)) for record in records.values()),
                 "formalAliasRecords": sum(alias["kind"] in {"correction", "control", "alternate", "figment", "abbreviation"} for record in records.values() for alias in detail_payload(record).get("aliases", [])),
                 "notes": "Assigned names remain unchanged. Formal name alias types come only from NameAliases.txt. NamesList headings, aliases, notices, variations and cross references are informative prose, not normative properties or corrections. Heading/notice context is searchable, including Suzhou numerals whose immutable names contain HANGZHOU. Numeric values, historical Unicode 1 names and simple case mappings come from UnicodeData.txt. Age and Script retain official generated property values; new draft assignments missing upstream Age have no inferred Age label and use the draft edition only for ordering. Emoji introduction version is distinct from the maximum official Unicode Age of its component scalars. Algorithmic names use DerivedName and the normative Hangul naming algorithm. Surrogates are excluded."}
@@ -752,16 +755,15 @@ def generate_catalog(source: str, cache: Path | None, refresh: bool, *, slot: st
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", default="all", help="all (default: latest final, previous two finals, draft), latest, previous, older, draft, or a pinned release such as 18.0.0")
+    parser.add_argument("--source", default="all", help="all (default) or draft: the development draft, labelled with the latest three final releases")
     parser.add_argument("--cache-dir", "--cache", dest="cache", type=Path)
     parser.add_argument("--refresh", action="store_true", help="Fetch every source again; required for live CI builds")
     args = parser.parse_args()
-    if args.source not in {"all", "latest", "previous", "older", "draft"} and not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.source):
-        parser.error("--source must be all, latest, previous, older, draft or a Unicode version")
-    artifacts = {}
-    for source, slot, resolved in generation_plan(args.source):
-        cache = (args.cache or ROOT / ".unicode-cache") / slot if args.source == "all" else args.cache
-        artifacts.update(generate_catalog(source, cache, args.refresh, slot=slot, resolved_source=resolved))
+    if args.source not in {"all", "draft"}:
+        parser.error("--source must be all or draft")
+    editions = edition_labels()
+    artifacts = generate_catalog("draft", args.cache or ROOT / ".unicode-cache" / "draft", args.refresh,
+                                 slot="draft", editions=editions)
     output = ROOT / "Shared" / "Resources"
     license_path = output / "Unicode-LICENSE.txt"
     if not license_path.exists():

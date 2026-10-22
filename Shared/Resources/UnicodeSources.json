@@ -81,6 +81,11 @@
       "sourceDate": "2026-09-21, 23:28:47 GMT"
     }
   },
+  "editions": {
+    "latest": "18.0.0",
+    "previous": "17.0.0",
+    "older": "16.0.0"
+  },
   "annotatedCharacters": 41194,
   "formalAliasRecords": 481,
   "notes": "Assigned names remain unchanged. Formal name alias types come only from NameAliases.txt. NamesList headings, aliases, notices, variations and cross references are informative prose, not normative properties or corrections. Heading/notice context is searchable, including Suzhou numerals whose immutable names contain HANGZHOU. Numeric values, historical Unicode 1 names and simple case mappings come from UnicodeData.txt. Age and Script retain official generated property values; new draft assignments missing upstream Age have no inferred Age label and use the draft edition only for ordering. Emoji introduction version is distinct from the maximum official Unicode Age of its component scalars. Algorithmic names use DerivedName and the normative Hangul naming algorithm. Surrogates are excluded."

@@ -48,8 +48,11 @@ enum UnicodeFontSupport {
         return manifest.fonts
     }()
 
+    /// The preview basics listed in `manifest.json` download on demand like
+    /// the other packs; they keep their place in the fallback order.
     static let assets: [Asset] = {
-        let downloads = UnicodeFontPackCatalog.bundled.packs.flatMap(\.fonts).map(\.asset)
+        let basics = Set(bundledAssets.map(\.filename))
+        let downloads = UnicodeFontPackCatalog.bundled.packs.flatMap(\.fonts).map(\.asset).filter { !basics.contains($0.filename) }
         let noto = downloads.filter { $0.displayName.hasPrefix("Noto") }
         let other = downloads.filter { !$0.displayName.hasPrefix("Noto") }
         let bundledNoto = bundledAssets.filter { $0.displayName.hasPrefix("Noto") }
@@ -332,7 +335,7 @@ enum UnicodeFontSupport {
 
     static var licenseText: String {
         guard !assets.isEmpty else { return "Bundled font license information is unavailable." }
-        let heading = "Extra Unicode fonts\n\nBundled fonts and optional downloaded subsets are used only when Extra Unicode fonts is enabled. Downloads are managed in the app and work offline afterwards. They do not change fonts in other apps.\n\n"
+        let heading = "Extra Unicode fonts\n\nDownloaded preview fonts are used only when Extra Unicode fonts is enabled. Downloads are managed in the app and work offline afterwards. They do not change fonts in other apps.\n\n"
         let names = assets.map { "\($0.displayName)\nSource: \($0.sourceURL)" }.joined(separator: "\n\n")
         let filenames = Array(Set(assets.map(\.licenseFilename))).sorted()
         let licenses = filenames.compactMap { filename -> String? in

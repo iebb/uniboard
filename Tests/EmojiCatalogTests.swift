@@ -11,11 +11,11 @@ final class EmojiCatalogTests: XCTestCase {
         ["id": points.map { String(format: "%04X", $0) }.joined(separator: "-"), "codePoints": points,
          "name": name, "emojiVersion": version, "unicodeVersion": "6.0", "group": "Fixture", "subgroup": "Symbols"]
     }
-    private func fixture(_ entries: [[String: Any]], version: String = "18.0", unicode: String = "18.0.0") throws -> URL {
+    private func fixture(_ entries: [[String: Any]], version: String = "19.0 draft", unicode: String = "19.0.0 draft") throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appendingPathComponent("EmojiCatalog-latest.json")
+        let url = directory.appendingPathComponent("EmojiCatalog-draft.json")
         try JSONSerialization.data(withJSONObject: ["version": version, "unicodeVersion": unicode, "entries": entries])
             .write(to: url)
         return url
@@ -51,39 +51,24 @@ final class EmojiCatalogTests: XCTestCase {
         XCTAssertTrue(UnicodeEdition.draft.emojiCatalog.version.hasSuffix(" draft"))
     }
 
-    func testEditionFilesDoNotMixTheirEntries() throws {
-        // Distinct tiny fixture sets exercise all four slots independently of
-        // today's upstream draft, whose assigned set can equal the final set.
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let fixtures: [(UnicodeEdition, UInt32, String, String)] = [
-            (.latest, 0x1F680, "rocket", "18.0"), (.previous, 0x1F600, "grinning face", "17.0"),
-            (.older, 0x2603, "snowman", "16.0"), (.draft, 0x1F6F0, "satellite", "19.0")]
-        for (edition, cp, name, number) in fixtures {
-            let entry: [String: Any] = ["id": String(format: "%04X", cp), "codePoints": [cp],
-                "name": name, "emojiVersion": "1.0", "unicodeVersion": "6.0",
-                "group": "Fixture", "subgroup": "Fixture"]
-            let suffix = edition == .draft ? " draft" : ""
-            let document: [String: Any] = ["version": number + suffix, "edition": edition.rawValue,
-                "unicodeVersion": number + ".0" + suffix, "entries": [entry]]
-            try JSONSerialization.data(withJSONObject: document)
-                .write(to: directory.appendingPathComponent("EmojiCatalog-\(edition.rawValue).json"))
+    func testFinalEditionsShowOnlyEmojiOfTheirVersion() throws {
+        let records = [entry([0x2603], name: "snowman", version: "16.0"), entry([0x1F600], name: "grinning face", version: "17.0"),
+                       entry([0x1F680], name: "rocket", version: "18.0"), entry([0x1F6F0], name: "satellite", version: "19.0")]
+            .map { record -> [String: Any] in var copy = record; copy["unicodeVersion"] = record["emojiVersion"]; return copy }
+        let draft = EmojiCatalog(resourceURL: try fixture(records))
+        XCTAssertNil(draft.resourceError)
+        XCTAssertTrue(draft.limited(to: .draft) === draft)
+        let labels = [UnicodeEdition.latest, .previous, .older].map(\.versionLabel)
+        XCTAssertEqual(labels, ["18.0.0", "17.0.0", "16.0.0"], "Labels come from the draft's manifest")
+        for (edition, names) in [(UnicodeEdition.latest, ["snowman", "grinning face", "rocket"]),
+                                 (.previous, ["snowman", "grinning face"]), (.older, ["snowman"])] {
+            let limited = draft.limited(to: edition)
+            XCTAssertNil(limited.resourceError)
+            XCTAssertEqual(limited.unicodeVersion, edition.versionLabel)
+            XCTAssertEqual(Set(limited.entries.map(\.name)), Set(names), edition.rawValue)
+            XCTAssertTrue(limited.search("satellite").isEmpty, "A later emoji is not part of \(edition.rawValue)")
+            XCTAssertEqual(limited.addedEntries.map(\.name), [names.last!], "What's New lists that version's emoji")
         }
-        for (edition, cp, name, _) in fixtures {
-            let catalog = EmojiCatalog(edition: edition, resourceURL: directory)
-            XCTAssertNil(catalog.resourceError)
-            XCTAssertEqual(catalog.search(name).first?.codePoints, [cp])
-            for (_, other, otherName, _) in fixtures where other != cp {
-                XCTAssertTrue(catalog.search(otherName).isEmpty)
-            }
-        }
-        // A complete but swapped historical document must fail closed, even
-        // though both editions are final and all scalar sequences are valid.
-        try FileManager.default.removeItem(at: directory.appendingPathComponent("EmojiCatalog-previous.json"))
-        try FileManager.default.copyItem(at: directory.appendingPathComponent("EmojiCatalog-older.json"),
-                                        to: directory.appendingPathComponent("EmojiCatalog-previous.json"))
-        XCTAssertNotNil(EmojiCatalog(edition: .previous, resourceURL: directory).resourceError)
     }
 
     func testExactZWJAndVariationSelectorInsertion() throws {
@@ -161,8 +146,7 @@ final class EmojiCatalogTests: XCTestCase {
             ("id", "rocket-alias"), ("id", "1f680"), ("codePoints", [UInt32(0xD800)]),
             ("codePoints", [UInt32.max]), ("codePoints", [UInt32]()), ("name", " \n"),
             ("group", " "), ("subgroup", ""), ("emojiVersion", "99.0"),
-            ("emojiVersion", "\(Int.max).0"), ("emojiVersion", "18.0 draft"), ("unicodeVersion", "999.0"),
-            ("unicodeVersion", "Pending draft age")
+            ("emojiVersion", "\(Int.max).0"), ("emojiVersion", "18.0 draft"), ("unicodeVersion", "999.0")
         ] {
             var bad = entry()
             bad[field] = value
@@ -173,7 +157,7 @@ final class EmojiCatalogTests: XCTestCase {
         invalid.append([entry(), alias])
         for records in invalid {
             let url = try fixture(records)
-            let broken = EmojiCatalog(edition: .latest, resourceURL: url)
+            let broken = EmojiCatalog(resourceURL: url)
             XCTAssertNotNil(broken.resourceError)
             XCTAssertEqual(broken.version, "Unavailable")
             XCTAssertTrue(broken.entries.isEmpty)
@@ -186,13 +170,13 @@ final class EmojiCatalogTests: XCTestCase {
         let complete = try Data(contentsOf: url)
         for length in [0, 1, complete.count / 2, complete.count - 1] {
             try complete.prefix(length).write(to: url)
-            XCTAssertNotNil(EmojiCatalog(edition: .latest, resourceURL: url).resourceError)
+            XCTAssertNotNil(EmojiCatalog(resourceURL: url).resourceError)
         }
         try FileManager.default.removeItem(at: url)
-        XCTAssertTrue(EmojiCatalog(edition: .latest, resourceURL: url.deletingLastPathComponent()).entries.isEmpty)
-        for (version, unicode) in [("19.0 draft", "19.0.0 draft"), ("18.0", "19.0.0"), ("", "18.0.0") ] {
+        XCTAssertTrue(EmojiCatalog(resourceURL: url.deletingLastPathComponent()).entries.isEmpty)
+        for (version, unicode) in [("18.0", "18.0.0"), ("19.0 draft", "18.0.0 draft"), ("", "19.0.0 draft")] {
             let mixed = try fixture([entry()], version: version, unicode: unicode)
-            XCTAssertNotNil(EmojiCatalog(edition: .latest, resourceURL: mixed).resourceError)
+            XCTAssertNotNil(EmojiCatalog(resourceURL: mixed).resourceError)
         }
         let draftFile = try fixture([entry()], version: "19.0 draft", unicode: "19.0.0 draft")
         var document = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: draftFile)) as? [String: Any])
@@ -200,7 +184,7 @@ final class EmojiCatalogTests: XCTestCase {
         pending["unicodeVersion"] = "Pending draft age"
         document["entries"] = [pending]
         try JSONSerialization.data(withJSONObject: document).write(to: draftFile)
-        let draft = EmojiCatalog(edition: .draft, resourceURL: draftFile)
+        let draft = EmojiCatalog(resourceURL: draftFile)
         XCTAssertNil(draft.resourceError)
         XCTAssertEqual(draft.entries.first?.unicodeVersionSortKey, 0)
     }
@@ -208,7 +192,7 @@ final class EmojiCatalogTests: XCTestCase {
     func testInjectedNumericAgeOrderAndAllPageBoundaries() throws {
         let records = [entry([0x1F680], version: "9.0"), entry([0x1F600], name: "fixture face", version: "10.0"),
                        entry([0x1F642, 0x200D, 0x2194, 0xFE0F], name: "fixture horizontal", version: "15.1")]
-        let url = try fixture(records), catalog = EmojiCatalog(edition: .latest, resourceURL: url.deletingLastPathComponent())
+        let url = try fixture(records), catalog = EmojiCatalog(resourceURL: url.deletingLastPathComponent())
         XCTAssertNil(catalog.resourceError)
         let expected: [UnicodeSortOrder: [String]] = [
             .newestFirst: ["1F642-200D-2194-FE0F", "1F600", "1F680"],
@@ -260,7 +244,7 @@ final class EmojiCatalogTests: XCTestCase {
 
     func testEmojiSearchUTF8BoundaryAndStableRepeatedTerms() throws {
         let url = try fixture([entry(name: "rocket", version: "1.0"), entry([0x1F600], name: "rocket rocket", version: "10.0")])
-        let fixture = EmojiCatalog(edition: .latest, resourceURL: url)
+        let fixture = EmojiCatalog(resourceURL: url)
         let boundary = "🚀" + String(repeating: " ", count: 4092)
         XCTAssertEqual(fixture.search(boundary).first?.codePoints, [0x1F680])
         XCTAssertTrue(fixture.search(boundary + " ").isEmpty)
@@ -279,7 +263,7 @@ final class EmojiCatalogTests: XCTestCase {
         let url = try fixture([entry([0x1F600], name: "cart", version: "18.0"),
             entry([0x1F601], name: "art", version: "1.0"), entry([0x1F602], name: "art word", version: "10.0"),
             entry([0x1F603], name: "earth word", version: "9.0"), group, subgroup])
-        let fixture = EmojiCatalog(edition: .latest, resourceURL: url)
+        let fixture = EmojiCatalog(resourceURL: url)
         XCTAssertNil(fixture.resourceError)
         let expected: [UnicodeSortOrder: [UInt32]] = [
             .codePoint: [0x1F601, 0x1F602, 0x1F604, 0x1F605, 0x1F600, 0x1F603],
@@ -300,7 +284,7 @@ final class EmojiCatalogTests: XCTestCase {
         let url = try fixture([entry([0x1F600], name: "mélange", version: "18.0"),
             entry([0x1F601], name: "élan", version: "1.0"),
             entry(sequence, name: "woman technologist", version: "4.0")])
-        let fixture = EmojiCatalog(edition: .latest, resourceURL: url)
+        let fixture = EmojiCatalog(resourceURL: url)
         XCTAssertNil(fixture.resourceError)
         for query in ["élan", "ÉLAN", "ｅｌａｎ", "(elan)"] {
             XCTAssertEqual(fixture.search(query).map { $0.codePoints[0] }, [0x1F601, 0x1F600], query)

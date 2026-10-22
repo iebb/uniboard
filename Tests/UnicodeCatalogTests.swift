@@ -1027,20 +1027,30 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertEqual(fixture.orderedCharacters(limit: 2, order: .newestFirst).map(\.codePoint), [0x41, 0x1F680])
     }
 
-    func testHistoricalCatalogManifestCannotBeSwappedBetweenFinalSlots() throws {
-        let directory = try fixture()
-        for name in ["UnicodeCatalog.ucd", "Blocks.json", "UnicodeProperties.json"] {
-            let original = directory.appendingPathComponent(name)
-            let suffix = original.pathExtension
-            let historical = original.deletingPathExtension().lastPathComponent + "-previous." + suffix
-            try FileManager.default.copyItem(at: original, to: directory.appendingPathComponent(historical))
-        }
-        let manifest = directory.appendingPathComponent("UnicodeSources-previous.json")
-        try JSONSerialization.data(withJSONObject: ["versionLabel": "18.0.0", "isDraft": false, "edition": "older"])
-            .write(to: manifest)
-        XCTAssertEqual(UnicodeCatalog(edition: .previous, resourceURL: directory).version, "Unavailable")
-        try JSONSerialization.data(withJSONObject: ["versionLabel": "18.0.0", "isDraft": false, "edition": "previous"])
-            .write(to: manifest)
-        XCTAssertNil(UnicodeCatalog(edition: .previous, resourceURL: directory).resourceError)
+    func testFinalEditionsAreTheDraftLimitedToTheirVersion() throws {
+        XCTAssertTrue(UnicodeCatalog.shared.limited(to: .draft) === UnicodeCatalog.shared)
+        let latest = UnicodeCatalog.latest, previous = UnicodeCatalog.previous
+        XCTAssertEqual(latest.version, "18.0.0")
+        XCTAssertNil(previous.resourceError)
+        let added = try XCTUnwrap(latest.addedCharacters(limit: 1).first, "Unicode 18 adds characters")
+        XCTAssertEqual(added.age, "18.0")
+        XCTAssertEqual(latest.character(at: added.codePoint)?.name, added.name)
+        let later = try XCTUnwrap(previous.character(at: added.codePoint))
+        XCTAssertEqual(later.name, "UNASSIGNED", "A character from a later version reads as unassigned")
+        XCTAssertNil(later.age)
+        XCTAssertEqual(later.script, "Unknown")
+        XCTAssertFalse(previous.search(added.name).contains { $0.codePoint == added.codePoint })
+        XCTAssertTrue(latest.search(added.name).contains { $0.codePoint == added.codePoint })
+        XCTAssertFalse(previous.addedCharacters(limit: 4096).contains { $0.codePoint == added.codePoint })
+        XCTAssertGreaterThan(latest.addedCount, 0)
+        XCTAssertLessThan(previous.blocks.count, latest.blocks.count, "Blocks begin in the version that fills them")
+        XCTAssertTrue(latest.blocks.allSatisfy(UnicodeCatalog.shared.blocks.contains))
+        // An algorithmic range that grew later keeps only its earlier part.
+        let ideographs = try XCTUnwrap(UnicodeCatalog.older.search("cjk unified ideograph", limit: 400_000))
+        XCTAssertTrue(ideographs.allSatisfy { ($0.age.map(unicodeVersionKey) ?? 0) <= unicodeVersionKey("16.0") })
+        XCTAssertEqual(UnicodeCatalog.older.character(at: 0x4E00)?.name, "CJK UNIFIED IDEOGRAPH-4E00")
+        XCTAssertEqual(UnicodeCatalog.older.search("cjk unified ideograph 4e00").first?.codePoint, 0x4E00)
+        let unavailable = UnicodeCatalog(resourceURL: try fixture()).limited(to: .latest)
+        XCTAssertEqual(unavailable.version, "18.0.0", "A custom catalog still uses the bundled labels")
     }
 }

@@ -25,20 +25,5 @@ test -s Shared/Resources/UnicodeCatalog.ucd
 test -s Shared/Resources/Blocks.json
 test -s Shared/Resources/UnicodeSources.json
 test -s Shared/Resources/UnicodeProperties.json
-test -s Shared/Resources/UnicodeCatalog-latest.ucd
-test -s Shared/Resources/Blocks-latest.json
-test -s Shared/Resources/UnicodeSources-latest.json
-test -s Shared/Resources/UnicodeProperties-latest.json
 test -s Shared/Resources/EmojiCatalog-draft.json
-test -s Shared/Resources/EmojiCatalog-latest.json
-test -s Shared/Resources/UnicodeCatalog-previous.ucd
-test -s Shared/Resources/Blocks-previous.json
-test -s Shared/Resources/UnicodeSources-previous.json
-test -s Shared/Resources/UnicodeProperties-previous.json
-test -s Shared/Resources/EmojiCatalog-previous.json
-test -s Shared/Resources/UnicodeCatalog-older.ucd
-test -s Shared/Resources/Blocks-older.json
-test -s Shared/Resources/UnicodeSources-older.json
-test -s Shared/Resources/UnicodeProperties-older.json
-test -s Shared/Resources/EmojiCatalog-older.json
-echo 'Three final Unicode releases, the draft and all four emoji catalogs passed validation and are ready to compile.'
+echo 'The Unicode draft and its emoji catalog passed validation; final editions are views of it.'

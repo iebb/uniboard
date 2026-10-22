@@ -48,7 +48,8 @@ enum UnicodeEdition: String, CaseIterable, Identifiable, Sendable {
         case nil: return .latest
         }
     }
-    var resourceSuffix: String { self == .draft ? "" : "-" + rawValue }
+    /// Only the draft is bundled. Its manifest also names the final editions,
+    /// which are the draft limited to characters of that version or earlier.
     private static let bundledVersionLabels: [UnicodeEdition: String] = {
         #if SWIFT_PACKAGE
         let bundles = [Bundle.module, Bundle.main, Bundle(for: UnicodeCatalog.self)]
@@ -56,36 +57,41 @@ enum UnicodeEdition: String, CaseIterable, Identifiable, Sendable {
         let bundles = [Bundle.main, Bundle(for: UnicodeCatalog.self)]
         #endif
         var labels: [UnicodeEdition: String] = [:]
-        for edition in allCases {
-            for bundle in bundles {
-                guard let url = bundle.url(forResource: "UnicodeSources" + edition.resourceSuffix, withExtension: "json"),
-                      let stream = InputStream(url: url) else { continue }
-                stream.open()
-                // Each manifest is a few KiB. Bound the read even if a bundle's
-                // metadata is malformed, without mapping its catalog at all.
-                var buffer = [UInt8](repeating: 0, count: 65_537)
-                var count = 0
-                while count < buffer.count {
-                    let read = buffer.withUnsafeMutableBytes { bytes in
-                        stream.read(bytes.baseAddress!.assumingMemoryBound(to: UInt8.self).advanced(by: count),
-                                    maxLength: bytes.count - count)
-                    }
-                    if read <= 0 { if read < 0 { count = buffer.count }; break }
-                    count += read
+        for bundle in bundles where labels.isEmpty {
+            guard let url = bundle.url(forResource: "UnicodeSources", withExtension: "json"),
+                  let stream = InputStream(url: url) else { continue }
+            stream.open()
+            // Each manifest is a few KiB. Bound the read even if a bundle's
+            // metadata is malformed, without mapping its catalog at all.
+            var buffer = [UInt8](repeating: 0, count: 65_537)
+            var count = 0
+            while count < buffer.count {
+                let read = buffer.withUnsafeMutableBytes { bytes in
+                    stream.read(bytes.baseAddress!.assumingMemoryBound(to: UInt8.self).advanced(by: count),
+                                maxLength: bytes.count - count)
                 }
-                stream.close()
-                guard count > 0, count <= 65_536,
-                      let identity = try? JSONDecoder().decode(UnicodeSourceIdentity.self, from: Data(buffer.prefix(count))),
-                      unicodeVersionKey(identity.versionLabel) > 0,
-                      identity.isDraft == (edition == .draft),
-                      identity.versionLabel.hasSuffix(" draft") == identity.isDraft,
-                      identity.edition == nil || identity.edition == edition.rawValue else { continue }
-                labels[edition] = identity.versionLabel
-                break
+                if read <= 0 { if read < 0 { count = buffer.count }; break }
+                count += read
             }
+            stream.close()
+            guard count > 0, count <= 65_536,
+                  let identity = try? JSONDecoder().decode(UnicodeSourceIdentity.self, from: Data(buffer.prefix(count))) else { continue }
+            labels = editionLabels(identity)
         }
         return labels
     }()
+    /// The draft's label and each final edition's, which must be an earlier final release.
+    fileprivate static func editionLabels(_ identity: UnicodeSourceIdentity) -> [UnicodeEdition: String] {
+        let draftKey = unicodeVersionKey(identity.versionLabel)
+        guard draftKey > 0, identity.isDraft, identity.versionLabel.hasSuffix(" draft"),
+              identity.edition == nil || identity.edition == UnicodeEdition.draft.rawValue else { return [:] }
+        var labels: [UnicodeEdition: String] = [.draft: identity.versionLabel]
+        for edition in [UnicodeEdition.latest, .previous, .older] {
+            if let label = identity.editions?[edition.rawValue], !label.hasSuffix(" draft"),
+               (1..<draftKey).contains(unicodeVersionKey(label)) { labels[edition] = label }
+        }
+        return labels
+    }
 }
 
 enum UnicodeSortOrder: String, CaseIterable, Identifiable, Sendable {
@@ -296,11 +302,13 @@ struct UnicodeBlock: Identifiable, Hashable, Sendable, Decodable {
 /// Browsing materializes only a page, rather than hundreds of thousands of objects.
 final class UnicodeCatalog: @unchecked Sendable {
     static let shared = UnicodeCatalog()
-    static let latest = UnicodeCatalog(edition: .latest)
-    static let previous = UnicodeCatalog(edition: .previous)
-    static let older = UnicodeCatalog(edition: .older)
+    static let latest = shared.limited(to: .latest)
+    static let previous = shared.limited(to: .previous)
+    static let older = shared.limited(to: .older)
 
     let edition: UnicodeEdition
+    /// A final edition shows only characters assigned by its version.
+    private let isLimited: Bool
     let blocks: [UnicodeBlock]
     private let representativeLock = NSLock()
     private var representatives: [UInt32: String] = [:]
@@ -331,14 +339,16 @@ final class UnicodeCatalog: @unchecked Sendable {
         "Co": "Private-use character", "Cn": "Unassigned code point"
     ]
 
-    /// Pass a resource directory or UnicodeCatalog.ucd URL for tests/custom bundles.
-    init(edition: UnicodeEdition = .draft, resourceURL: URL? = nil) {
-        self.edition = edition
+    /// Loads the bundled draft. Pass a resource directory or UnicodeCatalog.ucd
+    /// URL for tests/custom bundles.
+    init(resourceURL: URL? = nil) {
+        edition = .draft
+        isLimited = false
         let catalogURL: URL?
         let blocksURL: URL?
         let propertiesURL: URL?
         let sourcesURL: URL?
-        let suffix = edition.resourceSuffix
+        let suffix = ""
         if let resourceURL {
             let directory = resourceURL.pathExtension == "ucd" ? resourceURL.deletingLastPathComponent() : resourceURL
             catalogURL = resourceURL.pathExtension == "ucd" ? resourceURL : directory.appendingPathComponent("UnicodeCatalog\(suffix).ucd")
@@ -374,9 +384,9 @@ final class UnicodeCatalog: @unchecked Sendable {
             return String(decoding: bytes[start..<(start + Self.uint32(bytes, 36))], as: UTF8.self)
         }
         let sourceIdentityMatches = sourceIdentity.map {
-            $0.versionLabel == loadedVersion && $0.isDraft == (edition == .draft)
-                && $0.isDraft == $0.versionLabel.hasSuffix(" draft")
-                && ($0.edition == nil || $0.edition == edition.rawValue)
+            // The bundled base is always the draft; final editions are views of it.
+            $0.versionLabel == loadedVersion && $0.isDraft && $0.versionLabel.hasSuffix(" draft")
+                && ($0.edition == nil || $0.edition == UnicodeEdition.draft.rawValue)
         } ?? false
         if let loaded, let versionLabel = loadedVersion, !sourceIdentityRequired || sourceIdentityMatches {
             data = loaded
@@ -409,16 +419,57 @@ final class UnicodeCatalog: @unchecked Sendable {
         }
     }
 
+    /// A final edition: this catalog limited to characters of `edition`'s
+    /// version or earlier. It shares the mapped data.
+    func limited(to edition: UnicodeEdition) -> UnicodeCatalog {
+        edition == .draft ? self : UnicodeCatalog(base: self, edition: edition)
+    }
+
+    private init(base: UnicodeCatalog, edition: UnicodeEdition) {
+        self.edition = edition
+        isLimited = true
+        let key = unicodeVersionKey(edition.versionLabel)
+        let spans = base.properties.assignedSpans.filter { !$0.draftAddition && $0.sortKey <= key }
+        properties = UnicodePropertyData(unicodeVersion: base.properties.unicodeVersion, ages: base.properties.ages,
+                                         scripts: base.properties.scripts, assignedSpans: spans,
+                                         decompositions: base.properties.decompositions,
+                                         presentationSequences: base.properties.presentationSequences)
+        // Blocks with nothing assigned yet belong to a later version.
+        blocks = base.blocks.filter { block in spans.contains { $0.start <= block.end && $0.end >= block.start } }
+        version = key > 0 ? edition.versionLabel : "Unavailable"
+        resourceError = key > 0 ? base.resourceError : "This Unicode edition is unavailable."
+        data = base.data
+        recordCount = base.recordCount
+        recordOffset = base.recordOffset
+        rangeCount = base.rangeCount
+        rangeOffset = base.rangeOffset
+        poolOffset = base.poolOffset
+        formatVersion = base.formatVersion
+        recordSize = base.recordSize
+    }
+
+    /// In a final edition, a character from a later version reads as unassigned.
+    private func isAssigned(_ cp: UInt32) -> Bool {
+        let spans = properties.assignedSpans
+        var low = 0, high = spans.count
+        while low < high {
+            let mid = (low + high) / 2
+            if spans[mid].end < cp { low = mid + 1 } else { high = mid }
+        }
+        return low < spans.count && spans[low].start <= cp
+    }
+
     /// Every valid scalar can be inspected, including reserved/noncharacters.
     /// Surrogates and values above U+10FFFF are rejected because they cannot be text.
     func character(at codePoint: UInt32) -> UnicodeCharacter? {
         guard Unicode.Scalar(codePoint) != nil else { return nil }
         let block = block(containing: codePoint)?.name ?? "No Block"
+        let later = isLimited && !isAssigned(codePoint)
         return data.withUnsafeBytes { bytes in
-            if let index = recordIndex(codePoint, bytes: bytes) {
+            if !later, let index = recordIndex(codePoint, bytes: bytes) {
                 return character(record: index, blockName: block, bytes: bytes)
             }
-            if let range = algorithmicRange(codePoint, bytes: bytes) {
+            if !later, let range = algorithmicRange(codePoint, bytes: bytes) {
                 let category = Self.categories[Int(bytes[range + 14])]
                 let name = algorithmicName(codePoint, range: range, bytes: bytes)
                 let description = bytes[range + 15] == 2
@@ -436,7 +487,8 @@ final class UnicodeCatalog: @unchecked Sendable {
                                     detail: noncharacter ? "Permanently reserved for internal use. Not an assigned Unicode character."
                                         : "No character is assigned to this code point in Unicode \(version).",
                                     blockName: block, category: "Cn", isInvisible: true,
-                                    age: age(at: codePoint), script: script(at: codePoint))
+                                    age: later ? nil : age(at: codePoint),
+                                    script: later ? (properties.unicodeVersion.isEmpty ? nil : "Unknown") : script(at: codePoint))
         }
     }
 
@@ -623,8 +675,8 @@ final class UnicodeCatalog: @unchecked Sendable {
                     if kind == 0 { allMatch = false; break }
                     if kind != 2 { allWhole = false }
                 }
-                if allMatch {
-                    let cp = Self.u32(bytes, record)
+                let cp = Self.u32(bytes, record)
+                if allMatch, !isLimited || isAssigned(cp) {
                     candidates.append((cp, sortKey(at: cp), allWhole ? 0 : 1))
                 }
             }
@@ -655,13 +707,13 @@ final class UnicodeCatalog: @unchecked Sendable {
                             let whole = stringTokens.allSatisfy {
                                 !Task.isCancelled && CatalogSearchQueryPolicy.containsWholeTerm($0, in: prefixAndBlock)
                             }
-                            for cp in blockStart...blockEnd {
+                            for cp in blockStart...blockEnd where !isLimited || isAssigned(cp) {
                                 if cp & 255 == 0 && Task.isCancelled { return [] }
                                 candidates.append((cp, sortKey(at: cp), whole ? 0 : 1))
                             }
                         } else {
                             let blockName = Self.normalized(block.name)
-                            for cp in blockStart...blockEnd {
+                            for cp in blockStart...blockEnd where !isLimited || isAssigned(cp) {
                                 if cp & 255 == 0 && Task.isCancelled { return [] }
                                 let text = algorithmicName(cp, range: range, bytes: bytes)
                                     .lowercased().replacingOccurrences(of: "-", with: " ") + " " + blockName
@@ -963,10 +1015,12 @@ final class UnicodeCatalog: @unchecked Sendable {
     }
 }
 
-private struct UnicodeSourceIdentity: Decodable {
+struct UnicodeSourceIdentity: Decodable {
     let versionLabel: String
     let isDraft: Bool
     let edition: String?
+    /// The final editions shown by limiting the draft, such as "latest": "18.0.0".
+    var editions: [String: String]? = nil
 }
 
 private struct UnicodeDetailData: Decodable {

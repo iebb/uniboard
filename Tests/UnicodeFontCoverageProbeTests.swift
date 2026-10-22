@@ -156,10 +156,13 @@ final class UnicodeFontCoverageProbeTests: XCTestCase {
                           "Every shaped preview must have finite, nonnegative metrics")
         }
         let system = UIFont.systemFont(ofSize: 56)
+        // Unifont downloads on demand with the preview basics.
+        let basics = UnicodeFontSupport.resourceURL("unifont-18.0.01.otf") != nil
         for id in ["armenian-0558", "sidetic-10940"] {
             let before = try observation(id, enabled: false, in: report)
             let after = try observation(id, enabled: true, in: report)
             let missing = UnicodeFontSupport.missingCodePoints(in: before.fixture.text, font: system)
+            if !missing.isEmpty && !basics { continue }
             if !missing.isEmpty {
                 XCTAssertNotEqual(after.requestedFontName, before.requestedFontName)
                 XCTAssertNotNil(UnicodeFontSupport.sourceName(for: after.fixture.text, size: 56, enabled: true))

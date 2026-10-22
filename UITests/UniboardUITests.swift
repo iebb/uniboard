@@ -23,7 +23,7 @@ final class UniboardUITests: XCTestCase {
         revealByScrolling(link, in: app)
         link.tap()
         XCTAssertTrue(app.navigationBars["Font Downloads"].firstMatch.waitForExistence(timeout: 5))
-        for id in ["historic-symbols", "han-supplementary", "han-latest"] {
+        for id in ["preview-basics", "historic-symbols", "han-supplementary", "han-latest"] {
             let pack = app.descendants(matching: .any)["fontDownloads.pack.\(id)"].firstMatch
             revealByScrolling(pack, in: app)
             XCTAssertTrue(pack.exists)
@@ -507,6 +507,7 @@ final class UniboardUITests: XCTestCase {
 
     func testOptionalUnicodeFontsAppChoicePersistsAndPreservesExactText() {
         selectAppEdition("latest")
+        ensurePreviewBasics()
         setAppUnicodeFonts(false)
         let fonts = appUnicodeFontsSwitch()
         XCTAssertTrue(fonts.waitUntilValueEquals("0"), "The visible App Settings choice must be off before testing native previews")
@@ -2458,6 +2459,7 @@ final class UniboardUITests: XCTestCase {
     func testSystemKeyboardReadsAppFontSettingsAndPreservesExactInsertion() throws {
         try requireKeyboardIntegration()
         selectAppEdition("latest")
+        ensurePreviewBasics()
         setAppUnicodeFonts(false)
         setAppCollapseKey(false)
         app.launchArguments = []
@@ -3054,6 +3056,22 @@ final class UniboardUITests: XCTestCase {
         let floating = app.cells.matching(NSPredicate(format: "label == %@", title)).firstMatch
         if floating.exists { return floating }
         return app.buttons[title].firstMatch
+    }
+
+    /// Unifont and the other preview basics download on demand.
+    private func ensurePreviewBasics() {
+        openAppSettings()
+        let link = app.buttons["fontDownloads"].firstMatch
+        revealByScrolling(link, in: app)
+        link.tap()
+        let pack = app.descendants(matching: .any)["fontDownloads.pack.preview-basics"].firstMatch
+        XCTAssertTrue(pack.waitForExistence(timeout: 5))
+        let ready = pack.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Available offline")).firstMatch
+        if !ready.exists {
+            app.buttons["fontDownloads.download.preview-basics"].firstMatch.tap()
+            XCTAssertTrue(ready.waitForExistence(timeout: 180), "Preview basics download")
+        }
+        app.navigationBars["Font Downloads"].buttons.firstMatch.tap()
     }
 
     private func appUnicodeFontsSwitch() -> XCUIElement {

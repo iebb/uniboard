@@ -17,8 +17,9 @@ def validate_downloads(directory: Path) -> None:
     protected_emoji = {cp for block in stock["blocks"] for cp in block["emojiMissing"]}
     assert catalog["schemaVersion"] == inputs["schemaVersion"] == 1
     assert catalog["unicodeVersion"] == inputs["unicodeVersion"] == "18.0.0"
-    assert [pack["id"] for pack in catalog["packs"]] == ["historic-symbols", "han-supplementary", "han-latest", "seal", "emoji"]
-    fonts = [font for pack in catalog["packs"] for font in pack["fonts"]]
+    assert [pack["id"] for pack in catalog["packs"]] == ["preview-basics", "historic-symbols", "han-supplementary", "han-latest", "seal", "emoji"]
+    # Preview basics are the unchanged manifest fonts, checked in validate().
+    fonts = [font for pack in catalog["packs"][1:] for font in pack["fonts"]]
     assert len(fonts) == len(inputs["fonts"]) == 69
     by_name = {entry["filename"]: entry for entry in inputs["fonts"]}
     assert len(by_name) == len(fonts)
@@ -73,7 +74,8 @@ def validate_downloads(directory: Path) -> None:
             assert covered.isdisjoint(points), "Each download must contribute unique measured preview coverage"
             points.update(covered)
         assert not (directory / filename).exists(), "Download assets must not enlarge the initial app/keyboard bundles"
-    assert total <= 80 * 1024 * 1024
+    total += sum(font["bytes"] for font in catalog["packs"][0]["fonts"])
+    assert total <= 96 * 1024 * 1024
     print(f"Validated {len(catalog['packs'])} optional packs: {len(fonts)} pinned fonts, {total:,} download bytes, {len(points):,} iOS-measured scalars.")
 
 
@@ -84,16 +86,21 @@ def validate(directory: Path) -> None:
     assert [font["postScriptName"] for font in fonts] == [
         "NotoSansSymbols2-Regular", "UniboardCombiningPreviews-Regular", "Unifont", "UnifontUpper"
     ], "Unexpected font priority"
+    # These preview fonts download on demand as the first pack, unchanged.
+    basics = json.loads((directory / "DownloadableFonts.json").read_text())["packs"][0]
+    assert basics["id"] == "preview-basics" and len(basics["fonts"]) == len(fonts)
     all_points = set()
     byte_count = 0
-    for font in fonts:
+    for font, download in zip(fonts, basics["fonts"]):
         filename = font["filename"]
         assert Path(filename).name == filename, "Font path must stay inside Fonts"
-        data = (directory / filename).read_bytes()
-        assert data[:4] in {b"OTTO", b"\x00\x01\x00\x00"}, f"Invalid OpenType/CFF header: {filename}"
-        assert len(data) == font["bytes"], f"Changed size: {filename}"
-        assert hashlib.sha256(data).hexdigest() == font["sha256"], f"Changed font: {filename}"
-        byte_count += len(data)
+        assert not (directory / filename).exists(), "Preview fonts download on demand"
+        asset = download["asset"]
+        for key in ["filename", "displayName", "postScriptName", "sha256", "sourceURL", "licenseFilename", "ranges"]:
+            assert asset[key] == font[key], f"Download differs from manifest: {filename} {key}"
+        assert download["bytes"] == font["bytes"], f"Changed size: {filename}"
+        assert download["downloadURL"] == "https://github.com/iebb/uniboard/releases/download/fonts-1.1-20261022/" + filename
+        byte_count += font["bytes"]
         license_name = font["licenseFilename"]
         assert Path(license_name).name == license_name
         license_text = (directory / license_name).read_text()

@@ -24,9 +24,9 @@ struct UnicodeEmojiEntry: Identifiable, Hashable, Sendable, Decodable {
 /// The complete official fully-qualified keyboard set, including full sequences.
 final class EmojiCatalog: @unchecked Sendable {
     static let shared = EmojiCatalog()
-    static let latest = EmojiCatalog(edition: .latest)
-    static let previous = EmojiCatalog(edition: .previous)
-    static let older = EmojiCatalog(edition: .older)
+    static let latest = shared.limited(to: .latest)
+    static let previous = shared.limited(to: .previous)
+    static let older = shared.limited(to: .older)
     let edition: UnicodeEdition
     let version: String
     let unicodeVersion: String
@@ -43,7 +43,9 @@ final class EmojiCatalog: @unchecked Sendable {
         let entries: [UnicodeEmojiEntry]
     }
 
-    init(edition: UnicodeEdition = .draft, resourceURL: URL? = nil) {
+    /// Loads the bundled draft set. Final editions are limited views of it.
+    init(resourceURL: URL? = nil) {
+        let edition = UnicodeEdition.draft
         self.edition = edition
         let filename = "EmojiCatalog-\(edition.rawValue)"
         let url: URL?
@@ -92,6 +94,24 @@ final class EmojiCatalog: @unchecked Sendable {
             texts = []
             resourceError = "The offline emoji catalog could not be loaded."
         }
+    }
+
+    /// A final edition: the emoji introduced by its version or earlier.
+    func limited(to edition: UnicodeEdition) -> EmojiCatalog {
+        edition == .draft ? self : EmojiCatalog(base: self, edition: edition)
+    }
+
+    private init(base: EmojiCatalog, edition: UnicodeEdition) {
+        self.edition = edition
+        let key = unicodeVersionKey(edition.versionLabel)
+        unicodeVersion = key > 0 ? edition.versionLabel : "Unavailable"
+        version = key > 0 ? edition.versionLabel.split(separator: ".").prefix(2).joined(separator: ".") : "Unavailable"
+        entries = key > 0 ? base.entries.filter {
+            unicodeVersionKey($0.emojiVersion) <= key && (1...key).contains(unicodeVersionKey($0.unicodeVersion))
+        } : []
+        searchStrings = entries.map { Self.normalized($0.name + " " + $0.group + " " + $0.subgroup) }
+        texts = entries.map(\.text)
+        resourceError = key > 0 ? base.resourceError : "The offline emoji catalog could not be loaded."
     }
 
     func orderedEntries(order: UnicodeSortOrder = .codePoint) -> [UnicodeEmojiEntry] {

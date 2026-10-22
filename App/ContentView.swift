@@ -126,7 +126,12 @@ struct ExploreView: View {
         VStack(spacing: 0) {
             // The search field stays put, so typing never rebuilds it.
             VStack(alignment: .leading, spacing: 12) {
-                SearchBar(text: $query, placeholder: "Names, blocks or U+ codes")
+                // Search from the edit itself rather than a later view update:
+                // SwiftUI coalesces fast keystrokes and can skip the last one.
+                SearchBar(text: Binding(get: { query }, set: { value in
+                    query = value
+                    search.update(value, catalog: catalog)
+                }), placeholder: "Names, blocks or U+ codes")
                 HStack {
                     if let plane = scope.plane {
                         Text(ExploreScope.name(of: plane)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
@@ -224,7 +229,6 @@ struct ExploreView: View {
         }
         .onChange(of: density) { _, _ in pages = 1 }
         .onChange(of: scope) { _, _ in pages = 1 }
-        .onChange(of: query) { _, value in search.update(value, catalog: catalog) }
         .onChange(of: preferences.edition) { _, _ in
             pages = 1
             search.update(query, catalog: catalog)

@@ -126,7 +126,8 @@ enum KeyboardTypingLayoutPolicy {
         return state.label(for: key)
     }
 
-    static func padPlan(availableWidth: CGFloat, isPad: Bool, layout: KeyboardTypingLayout, isLandscape: Bool = false, padLayout: KeyboardPadLayout = .ansiNumbers) -> KeyboardPadTypingLayoutPlan? {
+    static func padPlan(availableWidth: CGFloat, isPad: Bool, layout: KeyboardTypingLayout, isLandscape: Bool = false, padLayout: KeyboardPadLayout = .ansiNumbers,
+                        alphabet: KeyboardAlphabet = .english) -> KeyboardPadTypingLayoutPlan? {
         guard isPad, layout == .letters, availableWidth.isFinite, availableWidth >= 650 else { return nil }
         let gap: CGFloat = 7
         if usesANSI(availableWidth: availableWidth, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout) {
@@ -137,7 +138,12 @@ enum KeyboardTypingLayoutPolicy {
                 tabWidth: span(1.5), deleteWidth: span(padLayout == .ansiNumbers ? 2 : 1.5), rightShiftWidth: span(padLayout == .ansiNumbers ? 2.75 : 1.75),
                 backslashWidth: padLayout == .ansiNumbers ? span(1.5) : key, isANSI: true, hasNumberRow: padLayout == .ansiNumbers)
         }
-        let key = (availableWidth - gap * 11) / 12
+        // Tab and Delete, Caps Lock and Return, and both Shifts with comma and
+        // period take 2, 3 and 5 key widths. English fills 12 units in each row;
+        // longer rows narrow every key so the widest row still fits.
+        let rows = alphabet.rows
+        let units = CGFloat(max(12, rows[0].count + 2, rows[1].count + 3, rows[2].count + 5))
+        let key = (availableWidth - gap * (units - 1)) / units
         return KeyboardPadTypingLayoutPlan(keySpacing: gap, characterWidth: key,
             capsWidth: key * 1.35 + gap / 2, returnWidth: key * 1.65 + gap / 2,
             shiftWidth: key * 1.5 + gap / 2, tabWidth: key, deleteWidth: key,

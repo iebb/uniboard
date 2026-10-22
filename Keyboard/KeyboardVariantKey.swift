@@ -24,6 +24,10 @@ struct KeyboardVariantKey: UIViewRepresentable {
     var showsInspection = false
     var showsEditing = false
     var holdLabel: String? = nil
+    /// Shown for the key and its choices instead of their literal text.
+    var displayText: ((String) -> String)? = nil
+    /// Names a hold choice for VoiceOver instead of its text and code points.
+    var actionName: ((String) -> String)? = nil
     let factory: KeyboardVariantInteraction.Factory
 
     func makeUIView(context: Context) -> KeyboardVariantButton { KeyboardVariantButton() }
@@ -35,7 +39,7 @@ struct KeyboardVariantKey: UIViewRepresentable {
             longPressOptions: longPressOptions, swipeUp: swipeUp, swipeDown: swipeDown, secondaryText: secondaryText, contentPosition: contentPosition,
             showsInspection: showsInspection, showsEditing: showsEditing, holdLabel: holdLabel,
             popupFont: { UnicodeFontSupport.font(for: symbolBoardPreview($0), size: fontSize, enabled: useUnicodeFonts) },
-            displayText: symbolBoardPreview, factory: factory)
+            displayText: displayText ?? symbolBoardPreview, actionName: actionName, factory: factory)
         view.tintColor = KeyboardPalette.accentUI
         view.accessibilityIdentifier = identifier
         view.accessibilityLabel = label ?? text

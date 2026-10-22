@@ -92,6 +92,26 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
         XCTAssertTrue([huge.characterWidth, huge.capsWidth, huge.returnWidth, huge.shiftWidth].allSatisfy { $0.isFinite && $0 > 0 })
     }
 
+    func testWidePadRowsOfEveryLayoutFitTheirFunctionKeys() throws {
+        for alphabet in KeyboardAlphabet.catalog {
+            for width: CGFloat in [650, 1008, 1350] {
+                let pad = try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: width, isPad: true, layout: .letters, alphabet: alphabet))
+                let rows = KeyboardTypingLayoutPolicy.rows(for: .letters, hasAuxiliaryRow: false, widePad: true, alphabet: alphabet)
+                func rowWidth(_ keys: Int, _ functions: CGFloat) -> CGFloat {
+                    CGFloat(keys) * pad.characterWidth + functions + CGFloat(keys + 1) * pad.keySpacing
+                }
+                XCTAssertLessThanOrEqual(rowWidth(rows[0].count, pad.tabWidth + pad.deleteWidth), width + 0.000001, alphabet.id)
+                XCTAssertLessThanOrEqual(rowWidth(rows[1].count, pad.capsWidth + pad.returnWidth), width + 0.000001, alphabet.id)
+                XCTAssertLessThanOrEqual(rowWidth(rows[2].count, 2 * pad.shiftWidth), width + 0.000001, alphabet.id)
+                XCTAssertGreaterThanOrEqual(pad.characterWidth, 36, alphabet.id)
+            }
+        }
+        let hungarian = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "hu"))
+        let narrow = try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: 1008, isPad: true, layout: .letters, alphabet: hungarian))
+        let english = try XCTUnwrap(KeyboardTypingLayoutPolicy.padPlan(availableWidth: 1008, isPad: true, layout: .letters))
+        XCTAssertLessThan(narrow.characterWidth, english.characterWidth, "Twelve-key rows narrow every key")
+    }
+
     func testPadFunctionsRequireActualPadLettersAndSufficientFiniteWindowWidth() {
         for width: CGFloat in [.nan, .infinity, -.infinity, -1, 0, 320, 402, 649, CGFloat(650).nextDown] {
             XCTAssertNil(KeyboardTypingLayoutPolicy.padPlan(availableWidth: width, isPad: true, layout: .letters))

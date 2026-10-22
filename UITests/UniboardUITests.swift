@@ -1020,6 +1020,42 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("Distinct letter accents, modifier and styled forms, and system Shift gestures")
     }
 
+    func testSystemKeyboardSwitchesLayoutsWithTheSpaceBarAndRemembersTheChoice() throws {
+        try requirePhoneKeyboardIntegration()
+        resetAppLayouts()
+        addTeardownBlock { @MainActor [self] in restoreEnglishKeyboard(); resetAppLayouts() }
+        openAppLayouts()
+        addAppLayout("Greek", id: "el")
+        addAppLayout("Russian", id: "ru")
+        let context = "Switch "
+        let input = openSystemKeyboardHost(initialText: context, unicodeBrowse: false)
+        let space = app.buttons["keyboard.space"].firstMatch
+        XCTAssertTrue(space.waitUntilValueEquals("English"), "With several layouts the space bar names the current one")
+        chooseHeldKeyboardOption(space, optionCount: 3, selectedIndex: 1, extraActions: 0)
+        XCTAssertTrue(space.waitUntilValueEquals("Ελληνικά"))
+        XCTAssertEqual(input.value as? String, context, "Switching types nothing")
+        let alpha = app.buttons["keyboard.typing.key.α"].firstMatch
+        XCTAssertTrue(alpha.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["keyboard.typing.key.q"].exists)
+        alpha.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "α"))
+        app.buttons["keyboard.typing.shift"].tap()
+        alpha.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "αΑ"))
+        space.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "αΑ "), "A tap on the named space bar still types a space")
+        attachScreenshot("Greek layout chosen by holding the space bar")
+        // The chooser lists the current layout first, then the others in order.
+        chooseHeldKeyboardOption(space, optionCount: 3, selectedIndex: 2, extraActions: 0)
+        XCTAssertTrue(space.waitUntilValueEquals("Русский"))
+        app.buttons["keyboard.typing.key.ж"].firstMatch.tap()
+        XCTAssertTrue(input.waitUntilValueEquals(context + "αΑ ж"))
+        let reopened = openSystemKeyboardHost(unicodeBrowse: false)
+        XCTAssertTrue(app.buttons["keyboard.space"].firstMatch.waitUntilValueEquals("Русский"), "The keyboard remembers the last layout")
+        XCTAssertTrue(app.buttons["keyboard.typing.key.ж"].firstMatch.exists)
+        _ = reopened
+    }
+
     func testSystemKeyboardWithoutNumberRowKeepsDigitsOnThe123PageAndInSearch() throws {
         try requirePhoneKeyboardIntegration()
         resetAppKey("letter.w")

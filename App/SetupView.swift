@@ -2,14 +2,12 @@ import SwiftUI
 
 struct SetupView: View {
     @EnvironmentObject private var preferences: CatalogPreferences
-    /// Explore's two Supplementary Private Use planes, hidden by default.
+    /// Explore's Private Use rows and planes, hidden by default.
     @AppStorage("exploreShowsPrivateUse") private var showsPrivateUse = false
     var body: some View {
         Form {
             Section {
                 CatalogEditionPicker()
-                Toggle("Supplementary Private Use", isOn: $showsPrivateUse)
-                    .accessibilityIdentifier("showSupplementaryPrivateUse")
                 if let message = preferences.editionSaveError {
                     Text(message).foregroundStyle(.red)
                         .accessibilityIdentifier("unicodeEdition.saveError")
@@ -75,6 +73,8 @@ struct SetupView: View {
             Section {
                 Toggle("Extra Unicode Fonts", isOn: Binding(get: { preferences.useUnicodeFonts }, set: { preferences.selectUnicodeFonts($0) }))
                     .accessibilityIdentifier("extraUnicodeFonts")
+                Toggle("Private Use Area", isOn: $showsPrivateUse)
+                    .accessibilityIdentifier("showPrivateUse")
                 Toggle("ConScript (UCSUR)", isOn: Binding(get: { preferences.showsUCSUR }, set: { preferences.selectUCSUR($0) }))
                     .accessibilityIdentifier("showUCSUR")
                 if preferences.showsUCSUR {

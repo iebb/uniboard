@@ -37,6 +37,8 @@ enum UnicodeFontSupport {
     private static var downloadRevision = ""
     private static var lastRevisionCheck = -Double.infinity
     private static let systemChoice = -1
+    /// A ConScript character no ConScript font draws, shown as a placeholder.
+    private static let placeholderChoice = -2
 
     static let bundledAssets: [Asset] = {
         guard let url = resourceURL("manifest.json"),
@@ -127,8 +129,16 @@ enum UnicodeFontSupport {
         guard index != systemChoice else { return system }
         let key = "\(index)@\(size)" as NSString
         if let cached = resolvedFonts.object(forKey: key) { return cached }
+        let font: UIFont
+        if index == placeholderChoice {
+            // LastResort draws a placeholder for every code point, so iOS's own
+            // Private Use emoji never stand in for a ConScript character.
+            font = UIFont(name: "LastResort", size: size) ?? system
+            resolvedFonts.setObject(font, forKey: key)
+            return font
+        }
         guard let graphics = graphicsFont(at: index) else { return system }
-        let font = CTFontCreateWithGraphicsFont(graphics, size, nil, nil) as UIFont
+        font = CTFontCreateWithGraphicsFont(graphics, size, nil, nil) as UIFont
         resolvedFonts.setObject(font, forKey: key)
         return font
     }
@@ -188,12 +198,11 @@ enum UnicodeFontSupport {
         if let cached = choices.object(forKey: text as NSString) { return cached.intValue }
         var selected = systemChoice
         let scalars = text.unicodeScalars.map(\.value)
-        if prefersConScript, scalars.allSatisfy(UCSUR.isPrivateUse),
-           let index = assets.indices.first(where: { index in
-               conscriptFilenames.contains(assets[index].filename) && scalars.allSatisfy(assets[index].contains)
-                   && referenceFont(at: index).map { font in scalars.allSatisfy { hasArtwork($0, in: font) } } == true
-           }) {
-            selected = index
+        let privateUse = scalars.filter(UCSUR.isPrivateUse)
+        // A combining mark shows on a dotted circle, which other fonts draw.
+        if prefersConScript, !privateUse.isEmpty, scalars.allSatisfy({ UCSUR.isPrivateUse($0) || $0 == 0x25CC }),
+           let pick = conscriptChoice(privateUse) {
+            selected = pick
         } else if isEmojiText(text) {
             if stockFontsMiss(text, emoji: true) {
                 for (index, asset) in assets.enumerated() where isEmojiAsset(asset) {
@@ -222,6 +231,17 @@ enum UnicodeFontSupport {
         }
         choices.setObject(NSNumber(value: selected), forKey: text as NSString)
         return selected
+    }
+
+    /// The ConScript font that draws every Private Use scalar, else a
+    /// placeholder when one is in a ConScript block, so iOS's own Private Use
+    /// emoji never stand in for it; nil leaves the usual fallbacks.
+    private static func conscriptChoice(_ points: [UInt32]) -> Int? {
+        if let index = assets.indices.first(where: { index in
+            conscriptFilenames.contains(assets[index].filename) && points.allSatisfy(assets[index].contains)
+                && referenceFont(at: index).map { font in points.allSatisfy { hasArtwork($0, in: font) } } == true
+        }) { return index }
+        return points.contains { UCSUR.block(containing: $0) != nil } ? placeholderChoice : nil
     }
 
     /// A color glyph can exist in the cmap yet draw nothing (for example COLR

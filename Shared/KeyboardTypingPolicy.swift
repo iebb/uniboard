@@ -64,6 +64,17 @@ struct KeyboardTypingState: Equatable {
         resetTapSequence()
     }
 
+    /// Switching alphabets drops a one-shot capital; Caps Lock stays on, and
+    /// automatic capitalization decides the next case afresh.
+    mutating func selectAlphabet(_ alphabet: KeyboardAlphabet) {
+        guard alphabet != self.alphabet else { return }
+        self.alphabet = alphabet
+        if shift == .uppercase { shift = .lowercase }
+        physicalSymbolShift = false
+        manualShiftOverride = false
+        resetTapSequence()
+    }
+
     mutating func pressShift(at timestamp: TimeInterval) {
         guard layout == .letters else { resetTapSequence(); return }
         manualShiftOverride = true

@@ -7,10 +7,15 @@ struct AppSearchField: UIViewRepresentable {
     @Binding var text: String
     let placeholder: String
     let identifier: String
+    var textStyle: UIFont.TextStyle = .body
+    /// Takes focus once, when the field is first created.
+    var focusOnAppear = false
 
     func makeUIView(context: Context) -> AppSearchTextField {
         let field = AppSearchTextField()
+        field.font = .preferredFont(forTextStyle: textStyle)
         configure(field)
+        if focusOnAppear { DispatchQueue.main.async { field.becomeFirstResponder() } }
         return field
     }
 

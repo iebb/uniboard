@@ -136,7 +136,8 @@ private struct KeyboardGestureSettingsView: View {
     @State private var showsUnicodePicker = false
     @State private var saveAttempted = false
     @State private var saveAlert = false
-    @FocusState private var focused: UUID?
+    /// The row Add Choice just created, which takes focus as it appears.
+    @State private var addedChoice: UUID?
 
     init(descriptor: KeyboardKeySettings.Descriptor, gesture: KeyboardKeySettings.Gesture,
          keys: KeyboardKeyPreferences, current: [String]?) {
@@ -172,11 +173,11 @@ private struct KeyboardGestureSettingsView: View {
             Section {
                 ForEach($choices) { $choice in
                     VStack(alignment: .leading, spacing: 6) {
-                        TextField("Character or sequence", text: $choice.text, axis: .vertical)
-                            .font(.title2).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .lineLimit(1...3)
-                            .focused($focused, equals: choice.id)
-                            .accessibilityIdentifier("keySettings.choice.\(choices.firstIndex(where: { $0.id == choice.id }) ?? 0)")
+                        // A UIKit field reports every edit; SwiftUI's TextField can miss
+                        // the last keystroke on iOS 27 when focus moves straight to Save.
+                        AppSearchField(text: $choice.text, placeholder: "Character or sequence",
+                                       identifier: "keySettings.choice.\(choices.firstIndex(where: { $0.id == choice.id }) ?? 0)",
+                                       textStyle: .title2, focusOnAppear: choice.id == addedChoice)
                         Text(codePoints(choice.text)).font(.caption.monospaced()).foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }.padding(.vertical, 4)
@@ -190,9 +191,8 @@ private struct KeyboardGestureSettingsView: View {
                 }
                 Button {
                     let choice = Choice(text: "")
+                    addedChoice = choice.id
                     choices.append(choice)
-                    // The field exists only after this update, so focus it on the next pass.
-                    DispatchQueue.main.async { focused = choice.id }
                 } label: { Label("Add Choice", systemImage: "plus") }
                     .disabled(choices.count >= gesture.maximumChoices)
                     .accessibilityIdentifier("keySettings.addChoice")

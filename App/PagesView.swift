@@ -100,6 +100,14 @@ struct PageEditorView: View {
         List {
             if let board {
                 Section {
+                    NavigationLink { PageArrangeView(boardID: boardID) } label: {
+                        LabeledContent("Arrange Keys", value: board.layout == nil ? "Rows of ten" : "Custom rows")
+                    }
+                    .accessibilityIdentifier("page.arrange")
+                } footer: {
+                    Text("Place keys in rows with half-width and full-width gaps, as the keyboard shows them.")
+                }
+                Section {
                     ForEach(Array(board.keys.enumerated()), id: \.element.id) { index, key in
                         NavigationLink { KeyVariantsView(boardID: boardID, keyID: key.id) } label: { KeyRow(key: key) }
                             .accessibilityIdentifier("page.key.\(index)")
@@ -116,7 +124,7 @@ struct PageEditorView: View {
                 } header: {
                     Text("Keys")
                 } footer: {
-                    Text("Keys appear in this order. Open a key to give it variants, which the keyboard offers when you hold it.")
+                    Text("Keys fill the page's rows in this order. Open a key to give it variants, which the keyboard offers when you hold it.")
                 }
                 Section {
                     Toggle("Opens with ★", isOn: Binding(get: { boards.preferredStarBoardID == boardID }, set: { on in
@@ -240,7 +248,7 @@ struct KeyVariantsView: View {
 func keyCount(_ count: Int) -> String { count == 1 ? "1 key" : "\(count) keys" }
 
 /// Spaces, controls and lone combining marks need a visible stand-in.
-private func symbolKeyPreview(_ text: String) -> String {
+func symbolKeyPreview(_ text: String) -> String {
     if text == " " { return "␠" }
     guard let first = text.unicodeScalars.first else { return "◌" }
     if text.unicodeScalars.allSatisfy({ CharacterSet.controlCharacters.contains($0) || $0.properties.generalCategory == .format }) { return "◌" }

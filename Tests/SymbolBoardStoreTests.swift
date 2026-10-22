@@ -67,6 +67,43 @@ final class SymbolBoardStoreTests: XCTestCase {
         }
     }
 
+    func testPageRowsReachTheKeyboardAndFollowAddedRemovedAndMovedKeys() throws {
+        let pages = try sharedPages().settings
+        try withDefaults { appDefaults in
+            try withDefaults { keyboardDefaults in
+                let app = SymbolBoardStore(defaults: appDefaults, pages: pages, configuresPages: true)
+                let id = try XCTUnwrap(app.createBoard(named: "Rows"))
+                for text in ["a", "b", "c", "d"] { XCTAssertNotNil(app.add(text: text, to: id)) }
+                XCTAssertNil(app.boards.last?.layout, "New pages use rows of ten")
+                XCTAssertTrue(app.setLayout(boardID: id, layout: SymbolPageLayout("kk/hkk")))
+                XCTAssertNotNil(app.add(text: "e", to: id))
+                XCTAssertEqual(app.boards.last?.layout, "kk/hkkk", "A new key takes a slot at the end")
+                let c = try XCTUnwrap(app.boards.last?.keys[2].id)
+                XCTAssertTrue(app.removeKey(boardID: id, keyID: c))
+                XCTAssertEqual(app.boards.last?.layout, "kk/hkk", "A removed key's slot goes with it")
+                XCTAssertEqual(app.boards.last?.keys.map(\.text), ["a", "b", "d", "e"])
+                XCTAssertTrue(app.setLayout(boardID: id, layout: SymbolPageLayout("kk/hkk"), keyMove: .init(from: 3, to: 0)))
+                XCTAssertEqual(app.boards.last?.keys.map(\.text), ["e", "a", "b", "d"])
+                XCTAssertFalse(app.setLayout(boardID: id, layout: nil, keyMove: .init(from: 0, to: 4)))
+                XCTAssertTrue(app.setLayout(boardID: SymbolBoardStore.favoritesID, layout: SymbolPageLayout("hk")))
+                XCTAssertEqual(try XCTUnwrap(pages.load()).pages.first { $0.id == SymbolBoardStore.favoritesID }?.layout, "hk",
+                               "Favorites keeps its rows in the shared file though its keys sync separately")
+
+                let keyboard = SymbolBoardStore(defaults: keyboardDefaults, pages: pages, configuresPages: false)
+                XCTAssertEqual(keyboard.boards.first { $0.id == id }?.layout, "kk/hkk")
+                XCTAssertEqual(keyboard.boards.first { $0.id == SymbolBoardStore.favoritesID }?.layout, "hk")
+                XCTAssertNotNil(keyboard.add(text: "★", to: SymbolBoardStore.favoritesID), "Saving in the keyboard leaves the rows alone")
+                XCTAssertNotNil(keyboard.add(text: "☃", to: SymbolBoardStore.favoritesID))
+                XCTAssertEqual(keyboard.boards.first { $0.id == SymbolBoardStore.favoritesID }?.layout, "hk")
+                XCTAssertFalse(keyboard.setLayout(boardID: id, layout: nil), "Rows are arranged in the app")
+
+                XCTAssertTrue(app.setLayout(boardID: id, layout: nil))
+                keyboard.refreshPages()
+                XCTAssertNil(keyboard.boards.first { $0.id == id }?.layout)
+            }
+        }
+    }
+
     func testPagesMadeInsideAnEarlierKeyboardAreNotCarriedOver() throws {
         let pages = try sharedPages().settings
         try withDefaults { defaults in

@@ -1400,6 +1400,86 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(favorites.label.contains("Opens with ★"), "Deleting the Star page returns ★ to Favorites")
     }
 
+    func testPagesArrangeKeysIntoRowsWithHalfAndFullGaps() {
+        deleteAppPages(named: "qarows")
+        addTeardownBlock { @MainActor [self] in deleteAppPages(named: "qarows") }
+        _ = createAppPage("qarows")
+        for (query, codepoint) in [("snowman", "U+2603"), ("comet", "U+2604"), ("umbrella", "U+2602")] {
+            addAppPageKey(query: query, codepoint: codepoint)
+        }
+        openArrange()
+        let tile = { (row: Int, index: Int) in self.app.buttons["arrange.\(row).\(index)"].firstMatch }
+        XCTAssertEqual(tile(0, 2).label, "Key ☂", "Without rows of its own a page fills rows of ten")
+        tile(0, 0).tap()
+        XCTAssertFalse(app.buttons["arrange.newRow"].isEnabled, "A row cannot break before its first key")
+        tile(0, 1).tap()
+        app.buttons["arrange.newRow"].tap()
+        XCTAssertTrue(tile(1, 0).waitForExistence(timeout: 5))
+        XCTAssertEqual(tile(1, 0).label, "Key ☄")
+        app.buttons["arrange.halfGap"].tap()
+        XCTAssertTrue(tile(1, 0).waitUntilLabelEquals("Half-width gap"))
+        XCTAssertEqual(tile(1, 1).label, "Key ☄")
+        tile(1, 2).tap()
+        app.buttons["arrange.gap"].tap()
+        XCTAssertTrue(tile(1, 2).waitUntilLabelEquals("Full-width gap"))
+        XCTAssertEqual(tile(1, 3).label, "Key ☂")
+        app.buttons["arrange.left"].tap()
+        XCTAssertTrue(tile(1, 1).waitUntilLabelEquals("Full-width gap"), "A selected gap moves left past a key")
+        XCTAssertEqual(tile(1, 2).label, "Key ☄")
+        app.buttons["arrange.remove"].tap()
+        XCTAssertTrue(tile(1, 1).waitUntilLabelEquals("Key ☄"))
+        tile(1, 2).tap()
+        app.buttons["arrange.up"].tap()
+        XCTAssertTrue(tile(0, 1).waitUntilLabelEquals("Key ☂"), "Moving a key up takes it to the row above")
+        attachScreenshot("A page arranged into rows with a half-width gap")
+        app.navigationBars.buttons.firstMatch.tap()
+        let arrange = app.buttons["page.arrange"].firstMatch
+        XCTAssertTrue(arrange.waitForExistence(timeout: 5))
+        XCTAssertTrue(arrange.label.contains("Custom rows"), arrange.label)
+        XCTAssertTrue(app.buttons["page.key.1"].firstMatch.label.contains("U+2602"), "Keys keep the order their places give them")
+        openArrange()
+        app.buttons["arrange.reset"].tap()
+        XCTAssertTrue(tile(0, 2).waitUntilLabelEquals("Key ☄"))
+        XCTAssertFalse(tile(1, 0).exists)
+    }
+
+    private func openArrange() {
+        let arrange = app.buttons["page.arrange"].firstMatch
+        XCTAssertTrue(arrange.waitForExistence(timeout: 5))
+        arrange.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["arrange.canvas"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testSystemKeyboardDrawsAppArrangedRowsAndGaps() throws {
+        try requirePhoneKeyboardIntegration()
+        deleteAppPages(named: "qarows")
+        addTeardownBlock { @MainActor [self] in restoreEnglishKeyboard(); deleteAppPages(named: "qarows") }
+        _ = createAppPage("qarows")
+        for (query, codepoint) in [("snowman", "U+2603"), ("comet", "U+2604"), ("umbrella", "U+2602")] {
+            addAppPageKey(query: query, codepoint: codepoint)
+        }
+        let star = app.switches["page.star"].firstMatch
+        revealByScrolling(star, in: app)
+        tapSwitch(star)
+        XCTAssertTrue(star.waitUntilValueEquals("1"))
+        openArrange()
+        app.buttons["arrange.0.1"].firstMatch.tap()
+        app.buttons["arrange.newRow"].tap()
+        app.buttons["arrange.halfGap"].tap()
+        XCTAssertTrue(app.buttons["arrange.1.0"].firstMatch.waitUntilLabelEquals("Half-width gap"))
+        _ = openSystemKeyboardHost(initialText: "Rows ", unicodeBrowse: false)
+        app.buttons["keyboard.openFavorites"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["qarows"].firstMatch.waitUntilSelected(), "★ opens the arranged page")
+        let snowman = symbolBoardKey("☃"), comet = symbolBoardKey("☄"), umbrella = symbolBoardKey("☂")
+        XCTAssertTrue(comet.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(comet.frame.minY, snowman.frame.maxY, "The second key starts the next row")
+        XCTAssertEqual(comet.frame.minX - snowman.frame.minX, (snowman.frame.width + 5) / 2, accuracy: 1,
+                       "A half-width gap indents the row by half a key")
+        XCTAssertEqual(umbrella.frame.minY, comet.frame.minY, accuracy: 1)
+        XCTAssertEqual(comet.frame.width, snowman.frame.width, accuracy: 0.5)
+        attachScreenshot("The keyboard draws the page's rows and half-width gap")
+    }
+
     func testSystemKeyboardListsAppConfiguredPagesAndKeepsTheStarPage() throws {
         try requirePhoneKeyboardIntegration()
         deleteAppPages(named: "qaone")
@@ -3383,8 +3463,14 @@ final class UniboardUITests: XCTestCase {
         let settings = appTab("Settings")
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         XCTAssertTrue(settings.isHittable)
-        settings.tap()
-        XCTAssertTrue(app.navigationBars["Settings"].firstMatch.waitForExistence(timeout: 5))
+        // Right after launch the floating tab bar can still be settling, and
+        // a tap may land on its neighbour; tap again until Settings opens.
+        let page = app.navigationBars["Settings"].firstMatch
+        for _ in 0..<3 {
+            settings.tap()
+            if page.waitForExistence(timeout: 2) { break }
+        }
+        XCTAssertTrue(page.waitForExistence(timeout: 5))
     }
 
     /// App Settings is a native Form, exposed as a collection view.

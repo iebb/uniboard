@@ -1,0 +1,217 @@
+import SwiftUI
+
+/// A page drawn as the keyboard shows it, for arranging its keys into rows
+/// with half-width and full-width gaps. Select a key or gap to move it or to
+/// add a gap or row break before it; keys can also be dragged onto a place.
+struct PageArrangeView: View {
+    typealias Layout = SymbolPageLayout
+    let boardID: String
+    @ObservedObject private var boards = SymbolBoardStore.shared
+    @State private var selection: Layout.Position?
+    @State private var canvasWidth: CGFloat = 360
+    @State private var failed = false
+    private let spacing: CGFloat = 5
+    private var board: SymbolBoard? { boards.boards.first { $0.id == boardID } }
+    private var keyCount: Int { board?.keys.count ?? 0 }
+    /// Exactly the keyboard's rows: every slot holds a key.
+    private var layout: Layout { Layout.resolved(board?.layout, keyCount: keyCount).fitted(keyCount: keyCount) }
+    private var selectedItem: Layout.Item? { selection.flatMap(layout.item(at:)) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if keyCount == 0 {
+                        Text("Add keys to this page to arrange them.").foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 120)
+                    } else {
+                        canvas
+                    }
+                    Text("Select a key or gap, then move it or add a gap or new row before it. You can also drag a key onto another place. New keys take a place at the end.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if failed {
+                        Text("This arrangement could not be saved.").font(.footnote).foregroundStyle(.red)
+                            .accessibilityIdentifier("arrange.error")
+                    }
+                }
+                .padding(16)
+            }
+            .background(Color(.systemGroupedBackground))
+            Divider()
+            controls.padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
+        }
+        .navigationTitle(board.map { "Arrange \($0.name)" } ?? "Arrange")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Rows of Ten") { selection = nil; save(nil) }
+                    .disabled(board?.layout == nil)
+                    .accessibilityIdentifier("arrange.reset")
+            }
+        }
+        .onAppear { boards.refreshPages() }
+    }
+
+    private var canvas: some View {
+        let cells = layout.cells(keyCount: keyCount)
+        let width = Layout.keyWidth(for: cells, available: canvasWidth, spacing: spacing)
+        return VStack(alignment: .leading, spacing: 6) {
+            ForEach(layout.rows.indices, id: \.self) { row in
+                HStack(spacing: spacing) {
+                    ForEach(layout.rows[row].indices, id: \.self) { index in
+                        tile(Layout.Position(row: row, index: index), keyWidth: width)
+                    }
+                    // Dropping here puts an item at the end of the row.
+                    Color.clear.frame(width: max(width / 2, 12), height: 44).contentShape(Rectangle())
+                        .dropDestination(for: String.self) { items, _ in drop(items, at: .init(row: row, index: layout.rows[row].count)) }
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(GeometryReader { proxy in
+            Color.clear.onAppear { canvasWidth = proxy.size.width - 16 }
+                .onChange(of: proxy.size.width) { _, width in canvasWidth = width - 16 }
+        })
+        // A container keeps each tile's own identifier.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("arrange.canvas")
+    }
+
+    @ViewBuilder private func tile(_ position: Layout.Position, keyWidth: CGFloat) -> some View {
+        let item = layout.rows[position.row][position.index]
+        let selected = selection == position
+        let key = layout.keyIndex(at: position).flatMap { board?.keys.indices.contains($0) == true ? board?.keys[$0] : nil }
+        let cell: Layout.Cell = item == .key ? .key(0) : item == .halfGap ? .halfGap : .gap
+        let width = item == .key ? keyWidth : Layout.gapWidth(cell, keyWidth: keyWidth, spacing: spacing)
+        Button { selection = selected ? nil : position } label: {
+            ZStack {
+                if let key {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color(.secondarySystemGroupedBackground))
+                        .shadow(color: .black.opacity(0.12), radius: 0, y: 1)
+                    Text(symbolKeyPreview(key.text)).font(.system(size: 22)).minimumScaleFactor(0.4).lineLimit(1).padding(2)
+                } else {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    Text(item == .halfGap ? "½" : "1").font(.caption2).foregroundStyle(.secondary)
+                }
+                if selected {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.accentColor, lineWidth: 2.5)
+                }
+            }
+            .frame(width: width, height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .draggable("\(position.row),\(position.index)") {
+            Text(key.map { symbolKeyPreview($0.text) } ?? (item == .halfGap ? "½" : "1")).font(.title2).padding(8)
+        }
+        .dropDestination(for: String.self) { items, _ in drop(items, at: position) }
+        .accessibilityLabel(key.map { "Key \(symbolKeyPreview($0.text))" } ?? (item == .halfGap ? "Half-width gap" : "Full-width gap"))
+        .accessibilityValue("Row \(position.row + 1), place \(position.index + 1)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("arrange.\(position.row).\(position.index)")
+    }
+
+    private var controls: some View {
+        let position = selection
+        let item = selectedItem
+        let rows = layout.rows
+        return VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                control("Move Left", "arrow.left", id: "arrange.left", enabled: (position?.index ?? 0) > 0) {
+                    guard let p = position else { return }
+                    move(from: p, to: .init(row: p.row, index: p.index - 1), select: .init(row: p.row, index: p.index - 1))
+                }
+                control("Move Right", "arrow.right", id: "arrange.right",
+                        enabled: position.map { $0.index + 1 < rows[$0.row].count } ?? false) {
+                    guard let p = position else { return }
+                    move(from: p, to: .init(row: p.row, index: p.index + 2), select: .init(row: p.row, index: p.index + 1))
+                }
+                control("Move Up", "arrow.up", id: "arrange.up", enabled: (position?.row ?? 0) > 0) {
+                    guard let p = position else { return }
+                    let index = min(p.index, rows[p.row - 1].count)
+                    move(from: p, to: .init(row: p.row - 1, index: index), select: .init(row: p.row - 1, index: index))
+                }
+                control("Move Down", "arrow.down", id: "arrange.down", enabled: position.map { $0.row + 1 < rows.count } ?? false) {
+                    guard let p = position else { return }
+                    let index = min(p.index, rows[p.row + 1].count)
+                    // A row emptied by the move goes away, so the next row takes its place.
+                    let row = rows[p.row].count == 1 ? p.row : p.row + 1
+                    move(from: p, to: .init(row: p.row + 1, index: index), select: .init(row: row, index: index))
+                }
+            }
+            HStack(spacing: 8) {
+                control("Half Gap", "rectangle.lefthalf.inset.filled", id: "arrange.halfGap",
+                        enabled: position.map { layout.canInsert(.halfGap, inRow: $0.row) } ?? false) { insert(.halfGap) }
+                control("Gap", "rectangle.dashed", id: "arrange.gap",
+                        enabled: position.map { layout.canInsert(.gap, inRow: $0.row) } ?? false) { insert(.gap) }
+                control("New Row", "return", id: "arrange.newRow", enabled: (position?.index ?? 0) > 0) {
+                    guard let p = position else { return }
+                    edit(select: .init(row: p.row + 1, index: 0)) { $0.breakRow(at: p) }
+                }
+                if position?.index == 0 && (position?.row ?? 0) > 0 {
+                    control("Join Rows", "arrow.turn.left.up", id: "arrange.joinRow", enabled: true) {
+                        guard let p = position else { return }
+                        let index = rows[p.row - 1].count
+                        edit(select: .init(row: p.row - 1, index: index)) { $0.joinRow(p.row) }
+                    }
+                } else {
+                    control("Remove Gap", "minus.circle", id: "arrange.remove", enabled: item != nil && item != .key) {
+                        guard let p = position else { return }
+                        edit(select: nil) { $0.removeGap(at: p) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func control(_ title: String, _ icon: String, id: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.body)
+                Text(title).font(.caption2).lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .frame(maxWidth: .infinity, minHeight: 40)
+        }
+        .buttonStyle(.bordered)
+        .disabled(!enabled || selection == nil)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier(id)
+    }
+
+    private func insert(_ gap: Layout.Item) {
+        guard let p = selection else { return }
+        edit(select: p) { $0.insertGap(gap, at: p) }
+    }
+
+    private func edit(select next: Layout.Position?, _ change: (inout Layout) -> Bool) {
+        var value = layout
+        guard change(&value) else { return }
+        save(value)
+        if !failed { selection = next }
+    }
+
+    private func move(from source: Layout.Position, to destination: Layout.Position, select next: Layout.Position?) {
+        var value = layout
+        var keyMove: Layout.KeyMove?
+        guard value.move(from: source, to: destination, keyMove: &keyMove) else { return }
+        save(value, keyMove: keyMove)
+        if !failed { selection = next }
+    }
+
+    /// A dragged item lands before the place it is dropped on.
+    private func drop(_ items: [String], at destination: Layout.Position) -> Bool {
+        let parts = items.first?.split(separator: ",").compactMap { Int($0) } ?? []
+        guard parts.count == 2 else { return false }
+        let source = Layout.Position(row: parts[0], index: parts[1])
+        guard source != destination else { return false }
+        move(from: source, to: destination, select: nil)
+        return !failed
+    }
+
+    private func save(_ value: Layout?, keyMove: Layout.KeyMove? = nil) {
+        failed = !boards.setLayout(boardID: boardID, layout: value, keyMove: keyMove)
+    }
+}

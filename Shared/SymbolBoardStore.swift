@@ -23,6 +23,8 @@ struct SymbolBoard: Codable, Identifiable, Equatable {
     let id: String
     var name: String
     var keys: [SymbolBoardKey]
+    /// The page's rows as `SymbolPageLayout` text; nil lays keys out in rows of ten.
+    var layout: String? = nil
 }
 
 struct SymbolBoardPickerTarget: Equatable {
@@ -214,14 +216,26 @@ final class SymbolBoardStore: ObservableObject {
         guard boards[index].keys.count < Self.keyLimit(boardID) else { return nil }
         let key = SymbolBoardKey(id: UUID().uuidString.lowercased(), text: text, variants: [])
         var next = boards
+        // Only the app edits rows; in the keyboard, new Favorites flow on in rows of ten.
+        if configuresPages, var layout = next[index].layout.flatMap(SymbolPageLayout.init) {
+            layout = layout.fitted(keyCount: next[index].keys.count)
+            layout.appendKey()
+            next[index].layout = layout.text
+        }
         next[index].keys.append(key)
         return commit(next) ? key.id : nil
     }
     @discardableResult func removeKey(boardID: String, keyID: String) -> Bool {
         guard let index = boards.firstIndex(where: { $0.id == boardID }),
-              boards[index].keys.contains(where: { $0.id == keyID }) else { return false }
+              let position = boards[index].keys.firstIndex(where: { $0.id == keyID }) else { return false }
         var next = boards
-        next[index].keys.removeAll { $0.id == keyID }
+        // Only the app edits rows; in the keyboard, new Favorites flow on in rows of ten.
+        if configuresPages, var layout = next[index].layout.flatMap(SymbolPageLayout.init) {
+            layout = layout.fitted(keyCount: next[index].keys.count)
+            layout.removeKeySlot(position)
+            next[index].layout = layout.rows.isEmpty ? nil : layout.text
+        }
+        next[index].keys.remove(at: position)
         return commit(next)
     }
     @discardableResult func moveKey(boardID: String, keyID: String, by offset: Int) -> Bool {
@@ -232,6 +246,22 @@ final class SymbolBoardStore: ObservableObject {
         var next = boards
         next[board].keys.swapAt(index, target)
         return commit(next)
+    }
+    /// Saves a page's rows, nil for rows of ten, and reorders its keys when a
+    /// key moved to another slot, as one change.
+    @discardableResult func setLayout(boardID: String, layout: SymbolPageLayout?, keyMove: SymbolPageLayout.KeyMove? = nil) -> Bool {
+        guard let index = boards.firstIndex(where: { $0.id == boardID }) else { return false }
+        var next = boards
+        if let keyMove {
+            let count = next[index].keys.count
+            guard next[index].keys.indices.contains(keyMove.from), (0..<count).contains(keyMove.to),
+                  let keys = Self.moving(next[index].keys, fromOffsets: [keyMove.from],
+                                         toOffset: keyMove.to > keyMove.from ? keyMove.to + 1 : keyMove.to) else { return false }
+            next[index].keys = keys
+        }
+        guard layout.map({ SymbolPageLayout($0.text) != nil }) ?? true else { return false }
+        next[index].layout = layout?.text
+        return next == boards || commit(next)
     }
     @discardableResult func setVariants(boardID: String, keyID: String, variants: [String]) -> Bool {
         guard let board = boards.firstIndex(where: { $0.id == boardID }),
@@ -289,7 +319,7 @@ final class SymbolBoardStore: ObservableObject {
 
     /// Pages as shared with the keyboard: Favorites keys sync separately.
     private static func shareable(_ boards: [SymbolBoard]) -> [SymbolBoard] {
-        boards.map { $0.id == favoritesID ? SymbolBoard(id: $0.id, name: $0.name, keys: []) : $0 }
+        boards.map { $0.id == favoritesID ? SymbolBoard(id: $0.id, name: $0.name, keys: [], layout: $0.layout) : $0 }
     }
 
     /// Called on presentation and foregrounding; never on each layout or key tap.
@@ -343,6 +373,7 @@ final class SymbolBoardStore: ObservableObject {
               Set(state.boards.map(\.id)).count == state.boards.count else { return false }
         return state.boards.allSatisfy { board in
             guard validID(board.id), validName(board.name) == board.name, board.keys.count <= keyLimit(board.id),
+                  board.layout.map({ SymbolPageLayout($0) != nil }) ?? true,
                   Set(board.keys.map(\.id)).count == board.keys.count,
                   uniqueExact(board.keys.map(\.text)).count == board.keys.count else { return false }
             return board.keys.allSatisfy { key in

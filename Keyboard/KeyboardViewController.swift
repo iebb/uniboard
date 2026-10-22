@@ -1819,23 +1819,42 @@ private struct UnicodeKeyboardView: View {
             emptyState(icon: board.id == SymbolBoardStore.favoritesID ? "star" : "square.grid.2x2",
                        title: "This page is empty", detail: "Hold a Unicode key and choose Save to add it to a page.")
         } else {
-            ScrollView {
-                LazyVGrid(columns: savedBoardColumns, spacing: 4) {
-                    ForEach(board.keys) { key in
-                        KeyboardVariantKey(text: key.text, variants: key.variants,
-                            identifier: "keyboard.board.\(board.id).key.\(key.id)",
-                            label: symbolBoardKeyLabel(key.text), route: model.inputModeID,
-                            enabled: model.isShowingSymbolPages && model.showFavorites && symbolBoards.activeBoardID == board.id,
-                            fontSize: 23, useUnicodeFonts: model.useUnicodeFonts, showsInspection: true, showsEditing: true,
-                            factory: { [mode = model.inputModeID, boardID = board.id] in boardKeyActions(mode, boardID, key) })
-                            .frame(height: savedKeyHeight)
-                            .keyboardKeySurface(radius: 7)
-                            .accessibilityHidden(!model.isShowingSymbolPages || !model.showFavorites || symbolBoards.activeBoardID != board.id)
-                    }
-                }.padding(.bottom, 2)
+            // The page's own rows and gaps, or rows of ten, with one key width throughout.
+            let cells = SymbolPageLayout.resolved(board.layout, keyCount: board.keys.count).cells(keyCount: board.keys.count)
+            let spacing: CGFloat = model.isPadLayout ? 7 : 5
+            GeometryReader { geometry in
+                let width = SymbolPageLayout.keyWidth(for: cells, available: geometry.size.width, spacing: spacing)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(cells.indices, id: \.self) { row in
+                            HStack(spacing: spacing) {
+                                ForEach(cells[row].indices, id: \.self) { column in
+                                    savedBoardCell(cells[row][column], board: board, keyWidth: width, spacing: spacing)
+                                }
+                            }
+                        }
+                    }.padding(.bottom, 2)
+                }
+                .scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
+                .accessibilityIdentifier("keyboard.boards.keys")
             }
-            .scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
-            .accessibilityIdentifier("keyboard.boards.keys")
+        }
+    }
+    @ViewBuilder private func savedBoardCell(_ cell: SymbolPageLayout.Cell, board: SymbolBoard, keyWidth: CGFloat, spacing: CGFloat) -> some View {
+        if case .key(let index) = cell, board.keys.indices.contains(index) {
+            let key = board.keys[index]
+            KeyboardVariantKey(text: key.text, variants: key.variants,
+                identifier: "keyboard.board.\(board.id).key.\(key.id)",
+                label: symbolBoardKeyLabel(key.text), route: model.inputModeID,
+                enabled: model.isShowingSymbolPages && model.showFavorites && symbolBoards.activeBoardID == board.id,
+                fontSize: 23, useUnicodeFonts: model.useUnicodeFonts, showsInspection: true, showsEditing: true,
+                factory: { [mode = model.inputModeID, boardID = board.id] in boardKeyActions(mode, boardID, key) })
+                .frame(width: keyWidth, height: savedKeyHeight)
+                .keyboardKeySurface(radius: 7)
+                .accessibilityHidden(!model.isShowingSymbolPages || !model.showFavorites || symbolBoards.activeBoardID != board.id)
+        } else {
+            Color.clear.frame(width: SymbolPageLayout.gapWidth(cell, keyWidth: keyWidth, spacing: spacing), height: savedKeyHeight)
+                .accessibilityHidden(true)
         }
     }
     private var savedKeyHeight: CGFloat { model.typingKeyHeight }

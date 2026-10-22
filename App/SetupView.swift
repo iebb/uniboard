@@ -25,12 +25,14 @@ struct SetupView: View {
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("keyboardTopRow")
                 .accessibilityValue(preferences.topRow.rawValue)
+                Toggle("Number Row", isOn: Binding(get: { preferences.showsNumberRow }, set: { preferences.selectNumberRow($0) }))
+                    .accessibilityIdentifier("showKeyboardNumberRow")
                 Toggle("Hide Keyboard Key", isOn: Binding(get: { preferences.showsCollapseKey }, set: { preferences.selectCollapseKey($0) }))
                     .accessibilityIdentifier("showKeyboardCollapseKey")
             } header: {
                 Text("Keyboard")
             } footer: {
-                Text("Top Row adds a row of symbols or a Unicode search field above the keys. Hide Keyboard Key adds a key that closes the keyboard; wide iPad layouts always have one.")
+                Text("Top Row adds a row of symbols or a Unicode search field above the keys. Turn off Number Row for a shorter keyboard; swipe up on Q to P for 1 to 0, and the 123 page keeps its digits. Hide Keyboard Key adds a key that closes the keyboard; wide iPad layouts always have one.")
             }
 
             if UIDevice.current.userInterfaceIdiom == .pad {
@@ -44,7 +46,7 @@ struct SetupView: View {
                 } header: {
                     Text("iPad Keyboard")
                 } footer: {
-                    Text("The number row is always present. On a wide landscape iPad, choose iPad styling, compact ANSI punctuation, or a full ANSI number row. Symbols can follow the standard, iPad or macOS U.S. Option layout; macOS offers Option first and Shift–Option next. Hold shows accents, Up offers symbols and Down offers other forms such as superscripts and mathematical letters. Reopen the keyboard to apply; Full Access is not required.")
+                    Text("On a wide landscape iPad, choose iPad styling, compact ANSI punctuation, or a full ANSI number row, which stays even with Number Row off. Symbols can follow the standard, iPad or macOS U.S. Option layout; macOS offers Option first and Shift–Option next. Hold shows accents, Up offers symbols and Down offers other forms such as superscripts and mathematical letters. Reopen the keyboard to apply; Full Access is not required.")
                 }
             }
 

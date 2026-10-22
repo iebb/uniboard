@@ -23,7 +23,7 @@ enum KeyboardPadSymbolMapping: String, CaseIterable {
     }
 }
 
-/// Four character rows are always present: digits plus three typing rows.
+/// Three typing rows, plus the digit row unless Settings turns it off.
 struct KeyboardTypingLayoutPlan: Equatable {
     let keyHeight: CGFloat
     let rowSpacing: CGFloat
@@ -150,10 +150,12 @@ enum KeyboardTypingLayoutPolicy {
 
     /// Heights are the space inside the typing panel, excluding the shared
     /// toolbar, grip and footer. The ordinary three rows remain on every page.
+    /// A full ANSI layout keeps its own digit row whatever `showsNumberRow` says.
     static func plan(availableHeight: CGFloat, availableWidth: CGFloat,
                      compact: Bool, layout: KeyboardTypingLayout,
                      isPad: Bool = false, isLandscape: Bool = false,
-                     padLayout: KeyboardPadLayout = .ansiNumbers) -> KeyboardTypingLayoutPlan? {
+                     padLayout: KeyboardPadLayout = .ansiNumbers,
+                     showsNumberRow: Bool = true) -> KeyboardTypingLayoutPlan? {
         let spacing: CGFloat = isPad && availableWidth >= 650 ? 6 : rowSpacing
         let keySpacing: CGFloat = isPad ? 7 : 5
         guard availableHeight.isFinite, availableWidth.isFinite,
@@ -161,8 +163,10 @@ enum KeyboardTypingLayoutPolicy {
         let ansiNumbers = usesANSI(availableWidth: availableWidth, isPad: isPad,
             isLandscape: isLandscape, padLayout: padLayout) && padLayout == .ansiNumbers && layout == .letters
         let ideal = typingKeyHeight(availableWidth: availableWidth, isPad: isPad)
-        return KeyboardTypingLayoutPlan(keyHeight: min(ideal, (availableHeight - spacing * 3) / 4),
-            rowSpacing: spacing, keySpacing: keySpacing, numberRowCount: ansiNumbers ? 0 : 1,
+        let numberRows = !ansiNumbers && showsNumberRow ? 1 : 0
+        let rows = CGFloat((ansiNumbers ? 4 : 3) + numberRows)
+        return KeyboardTypingLayoutPlan(keyHeight: min(ideal, (availableHeight - spacing * (rows - 1)) / rows),
+            rowSpacing: spacing, keySpacing: keySpacing, numberRowCount: numberRows,
             mainRowsCount: ansiNumbers ? 4 : 3)
     }
 

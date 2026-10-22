@@ -36,13 +36,18 @@ final class UnicodeEditionSettingsTests: XCTestCase {
                 searchBarInsteadOfSymbols: search)
             XCTAssertTrue(settings.save(value)); XCTAssertEqual(settings.loadSnapshot(), value)
             var malformed = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
-            for field in ["showsSymbolBar", "searchBarInsteadOfSymbols"] {
+            for field in ["showsSymbolBar", "searchBarInsteadOfSymbols", "showsNumberRow"] {
                 for invalid: Any in [0, 1, "true", NSNull(), [], [:]] {
                     var copy = malformed; copy[field] = invalid
                     let data = try JSONSerialization.data(withJSONObject: copy)
                     XCTAssertEqual(UnicodeEditionSettings(containerURL: { self.injectedContainer }, readPrefix: { _, _ in data }).loadSnapshot(), .init(edition: .latest))
                 }
             }
+            // Schema 4 predates the number-row setting, which then stays on.
+            malformed["schemaVersion"] = 4
+            malformed.removeValue(forKey: "showsNumberRow")
+            bytes = try JSONSerialization.data(withJSONObject: malformed)
+            XCTAssertEqual(settings.loadSnapshot(), value)
             malformed["schemaVersion"] = 3
             malformed.removeValue(forKey: "showsSymbolBar"); malformed.removeValue(forKey: "searchBarInsteadOfSymbols")
             bytes = try JSONSerialization.data(withJSONObject: malformed)
@@ -50,6 +55,20 @@ final class UnicodeEditionSettingsTests: XCTestCase {
             XCTAssertTrue(legacy.showsSymbolBar); XCTAssertFalse(legacy.searchBarInsteadOfSymbols)
             XCTAssertEqual(legacy.edition, .previous)
         } }
+    }
+
+    func testNumberRowChoiceRoundTripsAndSurvivesEditionChanges() throws {
+        var bytes = try payload("latest")
+        let settings = UnicodeEditionSettings(containerURL: { self.injectedContainer }, readPrefix: { _, _ in bytes },
+            writeAtomically: { data, _ in bytes = data })
+        XCTAssertTrue(UnicodeEditionSettings.Snapshot(edition: .latest).showsNumberRow, "The number row is on by default")
+        var value = UnicodeEditionSettings.Snapshot(edition: .latest, showsNumberRow: false)
+        XCTAssertTrue(settings.save(value)); XCTAssertEqual(settings.loadSnapshot(), value)
+        XCTAssertTrue(settings.save(.draft))
+        value.edition = .draft
+        XCTAssertEqual(settings.loadSnapshot(), value)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        XCTAssertEqual(object["showsNumberRow"] as? Bool, false)
     }
 
     func testPadPresetsAndSymbolMappingsRoundTripAndEditionChangesPreserveEverything() throws {
@@ -116,8 +135,8 @@ final class UnicodeEditionSettingsTests: XCTestCase {
         let data = try XCTUnwrap(observedData)
         XCTAssertLessThanOrEqual(data.count, UnicodeEditionSettings.maximumPayloadBytes)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertEqual(Set(object.keys), ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping", "showsSymbolBar", "searchBarInsteadOfSymbols"])
-        XCTAssertEqual(object["schemaVersion"] as? Int, 4)
+        XCTAssertEqual(Set(object.keys), ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping", "showsSymbolBar", "searchBarInsteadOfSymbols", "showsNumberRow"])
+        XCTAssertEqual(object["schemaVersion"] as? Int, 5)
         XCTAssertEqual(object["selectionIdentifier"] as? String, "draft")
         XCTAssertEqual(object["useUnicodeFonts"] as? Bool, false)
         XCTAssertEqual(object["showsCollapseKey"] as? Bool, false)

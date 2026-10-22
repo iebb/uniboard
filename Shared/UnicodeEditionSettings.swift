@@ -15,6 +15,7 @@ struct UnicodeEditionSettings {
         var showsCollapseKey = false
         var showsSymbolBar = true
         var searchBarInsteadOfSymbols = false
+        var showsNumberRow = true
         var padLayout: KeyboardPadLayout = .ansiNumbers
         var padSymbolMapping: KeyboardPadSymbolMapping = .standard
     }
@@ -64,17 +65,23 @@ struct UnicodeEditionSettings {
             return Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse)
         }
         let legacyKeys: Set<String> = ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey", "padLayout", "padSymbolMapping"]
-        let modernKeys = legacyKeys.union(["showsSymbolBar", "searchBarInsteadOfSymbols"])
+        let barKeys = legacyKeys.union(["showsSymbolBar", "searchBarInsteadOfSymbols"])
+        let modernKeys = barKeys.union(["showsNumberRow"])
         guard (schema == NSNumber(value: 3) && Set(dictionary.keys) == legacyKeys)
-                || (schema == NSNumber(value: 4) && Set(dictionary.keys) == modernKeys),
+                || (schema == NSNumber(value: 4) && Set(dictionary.keys) == barKeys)
+                || (schema == NSNumber(value: 5) && Set(dictionary.keys) == modernKeys),
               let layout = dictionary["padLayout"] as? String, let pad = KeyboardPadLayout(rawValue: layout),
               let mapping = dictionary["padSymbolMapping"] as? String, let symbols = KeyboardPadSymbolMapping(rawValue: mapping) else { return Snapshot(edition: .latest) }
         var value = Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse,
             padLayout: pad, padSymbolMapping: symbols)
-        if schema == NSNumber(value: 4) {
+        if schema == NSNumber(value: 4) || schema == NSNumber(value: 5) {
             guard let bar = Self.strictBoolean(dictionary["showsSymbolBar"]),
                   let search = Self.strictBoolean(dictionary["searchBarInsteadOfSymbols"]) else { return Snapshot(edition: .latest) }
             value.showsSymbolBar = bar; value.searchBarInsteadOfSymbols = search
+        }
+        if schema == NSNumber(value: 5) {
+            guard let numbers = Self.strictBoolean(dictionary["showsNumberRow"]) else { return Snapshot(edition: .latest) }
+            value.showsNumberRow = numbers
         }
         return value
     }
@@ -93,9 +100,10 @@ struct UnicodeEditionSettings {
         guard UnicodeEdition.resolve(selectionIdentifier: identifier) == snapshot.edition,
               let container = containerURL(), container.isFileURL,
               let data = try? JSONSerialization.data(withJSONObject: [
-                "schemaVersion": 4, "selectionIdentifier": identifier,
+                "schemaVersion": 5, "selectionIdentifier": identifier,
                 "useUnicodeFonts": snapshot.useUnicodeFonts, "showsCollapseKey": snapshot.showsCollapseKey,
                 "showsSymbolBar": snapshot.showsSymbolBar, "searchBarInsteadOfSymbols": snapshot.searchBarInsteadOfSymbols,
+                "showsNumberRow": snapshot.showsNumberRow,
                 "padLayout": snapshot.padLayout.rawValue, "padSymbolMapping": snapshot.padSymbolMapping.rawValue
               ], options: [.sortedKeys]), data.count <= Self.maximumPayloadBytes else { return false }
         do {

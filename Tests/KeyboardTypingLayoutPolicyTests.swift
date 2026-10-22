@@ -233,6 +233,22 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
             }
         }
     }
+    func testHiddenNumberRowLeavesThreeRowsWithStockDigitPagesButKeepsFullANSIDigits() throws {
+        let plan = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 500, availableWidth: 402,
+            compact: false, layout: .letters, showsNumberRow: false))
+        XCTAssertEqual(plan.numberRowCount, 0)
+        XCTAssertEqual(plan.rowCount, 3)
+        XCTAssertEqual(plan.keyHeight, 36 * 1.15)
+        let tight = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 98, availableWidth: 402,
+            compact: false, layout: .letters, showsNumberRow: false))
+        XCTAssertEqual(tight.contentHeight, 98, accuracy: 0.000001, "Three rows share the whole height")
+        // The 123 page falls back to its stock rows, which start with the digits.
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.rows(for: .numbers, hasAuxiliaryRow: false)[0],
+                       Array("1234567890").map(String.init))
+        let ansi = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 500, availableWidth: 1194,
+            compact: false, layout: .letters, isPad: true, isLandscape: true, padLayout: .ansiNumbers, showsNumberRow: false))
+        XCTAssertEqual(ansi.rowCount, 4, "Full ANSI keeps its own digit row")
+    }
     func testFixedTemplateRejectsInvalidDimensionsAndShrinksAllRowsOnlyIfConstrained() throws {
         for pad in [false, true] {
             for invalid: CGFloat in [.nan, .infinity, -.infinity, 0, -1, 12] {

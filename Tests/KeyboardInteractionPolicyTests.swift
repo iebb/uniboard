@@ -54,6 +54,25 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
             }
         }
     }
+    func testHidingTheNumberRowRemovesOneRowAndOneGapButNotFromSearch() {
+        for pad in [false, true] {
+            for width: CGFloat in [320, 402, 834] {
+                for bar in [false, true] {
+                    let shown = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                        isPad: pad, compactVertical: false, showsSymbolBar: bar)
+                    let hidden = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                        isPad: pad, compactVertical: false, showsSymbolBar: bar, showsNumberRow: false)
+                    let gap: CGFloat = pad && width >= 666 ? 6 : 4
+                    XCTAssertEqual(hidden.typingKeyHeight, shown.typingKeyHeight, accuracy: 0.000001)
+                    XCTAssertEqual(shown.height - hidden.height, shown.typingKeyHeight + gap, accuracy: 0.000001)
+                    let searching = { (numbers: Bool) in KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil,
+                        sceneHeight: 1200, isPad: pad, compactVertical: false, showsSymbolBar: bar,
+                        showsNumberRow: numbers, searching: true).height }
+                    XCTAssertEqual(searching(false), searching(true), accuracy: 0.000001)
+                }
+            }
+        }
+    }
     func testFixedTemplateRotationWidthAndInvalidSceneValuesFailSafely() {
         let phone = CGSize(width: 402, height: 874)
         for width: CGFloat in [402, 430, 874, .nan, .infinity] {

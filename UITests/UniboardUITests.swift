@@ -935,6 +935,28 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("Distinct letter accents, presentation forms, symbols, and system Shift gestures")
     }
 
+    func testSystemKeyboardWithoutNumberRowSwipesUpToDigitsAndKeepsThe123Page() throws {
+        try requirePhoneKeyboardIntegration()
+        resetAppKey("letter.q")
+        setAppNumberRow(false)
+        // A failed assertion stops the test, so restore the default in teardown rather than a defer.
+        addTeardownBlock { @MainActor [self] in restoreEnglishKeyboard(); setAppNumberRow(true) }
+        let input = openSystemKeyboardHost(unicodeBrowse: false)
+        let q = app.buttons["keyboard.typing.key.q"].firstMatch
+        XCTAssertTrue(q.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["keyboard.typing.number.1"].firstMatch.exists, "Settings hid the number row")
+        attachScreenshot("Keyboard without the number row")
+        flickMainKey(q, up: true)
+        XCTAssertTrue(input.waitUntilValueEquals("1"), "Q swipes up to 1 when the number row is hidden")
+        let numbers = app.buttons["keyboard.typing.numbers"].firstMatch
+        XCTAssertEqual(numbers.label, "Numbers", "Without digits on screen, the page key offers the 123 page")
+        numbers.tap()
+        let one = app.buttons["keyboard.typing.key.1"].firstMatch
+        XCTAssertTrue(one.waitForExistence(timeout: 5), "The 123 page keeps its stock digit row")
+        one.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("11"))
+    }
+
     func testSystemKeyboardHeldKeysCanChangeGestureGroupBeforeRelease() throws {
         try requirePhoneKeyboardIntegration()
         configureTopBar(symbols: true, search: true)
@@ -3054,6 +3076,15 @@ final class UniboardUITests: XCTestCase {
     /// tap the trailing switch itself, as a person would.
     private func tapSwitch(_ toggle: XCUIElement) {
         toggle.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: -36, dy: 0)).tap()
+    }
+
+    private func setAppNumberRow(_ enabled: Bool) {
+        openAppSettings()
+        let numbers = app.switches["showKeyboardNumberRow"].firstMatch
+        revealByScrolling(numbers, in: app)
+        let value = enabled ? "1" : "0"
+        if numbers.value as? String != value { tapSwitch(numbers) }
+        XCTAssertTrue(numbers.waitUntilValueEquals(value))
     }
 
     private func setAppCollapseKey(_ enabled: Bool) {

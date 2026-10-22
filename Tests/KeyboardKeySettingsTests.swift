@@ -37,6 +37,12 @@ final class KeyboardKeySettingsTests: XCTestCase {
         XCTAssertFalse(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .standard).isEmpty)
         XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .none).isEmpty)
         XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "digit.1", gesture: .swipeDown, mapping: .standard).first, "¹")
+        // Without the number row, Q to P swipe up to the digits instead.
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .standard).first, "_")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.q", gesture: .swipeUp, mapping: .standard,
+                                                               hasNumberRow: false).first, "1")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.p", gesture: .swipeUp, mapping: .standard,
+                                                               hasNumberRow: false).first, "0")
         XCTAssertTrue(KeyboardVariantPolicy.defaultCandidates(for: "utility.space", gesture: .longPress, mapping: .standard).isEmpty)
         for key in Settings.descriptors {
             for gesture in Settings.Gesture.customizable {

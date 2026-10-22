@@ -287,7 +287,9 @@ final class KeyboardViewController: UIInputViewController {
             viewWidth: view.bounds.width, displaySize: scene?.screen.bounds.size,
             sceneHeight: sceneSize?.height, isPad: pad,
             compactVertical: traitCollection.verticalSizeClass == .compact,
-            showsSymbolBar: model.showsSymbolBar, searching: model.isSearching)
+            showsSymbolBar: model.showsSymbolBar,
+            showsNumberRow: model.showsNumberRow || (landscapePad && model.padLayout == .ansiNumbers),
+            searching: model.isSearching)
         if model.isCompactLayout != metrics.isCompactLayout { model.isCompactLayout = metrics.isCompactLayout }
         if model.isPadLayout != pad { model.isPadLayout = pad }
         let typingHeight = metrics.typingKeyHeight
@@ -808,6 +810,7 @@ private final class KeyboardModel: ObservableObject {
     @Published private(set) var showsCollapseKey: Bool
     @Published private(set) var showsSymbolBar: Bool
     @Published private(set) var searchBarInsteadOfSymbols: Bool
+    @Published private(set) var showsNumberRow: Bool
     @Published private(set) var symbolPagesToolbarVisible: Bool?
     var showsUnicodeToolbar: Bool { symbolPagesToolbarVisible ?? (showsUnicode || (showsSymbolBar && searchBarInsteadOfSymbols)) }
     @Published private(set) var results: [UnicodeCharacter] = []
@@ -1103,6 +1106,7 @@ private final class KeyboardModel: ObservableObject {
         useUnicodeFonts = appSettings.useUnicodeFonts
         showsSymbolBar = appSettings.showsSymbolBar
         searchBarInsteadOfSymbols = appSettings.searchBarInsteadOfSymbols
+        showsNumberRow = appSettings.showsNumberRow
         showsCollapseKey = appSettings.showsCollapseKey
         padLayout = appSettings.padLayout
         padSymbolMapping = appSettings.padSymbolMapping
@@ -1118,6 +1122,10 @@ private final class KeyboardModel: ObservableObject {
         if padSymbolMapping != selected.padSymbolMapping { padSymbolMapping = selected.padSymbolMapping; invalidateInputMode() }
         if showsSymbolBar != selected.showsSymbolBar || searchBarInsteadOfSymbols != selected.searchBarInsteadOfSymbols {
             showsSymbolBar = selected.showsSymbolBar; searchBarInsteadOfSymbols = selected.searchBarInsteadOfSymbols
+            invalidateInputMode(); presentationChanged?()
+        }
+        if showsNumberRow != selected.showsNumberRow {
+            showsNumberRow = selected.showsNumberRow
             invalidateInputMode(); presentationChanged?()
         }
         let keys = KeyboardKeySettings.shared.loadSnapshot()
@@ -1614,7 +1622,7 @@ private struct UnicodeKeyboardView: View {
     private var typingContent: some View {
         return KeyboardTypingView(typing: model.typing, mode: model.inputModeID,
             isPad: model.isPadLayout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout, symbolMapping: model.padSymbolMapping, compact: model.isCompactLayout,
-            enabled: !model.showsUnicode, useUnicodeFonts: model.useUnicodeFonts,
+            showsNumberRow: model.showsNumberRow, enabled: !model.showsUnicode, useUnicodeFonts: model.useUnicodeFonts,
             delete: delete, variants: typingVariantActions,
             keySettings: model.keySettings, returnTitle: model.returnTitle, action: action, shiftSlide: shiftSlide)
     }
@@ -2253,9 +2261,11 @@ private struct UnicodeKeyboardView: View {
     }
     private func footerPageKey(_ plan: KeyboardFooterLayoutPolicy.Plan) -> some View {
         let letters = model.typingState.layout != .letters
-        return KeyboardTouchKey(title: letters ? "ABC" : "#+=",
+        // The number page swaps its digits for symbols only while the number row shows them.
+        let symbols = model.showsNumberRow
+        return KeyboardTouchKey(title: letters ? "ABC" : symbols ? "#+=" : "123",
             identifier: letters ? "keyboard.typing.letters" : "keyboard.typing.numbers",
-            label: letters ? "Letters" : "Symbols", value: model.typingLayoutValue, fontSize: 13,
+            label: letters ? "Letters" : symbols ? "Symbols" : "Numbers", value: model.typingLayoutValue, fontSize: 13,
             contentPosition: usesPadKeyPositions ? .bottomRight : .center,
             route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .layout(letters ? .letters : .numbers)) })
             .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
@@ -2273,6 +2283,7 @@ private struct KeyboardTypingView: View {
     let padLayout: KeyboardPadLayout
     let symbolMapping: KeyboardPadSymbolMapping
     let compact: Bool
+    let showsNumberRow: Bool
     let enabled: Bool
     let useUnicodeFonts: Bool
     let delete: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
@@ -2291,7 +2302,7 @@ private struct KeyboardTypingView: View {
         GeometryReader { geometry in
             if let plan = KeyboardTypingLayoutPolicy.plan(availableHeight: geometry.size.height,
                 availableWidth: geometry.size.width, compact: compact, layout: typing.state.layout,
-                isPad: isPad, isLandscape: isLandscape, padLayout: padLayout) {
+                isPad: isPad, isLandscape: isLandscape, padLayout: padLayout, showsNumberRow: showsNumberRow) {
                 let ansiStyle = KeyboardTypingLayoutPolicy.usesANSI(availableWidth: geometry.size.width, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout)
                 let pad = KeyboardTypingLayoutPolicy.padPlan(availableWidth: geometry.size.width, isPad: isPad, layout: typing.state.layout, isLandscape: isLandscape, padLayout: padLayout)
                 VStack(spacing: plan.rowSpacing) {
@@ -2440,7 +2451,8 @@ private struct KeyboardTypingView: View {
             useUnicodeFonts: useUnicodeFonts,
             preservesPressAcrossTextChanges: true,
             longPressOptions: gestures.longPress, swipeUp: gestures.swipeUp, swipeDown: gestures.swipeDown,
-            secondaryText: widePad || hasNumberRow ? gestures.swipeUp.first.map(symbolBoardPreview) : nil,
+            // Letters always show their swipe-up symbol, or digit when the number row is off.
+            secondaryText: widePad || typing.state.layout == .letters ? gestures.swipeUp.first.map(symbolBoardPreview) : nil,
             factory: { [mode = mode] in variants(mode, key, hasAuxiliaryRow, isAuxiliaryKey, widePad, ansiPad) })
     }
 

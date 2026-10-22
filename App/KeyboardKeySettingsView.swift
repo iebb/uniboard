@@ -147,7 +147,8 @@ private struct KeyboardGestureSettingsView: View {
         _choices = State(initialValue: (current ?? []).map { Choice(text: $0) })
     }
     private var defaults: [String] {
-        KeyboardVariantPolicy.defaultCandidates(for: descriptor.id, gesture: gesture, mapping: preferences.padSymbolMapping)
+        KeyboardVariantPolicy.defaultCandidates(for: descriptor.id, gesture: gesture, mapping: preferences.padSymbolMapping,
+                                                hasNumberRow: preferences.showsNumberRow)
     }
     private var candidates: [String]? {
         usesDefaults ? nil : choices.map(\.text).filter { !$0.isEmpty }

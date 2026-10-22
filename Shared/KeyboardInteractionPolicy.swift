@@ -9,7 +9,8 @@ enum KeyboardLayoutPolicy {
         let typingKeyHeight: CGFloat
     }
     static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
-                        compactVertical: Bool, showsSymbolBar: Bool, searching: Bool = false) -> Metrics {
+                        compactVertical: Bool, showsSymbolBar: Bool, showsNumberRow: Bool = true,
+                        searching: Bool = false) -> Metrics {
         let size = displaySize.flatMap { value -> CGSize? in
             guard value.width.isFinite, value.height.isFinite, value.width > 0, value.height > 0 else { return nil }
             return value
@@ -26,8 +27,10 @@ enum KeyboardLayoutPolicy {
         let sideResults = searchUsesSideResults(availableWidth: viewWidth - 16, isPad: isPad, isCompact: compact)
         // Search owns four full-height input rows, its toolbar and footer.
         // Portrait adds one horizontal result row instead of shrinking keys.
-        let rows: CGFloat = searching ? (sideResults ? 6 : 7) : showsSymbolBar ? 6 : 5
-        let gaps: CGFloat = searching && !sideResults ? 4 : 3
+        // Without the number row, typing is one row and one gap shorter.
+        let typingRows: CGFloat = showsNumberRow ? 5 : 4
+        let rows: CGFloat = searching ? (sideResults ? 6 : 7) : showsSymbolBar ? typingRows + 1 : typingRows
+        let gaps: CGFloat = searching && !sideResults ? 4 : searching || showsNumberRow ? 3 : 2
         let rowSpacing: CGFloat = searching ? 4 : spacing
         let target = key * rows + rowSpacing * gaps + chrome
         // Keep all rows and the footer equal if a host supplies a short scene.

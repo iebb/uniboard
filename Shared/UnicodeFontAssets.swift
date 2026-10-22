@@ -60,7 +60,8 @@ struct UnicodeFontDownload: Decodable, Sendable {
             && asset.filename.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0)
                 || (97...122).contains($0) || [45, 46, 95].contains($0) })
             && (asset.filename.hasSuffix(".ttf") || asset.filename.hasSuffix(".otf"))
-            && downloadURL == UnicodeFontPackCatalog.downloadBase + asset.filename
+            && (downloadURL == UnicodeFontPackCatalog.downloadBase + asset.filename
+                || downloadURL == UnicodeFontPackCatalog.completionDownloadBase + asset.filename)
     }
 }
 
@@ -74,6 +75,7 @@ struct UnicodeFontPack: Decodable, Identifiable, Sendable {
 
 struct UnicodeFontPackCatalog: Decodable, Sendable {
     static let downloadBase = "https://github.com/iebb/uniboard/releases/download/fonts-1.1-20261022/"
+    static let completionDownloadBase = "https://github.com/iebb/uniboard/releases/download/fonts-1.1-20261022-complete/"
     static let maximumCatalogBytes = 2 * 1024 * 1024
     let schemaVersion: Int
     let unicodeVersion: String

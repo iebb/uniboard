@@ -62,7 +62,7 @@ final class UnicodeFontSupportTests: XCTestCase {
     }
 
     func testSupportedTextEmojiAndReservedSlotsStayOnSystemFonts() {
-        for text in ["A", "Ω", "🚀", "🙂‍↔️", "☃️", "🇯🇵", "\u{1FAEB}", "\u{0378}"] {
+        for text in ["A", "Ω", "🚀", "🙂‍↔️", "☃️", "🇯🇵", "\u{1FAEB}\u{200D}\u{1F680}", "\u{0378}"] {
             let font = UnicodeFontSupport.font(for: text, size: 32, enabled: true)
             XCTAssertEqual(font.fontDescriptor, UIFont.systemFont(ofSize: 32).fontDescriptor, text)
             XCTAssertNil(UnicodeFontSupport.sourceName(for: text, size: 32, enabled: true), text)

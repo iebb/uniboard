@@ -24,6 +24,8 @@ PACKS = {
     "historic-symbols": ("Historic scripts & symbols", "Noto-first previews for Tangut, Nushu, Khitan, music, historic scripts and symbols, with compact open-font fallbacks."),
     "han-supplementary": ("Rare Han: B–F & I", "Missing ideographs from CJK extensions B, C, D, E, F and I, plus compatibility characters. Uses a Jigmo subset."),
     "han-latest": ("Rare Han: G, H & J", "Missing ideographs from newer CJK extensions G, H and J. Uses a Jigmo subset."),
+    "seal": ("Seal script", "All 11,328 Unicode 18 Seal characters. Uses the original Seal Sans font under AGPL-3.0; its license and corresponding source are provided with the font assets."),
+    "emoji-latest": ("Latest emoji previews", "Color previews for nine Unicode 18 emoji missing from iOS 27. Existing system emoji and joined sequences keep Apple's rendering."),
 }
 
 
@@ -54,6 +56,21 @@ def source_font(entry, cache):
 
 def build(entry, source, output):
     filename = entry["filename"]
+    if entry.get("distribution") == "verbatim":
+        # This independently licensed font is distributed unchanged, with its
+        # full license and original editable source in the same asset release.
+        if filename != "SealSans-Regular_v1.otf" or entry["licenseFilename"] != "SealSans-AGPL.txt":
+            raise ValueError("Unexpected verbatim font")
+        data = source.read_bytes()
+        font = TTFont(source)
+        points = {cp for start, end in entry["ranges"] for cp in range(start, end + 1)}
+        if font["name"].getDebugName(6) != entry["postScriptName"] or not points <= set(font.getBestCmap()):
+            raise ValueError("Verbatim font identity or coverage mismatch")
+        if "GNU Affero General Public License" not in (font["name"].getDebugName(13) or ""):
+            raise ValueError("Verbatim font license mismatch")
+        font.close()
+        (output / filename).write_bytes(data)
+        return len(data), digest(data)
     if Path(filename).name != filename or not re.fullmatch(r"UniboardCoverage\d{3}-Regular\.(ttf|otf)", filename):
         raise ValueError("Unexpected subset filename")
     number = re.search(r"Coverage(\d+)", filename)[1]
@@ -80,12 +97,16 @@ def build(entry, source, output):
     for record in font["name"].names:
         if record.nameID in names:
             record.string = names[record.nameID].encode(record.getEncoding(), errors="replace")
-    if entry["family"].startswith("Noto"):
+    if entry["licenseFilename"] == "NotoPreview-OFL.txt":
         body = (ROOT / "Fonts/NotoSymbols2-OFL.txt").read_text()
         body = body[body.index("-----------------------------------------------------------"):]
         notice = entry["copyright"] + "\n\nModified for Uniboard: renamed preview subset.\n\n" + body
     else:
         notice = (ROOT / "Fonts" / entry["licenseFilename"]).read_text()
+    if entry.get("normalizeLicenseRecords"):
+        for record in font["name"].names:
+            if record.nameID == 13:
+                record.string = notice.encode(record.getEncoding(), errors="replace")
     # Every individually downloadable font carries its own full license notice.
     font["name"].setName(notice, 13, 3, 1, 0x409)
     font["name"].setName(notice, 13, 0, 4, 0)
@@ -125,11 +146,12 @@ def main():
     packs = {}
     for entry in spec["fonts"]:
         length, checksum = build(entry, source_font(entry, args.cache), args.output)
-        asset = {"filename": entry["filename"], "displayName": entry["family"] + " (preview subset)",
+        suffix = "" if entry.get("distribution") == "verbatim" else " (preview subset)"
+        asset = {"filename": entry["filename"], "displayName": entry["family"] + suffix,
                  "postScriptName": entry["postScriptName"], "sha256": checksum, "sourceURL": entry["sourceURL"],
                  "licenseFilename": entry["licenseFilename"], "ranges": entry["ranges"]}
         packs.setdefault(entry["packId"], []).append({"asset": asset, "bytes": length,
-            "downloadURL": spec["downloadBase"] + entry["filename"]})
+            "downloadURL": entry.get("downloadBase", spec["downloadBase"]) + entry["filename"]})
         print(entry["family"], length, checksum, flush=True)
     catalog = {"schemaVersion": 1, "unicodeVersion": spec["unicodeVersion"], "stockIOS": spec["baselineIOS"],
         "packs": [{"id": key, "title": PACKS[key][0], "detail": PACKS[key][1], "fonts": fonts} for key, fonts in packs.items()]}

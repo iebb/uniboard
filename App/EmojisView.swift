@@ -61,10 +61,11 @@ private struct EmojiTile: View {
     let emoji: UnicodeEmojiEntry
     let favorite: Bool
     let action: () -> Void
+    @EnvironmentObject private var preferences: CatalogPreferences
     @State private var hoverTask: Task<Void, Never>?
     var body: some View {
         VStack(spacing: 7) {
-            Text(emoji.text).font(.system(size: 32)).lineLimit(1).minimumScaleFactor(0.55).frame(height: 40)
+            Text(emoji.text).font(Font(UnicodeFontSupport.font(for: emoji.text, size: 32, enabled: preferences.useUnicodeFonts))).lineLimit(1).minimumScaleFactor(0.55).frame(height: 40)
             Text(emoji.name.capitalized).font(.system(size: 11, weight: .medium))
                 .lineLimit(2).multilineTextAlignment(.center).foregroundStyle(Palette.ink).frame(height: 28)
             Text("Emoji \(emoji.emojiVersion)").font(.system(size: 9, design: .monospaced)).foregroundStyle(Palette.muted)
@@ -107,7 +108,7 @@ struct EmojiDetailView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    Text(emoji.text).font(.system(size: 92)).lineLimit(1).minimumScaleFactor(0.4)
+                    Text(emoji.text).font(Font(UnicodeFontSupport.font(for: emoji.text, size: 92, enabled: preferences.useUnicodeFonts))).lineLimit(1).minimumScaleFactor(0.4)
                         .frame(maxWidth: .infinity).frame(height: 190)
                         .background(Palette.soft, in: RoundedRectangle(cornerRadius: 24))
                     Text(emoji.name.capitalized).font(.system(size: 27, design: .serif))

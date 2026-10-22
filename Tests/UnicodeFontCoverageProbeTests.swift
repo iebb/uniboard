@@ -59,7 +59,7 @@ private enum UnicodeFontCoverageProbe {
         .init(id: "snowman-2603", text: "\u{2603}", purpose: "Existing system glyph control"),
         .init(id: "unassigned-0378", text: "\u{0378}", purpose: "Unassigned negative coverage control; not app placeholder"),
         .init(id: "emoji-rocket", text: "\u{1F680}", purpose: "System emoji must remain unchanged"),
-        .init(id: "emoji-cracking-face", text: "\u{1FAEB}", purpose: "Known unsupported iOS 18.5 emoji; do not imply monochrome-font recovery"),
+        .init(id: "emoji-cracking-face", text: "\u{1FAEB}", purpose: "Unicode 18 emoji: use the audited optional Noto color subset only when native rendering is missing"),
         .init(id: "emoji-zwj-vs16", text: "\u{1F642}\u{200D}\u{2194}\u{FE0F}", purpose: "Complete emoji ZWJ and variation-selector control")
     ]
 
@@ -156,17 +156,10 @@ final class UnicodeFontCoverageProbeTests: XCTestCase {
                           "Every shaped preview must have finite, nonnegative metrics")
         }
         let system = UIFont.systemFont(ofSize: 56)
-        let version = ProcessInfo.processInfo.operatingSystemVersion
-        let isIOS185 = version.majorVersion == 18 && version.minorVersion == 5
         for id in ["armenian-0558", "sidetic-10940"] {
             let before = try observation(id, enabled: false, in: report)
             let after = try observation(id, enabled: true, in: report)
             let missing = UnicodeFontSupport.missingCodePoints(in: before.fixture.text, font: system)
-            if isIOS185 {
-                XCTAssertFalse(missing.isEmpty, "The dedicated iOS18.5 fixture must actually be absent from native fonts")
-                XCTAssertTrue(before.runs.contains { $0.hasZeroGlyph || $0.hasLastResortFont },
-                              "Record the native missing glyph rather than assuming it from Unicode age")
-            }
             if !missing.isEmpty {
                 XCTAssertNotEqual(after.requestedFontName, before.requestedFontName)
                 XCTAssertNotNil(UnicodeFontSupport.sourceName(for: after.fixture.text, size: 56, enabled: true))
@@ -198,6 +191,13 @@ final class UnicodeFontCoverageProbeTests: XCTestCase {
         for id in ["native-latin", "native-omega", "unassigned-0378", "emoji-rocket", "emoji-cracking-face", "emoji-zwj-vs16"] {
             let before = try observation(id, enabled: false, in: report)
             let after = try observation(id, enabled: true, in: report)
+            if id == "emoji-cracking-face", after.requestedFontName != before.requestedFontName {
+                XCTAssertEqual(UnicodeFontSupport.sourceName(for: after.fixture.text, size: 56, enabled: true), "Noto Color Emoji (preview subset)")
+                XCTAssertTrue(after.runs.allSatisfy { !$0.hasZeroGlyph && !$0.hasLastResortFont })
+                XCTAssertNotEqual(try Data(contentsOf: directory.appendingPathComponent(after.bitmapName)),
+                    try Data(contentsOf: directory.appendingPathComponent(before.bitmapName)))
+                continue
+            }
             XCTAssertEqual(after.requestedFontName, before.requestedFontName, id)
             XCTAssertEqual(after.runs, before.runs, "Native fallback fonts and shaped emoji glyphs must remain identical: \(id)")
             let beforePNG = try Data(contentsOf: directory.appendingPathComponent(before.bitmapName))

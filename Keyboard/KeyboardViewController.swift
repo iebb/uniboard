@@ -2180,8 +2180,8 @@ private struct UnicodeKeyboardView: View {
         switch item {
         case .character(let character):
             return Font(UnicodeFontSupport.font(for: character.displayText, size: size, enabled: model.useUnicodeFonts))
-        case .emoji:
-            return .system(size: size)
+        case .emoji(let emoji):
+            return Font(UnicodeFontSupport.font(for: emoji.text, size: size, enabled: model.useUnicodeFonts))
         }
     }
 
@@ -2728,8 +2728,9 @@ private final class InspectableKeyButton: UIControl {
             glyph.font = UnicodeFontSupport.font(for: character.displayText, size: size, enabled: useUnicodeFonts)
             accessibilityValue = UnicodeFontSupport.sourceName(for: character.displayText, size: size, enabled: useUnicodeFonts).map { "Preview font: \($0)" }
         } else {
-            glyph.font = .systemFont(ofSize: compact ? 24 : 32)
-            accessibilityValue = nil
+            let size: CGFloat = compact ? 24 : 32
+            glyph.font = UnicodeFontSupport.font(for: item.displayText, size: size, enabled: useUnicodeFonts)
+            accessibilityValue = UnicodeFontSupport.sourceName(for: item.displayText, size: size, enabled: useUnicodeFonts).map { "Preview font: \($0)" }
         }
         code.text = item.footer
         codeHeight.isActive = !glyphOnly

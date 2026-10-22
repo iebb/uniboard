@@ -89,9 +89,14 @@ final class UnicodeStockCoverageAuditTests: XCTestCase {
             print("FONT_AUDIT \(block.name): \(result.tested) tested, \(result.stockMissing.count) stock missing")
         }
         if mode == "stock" { XCTAssertEqual(UnicodeFontSupport.loadedFontCount, 0) }
+        if mode == "complete", ProcessInfo.processInfo.environment["UNIBOARD_FONT_AUDIT_INSTALL"] == "1" {
+            XCTAssertEqual(blocks.reduce(0) { $0 + $1.optionalMissing.count }, 0,
+                "The complete pinned Unicode 18 preview set must close every measured stock gap")
+            try verifyStandaloneColorEmojiPreviews()
+        }
         let report = Report(os: ProcessInfo.processInfo.operatingSystemVersionString,
             model: UIDevice.current.model, catalog: catalog.version, mode: mode,
-            methodology: "Assigned L/M/N/P/S scalars in the bundled release; excludes invisible/default-ignorable/Braille blank. Uses exact production displayText, including dotted-circle combining previews, and actual CoreText shaped runs. Missing means glyph zero or LastResort covering that scalar. Emoji gaps are reported separately. This checks scalar preview coverage, not complex-script spelling or arbitrary emoji sequences.",
+            methodology: "Assigned L/M/N/P/S scalars in the bundled release; excludes invisible/default-ignorable/Braille blank. Uses exact production displayText, including dotted-circle combining previews, and actual CoreText shaped runs. Missing means glyph zero or LastResort covering that scalar. The nine audited missing standalone emoji may use the optional Noto COLR subset; joined and already-supported emoji preserve native rendering. This checks scalar preview coverage, not complex-script spelling or arbitrary emoji sequences.",
             elapsedSeconds: Date().timeIntervalSince(start), blocks: blocks)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -101,6 +106,42 @@ final class UnicodeStockCoverageAuditTests: XCTestCase {
         add(attachment)
         XCTAssertGreaterThan(blocks.reduce(0) { $0 + $1.tested }, 150_000)
         UnicodeFontSupport.clearCache()
+    }
+
+    private func verifyStandaloneColorEmojiPreviews() throws {
+        let pack = try XCTUnwrap(UnicodeFontPackCatalog.bundled.packs.first { $0.id == "emoji-latest" })
+        let points = pack.fonts.flatMap { $0.asset.ranges.flatMap { Array($0[0]...$0[1]) } }
+        XCTAssertEqual(points.count, 9)
+        for point in points {
+            for suffix in ["", "\u{FE0F}"] {
+                let text = String(try XCTUnwrap(Unicode.Scalar(point))) + suffix
+                let font = UnicodeFontSupport.font(for: text, size: 48, enabled: true)
+                XCTAssertTrue(UnicodeFontSupport.missingCodePoints(in: text, font: font).isEmpty)
+                if !UnicodeFontSupport.missingCodePoints(in: text, font: .systemFont(ofSize: 48)).isEmpty {
+                    XCTAssertEqual(font.fontName, pack.fonts[0].asset.postScriptName)
+                    XCTAssertTrue(CTFontGetSymbolicTraits(font as CTFont).contains(.traitColorGlyphs))
+                }
+                let off = UnicodeFontSupport.font(for: text, size: 48, enabled: false)
+                XCTAssertEqual(off.fontDescriptor, UIFont.systemFont(ofSize: 48).fontDescriptor)
+            }
+        }
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 200)).image { context in
+            UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 600, height: 200))
+            for (index, point) in points.enumerated() {
+                let text = String(Unicode.Scalar(point)!)
+                text.draw(at: CGPoint(x: 20 + index % 5 * 115, y: 10 + index / 5 * 95), withAttributes: [
+                    .font: UnicodeFontSupport.font(for: text, size: 48, enabled: true), .foregroundColor: UIColor.black])
+            }
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Nine Unicode 18 emoji using the exact optional Noto color subset"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        for text in ["🚀", "🙂‍↔️", "👍🏽", "🇯🇵", "☃️", "\u{1FAEB}\u{200D}\u{1F680}"] {
+            let on = UnicodeFontSupport.font(for: text, size: 48, enabled: true)
+            let off = UnicodeFontSupport.font(for: text, size: 48, enabled: false)
+            XCTAssertEqual(on.fontDescriptor, off.fontDescriptor, text)
+        }
     }
 }
 #endif

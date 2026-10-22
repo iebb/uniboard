@@ -40,6 +40,12 @@ enum UnicodeFontSupport {
     }()
     private static let downloadable = Dictionary(uniqueKeysWithValues:
         UnicodeFontPackCatalog.bundled.packs.flatMap(\.fonts).map { ($0.asset.filename, $0) })
+    private static let emojiPreviewAssets = UnicodeFontPackCatalog.bundled.packs
+        .filter { $0.id == "emoji-latest" }.flatMap(\.fonts).map(\.asset)
+
+    private static func isEmojiPreview(_ point: UInt32) -> Bool {
+        emojiPreviewAssets.contains { $0.contains(point) }
+    }
 
     static var loadedFontCount: Int { graphicsFonts.count }
 
@@ -89,9 +95,13 @@ enum UnicodeFontSupport {
         size.isFinite && size > 0 ? min(512, max(1, size)) : UIFont.systemFontSize
     }
 
-    /// Qualified and joined emoji retain Apple's color font and shaping.
+    /// Only the audited standalone emoji (optionally with VS16) may use the
+    /// color preview pack. Joined/modifier/flag sequences retain Apple's shaping.
     private static func preservesEmoji(_ text: String) -> Bool {
-        text.unicodeScalars.contains {
+        let points = text.unicodeScalars.map(\.value)
+        if let first = points.first, isEmojiPreview(first),
+           points.count == 1 || (points.count == 2 && points[1] == 0xFE0F) { return false }
+        return text.unicodeScalars.contains {
             $0.value == 0xFE0F || $0.value == 0x200D || (0xE0020...0xE007F).contains($0.value)
                 || $0.properties.isEmojiPresentation
         }
@@ -107,7 +117,7 @@ enum UnicodeFontSupport {
                 let candidate = CTFontCreateWithGraphicsFont(graphics, 32, nil, nil)
                 // A whitelist alone is insufficient: reject corrupt/non-drawing
                 // glyphs rather than replace one placeholder with another.
-                if missing.allSatisfy({ hasOutline($0, in: candidate) }),
+                if missing.allSatisfy({ hasArtwork($0, in: candidate) }),
                    missingCodePoints(in: text, font: candidate as UIFont).isEmpty {
                     selected = index
                     break
@@ -135,14 +145,17 @@ enum UnicodeFontSupport {
         return font
     }
 
-    private static func hasOutline(_ point: UInt32, in font: CTFont) -> Bool {
+    private static func hasArtwork(_ point: UInt32, in font: CTFont) -> Bool {
         guard let scalar = Unicode.Scalar(point) else { return false }
         let text = String(scalar)
         var characters = Array(text.utf16)
         var glyphs = [CGGlyph](repeating: 0, count: characters.count)
         CTFontGetGlyphsForCharacters(font, &characters, &glyphs, characters.count)
-        guard let glyph = glyphs.first, glyph != 0,
-              let path = CTFontCreatePathForGlyph(font, glyph, nil) else { return false }
+        guard let glyph = glyphs.first, glyph != 0 else { return false }
+        // COLR glyphs draw through paint layers and may have no base outline.
+        // Only pinned, bitmap-verified standalone emoji may take this path.
+        if isEmojiPreview(point), CTFontGetSymbolicTraits(font).contains(.traitColorGlyphs) { return true }
+        guard let path = CTFontCreatePathForGlyph(font, glyph, nil) else { return false }
         return !path.isEmpty
     }
 

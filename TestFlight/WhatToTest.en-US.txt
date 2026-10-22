@@ -1,4 +1,4 @@
-Uniboard 1.1 beta. Public App Store release awaits review.
+Uniboard 1.2 beta.
 
 SEARCH AND SAVE TOUCH FIXES
 Search uses four rows of normal-height query keys. Portrait results scroll horizontally above the keys; iPad and landscape put results beside them. Result keys stay fully visible and full height. Check rotations and visible host content.
@@ -8,10 +8,10 @@ Both Delete keys edit before the local search caret. Test empty/start/middle/end
 Properties has a native 76x44pt Save key. Test center/corners, cancel and save; preserve query/caret/receiving text. Hold a result to inspect without inserting. Check unsupported glyphs and emoji.
 
 FIXED DAILY KEYBOARD
-The number row is always present. Digits, letters and footer share one height (+15%). No resize controls. App Settings controls the optional symbol/search bar. At most one optional top bar; rounded keycaps stay fully visible. The U key toggles the toolbar. Fonts, Unicode version, layouts and key mappings are app-only. Unicode results follow code point order.
+App Settings can turn off the number row; Q–P then flick up to digits. Digits, letters and footer share one height (+15%). No resize controls. App Settings controls the one optional symbol/search bar; rounded keycaps stay fully visible. The U key toggles the toolbar. Fonts, Unicode version, layouts and key mappings are app-only. Unicode results follow code point order.
 
 GESTURES AND SHIFT
-Hold: current-case accents. Up: mapped symbols plus unused macOS Option outputs. Down: opposite case then its accents. Defaults are unique across groups, including I/O currency choices. Keep pressing to switch Hold > Up > Down > Up, then slide sideways; release inserts once. Choices surround the primary: 7,5,3,1,2,4,6. Test edge keys, exact combining text and cancellation.
+Hold: current-case accents. Up: mapped symbols plus unused macOS Option outputs. Down: superscript, subscript, math, circled and fullwidth forms, same case. Defaults are unique across groups. Keep pressing to switch Hold > Up > Down > Up, then slide sideways; release inserts once. Choices surround the primary: 7,5,3,1,2,4,6. Test edge keys, exact combining text and cancellation.
 
 Shift matches normal typing: tap for one capital, double-tap for Caps Lock, touch Shift then slide to a letter for one capital. A stationary hold is one Shift tap. Cancelled/outside slides must not insert or leave Shift stuck.
 

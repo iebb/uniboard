@@ -8,7 +8,7 @@ Both Delete keys edit before the local search caret. Test empty/start/middle/end
 Properties has a native 76x44pt Save key. Test center/corners, cancel and save; preserve query/caret/receiving text. Hold a result to inspect without inserting. Check unsupported glyphs and emoji.
 
 FIXED DAILY KEYBOARD
-The number row is always present. Digits, letters and footer share one height (+15%). No resize controls. App Settings controls the optional symbol/search bar. At most one optional top bar; rounded keycaps stay fully visible. The U key toggles the toolbar. Fonts, Unicode version, layouts and key mappings are app-only. Unicode results are always listed by code point.
+The number row is always present. Digits, letters and footer share one height (+15%). No resize controls. App Settings controls the optional symbol/search bar. At most one optional top bar; rounded keycaps stay fully visible. The U key toggles the toolbar. Fonts, Unicode version, layouts and key mappings are app-only. Unicode results follow code point order.
 
 GESTURES AND SHIFT
 Hold: current-case accents. Up: mapped symbols plus unused macOS Option outputs. Down: opposite case then its accents. Defaults are unique across groups, including I/O currency choices. Keep pressing to switch Hold > Up > Down > Up, then slide sideways; release inserts once. Choices surround the primary: 7,5,3,1,2,4,6. Test edge keys, exact combining text and cancellation.
@@ -16,7 +16,7 @@ Hold: current-case accents. Up: mapped symbols plus unused macOS Option outputs.
 Shift matches normal typing: tap for one capital, double-tap for Caps Lock, touch Shift then slide to a letter for one capital. A stationary hold is one Shift tap. Cancelled/outside slides must not insert or leave Shift stuck.
 
 IPAD AND CUSTOM KEYS
-Check portrait/landscape, Tab/Caps/both Shift keys, gray modifiers, one blue Return and two controls right of Space. Landscape presets: iPad, compact ANSI, full ANSI. Manual Shift changes punctuation; Caps Lock and automatic capitals keep digits literal. Symbol pages avoid duplicate digits. Mappings: standard, iPad, macOS Option, Off. Customize Tap, Shifted tap, Hold, Up and Down independently. Test literal emoji, combining text, Off, failed saves and Full Access OFF.
+Check portrait/landscape, Tab/Caps/both Shift keys, gray modifiers, one blue Return and two controls right of Space. Landscape presets: iPad, compact ANSI, full ANSI. Manual Shift changes punctuation; Caps Lock and automatic capitals keep digits literal. Symbol pages avoid duplicate digits. Mappings: standard, iPad, macOS Option, Off. Customize Up, Down and Hold lists; tap types the key. Test literal emoji, combining text, Off, failed saves and Full Access OFF.
 
 PAGES, FAVORITES AND PRIVACY
 Star opens the preferred page and returns to QWERTY. Swipe across ALL pages and Recent, one page at a time, preserving U visibility. Hold Star to create, rename, reorder or delete pages and choose a preferred target. Recent and saved symbols use plain keycaps. Editors stay inside the keyboard.
@@ -26,4 +26,4 @@ Saved shares built-in Favorites. App edits reach the keyboard with Full Access O
 Unicode 18 defaults; 16/17 previous, 19 DRAFT. Search names, blocks, descriptions, code points and Suzhou numerals. Verify exact whole-emoji insertion and sharp search text in light/dark and Reduce Transparency.
 
 OPTIONAL FONT DOWNLOADS
-In app Settings, enable Extra Unicode fonts or leave it off. Download the historic/symbol, supplementary Han or latest Han pack as needed. Test cancel/retry, navigation during download, remove/re-download and offline use. With Full Access OFF, try U+16A70 (Tangsa) in the keyboard after the historic pack; hold must only inspect, then tap must insert the original scalar. Downloads and editions are app-only. Files are size/SHA-256 verified; no typed content is included in requests. Native iOS 27 audit recovers 83,735 of 100,502 missing visible scalar previews; 16,767 remain unsupported, mostly newest blocks. Emoji keep Apple rendering.
+Downloading a pack turns Extra Unicode fonts on. Download single packs or use Download All, which queues packs one at a time. Test cancelling the active and a waiting pack, retry, navigation during download, remove/re-download and offline use. With Full Access OFF, try U+16A70 (Tangsa) in the keyboard after the historic pack; hold must only inspect, then tap must insert the original scalar. Downloads and editions are app-only. Files are size/SHA-256 verified; no typed content is included in requests. Native iOS 27 audit recovers 83,735 of 100,502 missing visible scalar previews; 16,767 remain unsupported, mostly newest blocks. Missing emoji use Noto Color Emoji.

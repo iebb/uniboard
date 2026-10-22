@@ -27,8 +27,8 @@ This closes **every measured stock gap** for visible assigned scalar previews in
 | Tangut Components Supplement | 115 | UFS Tangut and Jurchen preview subset |
 | Archaic Cuneiform Numerals | 311 | Robin Leroy's Archaic Cuneiform Numerals |
 | Cuneiform Numbers and Punctuation | 12 | Noto Sans Cuneiform Egg |
-| Transport and Map Symbols | 1 | Noto Color Emoji, COLR subset |
-| Symbols and Pictographs Extended-A | 8 | Noto Color Emoji, COLR subset |
+| Transport and Map Symbols | 1 | Noto Color Emoji 18 (sbix) |
+| Symbols and Pictographs Extended-A | 8 | Noto Color Emoji 18 (sbix) |
 
 Every scalar and its Unicode name, block and new font is listed in [build36-missing-characters.tsv](build36-missing-characters.tsv). The build 36 audit remains in [ios27-expanded.json](ios27-expanded.json); the completed production-resolver audit is [ios27-complete.json](ios27-complete.json). Stock evidence is [ios27-stock.json](ios27-stock.json).
 
@@ -36,7 +36,7 @@ The earlier omission was a source-selection limit, not proof that no font existe
 
 ## Minimal additions and optional packs
 
-Only measured missing scalar ranges are advertised. The seven additions total **9,013,532 bytes**. Splitting Egyptian coverage between NewGardiner and a residual UniHieroglyphica subset saves about 1.4 MB compared with using UniHieroglyphica alone. The nine emoji require just **31,848 bytes**. No downloaded font is included in the app or keyboard binary; the four existing bundled fonts remain 11,706,408 bytes.
+Only measured missing scalar ranges are advertised. The seven additions total **9,013,532 bytes**. Splitting Egyptian coverage between NewGardiner and a residual UniHieroglyphica subset saves about 1.4 MB compared with using UniHieroglyphica alone. The nine emoji first used a 31,848-byte COLR subset, since replaced by one Noto Color Emoji 18 font. No downloaded font is included in the app or keyboard binary; the four existing bundled fonts remain 11,706,408 bytes.
 
 | Optional pack | Faces | Download bytes |
 | --- | ---: | ---: |
@@ -44,8 +44,8 @@ Only measured missing scalar ranges are advertised. The seven additions total **
 | Rare Han: B–F & I | 1 | 30,903,504 |
 | Rare Han: G, H & J | 1 | 7,450,532 |
 | Seal script | 1 | 5,793,816 |
-| Emoji previews | 2 | 10,821,044 |
-| Total | 69 | 68,881,680 |
+| Emoji previews | 1 | 10,846,396 |
+| Total | 68 | 68,907,032 |
 
 The original 61 asset identities, hashes and URLs are unchanged. The seven new files use the separate [completion asset release](https://github.com/iebb/uniboard/releases/tag/fonts-1.1-20261022-complete); the [original asset release](https://github.com/iebb/uniboard/releases/tag/fonts-1.1-20261022) remains intact. Source commits, SHA-256 digests, advertised ranges, licenses, and the Seal source-archive hash are pinned in [font-subset-inputs.json](font-subset-inputs.json).
 
@@ -55,21 +55,18 @@ Packs are explicit, app-only, off by default, removable, and usable offline in t
 
 ## Emoji behavior
 
-Emoji fallback is decided at runtime on the device's own iOS version, not from this iOS 27 list. A preview is drawn with the stock fonts first. If any scalar hits glyph zero or LastResort, or a fully qualified sequence shapes to more glyphs than visible characters (iOS drawing an unsupported ZWJ, modifier, flag or keycap sequence as separate pieces), the optional **Emoji previews** pack is tried in order:
+Emoji fallback is decided at runtime on the device's own iOS version, not from this iOS 27 list. A preview is drawn with the stock fonts first. If any scalar hits glyph zero or LastResort, or a fully qualified sequence shapes to more glyphs than visible characters (iOS drawing an unsupported ZWJ, modifier, flag or keycap sequence as separate pieces), the optional **Emoji previews** pack is tried. It is one font: **Noto Color Emoji 2.057** (Emoji 18.0), the unmodified sbix rebuild `noto.ttf` from [iebb/emojifonts release 2026.10.22](https://github.com/iebb/emojifonts/releases/tag/2026.10.22) (10,846,396 bytes, SHA-256 pinned), built from [googlefonts/noto-emoji](https://github.com/googlefonts/noto-emoji/tree/e20cbc2bbec1926686be9f9bee7d1d2cfa1fea0e/2D/fonts) at commit `e20cbc2` (release `v2026-09-24-unicode18_0`). iOS cannot draw upstream's CBDT bitmaps; sbix is Apple's own bitmap format, so it draws on every supported iOS version, and its GSUB ligatures cover sequences. It replaced the Emoji 17.0 rebuild from release 2026.10 and the 31,848-byte COLR subset for nine standalone Unicode 18 emoji. Noto had moved its sources to `2D/` with Emoji 18, so the emojifonts build had stayed on Emoji 17.0 until its paths were fixed.
 
-1. **Noto Color Emoji**, the unmodified sbix rebuild `noto.ttf` from [iebb/emojifonts release 2026.10](https://github.com/iebb/emojifonts/releases/tag/2026.10) (10,789,196 bytes, SHA-256 pinned, Emoji 17.0). sbix is Apple's own bitmap format, so it draws on every supported iOS version, and its GSUB ligatures cover sequences.
-2. The 31,848-byte Noto COLR subset for the nine standalone Unicode 18 emoji, which the sbix build does not yet contain.
+A candidate must draw the text completely and leave ink in a test render, so a format the runtime cannot paint is rejected. VS15 text presentation stays on text fonts. Anything still missing is tinted red.
 
-A candidate must draw the text completely and leave ink in a test render. That second check matters: COLR glyphs exist in the cmap on iOS 18.5 but draw nothing there, so the subset is used only where the runtime actually paints it. VS15 text presentation stays on text fonts. Anything still missing is tinted red.
-
-`Tests/UnicodeEmojiSequenceAuditTests.swift` (opt-in, `UNIBOARD_EMOJI_AUDIT=1`; add `UNIBOARD_EMOJI_AUDIT_INSTALL=1` with the pack files in the test host's `Documents/FontAuditAssets`) shapes all 3,963 fully qualified Unicode 18 emoji:
+`Tests/UnicodeEmojiSequenceAuditTests.swift` (opt-in, `UNIBOARD_EMOJI_AUDIT=1`; add `UNIBOARD_EMOJI_AUDIT_INSTALL=1` with the pack files in the test host's `Documents/FontAuditAssets`) shapes all 3,963 fully qualified Unicode 18 emoji. Measured on 2026-10-22 with the Emoji 18 pack installed:
 
 | Runtime | Stock gaps | Recovered with the emoji pack | Still missing |
 | --- | ---: | ---: | ---: |
-| iOS 27.0 (24A5390f) | 19, all Emoji 18.0 | 9 standalone, COLR subset | 10 skin-tone thumb signs |
-| iOS 18.5 (22F77) | 182: 67 missing and 96 split Emoji 17.0; 19 Emoji 18.0 | 163, all Noto sbix | 19 Emoji 18.0 |
+| iOS 27.0 (24A5390f) | 19, all Emoji 18.0 | 19 | 0 |
+| iOS 18.5 (22F77) | 182: 67 missing and 96 split Emoji 17.0; 19 Emoji 18.0 | 182 | 0 |
 
-The remaining gaps are Emoji 18.0 sequences that no pinned font contains yet. A later Noto sbix build with Emoji 18.0 can replace the pinned release without code changes.
+The 19 Emoji 18.0 gaps are the nine standalone emoji and the leftwards and rightwards thumb signs in all five skin tones; before this update the thumb-sign sequences stayed missing.
 
 ## Native verification and reproduction
 

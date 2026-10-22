@@ -159,15 +159,17 @@ def main():
         packs.setdefault(entry["packId"], []).append({"asset": asset, "bytes": length,
             "downloadURL": entry.get("downloadBase", spec["downloadBase"]) + entry["filename"]})
         print(entry["family"], length, checksum, flush=True)
-    catalog = {"schemaVersion": 1, "unicodeVersion": spec["unicodeVersion"], "stockIOS": spec["baselineIOS"],
-        "packs": [{"id": key, "title": PACKS[key][0], "detail": PACKS[key][1], "fonts": fonts} for key, fonts in packs.items()]}
     target = ROOT / "Fonts/DownloadableFonts.json"
+    # Preview basics (Fonts/manifest.json) and ConScript keep their shipped entries.
+    built = {key: {"id": key, "title": PACKS[key][0], "detail": PACKS[key][1], "fonts": fonts} for key, fonts in packs.items()}
+    catalog = {"schemaVersion": 1, "unicodeVersion": spec["unicodeVersion"], "stockIOS": spec["baselineIOS"],
+        "packs": [built.get(pack["id"], pack) for pack in json.loads(target.read_text())["packs"]]}
     if args.update_catalog:
         target.write_text(json.dumps(catalog, indent=2) + "\n")
     elif json.loads(target.read_text()) != catalog:
         raise ValueError("Reproduced files differ from the reviewed font catalog")
     (args.output / "catalog.json").write_text(json.dumps(catalog, indent=2) + "\n")
-    print("Verified", sum(len(p["fonts"]) for p in catalog["packs"]), "reproducible licensed preview subsets")
+    print("Verified", sum(len(p["fonts"]) for p in built.values()), "reproducible licensed preview subsets")
 
 
 if __name__ == "__main__":

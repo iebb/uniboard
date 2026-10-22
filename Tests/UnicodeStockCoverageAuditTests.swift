@@ -96,7 +96,7 @@ final class UnicodeStockCoverageAuditTests: XCTestCase {
         }
         let report = Report(os: ProcessInfo.processInfo.operatingSystemVersionString,
             model: UIDevice.current.model, catalog: catalog.version, mode: mode,
-            methodology: "Assigned L/M/N/P/S scalars in the bundled release; excludes invisible/default-ignorable/Braille blank. Uses exact production displayText, including dotted-circle combining previews, and actual CoreText shaped runs. Missing means glyph zero or LastResort covering that scalar. The nine audited missing standalone emoji may use the optional Noto COLR subset; joined and already-supported emoji preserve native rendering. This checks scalar preview coverage, not complex-script spelling or arbitrary emoji sequences.",
+            methodology: "Assigned L/M/N/P/S scalars in the bundled release; excludes invisible/default-ignorable/Braille blank. Uses exact production displayText, including dotted-circle combining previews, and actual CoreText shaped runs. Missing means glyph zero or LastResort covering that scalar. The nine audited missing standalone emoji may use the optional Noto Color Emoji pack; joined and already-supported emoji preserve native rendering. This checks scalar preview coverage, not complex-script spelling or arbitrary emoji sequences.",
             elapsedSeconds: Date().timeIntervalSince(start), blocks: blocks)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -110,21 +110,21 @@ final class UnicodeStockCoverageAuditTests: XCTestCase {
 
     private func verifyStandaloneColorEmojiPreviews() throws {
         let pack = try XCTUnwrap(UnicodeFontPackCatalog.bundled.packs.first { $0.id == "emoji" })
-        let subset = try XCTUnwrap(pack.fonts.first { $0.asset.postScriptName == "UniboardCoverage068-Regular" })
-        let points = subset.asset.ranges.flatMap { Array($0[0]...$0[1]) }
-        XCTAssertEqual(points.count, 9)
-        for point in points {
-            for suffix in ["", "\u{FE0F}"] {
-                let text = String(try XCTUnwrap(Unicode.Scalar(point))) + suffix
-                let font = UnicodeFontSupport.font(for: text, size: 48, enabled: true)
-                XCTAssertTrue(UnicodeFontSupport.missingCodePoints(in: text, font: font).isEmpty)
-                if !UnicodeFontSupport.missingCodePoints(in: text, font: .systemFont(ofSize: 48)).isEmpty {
-                    XCTAssertEqual(font.fontName, subset.asset.postScriptName)
-                    XCTAssertTrue(CTFontGetSymbolicTraits(font as CTFont).contains(.traitColorGlyphs))
-                }
-                let off = UnicodeFontSupport.font(for: text, size: 48, enabled: false)
-                XCTAssertEqual(off.fontDescriptor, UIFont.systemFont(ofSize: 48).fontDescriptor)
+        let noto = try XCTUnwrap(pack.fonts.first { $0.asset.postScriptName == "NotoColorEmoji" })
+        // The nine standalone Emoji 18.0 scalars iOS 27 cannot draw.
+        let points: [UInt32] = [0x1F6D9, 0x1FA8B, 0x1FA8C, 0x1FA8D, 0x1FACC, 0x1FADD, 0x1FAEB, 0x1FAF9, 0x1FAFA]
+        XCTAssertTrue(points.allSatisfy(noto.asset.contains))
+        let texts = points.flatMap { point in ["", "\u{FE0F}"].map { String(Unicode.Scalar(point)!) + $0 } }
+            + ["\u{1FAF9}\u{1F3FD}", "\u{1FAFA}\u{1F3FD}"]
+        for text in texts {
+            let font = UnicodeFontSupport.font(for: text, size: 48, enabled: true)
+            XCTAssertTrue(UnicodeFontSupport.missingCodePoints(in: text, font: font).isEmpty)
+            if !UnicodeFontSupport.missingCodePoints(in: text, font: .systemFont(ofSize: 48)).isEmpty {
+                XCTAssertEqual(font.fontName, noto.asset.postScriptName)
+                XCTAssertTrue(CTFontGetSymbolicTraits(font as CTFont).contains(.traitColorGlyphs))
             }
+            let off = UnicodeFontSupport.font(for: text, size: 48, enabled: false)
+            XCTAssertEqual(off.fontDescriptor, UIFont.systemFont(ofSize: 48).fontDescriptor)
         }
         let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 200)).image { context in
             UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 600, height: 200))
@@ -135,7 +135,7 @@ final class UnicodeStockCoverageAuditTests: XCTestCase {
             }
         }
         let attachment = XCTAttachment(image: image)
-        attachment.name = "Nine Unicode 18 emoji using the exact optional Noto color subset"
+        attachment.name = "Nine Unicode 18 emoji using the exact optional Noto Color Emoji font"
         attachment.lifetime = .keepAlways
         add(attachment)
         // Stock-drawn emoji, text presentation, and sequences no fallback can

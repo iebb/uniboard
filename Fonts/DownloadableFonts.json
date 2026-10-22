@@ -31502,8 +31502,8 @@
             "filename": "noto.ttf",
             "displayName": "Noto Color Emoji",
             "postScriptName": "NotoColorEmoji",
-            "sha256": "0dbd38fcbbb7869ad872c1dac5e80c72a0e32508ef17666027d488ffedc41a54",
-            "sourceURL": "https://github.com/iebb/emojifonts/releases/download/2026.10/noto.ttf",
+            "sha256": "894fbd8189c8213cdd935980b1e4675fd44b81c9f50bbd61962292abd56fa1ab",
+            "sourceURL": "https://github.com/iebb/emojifonts/releases/download/2026.10.22/noto.ttf",
             "licenseFilename": "NotoEmoji-OFL.txt",
             "ranges": [
               [
@@ -32056,7 +32056,7 @@
               ],
               [
                 128725,
-                128728
+                128729
               ],
               [
                 128732,
@@ -32104,10 +32104,6 @@
               ],
               [
                 129664,
-                129674
-              ],
-              [
-                129678,
                 129734
               ],
               [
@@ -32115,16 +32111,16 @@
                 129736
               ],
               [
-                129741,
-                129756
+                129740,
+                129757
               ],
               [
                 129759,
-                129770
+                129771
               ],
               [
                 129775,
-                129784
+                129786
               ],
               [
                 917552,
@@ -32152,58 +32148,8 @@
               ]
             ]
           },
-          "bytes": 10789196,
-          "downloadURL": "https://github.com/iebb/emojifonts/releases/download/2026.10/noto.ttf"
-        },
-        {
-          "asset": {
-            "filename": "UniboardCoverage068-Regular.ttf",
-            "displayName": "Noto Color Emoji (preview subset)",
-            "postScriptName": "UniboardCoverage068-Regular",
-            "sha256": "9934716b630d57b0136a45a8537ef87e2107d18b097c3793bc65f2afa798d84c",
-            "sourceURL": "https://raw.githubusercontent.com/googlefonts/noto-emoji/e20cbc2bbec1926686be9f9bee7d1d2cfa1fea0e/2D/fonts/Noto-COLRv1.ttf",
-            "licenseFilename": "NotoEmoji-OFL.txt",
-            "ranges": [
-              [
-                128729,
-                128729
-              ],
-              [
-                129675,
-                129675
-              ],
-              [
-                129676,
-                129676
-              ],
-              [
-                129677,
-                129677
-              ],
-              [
-                129740,
-                129740
-              ],
-              [
-                129757,
-                129757
-              ],
-              [
-                129771,
-                129771
-              ],
-              [
-                129785,
-                129785
-              ],
-              [
-                129786,
-                129786
-              ]
-            ]
-          },
-          "bytes": 31848,
-          "downloadURL": "https://github.com/iebb/uniboard/releases/download/fonts-1.1-20261022-complete/UniboardCoverage068-Regular.ttf"
+          "bytes": 10846396,
+          "downloadURL": "https://github.com/iebb/emojifonts/releases/download/2026.10.22/noto.ttf"
         }
       ]
     },

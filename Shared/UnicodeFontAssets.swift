@@ -77,7 +77,7 @@ struct UnicodeFontPackCatalog: Decodable, Sendable {
     static let completionDownloadBase = "https://github.com/iebb/uniboard/releases/download/fonts-1.1-20261022-complete/"
     /// Upstream Noto Color Emoji rebuilt as sbix, which Core Text draws on every
     /// supported iOS version; pinned to a dated release, never `latest`.
-    static let emojiDownloadBase = "https://github.com/iebb/emojifonts/releases/download/2026.10/"
+    static let emojiDownloadBase = "https://github.com/iebb/emojifonts/releases/download/2026.10.22/"
     static let downloadBases = [downloadBase, completionDownloadBase, emojiDownloadBase]
     static let maximumTotalBytes: Int64 = 96 * 1024 * 1024
     static let maximumCatalogBytes = 2 * 1024 * 1024

@@ -24,6 +24,9 @@ Only the Unicode 19 draft is bundled; Unicode 18, 17 and 16 limit it to their ve
 FONTS
 Preview basics (Unifont, Noto Sans Symbols 2) now download on demand in Settings > Font Downloads, like the other packs. With Extra Unicode fonts on and the pack downloaded, check U+0558 previews in app and keyboard with Full Access OFF. Test cancel, retry, remove and offline use.
 
+EMOJI 18
+The Emoji previews pack is now one Noto Color Emoji font with all of Emoji 18, including the leftwards and rightwards thumb signs (U+1FAF9, U+1FAFA) in every skin tone. An earlier download shows as not downloaded: download it again, then check Emoji 18 in the Emoji tab and keyboard.
+
 YOUR FONTS AND TEXT PREVIEW
 Font Downloads > Add Font File adds a TTF or OTF file; Use Installed Font picks a font installed by a font app. Either previews characters first, including Private Use, in the app and keyboard. Settings > Text Preview adds a keyboard row showing the text around the caret as Uniboard draws it.
 

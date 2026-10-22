@@ -54,6 +54,8 @@ final class UnicodeFontAssetsTests: XCTestCase {
         XCTAssertTrue(UnicodeFontDownload(asset: a, bytes: 1, downloadURL: UnicodeFontPackCatalog.emojiDownloadBase + a.filename).isValid)
         XCTAssertFalse(UnicodeFontDownload(asset: a, bytes: 1, downloadURL: "https://github.com/iebb/emojifonts/releases/download/latest/" + a.filename).isValid,
                        "A rolling release cannot satisfy a pinned digest")
+        XCTAssertFalse(UnicodeFontDownload(asset: a, bytes: 1, downloadURL: "https://github.com/iebb/emojifonts/releases/download/2026.10/" + a.filename).isValid,
+                       "The Emoji 17 rebuild is no longer trusted")
         for url in ["http://github.com/font.ttf", UnicodeFontPackCatalog.downloadBase + "other.ttf",
                     UnicodeFontPackCatalog.downloadBase + a.filename + "?token=x", "https://evil.example/font.ttf"] {
             XCTAssertFalse(UnicodeFontDownload(asset: a, bytes: 1, downloadURL: url).isValid)
@@ -110,10 +112,10 @@ final class UnicodeFontAssetsTests: XCTestCase {
             let catalog = try XCTUnwrap(UnicodeFontPackCatalog.load(data: Data(contentsOf: path)))
             XCTAssertEqual(catalog.packs.count, 7)
             XCTAssertEqual(catalog.packs.first?.id, "preview-basics", "Preview fonts download on demand first")
-            XCTAssertEqual(catalog.packs.flatMap(\.fonts).count, 74)
+            XCTAssertEqual(catalog.packs.flatMap(\.fonts).count, 73)
             let emoji = try XCTUnwrap(catalog.packs.first { $0.id == "emoji" })
-            XCTAssertEqual(emoji.fonts.map(\.asset.postScriptName), ["NotoColorEmoji", "UniboardCoverage068-Regular"],
-                           "The complete sbix fallback is tried before the Unicode 18 COLR subset")
+            XCTAssertEqual(emoji.fonts.map(\.asset.postScriptName), ["NotoColorEmoji"],
+                           "One sbix Noto Color Emoji 18 font replaces the COLR subset")
             XCTAssertLessThanOrEqual(catalog.packs.flatMap(\.fonts).reduce(Int64(0)) { $0 + $1.bytes }, UnicodeFontPackCatalog.maximumTotalBytes)
             XCTAssertEqual(UnicodeFontPackCatalog.loadBundled(resourceURL: path).packs.count, 7)
         }

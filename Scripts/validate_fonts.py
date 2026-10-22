@@ -22,7 +22,7 @@ def validate_downloads(directory: Path) -> None:
     # Preview basics are the unchanged manifest fonts, checked in validate();
     # the UCSUR pack draws Private Use characters, outside the measured audit.
     fonts = [font for pack in catalog["packs"][1:-1] for font in pack["fonts"]]
-    assert len(fonts) == len(inputs["fonts"]) == 69
+    assert len(fonts) == len(inputs["fonts"]) == 68
     by_name = {entry["filename"]: entry for entry in inputs["fonts"]}
     assert len(by_name) == len(fonts)
     assert len({font["asset"]["postScriptName"] for font in fonts}) == len(fonts)

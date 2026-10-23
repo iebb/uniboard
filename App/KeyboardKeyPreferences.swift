@@ -37,12 +37,26 @@ final class KeyboardKeyPreferences: ObservableObject {
         return persist(updated)
     }
 
-    /// Saves a layout's letter order; nil restores its standard rows.
+    /// Saves a layout's main keyboard arrangement; nil restores its standard rows.
     @discardableResult
-    func saveArrangement(_ order: [String]?, alphabetID: String) -> Bool {
+    func saveArrangement(_ arrangement: MainKeyboardArrangement?, alphabetID: String) -> Bool {
         guard let current = settings.loadForEditing() else { saveError = Self.readError; return false }
-        guard let updated = current.updatingArrangement(order, for: alphabetID) else {
+        guard let updated = current.updatingArrangement(arrangement, for: alphabetID) else {
             saveError = "This arrangement could not be saved."
+            return false
+        }
+        return persist(updated)
+    }
+
+    /// Saves several layers of one key as one change, such as a candidate
+    /// moved from one layer to another.
+    @discardableResult
+    func save(layers: [KeyboardKeySettings.Gesture: [String]?], keyID: String) -> Bool {
+        guard let current = settings.loadForEditing() else { saveError = Self.readError; return false }
+        var updated: KeyboardKeySettings.Snapshot? = current
+        for (gesture, values) in layers { updated = updated?.updating(values, for: keyID, gesture: gesture) }
+        guard let updated else {
+            saveError = "Use up to 16 different, nonempty choices, each no longer than 64 Unicode scalars."
             return false
         }
         return persist(updated)

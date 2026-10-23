@@ -13,6 +13,7 @@
 		069E131529729AFBC285927E /* SymbolBoardStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A41D3D251CE076E09EF76D3B /* SymbolBoardStore.swift */; };
 		06D728B631A19E9BAA1BAC42 /* KeyLayersPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19EC573E5D9DCE64348D5E6C /* KeyLayersPanel.swift */; };
 		07B0485AD423FC4F6A6D0FD9 /* PageArrangeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CACA70521701E8F697BB5948 /* PageArrangeView.swift */; };
+		07EEE99633819C472F3B3985 /* MainKeyboardArrangement.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECC9EDA47CB40676496E72BF /* MainKeyboardArrangement.swift */; };
 		0A5B060BF07F04A7587EB34F /* LocalPreferencePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5B6E9300EFF6D8D8A8BE211 /* LocalPreferencePolicy.swift */; };
 		0BD581E6FAFCC86EF0A47FA5 /* KeyboardVariantControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E46CAE98E0D3DA0F244E40B /* KeyboardVariantControlTests.swift */; };
 		0CA86A73BEE1761EFAB64A4E /* UniboardKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FADFF79503D90B10A9C8AEB2 /* UniboardKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -30,6 +31,7 @@
 		229A7E40362FD588C2621C63 /* CharacterDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA39E9D562CC12833DB173DD /* CharacterDetailView.swift */; };
 		248DC88948EC019B113989AF /* SymbolBoardStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C848742463EC05B9E73E569 /* SymbolBoardStoreTests.swift */; };
 		24D2C35889F61D3E8190A159 /* KeyboardSymbolPagesPager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0CB9190C7ED0900DD4624B7 /* KeyboardSymbolPagesPager.swift */; };
+		2587F5C5E5B303DC61AEB639 /* MainKeyboardArrangement.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECC9EDA47CB40676496E72BF /* MainKeyboardArrangement.swift */; };
 		26CA8AD93A9F0312CB789526 /* KeyboardInspectableInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57D7608E1932AA311FBFD2CB /* KeyboardInspectableInteraction.swift */; };
 		270D9F9A5D245AD880A66B96 /* KeyboardInteractionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACC24723A64562F6EDD61941 /* KeyboardInteractionPolicy.swift */; };
 		28350C0F165B32D4CD042560 /* KeyboardFooterLayoutPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 199F582BE632E36D64E344F9 /* KeyboardFooterLayoutPolicy.swift */; };
@@ -42,6 +44,7 @@
 		309A88CDE6442977051CBBDA /* KeyboardTouchActionControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D08F3EDF9E8B39B534FABD8F /* KeyboardTouchActionControl.swift */; };
 		3280D5FF51EC2EC230A91E5F /* KeyboardVariantKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4095E46165DABA2D9D7DA548 /* KeyboardVariantKey.swift */; };
 		33367954F1970C5F09CB4018 /* UnicodeProperties.json in Resources */ = {isa = PBXBuildFile; fileRef = A24745F2DC10363D8E1053AA /* UnicodeProperties.json */; };
+		37169F75BBF9E670EBEEEF3E /* MainKeyboardArrangementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F842DD8843F4DA52BFB7EC98 /* MainKeyboardArrangementTests.swift */; };
 		393B006A40D7570A220B3D09 /* KeyboardEnglishInputPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E605AEE1EF72C3C22DB00A7 /* KeyboardEnglishInputPolicy.swift */; };
 		3A55B0DE7A0683FB8A068503 /* KeyboardQueryControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 597C75D04C1D743DF5E189F1 /* KeyboardQueryControlTests.swift */; };
 		3B9A0277A5DC5AF886F334E4 /* KeyboardDocumentIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 984EDFFAF22643E351C9AE0D /* KeyboardDocumentIdentityTests.swift */; };
@@ -312,11 +315,13 @@
 		E8F7A7C1AABB81F3A958BC4F /* PagesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PagesView.swift; sourceTree = "<group>"; };
 		E902179D14C382122A604D6A /* MainKeyboardEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainKeyboardEditorView.swift; sourceTree = "<group>"; };
 		E97E62E7780A345F029D3306 /* SymbolPageSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SymbolPageSettings.swift; sourceTree = "<group>"; };
+		ECC9EDA47CB40676496E72BF /* MainKeyboardArrangement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainKeyboardArrangement.swift; sourceTree = "<group>"; };
 		EE132447D384821FBF5CC7DA /* KeyboardKeySettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardKeySettingsTests.swift; sourceTree = "<group>"; };
 		EF1A12187006E17DE8AF4221 /* UniboardKeyboard.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = UniboardKeyboard.entitlements; sourceTree = "<group>"; };
 		F0A43A2B3EBE1567FC006A4C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F334022E9B3AF0015245C1A7 /* FavoriteSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoriteSyncTests.swift; sourceTree = "<group>"; };
 		F3A9666760F5893403CE00B6 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		F842DD8843F4DA52BFB7EC98 /* MainKeyboardArrangementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainKeyboardArrangementTests.swift; sourceTree = "<group>"; };
 		F891B014BE9874D5FCA7CC66 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FADFF79503D90B10A9C8AEB2 /* UniboardKeyboard.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = UniboardKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC6B6DEDCD4EC38CF03A67DA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -424,6 +429,7 @@
 				7E46CAE98E0D3DA0F244E40B /* KeyboardVariantControlTests.swift */,
 				2678F5E3055C4580B17553FF /* KeyboardVariantPolicyTests.swift */,
 				DA24ADEEB30AF21752C6C8E3 /* LocalPreferencePolicyTests.swift */,
+				F842DD8843F4DA52BFB7EC98 /* MainKeyboardArrangementTests.swift */,
 				663AD2F7AA4B19119C73F049 /* PrivacyManifestTests.swift */,
 				7C848742463EC05B9E73E569 /* SymbolBoardStoreTests.swift */,
 				8499C3EBBCBB98A8A5F87F54 /* SymbolPageLayoutTests.swift */,
@@ -481,6 +487,7 @@
 				2D4EF80295F07AF583781860 /* KeyboardVariantControl.swift */,
 				CBBF4093360B454BD7E14BAD /* KeyboardVariantPolicy.swift */,
 				E5B6E9300EFF6D8D8A8BE211 /* LocalPreferencePolicy.swift */,
+				ECC9EDA47CB40676496E72BF /* MainKeyboardArrangement.swift */,
 				2013431F9842DF50EBB4D099 /* PrivacyInfo.xcprivacy */,
 				A41D3D251CE076E09EF76D3B /* SymbolBoardStore.swift */,
 				625891A14AFCE34A29DE6576 /* SymbolPageLayout.swift */,
@@ -701,6 +708,7 @@
 				0BD581E6FAFCC86EF0A47FA5 /* KeyboardVariantControlTests.swift in Sources */,
 				74CF8CAC8E72CBD805879C53 /* KeyboardVariantPolicyTests.swift in Sources */,
 				E0FACCB152A3529201D858E7 /* LocalPreferencePolicyTests.swift in Sources */,
+				37169F75BBF9E670EBEEEF3E /* MainKeyboardArrangementTests.swift in Sources */,
 				BFC8649E36A0F8A4F0F4EE55 /* PrivacyManifestTests.swift in Sources */,
 				248DC88948EC019B113989AF /* SymbolBoardStoreTests.swift in Sources */,
 				AA4FD041352C67CFCA7A5E31 /* SymbolPageLayoutTests.swift in Sources */,
@@ -748,6 +756,7 @@
 				5069F73007F8BCC182D1614C /* KeyboardVariantPolicy.swift in Sources */,
 				18E0F035EBA7D7EE39166431 /* KeyboardViewController.swift in Sources */,
 				0A5B060BF07F04A7587EB34F /* LocalPreferencePolicy.swift in Sources */,
+				07EEE99633819C472F3B3985 /* MainKeyboardArrangement.swift in Sources */,
 				5EE324656AD3EE3A5F997F59 /* SymbolBoardPanel.swift in Sources */,
 				8EF067FFC72FDF28E4F21C71 /* SymbolBoardStore.swift in Sources */,
 				3D76FAAD6DA269F378726069 /* SymbolPageLayout.swift in Sources */,
@@ -803,6 +812,7 @@
 				BDA4172F47D126C435721C78 /* KeyboardVariantControl.swift in Sources */,
 				C79EDADB8A6A24F86D9D2AE4 /* KeyboardVariantPolicy.swift in Sources */,
 				E93DAC28C3A83FD14274C71D /* LocalPreferencePolicy.swift in Sources */,
+				2587F5C5E5B303DC61AEB639 /* MainKeyboardArrangement.swift in Sources */,
 				287721E155A20123F8E22A5B /* MainKeyboardEditorView.swift in Sources */,
 				121164399FB97D550F0BD94B /* NewInEditionView.swift in Sources */,
 				07B0485AD423FC4F6A6D0FD9 /* PageArrangeView.swift in Sources */,

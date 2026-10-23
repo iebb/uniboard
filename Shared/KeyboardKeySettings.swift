@@ -80,18 +80,19 @@ struct KeyboardKeySettings {
 
     struct Snapshot: Codable, Equatable, Sendable {
         let overrides: [String: Overrides]
-        /// Rearranged letter orders by layout id; rows keep their lengths.
-        let arrangements: [String: [String]]
+        /// Rearranged main keyboards by layout id.
+        let arrangements: [String: MainKeyboardArrangement]
         static let defaults = Snapshot()
-        init(overrides: [String: Overrides] = [:], arrangements: [String: [String]] = [:]) {
+        init(overrides: [String: Overrides] = [:], arrangements: [String: MainKeyboardArrangement] = [:]) {
             self.overrides = overrides; self.arrangements = arrangements
         }
-        func arrangement(for alphabetID: String) -> [String]? { arrangements[alphabetID] }
-        /// nil, or the standard order, restores the layout's own rows.
-        func updatingArrangement(_ order: [String]?, for alphabetID: String) -> Snapshot? {
+        func arrangement(for alphabetID: String) -> MainKeyboardArrangement? { arrangements[alphabetID] }
+        /// nil, or the standard arrangement, restores the layout's own rows.
+        func updatingArrangement(_ arrangement: MainKeyboardArrangement?, for alphabetID: String) -> Snapshot? {
             guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID) else { return nil }
             var copy = arrangements
-            if let order, order != alphabet.keys { copy[alphabetID] = order } else { copy.removeValue(forKey: alphabetID) }
+            if let arrangement, arrangement != .standard(for: alphabet) { copy[alphabetID] = arrangement }
+            else { copy.removeValue(forKey: alphabetID) }
             let result = Snapshot(overrides: overrides, arrangements: copy)
             guard (try? KeyboardKeySettings.validate(result)) != nil else { return nil }
             return result
@@ -146,7 +147,7 @@ struct KeyboardKeySettings {
                     result[entry.keyID] = entry.values
                 }
             }
-            self.init(overrides: result, arrangements: try c.decodeIfPresent([String: [String]].self, forKey: .arrangements) ?? [:])
+            self.init(overrides: result, arrangements: try c.decodeIfPresent([String: MainKeyboardArrangement].self, forKey: .arrangements) ?? [:])
             try KeyboardKeySettings.validate(self)
         }
         func encode(to encoder: Encoder) throws {
@@ -326,9 +327,8 @@ struct KeyboardKeySettings {
     }
     private static func validate(_ snapshot: Snapshot) throws {
         guard snapshot.overrides.count <= descriptors.count else { throw Invalid.settings }
-        for (alphabetID, order) in snapshot.arrangements {
-            guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID),
-                  KeyboardAlphabet.isArrangement(order, of: alphabet.keys) else { throw Invalid.settings }
+        for (alphabetID, arrangement) in snapshot.arrangements {
+            guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID), arrangement.isValid(for: alphabet) else { throw Invalid.settings }
         }
         for (keyID, values) in snapshot.overrides {
             guard descriptorsByID[keyID] != nil else { throw Invalid.settings }

@@ -82,33 +82,31 @@ final class KeyboardKeySettingsTests: XCTestCase {
         XCTAssertNil(migrated.candidates(for: "letter.q", gesture: .tap))
         XCTAssertEqual(load(try data(migrated)), migrated)
     }
-    func testLayoutsCanBeRearrangedAndKeepTheirRows() throws {
+    func testMainKeyboardArrangementsSaveAndLoad() throws {
         let english = KeyboardAlphabet.english
-        var order = english.keys
-        order.swapAt(0, 1)
-        let swapped = try XCTUnwrap(Settings.Snapshot.defaults.updatingArrangement(order, for: "en"))
-        XCTAssertEqual(swapped.arrangement(for: "en"), order)
-        XCTAssertEqual(english.arranged(order).rows.first?.prefix(2), ["w", "q"])
-        XCTAssertEqual(english.arranged(order).rows.map(\.count), english.rows.map(\.count), "Each row keeps its length")
-        XCTAssertEqual(english.arranged(["q"]).rows, english.rows, "A partial order leaves the standard rows")
-        XCTAssertEqual(english.arranged(nil).rows, english.rows)
-        XCTAssertNil(swapped.updatingArrangement(english.keys, for: "en")?.arrangement(for: "en"), "The standard order clears it")
+        var moved = MainKeyboardArrangement.standard(for: english)
+        moved.keys.swapAt(0, 1)
+        let swapped = try XCTUnwrap(Settings.Snapshot.defaults.updatingArrangement(moved, for: "en"))
+        XCTAssertEqual(swapped.arrangement(for: "en"), moved)
+        XCTAssertNil(swapped.updatingArrangement(.standard(for: english), for: "en")?.arrangement(for: "en"), "The standard rows clear it")
         XCTAssertNil(swapped.updatingArrangement(nil, for: "en")?.arrangement(for: "en"))
-        XCTAssertNil(Settings.Snapshot.defaults.updatingArrangement(order, for: "xx"))
-        XCTAssertNil(Settings.Snapshot.defaults.updatingArrangement(Array(order.dropFirst()) + ["ä"], for: "en"))
+        XCTAssertNil(Settings.Snapshot.defaults.updatingArrangement(moved, for: "xx"))
+        var broken = moved
+        broken.keys.removeLast()
+        XCTAssertNil(Settings.Snapshot.defaults.updatingArrangement(broken, for: "en"))
         // Key choices keep the arrangement, and it survives saving.
         let both = try XCTUnwrap(swapped.updating(["x"], for: "letter.q", gesture: .tap))
-        XCTAssertEqual(both.arrangement(for: "en"), order)
-        XCTAssertEqual(both.removingOverride(for: "letter.q").arrangement(for: "en"), order)
+        XCTAssertEqual(both.arrangement(for: "en"), moved)
+        XCTAssertEqual(both.removingOverride(for: "letter.q").arrangement(for: "en"), moved)
         XCTAssertEqual(load(try data(both)), both)
         XCTAssertEqual(load(try data(.defaults)), .defaults)
         for bad in [#"{"schemaVersion":2,"overrides":[],"arrangements":{}}"#,
-                    #"{"schemaVersion":3,"overrides":[],"arrangements":{"en":["q"]}}"#,
+                    #"{"schemaVersion":3,"overrides":[],"arrangements":{"en":{"keys":["q"],"layout":"k"}}}"#,
                     #"{"schemaVersion":4,"overrides":[]}"#] {
             XCTAssertEqual(load(json(bad)), .defaults)
         }
         var typing = KeyboardTypingState()
-        typing.selectAlphabet(english.arranged(order))
+        typing.selectAlphabet(english.arranged(moved.letterRows))
         XCTAssertEqual(typing.alphabet.rows.first?.first, "w", "A rearranged layout replaces the same layout")
     }
 

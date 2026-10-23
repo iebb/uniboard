@@ -209,6 +209,13 @@ struct SymbolPageLayout: Equatable {
         }
     }
 
+    /// A new key slot at the start of `row`, returning the index the key takes.
+    mutating func insertKeySlot(atStartOf row: Int) -> Int? {
+        guard rows.indices.contains(row), Self.units(rows[row]) + 1 <= Self.maximumRowUnits else { return nil }
+        rows[row].insert(.key, at: 0)
+        return rows.prefix(row).reduce(0) { $0 + $1.filter { $0 == .key }.count }
+    }
+
     /// Drops the slot of a removed key, keeping the rest of the arrangement.
     mutating func removeKeySlot(_ keyIndex: Int) {
         var seen = 0

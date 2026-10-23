@@ -315,8 +315,11 @@ final class UnicodeCatalog: @unchecked Sendable {
     private let isLimited: Bool
     /// Present when Private Use reads as the ConScript Unicode Registry assigns it.
     private let conscript: UCSUR.Registry?
+    /// Present when ConScript names also find characters.
+    private let conscriptSearch: UCSUR.Registry?
     private let variantLock = NSLock()
     private var conscriptVariant: UnicodeCatalog?
+    private var conscriptSearchVariant: UnicodeCatalog?
     let blocks: [UnicodeBlock]
     private let representativeLock = NSLock()
     private var representatives: [UInt32: String] = [:]
@@ -353,6 +356,7 @@ final class UnicodeCatalog: @unchecked Sendable {
         edition = .draft
         isLimited = false
         conscript = nil
+        conscriptSearch = nil
         let catalogURL: URL?
         let blocksURL: URL?
         let propertiesURL: URL?
@@ -438,6 +442,7 @@ final class UnicodeCatalog: @unchecked Sendable {
         self.edition = edition
         isLimited = true
         conscript = nil
+        conscriptSearch = nil
         let key = unicodeVersionKey(edition.versionLabel)
         let spans = base.properties.assignedSpans.filter { !$0.draftAddition && $0.sortKey <= key }
         properties = UnicodePropertyData(unicodeVersion: base.properties.unicodeVersion, ages: base.properties.ages,
@@ -468,17 +473,30 @@ final class UnicodeCatalog: @unchecked Sendable {
         variantLock.lock()
         defer { variantLock.unlock() }
         if let conscriptVariant { return conscriptVariant }
-        let variant = UnicodeCatalog(base: self, conscript: UCSUR.registry)
+        let variant = UnicodeCatalog(base: self, conscript: UCSUR.registry, namesCharacters: true)
         conscriptVariant = variant
         return variant
     }
 
-    private init(base: UnicodeCatalog, conscript: UCSUR.Registry) {
+    /// This edition with Unicode's own names, where ConScript names and
+    /// aliases also find characters. It shares the mapped data and is made once.
+    func withConScriptSearch() -> UnicodeCatalog {
+        guard conscriptSearch == nil else { return self }
+        variantLock.lock()
+        defer { variantLock.unlock() }
+        if let conscriptSearchVariant { return conscriptSearchVariant }
+        let variant = UnicodeCatalog(base: self, conscript: UCSUR.registry, namesCharacters: false)
+        conscriptSearchVariant = variant
+        return variant
+    }
+
+    private init(base: UnicodeCatalog, conscript: UCSUR.Registry, namesCharacters: Bool) {
         edition = base.edition
         isLimited = base.isLimited
-        self.conscript = conscript
+        self.conscript = namesCharacters ? conscript : nil
+        conscriptSearch = conscript
         properties = base.properties
-        blocks = UCSUR.splitting(base.blocks, with: conscript.blocks)
+        blocks = namesCharacters ? UCSUR.splitting(base.blocks, with: conscript.blocks) : base.blocks
         version = base.version
         resourceError = base.resourceError
         data = base.data
@@ -807,8 +825,8 @@ final class UnicodeCatalog: @unchecked Sendable {
                     }
                 }
             }
-            // ConScript names and aliases, when Private Use reads as the registry.
-            for entry in conscript?.entries ?? [] {
+            // ConScript names and aliases, while ConScript is on.
+            for entry in conscriptSearch?.entries ?? [] {
                 let text = Self.normalized(([entry.name] + entry.aliases).joined(separator: " "))
                 if stringTokens.allSatisfy({ text.contains($0) }) {
                     let whole = stringTokens.allSatisfy { CatalogSearchQueryPolicy.containsWholeTerm($0, in: text) }

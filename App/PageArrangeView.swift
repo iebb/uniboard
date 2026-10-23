@@ -191,6 +191,11 @@ struct PageArrangeView: View {
                 default: return boards.setSwipe(boardID: boardID, keyID: key.id, up: gesture == .swipeUp, choices: values)
                 }
             }
+        }, save: { changed in
+            let saved = boards.setLayers(boardID: boardID, keyID: key.id, variants: changed[.longPress] ?? key.variants,
+                                         up: changed[.swipeUp] ?? key.up ?? [], down: changed[.swipeDown] ?? key.down ?? [])
+            failed = !saved
+            return saved
         })
     }
 

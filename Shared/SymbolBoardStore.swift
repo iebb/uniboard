@@ -324,6 +324,20 @@ final class SymbolBoardStore: ObservableObject {
         next[board].keys[index].variants = unique
         return commit(next)
     }
+    /// Saves a key's hold, swipe-up and swipe-down choices as one change,
+    /// such as a choice dragged from one to another.
+    @discardableResult func setLayers(boardID: String, keyID: String, variants: [String], up: [String], down: [String]) -> Bool {
+        guard let board = boards.firstIndex(where: { $0.id == boardID }),
+              let index = boards[board].keys.firstIndex(where: { $0.id == keyID }),
+              (variants + up + down).allSatisfy(Self.validText) else { return false }
+        let original = boards[board].keys[index].text
+        var next = boards
+        next[board].keys[index].variants = Self.uniqueExact(variants.filter { !SymbolBoardKey.exact($0, original) })
+        next[board].keys[index].up = up.isEmpty ? nil : Self.uniqueExact(up)
+        next[board].keys[index].down = down.isEmpty ? nil : Self.uniqueExact(down)
+        // Saving checks each layer's size.
+        return commit(next)
+    }
     /// Saves a key's swipe-up or swipe-down choices; none turns the swipe off.
     @discardableResult func setSwipe(boardID: String, keyID: String, up: Bool, choices: [String]) -> Bool {
         guard let board = boards.firstIndex(where: { $0.id == boardID }),

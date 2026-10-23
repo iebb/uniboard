@@ -257,6 +257,13 @@ final class UnicodeCatalogTests: XCTestCase {
         XCTAssertFalse(plain.blocks.contains { $0.name == "Klingon" })
         XCTAssertEqual(conscript.search("tengwar letter tinco").first?.codePoint, 0xE000)
         XCTAssertTrue(plain.search("tengwar letter tinco").isEmpty)
+        // ConScript on without Prefer: Unicode's names, found by ConScript names too.
+        let searching = plain.withConScriptSearch()
+        XCTAssertTrue(searching === plain.withConScriptSearch())
+        XCTAssertTrue(searching.withConScriptSearch() === searching)
+        XCTAssertFalse(searching.usesConScript)
+        XCTAssertEqual(searching.search("pona").first?.name, "PRIVATE USE-F1900")
+        XCTAssertEqual(searching.blocks.count, plain.blocks.count)
         XCTAssertEqual(conscript.search("suule").first?.codePoint, 0xE008, "Aliases are searchable")
         let klingon = conscript.search("klingon", limit: 1000)
         XCTAssertEqual(Set(klingon.map(\.codePoint)).count, klingon.count, "Block and name matches list a character once")

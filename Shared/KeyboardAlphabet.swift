@@ -29,12 +29,10 @@ struct KeyboardAlphabet: Identifiable, Sendable {
     /// A key of this alphabet whose capital differs, so Shift changes it.
     func isCasedLetter(_ key: String) -> Bool { keys.contains(key) && uppercase(key) != key }
 
-    /// The same keys in `order`, each row keeping its length; any other order
+    /// The same keys in `rows`, three rows of any length; anything else
     /// leaves the standard rows.
-    func arranged(_ order: [String]?) -> KeyboardAlphabet {
-        guard let order, Self.isArrangement(order, of: keys) else { return self }
-        let starts = rows.indices.map { rows.prefix($0).reduce(0) { $0 + $1.count } }
-        let rows = zip(starts, rows).map { Array(order[$0..<($0 + $1.count)]) }
+    func arranged(_ rows: [[String]]?) -> KeyboardAlphabet {
+        guard let rows, rows.count == 3, Self.isArrangement(rows.flatMap { $0 }, of: keys) else { return self }
         return KeyboardAlphabet(id: id, nativeName: nativeName, englishName: englishName, script: script,
                                 languageCode: languageCode, rows: rows, variants: variants)
     }

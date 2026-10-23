@@ -16,7 +16,7 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
                             isPad: pad, compactVertical: compact, showsSymbolBar: bar, searching: true)
                         let key = KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: width - 16, isPad: pad)
                         XCTAssertEqual(metrics.typingKeyHeight, key, accuracy: 0.000001)
-                        XCTAssertEqual(metrics.height, key * 7 + 34, accuracy: 0.000001, "Results stay in a row above the keys")
+                        XCTAssertEqual(metrics.height, key * 7.75 + 34, accuracy: 0.000001, "Results stay in a tall row above the keys")
                     }
                 }
             }
@@ -32,7 +32,7 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
         let capped = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: nil, sceneHeight: 200,
             isPad: false, compactVertical: false, showsSymbolBar: false, searching: true)
         XCTAssertEqual(capped.height, 170)
-        XCTAssertEqual(capped.typingKeyHeight * 7 + 34, capped.height, accuracy: 0.000001)
+        XCTAssertEqual(capped.typingKeyHeight * 7.75 + 34, capped.height, accuracy: 0.000001)
     }
 
     func testFixedTemplateHasFiveRowsAndAtMostOneOptionalBar() {

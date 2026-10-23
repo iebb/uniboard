@@ -599,14 +599,16 @@ final class KeyboardViewController: UIInputViewController {
                 self.expectedHostEdit = nil
                 self.model.toggleUnicodeToolbar()
             case .tab:
-                guard !self.model.showsUnicode, self.model.isPadLayout, self.model.typingWidePadVisible == true,
-                      self.model.typingState.layout == .letters else { return false }
+                guard !self.model.showsUnicode, self.model.typingState.layout == .letters,
+                      (self.model.isPadLayout && self.model.typingWidePadVisible == true)
+                        || self.model.arrangementHas(MainKeyboardArrangement.tab) else { return false }
                 self.doubleSpaceState.reset()
                 guard self.insertHostText("\t") else { return false }
                 self.didEditHostText()
             case .capsLock:
-                guard !self.model.showsUnicode, self.model.isPadLayout, self.model.typingWidePadVisible == true,
-                      self.model.typingState.layout == .letters else { return false }
+                guard !self.model.showsUnicode, self.model.typingState.layout == .letters,
+                      (self.model.isPadLayout && self.model.typingWidePadVisible == true)
+                        || self.model.arrangementHas(MainKeyboardArrangement.caps) else { return false }
                 self.doubleSpaceState.reset(); self.expectedHostEdit = nil
                 self.model.toggleCapsLock()
             case .space: self.spaceKey()
@@ -1028,8 +1030,14 @@ private final class KeyboardModel: ObservableObject {
         presentationChanged?()
     }
 
+    /// Whether the app placed `key`, such as Tab, on this layout's keyboard.
+    func arrangementHas(_ key: String) -> Bool {
+        keySettings.arrangement(for: typingState.alphabet.id)?.keys.contains(key) == true
+    }
     /// With ConScript preferred, Private Use reads as the registry assigns it.
-    var catalog: UnicodeCatalog { showsUCSUR && prefersUCSUR ? edition.catalog.withConScript() : edition.catalog }
+    var catalog: UnicodeCatalog {
+        !showsUCSUR ? edition.catalog : prefersUCSUR ? edition.catalog.withConScript() : edition.catalog.withConScriptSearch()
+    }
     /// A page key's hold choices: its own variants, then, for a character
     /// with both a text and an emoji form, the form the key does not type.
     func pageKeyVariants(_ key: SymbolBoardKey) -> [String] {
@@ -1039,7 +1047,7 @@ private final class KeyboardModel: ObservableObject {
         return key.variants + [forms.text, forms.emoji].filter { !$0.utf16.elementsEqual(key.text.utf16) }
     }
     var emojiCatalog: EmojiCatalog { edition.emojiCatalog }
-    var editionValue: String { edition.rawValue + (catalog.usesConScript ? "+conscript" : "") }
+    var editionValue: String { edition.rawValue + (catalog.usesConScript ? "+conscript" : showsUCSUR ? "+search" : "") }
     var hasSearchQuery: Bool {
         (section == .symbols || section == .emojis) && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -1066,7 +1074,7 @@ private final class KeyboardModel: ObservableObject {
     /// used last, otherwise the first.
     private func adoptLayouts(_ ids: [String], keepingCurrent: Bool) {
         // Each layout in the letter order the app arranged.
-        let enabled = ids.compactMap(KeyboardAlphabet.alphabet(id:)).map { $0.arranged(keySettings.arrangement(for: $0.id)) }
+        let enabled = ids.compactMap(KeyboardAlphabet.alphabet(id:)).map { $0.arranged(keySettings.arrangement(for: $0.id)?.letterRows) }
         let next = enabled.isEmpty ? [KeyboardAlphabet.english] : enabled
         // Alphabets compare by id, so compare their rows too.
         if layouts != next || layouts.map(\.rows) != next.map(\.rows) { layouts = next }
@@ -1115,10 +1123,10 @@ private final class KeyboardModel: ObservableObject {
             invalidateInputMode(); presentationChanged?()
         }
         if showsUCSUR != selected.showsUCSUR || prefersUCSUR != selected.prefersUCSUR {
-            let reload = (showsUCSUR && prefersUCSUR) != (selected.showsUCSUR && selected.prefersUCSUR)
             showsUCSUR = selected.showsUCSUR; prefersUCSUR = selected.prefersUCSUR
             UnicodeFontSupport.prefersConScript = showsUCSUR && prefersUCSUR
-            if reload { invalidateInputMode(); refreshCatalog() }
+            // Names, blocks and search follow both choices.
+            invalidateInputMode(); refreshCatalog()
         }
         let keys = KeyboardKeySettings.shared.loadSnapshot()
         if keySettings != keys {
@@ -1447,7 +1455,8 @@ private struct UnicodeKeyboardView: View {
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: model.isPadLayout ? 70 : 58, maximum: 92), spacing: 6)]
     }
-    private var keyHeight: CGFloat { model.isCompactLayout ? 50 : model.isPadLayout ? 60 : 56 }
+    /// Named keys fit the glyph, the code point and three lines of name.
+    private var keyHeight: CGFloat { model.isCompactLayout ? 72 : model.isPadLayout ? 84 : 80 }
     private var headerHeight: CGFloat { model.typingKeyHeight }
     private var controlHeight: CGFloat { model.typingKeyHeight }
 
@@ -1717,7 +1726,8 @@ private struct UnicodeKeyboardView: View {
                         InspectableCharacterKey(item: item, favorite: isFavorite(item), compact: true,
                             useUnicodeFonts: model.useUnicodeFonts, showsUCSUR: model.showsUCSUR, route: model.inputModeID, enabled: model.isSearching, showsName: true,
                             actionFactory: { [mode = model.inputModeID] in keyActions(mode, item) })
-                            .frame(width: 58, height: model.typingKeyHeight)
+                            // The row is taller than a typing key, for the code point and name.
+                            .frame(width: 64).frame(maxHeight: .infinity)
                             .keyboardKeySurface(radius: 7)
                     }
                 }
@@ -2295,9 +2305,9 @@ private struct UnicodeKeyboardView: View {
             }
             if displaysCollapseKey && !usesPadFooter { footerCollapseKey(plan) }
             if !model.showsUnicode && !usesPadFooter { footerPageKey(plan) }
-            if model.isShowingSymbolPages {
+            if model.showsUnicode && !model.isSearching && model.inspection == nil && model.symbolBoardInspectionText == nil {
                 RepeatingDeleteKey(action: delete, isQuery: false, route: model.inputModeID, identifier: "keyboard.pages.delete")
-                    .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface()
+                    .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: true)
             }
             KeyboardVariantKey(text: "★", variants: [], identifier: "keyboard.openFavorites",
                 label: model.isShowingSymbolPages ? "Back to English keyboard" : "Symbol keyboard",
@@ -2306,7 +2316,7 @@ private struct UnicodeKeyboardView: View {
                 enabled: true, fontSize: 20,
                 contentPosition: usesPadKeyPositions ? .bottomLeft : .center,
                 factory: { [mode = model.inputModeID] in favoritesActions(mode) })
-                .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
+                .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: true)
             if model.layouts.count > 1 && !model.isSearching {
                 let alphabet = model.typingState.alphabet
                 KeyboardVariantKey(text: alphabet.id, variants: [], identifier: "keyboard.space", label: "Insert space",
@@ -2343,7 +2353,7 @@ private struct UnicodeKeyboardView: View {
             identifier: "keyboard.collapse", label: "Dismiss keyboard", fontSize: 17,
             contentPosition: usesPadKeyPositions ? .bottomRight : .center,
             route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .collapse) })
-            .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
+            .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: true)
     }
     private func footerPageKey(_ plan: KeyboardFooterLayoutPolicy.Plan) -> some View {
         let letters = model.typingState.layout != .letters
@@ -2354,7 +2364,7 @@ private struct UnicodeKeyboardView: View {
             label: letters ? "Letters" : symbols ? "Symbols" : "Numbers", value: model.typingLayoutValue, fontSize: 13,
             contentPosition: usesPadKeyPositions ? .bottomRight : .center,
             route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .layout(letters ? .letters : .numbers)) })
-            .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: model.isPadLayout && !model.showsUnicode)
+            .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: true)
     }
 
 }
@@ -2396,6 +2406,8 @@ private struct KeyboardTypingView: View {
                     if let pad {
                         if pad.isANSI { ansiRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0) }
                         else { padRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0) }
+                    } else if typing.state.layout == .letters, let arrangement = customArrangement {
+                        arrangedRows(arrangement, width: geometry.size.width, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0)
                     } else {
                         ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: typing.state.layout, hasAuxiliaryRow: plan.numberRowCount > 0, ansiPad: ansiStyle, padLayout: padLayout,
                                 alphabet: typing.state.alphabet).enumerated()), id: \.offset) { index, keys in
@@ -2410,7 +2422,7 @@ private struct KeyboardTypingView: View {
                                 if index == 2 {
                                     RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete", padStyle: isPad)
                                         .frame(width: isPad ? 64 : 42, height: plan.keyHeight)
-                                        .keyboardKeySurface(radius: 7, modifier: isPad)
+                                        .keyboardKeySurface(radius: 7, modifier: true)
                                     if isPad && geometry.size.width >= 650 { padReturn(width: 112, height: plan.keyHeight) }
                                 }
                             }
@@ -2424,6 +2436,55 @@ private struct KeyboardTypingView: View {
                 .preference(key: KeyboardTypingWidePadVisible.self, value: pad != nil)
                 .preference(key: KeyboardTypingANSIPadVisible.self, value: ansiStyle)
             }
+        }
+    }
+
+    /// The app's arrangement of this layout, when it has a valid one.
+    private var customArrangement: MainKeyboardArrangement? {
+        guard let arrangement = keySettings.arrangement(for: typing.state.alphabet.id),
+              let alphabet = KeyboardAlphabet.alphabet(id: typing.state.alphabet.id), arrangement.isValid(for: alphabet) else { return nil }
+        return arrangement
+    }
+
+    /// Rows as the app arranged them: letters, Shift, Delete and optional Tab
+    /// and Caps Lock, with gaps, every key one width and each row centred.
+    private func arrangedRows(_ arrangement: MainKeyboardArrangement, width: CGFloat, height: CGFloat, hasAuxiliaryRow: Bool) -> some View {
+        let spacing: CGFloat = isPad ? 7 : 5
+        let rows = arrangement.rows
+        let keyWidth = MainKeyboardArrangement.keyWidth(for: rows, available: width, spacing: spacing)
+        return ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+            HStack(spacing: spacing) {
+                ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                    arrangedCell(cell, width: MainKeyboardArrangement.width(of: cell, keyWidth: keyWidth, spacing: spacing),
+                                 height: height, hasAuxiliaryRow: hasAuxiliaryRow)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder private func arrangedCell(_ cell: MainKeyboardArrangement.Cell, width: CGFloat, height: CGFloat, hasAuxiliaryRow: Bool) -> some View {
+        switch cell {
+        case .halfGap, .gap:
+            Color.clear.frame(width: width, height: height).accessibilityHidden(true)
+        case .key(let key) where key == MainKeyboardArrangement.shift:
+            typingLeadingKey(height: height, width: width)
+        case .key(let key) where key == MainKeyboardArrangement.delete:
+            RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete", padStyle: isPad)
+                .frame(width: width, height: height).keyboardKeySurface(radius: 7, modifier: true)
+        case .key(let key) where key == MainKeyboardArrangement.tab:
+            KeyboardTouchKey(title: nil, symbol: "arrow.right.to.line", identifier: "keyboard.typing.tab", label: "Tab", fontSize: 16,
+                route: mode, factory: { [mode = mode] in action(mode, .tab) })
+                .frame(width: width, height: height).keyboardKeySurface(radius: 7, modifier: true)
+        case .key(let key) where key == MainKeyboardArrangement.caps:
+            KeyboardTouchKey(title: nil, symbol: typing.state.shift == .capsLock ? "capslock.fill" : "capslock",
+                identifier: "keyboard.typing.capsLock", label: "Caps Lock", value: typing.state.shift == .capsLock ? "on" : "off", fontSize: 16,
+                route: mode, factory: { [mode = mode] in action(mode, .capsLock) })
+                .frame(width: width, height: height).keyboardKeySurface(radius: 7, modifier: true)
+        case .key(let key):
+            typingCharacterKey(key, hasAuxiliaryRow: hasAuxiliaryRow, isAuxiliaryKey: false, ansiPad: false,
+                identifier: "keyboard.typing.key.\(key)", fontSize: compact ? 20 : 23)
+                .frame(width: width, height: height).keyboardKeySurface(radius: 7)
         }
     }
 
@@ -2539,15 +2600,15 @@ private struct KeyboardTypingView: View {
             factory: { [mode = mode] in variants(mode, key, hasAuxiliaryRow, isAuxiliaryKey, widePad, ansiPad) })
     }
 
-    @ViewBuilder private func typingLeadingKey(height: CGFloat) -> some View {
+    @ViewBuilder private func typingLeadingKey(height: CGFloat, width: CGFloat? = nil) -> some View {
         if typing.state.layout == .letters {
             KeyboardTouchKey(title: nil,
                 symbol: typing.state.shift == .capsLock ? "capslock.fill" : typing.state.shift == .uppercase ? "shift.fill" : "shift",
                 identifier: "keyboard.typing.shift", label: "Shift", value: shiftValue,
                 route: mode, shiftSlideFactory: { [mode = mode] in shiftSlide(mode) },
             factory: { [mode = mode] in action(mode, .shift) })
-                .frame(width: isPad ? 64 : 42, height: height)
-                .keyboardKeySurface(radius: 7, modifier: isPad)
+                .frame(width: width ?? (isPad ? 64 : 42), height: height)
+                .keyboardKeySurface(radius: 7, modifier: true)
                 .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(typing.state.shift == .lowercase ? Color.clear : KeyboardPalette.accent.opacity(0.65), lineWidth: 1))
         } else {
             let symbols = typing.state.layout == .numbers
@@ -2556,8 +2617,8 @@ private struct KeyboardTypingView: View {
                 label: symbols ? "More symbols" : "Numbers", value: layoutValue, fontSize: 13,
                 contentPosition: isPad && height >= 44 ? .bottomLeft : .center,
                 route: mode, factory: { [mode = mode] in action(mode, .layout(symbols ? .symbols : .numbers)) })
-                .frame(width: isPad ? 64 : 42, height: height)
-                .keyboardKeySurface(radius: 7, modifier: isPad)
+                .frame(width: width ?? (isPad ? 64 : 42), height: height)
+                .keyboardKeySurface(radius: 7, modifier: true)
         }
     }
 
@@ -2703,15 +2764,14 @@ private final class InspectableKeyButton: UIControl {
         code.minimumScaleFactor = 0.7
         code.textColor = .secondaryLabel
         code.lineBreakMode = .byTruncatingTail
-        // The name overlays the bottom edge, so the glyph keeps its place.
+        // The name wraps anywhere, up to three lines, below the glyph and code point.
         name.font = .systemFont(ofSize: 7, weight: .medium)
         name.textColor = .secondaryLabel
         name.textAlignment = .center
-        name.lineBreakMode = .byTruncatingTail
+        name.numberOfLines = 3
+        name.lineBreakMode = .byCharWrapping
         name.isUserInteractionEnabled = false
-        name.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(name)
-        let stack = UIStackView(arrangedSubviews: [glyph, code])
+        let stack = UIStackView(arrangedSubviews: [glyph, code, name])
         // Touches must reach this control rather than the decorative label stack.
         stack.isUserInteractionEnabled = false
         glyph.isUserInteractionEnabled = false
@@ -2731,9 +2791,6 @@ private final class InspectableKeyButton: UIControl {
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             stackCenter, glyphHeight,
-            name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 3),
-            name.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3),
-            name.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
             codeHeight,
             star.widthAnchor.constraint(equalToConstant: 9),
             star.heightAnchor.constraint(equalToConstant: 9),
@@ -2795,9 +2852,10 @@ private final class InspectableKeyButton: UIControl {
         code.text = item.footer
         name.text = showsName ? item.name : nil
         name.isHidden = !showsName
-        stackCenter.constant = showsName ? -3 : 0
-        codeHeight.isActive = !glyphOnly
-        code.isHidden = glyphOnly
+        // A named key shows its code point too.
+        let showsCode = !glyphOnly || showsName
+        codeHeight.isActive = showsCode
+        code.isHidden = !showsCode
         star.isHidden = glyphOnly || !favorite
         layer.cornerRadius = glyphOnly ? 7 : 9
         accessibilityLabel = "\(item.name), \(item.codePointLabel), \(item.ageLabel)"

@@ -1163,6 +1163,37 @@ final class UniboardUITests: XCTestCase {
         _ = reopened
     }
 
+    func testSystemKeyboardDrawsTheAppArrangementAndNamedResults() throws {
+        try requirePhoneKeyboardIntegration()
+        openAppPages()
+        app.buttons["pages.keyboard"].firstMatch.tap()
+        app.buttons["mainKeyboard.key.letter.q"].firstMatch.tap()
+        app.buttons["mainKeyboard.right"].firstMatch.tap()
+        app.buttons["mainKeyboard.more"].firstMatch.tap()
+        app.buttons["mainKeyboard.add.Tab"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["mainKeyboard.key.{tab}"].firstMatch.waitForExistence(timeout: 5))
+        addTeardownBlock { @MainActor [self] in
+            restoreEnglishKeyboard()
+            openAppPages()
+            app.buttons["pages.keyboard"].firstMatch.tap()
+            app.buttons["mainKeyboard.more"].firstMatch.tap()
+            app.buttons["mainKeyboard.reset"].firstMatch.tap()
+        }
+        let input = openSystemKeyboardHost(unicodeBrowse: false)
+        let tab = app.buttons["keyboard.typing.tab"].firstMatch
+        XCTAssertTrue(tab.waitForExistence(timeout: 5), "The keyboard draws the app's Tab key")
+        let q = app.buttons["keyboard.typing.key.q"].firstMatch, w = app.buttons["keyboard.typing.key.w"].firstMatch
+        XCTAssertGreaterThan(q.frame.minX, w.frame.minX, "Q follows W as arranged")
+        tab.tap()
+        XCTAssertTrue(input.waitUntilValueEquals("\t"), "Tab types a tab")
+        attachScreenshot("The keyboard draws the app's arrangement")
+        app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch.tap()
+        enterKeyboardQuery("thai character")
+        let result = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'keyboard.character.'")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        attachScreenshot("Search results show the code point and a wrapped name")
+    }
+
     func testUnicodeKeyOpensSearchUnderTheTextPreview() throws {
         try requirePhoneKeyboardIntegration()
         setAppTextPreview(true)
@@ -1669,10 +1700,11 @@ final class UniboardUITests: XCTestCase {
         let key = app.buttons["layers.tap"].firstMatch
         XCTAssertTrue(key.waitUntilValueEquals("q"), "The key types itself until changed")
         key.tap()
-        app.buttons["layer.addChoice"].firstMatch.tap()
+        XCTAssertFalse(app.buttons["layer.addChoice"].exists, "The key itself has one value, edited in place")
         let output = app.textFields["layer.choice.0"].firstMatch
         XCTAssertTrue(output.waitForExistence(timeout: 5))
-        output.typeText("x")
+        output.tap()
+        output.typeText(XCUIKeyboardKey.delete.rawValue + "x")
         app.buttons["layer.save"].firstMatch.tap()
         XCTAssertTrue(key.waitUntilValueEquals("x"), "The changed key types x")
         key.tap()
@@ -1682,6 +1714,20 @@ final class UniboardUITests: XCTestCase {
         changed.typeText(XCUIKeyboardKey.delete.rawValue)
         app.buttons["layer.save"].firstMatch.tap()
         XCTAssertTrue(key.waitUntilValueEquals("q"), "No value restores the key's own text")
+        // Letters, Shift and Delete move like a page's keys, and Tab can join them.
+        let w = app.buttons["mainKeyboard.key.letter.w"].firstMatch
+        XCTAssertLessThan(q.frame.minX, w.frame.minX)
+        app.buttons["mainKeyboard.right"].firstMatch.tap()
+        XCTAssertTrue(q.waitUntilFrame { $0.minX > w.frame.minX }, "Q moved right of W")
+        app.buttons["mainKeyboard.more"].firstMatch.tap()
+        app.buttons["mainKeyboard.add.Tab"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["mainKeyboard.key.{tab}"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(app.buttons["mainKeyboard.key.letter.p"].firstMatch.frame.maxX, app.frame.maxX, "The rows still fit")
+        attachScreenshot("The main keyboard rearranged with Tab")
+        app.buttons["mainKeyboard.more"].firstMatch.tap()
+        app.buttons["mainKeyboard.reset"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["mainKeyboard.key.{tab}"].firstMatch.waitUntilAbsent())
+        XCTAssertTrue(q.waitUntilFrame { $0.minX < w.frame.minX }, "Standard Layout restores the rows")
     }
 
     /// A page opens as its canvas.
@@ -4078,6 +4124,12 @@ private extension XCUIElement {
 
     func waitUntilValueEquals(_ expectedValue: String, timeout: TimeInterval = 5) -> Bool {
         let predicate = NSPredicate(format: "value == %@", expectedValue)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: self)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    func waitUntilFrame(timeout: TimeInterval = 5, _ condition: @escaping (CGRect) -> Bool) -> Bool {
+        let predicate = NSPredicate { object, _ in (object as? XCUIElement).map { $0.exists && condition($0.frame) } ?? false }
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: self)
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }

@@ -141,6 +141,17 @@ final class SymbolBoardStoreTests: XCTestCase {
                 XCTAssertTrue(from.setSwipe(boardID: id, keyID: infinity, up: false, choices: ["♾"]))
                 XCTAssertTrue(from.setSwipe(boardID: id, keyID: infinity, up: false, choices: []))
                 XCTAssertNil(from.key(boardID: id, keyID: infinity)?.down, "No choices turn the swipe off")
+                // A choice dragged from hold to swipe down moves in one change.
+                XCTAssertTrue(from.setLayers(boardID: id, keyID: infinity, variants: ["∞", "∝"], up: [], down: ["⧜"]))
+                XCTAssertEqual(from.key(boardID: id, keyID: infinity)?.variants, ["∝"], "The key itself is not its own variant")
+                XCTAssertEqual(from.key(boardID: id, keyID: infinity)?.down, ["⧜"])
+                XCTAssertNil(from.key(boardID: id, keyID: infinity)?.up)
+                XCTAssertFalse(from.setLayers(boardID: id, keyID: infinity, variants: [""], up: [], down: []))
+                XCTAssertFalse(from.setLayers(boardID: id, keyID: "missing", variants: [], up: [], down: []))
+                XCTAssertFalse(from.setLayers(boardID: "missing", keyID: infinity, variants: [], up: [], down: []))
+                XCTAssertFalse(from.setLayers(boardID: id, keyID: infinity, variants: [],
+                                              up: (0...16).map { String(UnicodeScalar(0x2200 + $0)!) }, down: []))
+                XCTAssertTrue(from.setLayers(boardID: id, keyID: infinity, variants: [], up: [], down: []))
                 XCTAssertTrue(from.setLayout(boardID: id, layout: SymbolPageLayout("hk/k")))
                 XCTAssertNotNil(from.add(text: "★", to: SymbolBoardStore.favoritesID))
                 let file = try XCTUnwrap(from.exportedPages())

@@ -27,6 +27,7 @@ MINIMUMS = {
     "KeyboardAlphabet.swift": 1.0,
     "SymbolPageLayout.swift": 1.0,
     "UCSUR.swift": 1.0,
+    "MainKeyboardArrangement.swift": 1.0,
 }
 
 

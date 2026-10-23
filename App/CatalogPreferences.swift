@@ -36,7 +36,9 @@ final class CatalogPreferences: ObservableObject {
         padSymbolMapping = snapshot.padSymbolMapping
     }
     /// With ConScript preferred, Private Use reads as the registry assigns it.
-    var catalog: UnicodeCatalog { showsUCSUR && prefersUCSUR ? edition.catalog.withConScript() : edition.catalog }
+    var catalog: UnicodeCatalog {
+        !showsUCSUR ? edition.catalog : prefersUCSUR ? edition.catalog.withConScript() : edition.catalog.withConScriptSearch()
+    }
     var emojis: EmojiCatalog { edition.emojiCatalog }
     func selectEdition(_ selection: UnicodeEdition) {
         edit { $0.edition = selection }

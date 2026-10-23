@@ -265,6 +265,10 @@ struct FontPackDownloadsView: View {
     var body: some View {
         Form {
             Section {
+                NavigationLink("Browse Google Fonts") { GoogleFontsView() }
+                    .accessibilityIdentifier("fontDownloads.browseGoogle")
+            }
+            Section {
                 Toggle("Extra Unicode Fonts", isOn: Binding(get: { preferences.useUnicodeFonts },
                     set: { preferences.selectUnicodeFonts($0) }))
                     .accessibilityIdentifier("fontDownloads.enable")

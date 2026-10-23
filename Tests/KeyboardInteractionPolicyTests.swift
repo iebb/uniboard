@@ -7,6 +7,13 @@ import XCTest
 #endif
 
 final class KeyboardInteractionPolicyTests: XCTestCase {
+    func testSearchBottomRowOmitsColonButKeepsCodePointAndRangeKeys() {
+        XCTAssertEqual(KeyboardQueryPolicy.bottomRow, ["+", "z", "x", "c", "v", "b", "n", "m", "-"])
+        XCTAssertFalse(KeyboardQueryPolicy.bottomRow.contains(":"))
+        // Removing a key must not prevent pasted structured queries.
+        XCTAssertEqual(KeyboardQueryPolicy.inserting("decimal:960", into: "", caretUTF16Offset: 0).text, "decimal:960")
+    }
+
     func testSearchKeepsNormalKeyHeightAndReservesResultsInsteadOfSqueezingKeys() {
         for pad in [false, true] {
             for width: CGFloat in [320, 402, 535, 536, 665, 666, 1032, 1376] {

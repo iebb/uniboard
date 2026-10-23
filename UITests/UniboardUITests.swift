@@ -184,10 +184,31 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
         field.typeText(query)
+        XCTAssertTrue(field.waitUntilValueEquals(query), "Layout search accepts the complete query")
         let row = app.buttons["layouts.catalog.\(id)"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5), "Search finds \(query)")
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            field.value as? String == query && row.exists && row.isHittable
+        }, object: row)
+        let searchReady = XCTWaiter.wait(for: [ready], timeout: 5) == .completed
+        attachDiagnostics("Layout \(id) search before selection")
+        XCTAssertTrue(searchReady, "The filtered layout must be hittable before selection")
         row.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["layouts.enabled.\(id)"].firstMatch.waitForExistence(timeout: 5))
+        // Capture each transition before assertions can stop the test or teardown navigates away.
+        // Search can hide the sheet title while the underlying Layouts bar remains in AX.
+        let catalogRowGone = row.waitUntilAbsent()
+        let searchGone = field.waitUntilAbsent()
+        let dismissed = catalogRowGone && searchGone
+        let returned = app.navigationBars["Layouts"].firstMatch.waitForExistence(timeout: 5)
+        let added = app.descendants(matching: .any)["layouts.enabled.\(id)"].firstMatch.waitForExistence(timeout: 5)
+        let error = app.descendants(matching: .any)["layouts.error"].firstMatch
+        let saveFailed = error.exists
+        let errorText = saveFailed ? error.label : "No layouts.error"
+        attachDiagnostics("Layout \(id) after selection: dismissed=\(dismissed), parent=\(returned), added=\(added), \(errorText)")
+        XCTAssertTrue(dismissed, "Selecting \(query) must dismiss Add Layout")
+        XCTAssertTrue(returned, "Selecting \(query) must return to Layouts")
+        XCTAssertFalse(saveFailed, "Adding \(query) must not show layouts.error: \(errorText)")
+        XCTAssertTrue(added, "Adding \(query) must create layouts.enabled.\(id)")
     }
 
     private func removeAppLayout(_ id: String) {
@@ -360,6 +381,9 @@ final class UniboardUITests: XCTestCase {
         app.buttons["Done"].tap()
 
         openAppFavorites()
+        let savedList = app.buttons["page.list"].firstMatch
+        XCTAssertTrue(savedList.waitForExistence(timeout: 5))
+        savedList.tap()
         let favorites = app.otherElements["savedFavorites"].firstMatch
         XCTAssertTrue(favorites.waitForExistence(timeout: 5))
         let savedSnowman = favorites.buttons["character-U+2603"].firstMatch
@@ -419,9 +443,12 @@ final class UniboardUITests: XCTestCase {
         app.buttons["block.previous"].firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["character-U+2190"].firstMatch.waitForExistence(timeout: 5))
         app.descendants(matching: .any)["chartBlockNavigator"].firstMatch.press(forDuration: 1)
-        // The menu's preview card is outside the app's own identifiers; its button is not.
+        // The preview exposes blockInfo as combined text; do not assume an Other element type.
         XCTAssertTrue(app.buttons["Copy Range"].firstMatch.waitForExistence(timeout: 5), "Holding a block name shows its info")
-        XCTAssertTrue(app.otherElements.matching(NSPredicate(format: "label CONTAINS 'Since, Unicode 1.1'")).firstMatch.exists)
+        attachDiagnostics("Block info immediately after Copy Range appears")
+        let blockInfo = app.descendants(matching: .any)["blockInfo"].firstMatch
+        XCTAssertTrue(blockInfo.waitForExistence(timeout: 5))
+        XCTAssertTrue(blockInfo.label.contains("Since, Unicode 1.1"), blockInfo.label)
         attachScreenshot("Holding a block name shows its info")
         app.buttons["Copy Range"].firstMatch.tap()
         options.tap()
@@ -496,6 +523,115 @@ final class UniboardUITests: XCTestCase {
         XCTAssertGreaterThan(initialTiles.count, 1)
         for (before, after) in zip(initialTiles, initialTiles.dropFirst()) { XCTAssertLessThan(before.1, after.1) }
         attachScreenshot("Explore uses ascending code point order")
+    }
+
+    func testExplorePinchZoomsPastSevenColumnsAndBack() {
+        selectAppTab("Explore")
+        let options = app.buttons["exploreDensity"].firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 5))
+        if (options.value as? String) != "3" {
+            options.tap()
+            app.buttons["Tiles"].firstMatch.tap()
+            XCTAssertTrue(options.waitUntilValueEquals("3"))
+        }
+        let grid = app.scrollViews["exploreResults"].firstMatch
+        XCTAssertTrue(grid.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["character-U+0020"].firstMatch.waitForExistence(timeout: 10))
+
+        // The scroll view runs under the floating tab bar, so a pinch over the
+        // whole scroll view would touch a tab; pinch on a tile in the visible middle instead.
+        let tabBar = app.tabBars.firstMatch
+        let visible: CGRect = {
+            let frame = grid.frame
+            let bottom = tabBar.exists ? min(frame.maxY, tabBar.frame.minY) : min(frame.maxY, app.frame.maxY)
+            return CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: bottom - frame.minY)
+        }()
+        /// Identifiers and frames of the tiles lying fully inside the visible grid, from one snapshot.
+        func visibleTiles() -> [(id: String, frame: CGRect)] {
+            guard let root = try? app.snapshot() else { return [] }
+            var tiles: [(id: String, frame: CGRect)] = []
+            var stack: [XCUIElementSnapshot] = [root]
+            let bounds = visible.insetBy(dx: -1, dy: -1)
+            while let node = stack.popLast() {
+                if node.identifier.hasPrefix("character-U+"), usableHeightFrame(node.frame), bounds.contains(node.frame) {
+                    tiles.append((node.identifier, node.frame))
+                }
+                stack.append(contentsOf: node.children)
+            }
+            return tiles
+        }
+        /// Frames of the topmost row of tiles lying fully inside the visible grid.
+        func firstRow() -> [CGRect] {
+            let frames = visibleTiles().map(\.frame)
+            guard let top = frames.map(\.minY).min() else { return [] }
+            return frames.filter { abs($0.minY - top) < 5 }.sorted { $0.minX < $1.minX }
+        }
+        /// Pinches once and waits for the column count to settle, returning it.
+        func pinch(zoomOut: Bool, from count: Int) -> Int {
+            let center = CGPoint(x: visible.midX, y: visible.midY)
+            let distance = { (frame: CGRect) in hypot(frame.midX - center.x, frame.midY - center.y) }
+            guard let target = visibleTiles().min(by: { distance($0.frame) < distance($1.frame) }) else {
+                XCTFail("No visible tile to pinch")
+                return -1
+            }
+            let tile = app.buttons[target.id].firstMatch
+            if zoomOut { tile.pinch(withScale: 0.5, velocity: -1) } else { tile.pinch(withScale: 2, velocity: 1) }
+            if app.buttons["copyCharacter"].firstMatch.waitForExistence(timeout: 1) {
+                attachDiagnostics("A pinch opened the character inspector")
+                XCTFail("Pinching on \(target.id) opened the character inspector instead of zooming")
+                return -1
+            }
+            if !grid.waitForExistence(timeout: 2) {
+                print("PINCH LOST GRID: state \(app.state.rawValue)\n\(app.debugDescription)")
+                attachDiagnostics("Explore grid missing after a pinch")
+                XCTFail("The Explore grid disappeared after a pinch")
+                return -1
+            }
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in firstRow().count != count }, object: nil)
+            _ = XCTWaiter.wait(for: [changed], timeout: 3)
+            sleep(1) // let the snappy column animation finish before measuring frames
+            return firstRow().count
+        }
+
+        // The grid keeps 16pt margins inside its 780pt maximum; tiles stay >= 32pt with 8pt gaps.
+        let gridWidth = min(grid.frame.width, 780) - 32
+        let expectedMaximum = Int(((gridWidth + 8) / 40).rounded(.down))
+        var columns = firstRow().count
+        XCTAssertGreaterThanOrEqual(columns, 2, "Explore shows a tile grid")
+        var zoomOutCounts = [columns]
+        for _ in 0..<12 {
+            let next = pinch(zoomOut: true, from: columns)
+            zoomOutCounts.append(next)
+            if next == columns && columns >= expectedMaximum { break }
+            columns = next
+        }
+        let row = firstRow()
+        let widths = row.map(\.width)
+        let summary = "columns \(row.count) (expected maximum \(expectedMaximum) for grid width \(gridWidth)), tile widths \(widths), pinch sequence \(zoomOutCounts)"
+        print("PINCH ZOOM MAX: \(summary)")
+        let measurement = XCTAttachment(string: summary)
+        measurement.name = "Maximum zoom measurement"
+        measurement.lifetime = .keepAlways
+        add(measurement)
+        attachScreenshot("Explore at maximum zoom past 7 columns")
+        XCTAssertGreaterThan(row.count, 7, "Pinching zooms out past 7 columns: \(summary)")
+        XCTAssertEqual(row.count, expectedMaximum, "Zoom stops at the narrowest 32pt tiles: \(summary)")
+        for width in widths { XCTAssertGreaterThanOrEqual(width, 32, "Every tile stays at least 32pt wide: \(summary)") }
+        XCTAssertEqual(pinch(zoomOut: true, from: row.count), row.count, "Pinching further keeps the maximum")
+
+        // Spreading the fingers zooms back in, one column per pinch, to 7 or fewer and then the default 3.
+        columns = row.count
+        var zoomInCounts = [columns]
+        while columns > 3, zoomInCounts.count < 12 {
+            let next = pinch(zoomOut: false, from: columns)
+            zoomInCounts.append(next)
+            XCTAssertEqual(next, columns - 1, "Each spread removes one column: \(zoomInCounts)")
+            columns = next
+        }
+        print("PINCH ZOOM IN: \(zoomInCounts)")
+        XCTAssertLessThanOrEqual(columns, 7, "Spreading returns to 7 or fewer columns: \(zoomInCounts)")
+        XCTAssertEqual(columns, 3, "The shared column preference is restored for later tests")
+        attachScreenshot("Explore zoomed back in to 3 columns")
     }
 
     func testEmojiSortByVersionAndExploreHighToLow() {
@@ -1578,6 +1714,42 @@ final class UniboardUITests: XCTestCase {
         XCTAssertFalse(tile(1, 0).exists)
     }
 
+    /// Holding a key lifts it; dropping it on another puts it before that one,
+    /// and letting go outside the canvas leaves the page as it was.
+    func testPagesDragAKeyBeforeAnotherAndCancelKeepsTheOrder() {
+        deleteAppPages(named: "qadrag")
+        addTeardownBlock { @MainActor [self] in deleteAppPages(named: "qadrag") }
+        let page = createAppPage("qadrag")
+        for (query, codepoint) in [("infinity", "U+221E"), ("almost equal to", "U+2248"), ("n-ary summation", "U+2211")] {
+            addAppPageKey(query: query, codepoint: codepoint)
+        }
+        openArrange()
+        let tile = { (row: Int, index: Int) in self.app.buttons["arrange.\(row).\(index)"].firstMatch }
+        XCTAssertTrue(tile(0, 2).waitUntilLabelEquals("Key ∑"))
+        XCTAssertEqual(tile(0, 0).label, "Key ∞")
+
+        tile(0, 0).press(forDuration: 1, thenDragTo: app.navigationBars.firstMatch, withVelocity: .slow, thenHoldForDuration: 0.5)
+        XCTAssertTrue(tile(0, 0).waitUntilLabelEquals("Key ∞"), "Dropped outside, nothing moves")
+        XCTAssertEqual(tile(0, 1).label, "Key ≈")
+        XCTAssertEqual(tile(0, 2).label, "Key ∑")
+        XCTAssertFalse(app.staticTexts["arrange.error"].exists)
+
+        tile(0, 0).press(forDuration: 1, thenDragTo: tile(0, 2), withVelocity: .slow, thenHoldForDuration: 0.5)
+        XCTAssertTrue(tile(0, 1).waitUntilLabelEquals("Key ∞"), "∞ lands before ∑, not in its place")
+        XCTAssertEqual(tile(0, 0).label, "Key ≈")
+        XCTAssertEqual(tile(0, 2).label, "Key ∑")
+        XCTAssertFalse(tile(0, 3).exists, "No key is duplicated")
+        attachScreenshot("A page key dragged before another")
+
+        // The move was saved once: it is still there after leaving and reopening the page.
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(page.waitForExistence(timeout: 5))
+        page.tap()
+        openArrange()
+        XCTAssertTrue(tile(0, 1).waitUntilLabelEquals("Key ∞"))
+        XCTAssertEqual(tile(0, 0).label, "Key ≈")
+    }
+
     func testTextAndEmojiFormsShowSideBySideAndJoinAPageSeparately() {
         searchUnicode("snowman")
         assertCharacterVisible("U+2603").tap()
@@ -2491,9 +2663,9 @@ final class UniboardUITests: XCTestCase {
         attachScreenshot("ABC refreshes sentence capitalization after number-page period and Space")
     }
 
-    func testSystemKeyboardSearchKeysKeepTypingHeightAndBothDeletesEditTheLocalCaret() throws {
+    func testSystemKeyboardSearchKeysKeepTypingHeightAndDeletesUseSeparateDestinations() throws {
         try requireKeyboardIntegration()
-        let context = "Keep the receiving document."
+        var context = "Keep the receiving document."
         let input = openSystemKeyboardHost(initialText: context)
         defer { XCUIDevice.shared.orientation = .portrait; restoreEnglishKeyboard() }
         enterKeyboardQuery("cat")
@@ -2514,8 +2686,11 @@ final class UniboardUITests: XCTestCase {
         lower.tap()
         XCTAssertTrue(search.waitUntilValueEquals("arrowcat"), "The lower Delete removes before the local middle caret")
         upper.tap()
-        XCTAssertTrue(search.waitUntilValueEquals("arrocat"), "The header Delete uses the same local caret")
-        typeKeyboardQueryKeys("w ")
+        context.removeLast()
+        XCTAssertTrue(input.waitUntilValueEquals(context), "The header Delete edits the host while search is focused")
+        XCTAssertTrue(search.waitUntilValueEquals("arrowcat"), "The header Delete preserves the query and its caret")
+        XCTAssertFalse(app.buttons["keyboard.query.:"].exists)
+        typeKeyboardQueryKeys(" ")
         XCTAssertTrue(search.waitUntilValueEquals("arrow cat"))
         XCTAssertEqual(input.value as? String, context)
         // Repeated discrete taps must not leave either native key latched off.
@@ -2524,7 +2699,11 @@ final class UniboardUITests: XCTestCase {
             XCTAssertTrue(search.waitUntilValueEquals(expected))
         }
         upper.tap()
-        XCTAssertTrue(search.waitUntilValueEquals("cat"), "At the beginning, Delete must not fall through to the host")
+        context.removeLast()
+        XCTAssertTrue(input.waitUntilValueEquals(context), "The header Delete still targets the host at the query start")
+        XCTAssertTrue(search.waitUntilValueEquals("cat"))
+        lower.tap()
+        XCTAssertTrue(search.waitUntilValueEquals("cat"), "Lower Delete at query start does not fall through to host")
         typeKeyboardQueryKeys("u+2603")
         XCTAssertTrue(search.waitUntilValueEquals("u+2603cat"))
         XCTAssertEqual(input.value as? String, context)
@@ -2542,7 +2721,7 @@ final class UniboardUITests: XCTestCase {
         XCTAssertLessThan(remaining == "No query" ? 0 : remaining.count, 5)
         assertValueRemainsAfterRelease(search, equals: remaining)
         XCTAssertEqual(input.value as? String, context)
-        attachScreenshot("Full-height search keys and two local Delete controls")
+        attachScreenshot("Full-height search keys with separate host and query Delete controls")
         closeKeyboardSearch()
         ensureUnicodeToolbarVisible()
         upper.tap()
@@ -2655,7 +2834,7 @@ final class UniboardUITests: XCTestCase {
         let delete = app.buttons["keyboard.delete"].firstMatch
         XCTAssertTrue(delete.waitForExistence(timeout: 5))
 
-        delete.press(forDuration: 0.75)
+        app.buttons["keyboard.query.delete"].press(forDuration: 0.75)
         let remainingQuery = search.value as? String ?? ""
         XCTAssertFalse(remainingQuery.isEmpty)
         XCTAssertTrue(query.hasPrefix(remainingQuery), "Held search delete may only remove the query suffix")
@@ -2666,19 +2845,18 @@ final class UniboardUITests: XCTestCase {
         XCTAssertEqual(input.value as? String, context)
         attachScreenshot("Held query delete stops on release without changing host text")
 
-        closeKeyboardSearch()
-        ensureUnicodeToolbarVisible()
+        // Keep search focused while holding the toolbar's host Delete.
         XCTAssertTrue(search.waitUntilValueEquals(remainingQuery))
         delete.press(forDuration: 0.75)
         let remainingHost = input.value as? String ?? ""
         XCTAssertFalse(remainingHost.isEmpty)
-        XCTAssertTrue(context.hasPrefix(remainingHost), "Folded delete may only remove the host suffix")
+        XCTAssertTrue(context.hasPrefix(remainingHost), "Toolbar delete may only remove the host suffix")
         XCTAssertGreaterThanOrEqual(context.count - remainingHost.count, 2,
-                                    "The real folded hold must exercise repeating host deletion")
-        XCTAssertEqual(search.value as? String, remainingQuery, "Folded host deletion must retain the query")
+                                    "The real toolbar hold must exercise repeating host deletion")
+        XCTAssertEqual(search.value as? String, remainingQuery, "Toolbar host deletion must retain the query")
         assertValueRemainsAfterRelease(input, equals: remainingHost)
         XCTAssertTrue(search.waitUntilValueEquals(remainingQuery))
-        attachScreenshot("Held host delete stops on release and preserves the folded query")
+        attachScreenshot("Held host delete stops on release and preserves the focused query")
     }
 
     func testSystemKeyboardReadsAppFontSettingsAndPreservesExactInsertion() throws {
@@ -3292,10 +3470,22 @@ final class UniboardUITests: XCTestCase {
         link.tap()
         let pack = app.descendants(matching: .any)["fontDownloads.pack.preview-basics"].firstMatch
         XCTAssertTrue(pack.waitForExistence(timeout: 5))
-        let ready = pack.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Available offline")).firstMatch
+        let ready = pack.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Available offline")).firstMatch
         if !ready.exists {
             app.buttons["fontDownloads.download.preview-basics"].firstMatch.tap()
-            XCTAssertTrue(ready.waitForExistence(timeout: 180), "Preview basics download")
+            let failure = pack.descendants(matching: .any).matching(NSPredicate(
+                format: "label BEGINSWITH %@", "Couldn’t download or verify this pack.")).firstMatch
+            let message = app.staticTexts["fontDownloads.message"].firstMatch
+            let finished = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                ready.exists || failure.exists || (message.exists && (
+                    message.label.hasPrefix("Shared font storage is unavailable.") ||
+                    message.label.hasPrefix("Download cancelled.") ||
+                    message.label.hasPrefix("The font download could not be verified.")))
+            }, object: pack)
+            let completed = XCTWaiter.wait(for: [finished], timeout: 180) == .completed
+            let available = ready.exists
+            if !completed || !available { attachDiagnostics("Preview basics download failed or timed out") }
+            XCTAssertTrue(completed && available, "Preview basics must be available offline, not merely finish downloading")
         }
         app.navigationBars["Font Downloads"].buttons.firstMatch.tap()
     }
@@ -3903,6 +4093,14 @@ final class UniboardUITests: XCTestCase {
         revealByScrolling(uniboard, in: settings)
         uniboard.tap()
         XCTAssertTrue(existingKeyboard.waitForExistence(timeout: 5), "Uniboard should appear in the enabled system keyboard list")
+    }
+
+    private func attachDiagnostics(_ name: String) {
+        attachScreenshot(name)
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "\(name) — accessibility hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
     }
 
     private func attachScreenshot(_ name: String) {

@@ -100,7 +100,11 @@ private struct AddLayoutView: View {
 
     private func rows(_ layouts: [KeyboardAlphabet]) -> some View {
         ForEach(layouts) { alphabet in
-            Button { add(alphabet.id); dismiss() } label: { LayoutRow(alphabet: alphabet).contentShape(Rectangle()) }
+            Button { add(alphabet.id); dismiss() } label: {
+                LayoutRow(alphabet: alphabet)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("layouts.catalog.\(alphabet.id)")
         }

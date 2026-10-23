@@ -20,6 +20,11 @@ targets:
     platform: iOS
     sources:
       - path: App
+        excludes:
+          - Resources/GoogleFonts
+      - path: App/Resources/GoogleFonts
+        type: folder
+        buildPhase: resources
       - path: Shared
       - path: Fonts
         type: folder
@@ -76,6 +81,12 @@ targets:
     platform: iOS
     sources:
       - path: Tests
+        excludes:
+          - Fixtures
+      - path: Tests/Fixtures/Roboto/Roboto-Pinned.ttf
+        buildPhase: resources
+      - path: Tests/Fixtures/Roboto/OFL.txt
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ad.neko.uniboard.tests

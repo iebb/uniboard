@@ -3,8 +3,10 @@ import SwiftUI
 /// A selected key's layers, one row each: its swipe-up, hold and swipe-down
 /// choices as they show on the key. Tapping a row opens that layer's editor;
 /// holding a choice drags it to another place, in its row or another one.
+/// Hovering only marks where it would go; the drop saves once.
 struct KeyLayersPanel<Destination: View>: View {
     typealias Gesture = KeyboardKeySettings.Gesture
+    typealias Position = SymbolPageLayout.Position
     var layers: [Gesture] = [.swipeUp, .longPress, .swipeDown]
     /// A layer's choices, and whether they are the built-in defaults.
     let choices: (Gesture) -> (values: [String], isDefault: Bool)
@@ -12,31 +14,64 @@ struct KeyLayersPanel<Destination: View>: View {
     /// Saves the layers a drag changed, as one change.
     var save: (([Gesture: [String]]) -> Bool)? = nil
     @State private var editing: Gesture?
+    @StateObject private var drag = EditorDragSession()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    /// A parent's `.disabled`, such as while its own drag is under way. The
+    /// chips are hosted by UIKit, so it is passed to them explicitly.
+    @Environment(\.isEnabled) private var isEnabled
+    @Namespace private var motion
+
+    /// Each layer's choices, in the order of `layers`.
+    private var rows: [[String]] { layers.map { choices($0).values } }
+    /// The key's own output is one value, so it neither gives nor takes a choice.
+    private var locked: Set<Int> { Set(layers.indices.filter { layers[$0] == .tap }) }
+    /// What a drag lifted from; any other choices refuse its drop.
+    private var fingerprint: String {
+        zip(layers, rows).map { "\($0.rawValue):" + $1.joined(separator: "\u{1F}") }.joined(separator: "\u{1E}")
+    }
 
     var body: some View {
         VStack(spacing: 8) {
             ForEach(layers, id: \.rawValue) { gesture in row(gesture) }
         }
         .navigationDestination(item: $editing) { destination($0) }
+        .onAppear { drag.fit(rowCounts: rows.map(\.count)) }
+        .onDisappear { drag.reset() }
+        .onChange(of: fingerprint) { _, _ in drag.reset(); drag.fit(rowCounts: rows.map(\.count)) }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { drag.reset() } }
+    }
+
+    private func open(_ gesture: Gesture) {
+        if isEnabled && !drag.isDragging { editing = gesture }
     }
 
     private func row(_ gesture: Gesture) -> some View {
         let layer = choices(gesture)
-        // The key's own output is one value, so it does not drag.
         let drags = save != nil && gesture != .tap
+        let row = layers.firstIndex(of: gesture) ?? 0
+        let end = Position(row: row, index: layer.values.count)
         return HStack(spacing: 10) {
             Image(systemName: gesture == .tap ? "character.cursor.ibeam" : gesture.icon)
                 .font(.body.weight(.semibold)).foregroundStyle(.tint).frame(width: 24)
             if layer.values.isEmpty {
-                Text("Off").foregroundStyle(.secondary)
+                // An empty layer takes a choice; Off stays until the drop.
+                target(end, enabled: drags, gesture: gesture) { Text("Off").foregroundStyle(.secondary).frame(minHeight: 34) }
             } else {
                 // An overlay never widens the row, however many choices there are.
                 Color.clear.frame(maxWidth: .infinity, minHeight: 34)
                     .overlay(alignment: .leading) {
                         HStack(spacing: 6) {
-                            ForEach(Array(layer.values.prefix(16).enumerated()), id: \.offset) { index, value in
-                                chip(value, isDefault: layer.isDefault)
-                                    .modifier(ChoiceDrag(payload: "\(gesture.rawValue)|\(index)", enabled: drags) { move($0, to: gesture, at: index) })
+                            ForEach(layer.values.prefix(16).indices.map {
+                                EditorTilePosition(id: drag.tileID(Position(row: row, index: $0)), position: Position(row: row, index: $0))
+                            }) { entry in
+                                choice(entry.position, value: layer.values[entry.position.index], isDefault: layer.isDefault,
+                                       draggable: drags, gesture: gesture)
+                                    .matchedGeometryEffect(id: entry.id, in: motion)
+                            }
+                            // Dropping past the last choice puts a choice at the end.
+                            target(end, enabled: drags, gesture: gesture) {
+                                Color.clear.frame(width: 12, height: 34).contentShape(Rectangle())
                             }
                         }
                         .fixedSize()
@@ -49,15 +84,47 @@ struct KeyLayersPanel<Destination: View>: View {
         .padding(.horizontal, 12).frame(minHeight: 52)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(Rectangle())
-        .onTapGesture { editing = gesture }
-        // Dropping on the row, past its choices, puts a choice at its end.
-        .dropDestination(for: String.self) { items, _ in drags && items.first.map { move($0, to: gesture, at: nil) } == true }
+        .onTapGesture { open(gesture) }
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel(gesture == .tap ? "Key" : gesture.title)
         .accessibilityValue(Self.summary(layer.values))
-        .accessibilityAction { editing = gesture }
+        .accessibilityAction { open(gesture) }
         .accessibilityIdentifier("layers.\(gesture.rawValue)")
+    }
+
+    private func choice(_ position: Position, value: String, isDefault: Bool, draggable: Bool, gesture: Gesture) -> some View {
+        let active = drag.source == position
+        let current = rows, fixed = locked
+        // The row speaks for its choices, so the hosted chips stay out of VoiceOver.
+        return EditorDragSurface(session: drag, position: position, fingerprint: fingerprint, currentFingerprint: { fingerprint },
+                                 draggable: draggable, isEnabled: isEnabled, hidesAccessibility: true, cornerRadius: 6,
+                                 accepts: { draggable && Self.move(current, locked: fixed, from: $0, to: position) != nil },
+                                 commit: { drop($0, at: position) }) {
+            chip(value, isDefault: isDefault).contentShape(Rectangle()).onTapGesture { open(gesture) }
+        }
+        .opacity(active ? 0.35 : 1)
+        .animation(.editorFade(0.12, reduceMotion: reduceMotion), value: active)
+        // Centred in the 6 pt gap before the choice; inside the row at its start.
+        .overlay(alignment: .leading) { indicator(position, offset: position.index == 0 ? 0 : -5) }
+    }
+
+    private func target<Content: View>(_ position: Position, enabled: Bool, gesture: Gesture,
+                                       @ViewBuilder content: @escaping () -> Content) -> some View {
+        let current = rows, fixed = locked
+        return EditorDragSurface(session: drag, position: position, fingerprint: fingerprint, currentFingerprint: { fingerprint },
+                                 draggable: false, isEnabled: isEnabled, hidesAccessibility: true, cornerRadius: 6,
+                                 accepts: { enabled && Self.move(current, locked: fixed, from: $0, to: position) != nil },
+                                 commit: { drop($0, at: position) }) {
+            content().onTapGesture { open(gesture) }
+        }
+        .overlay(alignment: .leading) { indicator(position, offset: position.index == 0 ? 0 : -5) }
+    }
+
+    private func indicator(_ position: Position, offset: CGFloat) -> some View {
+        EditorInsertionMark(height: 30).offset(x: offset)
+            .opacity(drag.target == position ? 1 : 0)
+            .animation(.editorFade(0.08, reduceMotion: reduceMotion), value: drag.target == position)
     }
 
     private func chip(_ value: String, isDefault: Bool) -> some View {
@@ -67,43 +134,27 @@ struct KeyLayersPanel<Destination: View>: View {
             .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
-    /// Moves the dragged choice before `index` in `target`, or to its end.
-    private func move(_ payload: String, to target: Gesture, at index: Int?) -> Bool {
-        let parts = payload.split(separator: "|")
-        guard let save, parts.count == 2, let source = Gesture(rawValue: String(parts[0])), let from = Int(parts[1]),
-              layers.contains(source), source != .tap, target != .tap else { return false }
-        var lists = Dictionary(uniqueKeysWithValues: layers.filter { $0 != .tap }.map { ($0, choices($0).values) })
-        guard var sourceList = lists[source], sourceList.indices.contains(from) else { return false }
-        let value = sourceList.remove(at: from)
-        lists[source] = sourceList
-        var targetList = lists[target] ?? []
-        // Within one row, removing the choice shifts the places after it.
-        let place = index.map { source == target && $0 > from ? $0 - 1 : $0 } ?? targetList.count
-        guard source == target || !targetList.contains(value) else { return false }
-        targetList.insert(value, at: min(place, targetList.count))
-        lists[target] = targetList
-        return save(lists.filter { $0.key == source || $0.key == target })
+    private static func move(_ rows: [[String]], locked: Set<Int>, from source: Position, to destination: Position) -> EditorReorder.Move<[[String]]>? {
+        EditorReorder.choices(rows, from: source, to: destination, locked: locked, maximum: SymbolBoardStore.maximumVariants)
+    }
+
+    /// A drop: computed once from the saved choices, saved once as one change
+    /// of the layers it touched. A refused or unchanged drop saves nothing.
+    private func drop(_ source: Position, at destination: Position) {
+        guard let save, let move = Self.move(rows, locked: locked, from: source, to: destination), move.changesValue else { return }
+        var changed: [Gesture: [String]] = [:]
+        for row in Set([move.source.row, move.destination.row]) where layers.indices.contains(row) {
+            changed[layers[row]] = move.value[row]
+        }
+        withAnimation(.editorReorder(reduceMotion: reduceMotion)) {
+            // Layer rows never collapse, even when their last choice moves.
+            if save(changed) { drag.moveIdentity(from: move.source, to: move.destination, removesEmptyRows: false) }
+        }
     }
 
     /// Choices joined as they show on a key.
     static func summary(_ choices: [String]) -> String {
         choices.isEmpty ? "Off" : choices.map(symbolKeyPreview).joined(separator: " ")
-    }
-}
-
-/// Holding a choice drags it; dropping one on another puts it before it.
-private struct ChoiceDrag: ViewModifier {
-    let payload: String
-    let enabled: Bool
-    let drop: (String) -> Bool
-    func body(content: Content) -> some View {
-        if enabled {
-            content
-                .draggable(payload) { content.padding(4) }
-                .dropDestination(for: String.self) { items, _ in items.first.map(drop) ?? false }
-        } else {
-            content
-        }
     }
 }
 

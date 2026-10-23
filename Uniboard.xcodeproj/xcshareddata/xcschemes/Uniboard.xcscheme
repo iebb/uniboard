@@ -71,6 +71,11 @@
       </CommandLineArguments>
       <EnvironmentVariables>
          <EnvironmentVariable
+            key = "UNIBOARD_GOOGLE_FONT_DOWNLOAD_INTEGRATION"
+            value = "$(UNIBOARD_GOOGLE_FONT_DOWNLOAD_INTEGRATION)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "UNIBOARD_KEYBOARD_INTEGRATION"
             value = "$(UNIBOARD_KEYBOARD_INTEGRATION)"
             isEnabled = "YES">

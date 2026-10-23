@@ -153,7 +153,7 @@ struct BlockDetailView: View {
                 .accessibilityHint("Jump to another block")
                 .accessibilityIdentifier("blockNavigator")
                 .blockInfo(block, catalog: preferences.catalog, showsUCSUR: preferences.showsUCSUR)
-                CharacterGrid(characters: characters, onReachEnd: { if hasMore { loadMore() } }, select: select)
+                CharacterGrid(characters: characters, onReachEnd: { if hasMore { loadMore() } }, blockView: true, select: select)
                 if characters.isEmpty && !hasMore {
                     EmptyCollection(symbol: "square.dashed", title: "No Assigned Characters", message: block.name.contains("Surrogate") ? "Surrogate code points encode other characters and cannot be inserted on their own." : "This block has no assigned characters in the selected Unicode edition.")
                 }

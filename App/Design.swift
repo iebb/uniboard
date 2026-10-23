@@ -24,8 +24,14 @@ struct VersionRibbon: View {
     let version: String?
     var prefix = ""
     var labeled = true
+    /// Leg length of the unlabeled corner triangle.
+    var triangleSide: CGFloat = 10
     /// A ConScript character reads CSUR, its registry, rather than its Unicode age.
     var conscript = false
+
+    /// The unlabeled triangle grows with the tile's corner radius, so it stays
+    /// visible past the rounded corner: 18pt on 12pt tiles, 14pt on 8pt, 10pt on 4pt.
+    static func triangleSide(cornerRadius: CGFloat) -> CGFloat { max(10, cornerRadius + 6) }
 
     static let conscriptColor = Color.indigo
     static func color(for version: String?) -> Color {
@@ -55,10 +61,12 @@ struct VersionRibbon: View {
                 .accessibilityHidden(true)
         } else {
             Path { path in
-                path.move(to: .zero); path.addLine(to: CGPoint(x: 10, y: 0)); path.addLine(to: CGPoint(x: 10, y: 10))
+                path.move(to: .zero)
+                path.addLine(to: CGPoint(x: triangleSide, y: 0))
+                path.addLine(to: CGPoint(x: triangleSide, y: triangleSide))
             }
             .fill(color)
-            .frame(width: 10, height: 10)
+            .frame(width: triangleSide, height: triangleSide)
             .accessibilityHidden(true)
         }
     }
@@ -137,6 +145,50 @@ extension GridDensity {
     }
 }
 
+/// How the tile grid sizes its columns and marks each tile's version.
+enum TileGridLayout {
+    static let spacing: CGFloat = 8
+    static let minimumColumns = 2
+    /// Columns shown before the grid's width is known.
+    static let defaultMaximumColumns = 7
+    /// Pinching never makes tiles narrower than this.
+    static let minimumTileWidth: CGFloat = 32
+    /// Narrower tiles show a corner triangle instead of the labeled ribbon.
+    static let labeledRibbonMinimumWidth: CGFloat = 80
+    /// Narrower tiles leave out the code point and show only the glyph.
+    static let codePointMinimumWidth: CGFloat = 44
+
+    /// The most columns whose tiles stay at least `minimumTileWidth` wide in
+    /// `width`, and never fewer than `minimumColumns`.
+    static func maximumColumns(in width: CGFloat, spacing: CGFloat = spacing) -> Int {
+        guard width > 0 else { return defaultMaximumColumns }
+        let fitting = Int(((width + spacing) / (minimumTileWidth + spacing)).rounded(.down))
+        return max(minimumColumns, fitting)
+    }
+
+    /// The stored column preference, clamped to what fits `width`.
+    static func columns(stored: Int, in width: CGFloat, spacing: CGFloat = spacing) -> Int {
+        min(maximumColumns(in: width, spacing: spacing), max(minimumColumns, stored))
+    }
+
+    /// The width of one tile when `columns` tiles share `width`, or 0 when
+    /// the width is not known yet.
+    static func tileWidth(columns: Int, in width: CGFloat, spacing: CGFloat = spacing) -> CGFloat {
+        guard width > 0, columns > 0 else { return 0 }
+        return max(0, (width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
+    }
+
+    /// Block view and tiles under 80 points show only a corner triangle; an
+    /// unmeasured tile keeps the ribbon.
+    static func showsLabeledRibbon(tileWidth: CGFloat, blockView: Bool) -> Bool {
+        !blockView && (tileWidth <= 0 || tileWidth >= labeledRibbonMinimumWidth)
+    }
+
+    static func showsCodePoint(tileWidth: CGFloat) -> Bool {
+        tileWidth <= 0 || tileWidth >= codePointMinimumWidth
+    }
+}
+
 struct CharacterTile: View {
     let character: UnicodeCharacter
     @EnvironmentObject private var preferences: CatalogPreferences
@@ -148,6 +200,10 @@ struct CharacterTile: View {
     var showsName = true
     /// Square side for dense rows, measured from the available width.
     var side: CGFloat = 40
+    /// Measured width of a full tile, or 0 when unknown.
+    var tileWidth: CGFloat = 0
+    /// Block view marks the version with a corner triangle only.
+    var blockView = false
     var action: () -> Void
     @State private var hoverTask: Task<Void, Never>?
     private var ageText: String {
@@ -156,7 +212,9 @@ struct CharacterTile: View {
     }
     private var glyphSize: CGFloat {
         switch density {
-        case .three: return 32
+        case .three:
+            // Narrow tiles shrink the glyph to their width.
+            return tileWidth > 0 ? min(32, max(14, (tileWidth - 8) * 0.8)) : 32
         case .eight: return showsCodePoint ? 22 : 26
         case .sixteen, .thirtyTwo: return 15
         }
@@ -177,7 +235,10 @@ struct CharacterTile: View {
             .background(Color.previewSurface(missing: missing, ucsur: preferences.isUCSUR(character.codePoint)))
             .overlay(alignment: .topTrailing) {
                 if !density.isDense, character.category != "Cn" {
-                    VersionRibbon(version: character.age, labeled: density == .three, conscript: preferences.isUCSUR(character.codePoint))
+                    VersionRibbon(version: character.age,
+                                  labeled: density == .three && TileGridLayout.showsLabeledRibbon(tileWidth: tileWidth, blockView: blockView),
+                                  triangleSide: VersionRibbon.triangleSide(cornerRadius: cornerRadius),
+                                  conscript: preferences.isUCSUR(character.codePoint))
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -221,6 +282,7 @@ struct CharacterTile: View {
     @ViewBuilder private var content: some View {
         switch density {
         case .three:
+            let showsCode = TileGridLayout.showsCodePoint(tileWidth: tileWidth)
             VStack(spacing: 3) {
                 glyph.frame(height: 44)
                 if showsName {
@@ -230,13 +292,15 @@ struct CharacterTile: View {
                         .lineLimit(2).multilineTextAlignment(.center)
                         .frame(height: 28)
                 }
-                Text(character.codePointLabel)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1).minimumScaleFactor(0.6)
+                if showsCode {
+                    Text(character.codePointLabel)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: showsName ? 106 : 72)
+            .frame(height: showsName ? 106 : showsCode ? 72 : 52)
             .padding(.horizontal, 4)
         case .eight:
             VStack(spacing: 1) {
@@ -269,8 +333,11 @@ struct CharacterGrid: View {
     /// Tiles per row, shared by every tile grid; pinch to change it.
     @AppStorage("tileColumns") private var tileColumns = 3
     @State private var pinch: CGFloat = 1
+    /// The tile grid's own measured width, which caps its columns.
+    @State private var gridWidth: CGFloat = 0
+    /// Block view marks versions with a corner triangle only.
+    var blockView = false
     var select: (UnicodeCharacter) -> Void
-    static let tileColumnRange = 2...7
 
     var body: some View {
         if let density, density != .three, width > 0 {
@@ -299,28 +366,34 @@ struct CharacterGrid: View {
                 }
             }
         } else {
-            let columns = min(Self.tileColumnRange.upperBound, max(Self.tileColumnRange.lowerBound, tileColumns))
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
+            // A preference wider than this screen allows is clamped here and kept for wider screens.
+            let columns = TileGridLayout.columns(stored: tileColumns, in: gridWidth)
+            let tileWidth = TileGridLayout.tileWidth(columns: columns, in: gridWidth)
+            let spacing = TileGridLayout.spacing
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: spacing), count: columns), spacing: spacing) {
                 ForEach(characters) { character in
-                    tile(character, density: .three, side: 0, showsName: columns <= 4)
+                    tile(character, density: .three, side: 0, showsName: columns <= 4, tileWidth: tileWidth)
                         .onAppear { if character.id == characters.last?.id { onReachEnd?() } }
                 }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { gridWidth = $0 }
             .simultaneousGesture(MagnifyGesture()
                 .onChanged { pinch = $0.magnification }
                 .onEnded { _ in
-                    // Spreading the fingers zooms in to fewer, larger tiles.
+                    // Spreading the fingers zooms in to fewer, larger tiles,
+                    // down to the narrowest tiles this width allows.
                     let step = pinch > 1.15 ? -1 : pinch < 0.87 ? 1 : 0
-                    tileColumns = min(Self.tileColumnRange.upperBound, max(Self.tileColumnRange.lowerBound, columns + step))
+                    if step != 0 { tileColumns = TileGridLayout.columns(stored: columns + step, in: gridWidth) }
                     pinch = 1
                 })
             .animation(.snappy, value: columns)
         }
     }
 
-    private func tile(_ character: UnicodeCharacter, density: GridDensity, side: CGFloat, showsName: Bool = true) -> some View {
+    private func tile(_ character: UnicodeCharacter, density: GridDensity, side: CGFloat, showsName: Bool = true,
+                      tileWidth: CGFloat = 0) -> some View {
         CharacterTile(character: character, saved: store.isFavorite(character.codePoint), density: density,
-                      showsName: showsName, side: side) { select(character) }
+                      showsName: showsName, side: side, tileWidth: tileWidth, blockView: blockView) { select(character) }
     }
 }
 

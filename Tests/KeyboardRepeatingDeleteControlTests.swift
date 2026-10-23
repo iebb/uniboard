@@ -55,6 +55,36 @@ final class KeyboardRepeatingDeleteControlTests: XCTestCase {
         button.configure(isQuery: renderedIsQuery) { route.action(renderedMode: renderedMode, renderedIsQuery: renderedIsQuery) }
     }
 
+    func testToolbarDeleteTargetsHostWhileSearchIsFocusedAndStopsOnScopeChange() {
+        let clock = Clock()
+        let button = RepeatingDeleteButton(scheduleTimer: clock.schedule)
+        var current = KeyboardDeleteContext(modeIdentifier: UUID(), isQuery: true, documentIdentifier: UUID())
+        var host = "abcd"
+        var query = "arrow cat"
+        button.configure(isQuery: false) {
+            let bound = current // Capture search scope independently of the host destination.
+            return bound.guardedAction(currentContext: { current }, delete: { host.removeLast() })
+        }
+        XCTAssertEqual(button.accessibilityLabel, "Delete backward")
+        button.sendActions(for: .touchDown)
+        XCTAssertEqual(host, "abc")
+        clock.deliver(0)
+        XCTAssertEqual(host, "ab")
+        XCTAssertEqual(query, "arrow cat")
+        let lower = RepeatingDeleteButton()
+        lower.configure(isQuery: true) {
+            let bound = current
+            return bound.guardedAction(currentContext: { current }, delete: { query.removeLast() })
+        }
+        XCTAssertTrue(lower.accessibilityActivate())
+        XCTAssertEqual(query, "arrow ca")
+        XCTAssertEqual(host, "ab")
+        current = .init(modeIdentifier: UUID(), isQuery: false, documentIdentifier: current.documentIdentifier)
+        clock.deliver(1)
+        XCTAssertEqual(host, "ab", "A mode change must cancel the old held host action")
+        button.sendActions(for: .touchUpInside)
+    }
+
     func testRawTouchCompletionReleasesLatchAndRejectsQueuedRepeatsWithoutControlEvent() {
         for query in [false, true] {
             for cancelled in [false, true] {

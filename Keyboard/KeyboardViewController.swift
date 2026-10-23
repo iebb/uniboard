@@ -125,6 +125,7 @@ final class KeyboardViewController: UIInputViewController {
         // individual keys. Invalidate every captured input/hover action first.
         deleteInteractionID = UUID()
         model.symbolBoardManagerPresented = false
+        closePreviewImagePanel()
         KeyboardVariantButton.cancelInteractions(in: view)
         doubleSpaceState.reset()
         expectedHostEdit = nil
@@ -151,6 +152,65 @@ final class KeyboardViewController: UIInputViewController {
 
     private var currentDocumentIdentifier: UUID? {
         KeyboardDocumentIdentity.read(from: textDocumentProxy)
+    }
+
+    // MARK: Copy Image
+
+    /// Freezes exactly the excerpt the preview row is showing and renders it
+    /// once; later host edits never change what this panel copies.
+    /// The picture uses the remembered fixed sRGB colors, never the
+    /// keyboard's appearance, so light and dark keyboards copy the same PNG.
+    fileprivate func openPreviewImagePanel(excerpt: KeyboardPreviewExcerpt, availableWidth: CGFloat, visibleHeight: CGFloat) {
+        let choice = KeyboardImageColorStore.load()
+        if model.previewImageColors != choice { model.previewImageColors = choice }
+        let export = KeyboardPreviewImageExport.prepare(excerpt: excerpt, availableWidth: availableWidth,
+            visibleHeight: visibleHeight, colors: choice.colors, hasFullAccess: hasFullAccess)
+        model.previewImageThumbnail = export.image.flatMap { UIImage(data: $0.png, scale: $0.scale) }
+        model.previewImageExport = export
+    }
+
+    /// Re-renders the frozen excerpt in new colors and remembers the choice
+    /// (preset id and the two Custom colors only). Ignored while copying.
+    fileprivate func selectPreviewImageColors(_ choice: KeyboardImageColorChoice) {
+        guard let export = model.previewImageExport, export.phase != .copying else { return }
+        guard choice != model.previewImageColors else { return }
+        model.previewImageColors = choice
+        KeyboardImageColorStore.save(choice)
+        guard choice.colors != export.colors,
+              let recolored = export.recolored(choice.colors, hasFullAccess: hasFullAccess) else { return }
+        model.previewImageThumbnail = recolored.image.flatMap { UIImage(data: $0.png, scale: $0.scale) }
+        model.previewImageExport = recolored
+    }
+
+    /// Writes the frozen PNG only on this explicit request. A closed or
+    /// replaced panel never reaches the pasteboard afterwards.
+    fileprivate func copyPreviewImage() {
+        guard let export = model.previewImageExport, export.canCopy, let image = export.image else { return }
+        let id = export.id
+        model.previewImageExport?.phase = .copying
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.model.previewImageExport?.id == id,
+                  self.model.previewImageExport?.phase == .copying else { return }
+            switch KeyboardPreviewClipboard.write(image, to: .general, hasFullAccess: self.hasFullAccess) {
+            case .copied:
+                self.model.previewImageExport?.phase = .copied
+                UIAccessibility.post(notification: .announcement, argument: String(localized: "Image copied"))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                    guard let self, self.model.previewImageExport?.id == id,
+                          self.model.previewImageExport?.phase == .copied else { return }
+                    self.model.previewImageExport?.phase = .ready
+                }
+            case .fullAccessRequired:
+                self.model.previewImageExport?.phase = .fullAccessRequired
+            case .unavailable:
+                self.model.previewImageExport?.phase = .copyFailed
+            }
+        }
+    }
+
+    fileprivate func closePreviewImagePanel() {
+        if model.previewImageExport != nil { model.previewImageExport = nil }
+        if model.previewImageThumbnail != nil { model.previewImageThumbnail = nil }
     }
 
     /// The host's text either side of the caret, when the preview row shows it.
@@ -559,7 +619,10 @@ final class KeyboardViewController: UIInputViewController {
         guard literalWriteToken == nil, renderedMode == model.inputModeID, !model.hasSymbolBoardOverlay,
               let document = currentDocumentIdentifier else { return { false } }
         let interactionID = deleteInteractionID
-        let context = KeyboardDeleteContext(modeIdentifier: renderedMode, isQuery: isQuery, documentIdentifier: document)
+        // Search focus scopes the lifetime of the press, not its destination.
+        // The toolbar always targets the host; only the lower query key edits search.
+        guard !isQuery || model.isSearching else { return { false } }
+        let context = KeyboardDeleteContext(modeIdentifier: renderedMode, isQuery: model.isSearching, documentIdentifier: document)
         return context.guardedAction(currentContext: { [weak self] in
             guard let self, self.literalWriteToken == nil, !self.model.hasSymbolBoardOverlay, self.deleteInteractionID == interactionID,
                   let document = self.currentDocumentIdentifier else { return nil }
@@ -837,6 +900,13 @@ private final class KeyboardModel: ObservableObject {
     /// The host's text either side of the caret, for the text preview row.
     @Published var hostTextBefore = ""
     @Published var hostTextAfter = ""
+    /// The open Copy Image panel: a frozen excerpt of the visible preview and
+    /// its rendered picture. Nil when closed; never persisted or logged.
+    @Published var previewImageExport: KeyboardPreviewImageExport?
+    @Published var previewImageThumbnail: UIImage?
+    /// The Copy Image colors; loaded from and saved to the keyboard's own
+    /// defaults as a preset id and two colors.
+    @Published var previewImageColors = KeyboardImageColorChoice.default
     @Published private(set) var symbolPagesToolbarVisible: Bool?
     var showsUnicodeToolbar: Bool { symbolPagesToolbarVisible ?? (showsUnicode || (showsSymbolBar && searchBarInsteadOfSymbols)) }
     @Published private(set) var results: [UnicodeCharacter] = []
@@ -1413,6 +1483,233 @@ private struct KeyboardTray: View {
     }
 }
 
+/// The preview-only checkerboard behind transparent areas. Never exported.
+private struct KeyboardCheckerboard: View {
+    let tones: (KeyboardImageRGB, KeyboardImageRGB)
+    var square: CGFloat = 8
+
+    var body: some View {
+        Canvas { context, size in
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(cgColor: tones.0.cgColor)))
+            var path = Path()
+            let columns = Int((size.width / square).rounded(.up)), rows = Int((size.height / square).rounded(.up))
+            for row in 0..<max(0, rows) {
+                for column in 0..<max(0, columns) where (row + column) % 2 == 1 {
+                    path.addRect(CGRect(x: CGFloat(column) * square, y: CGFloat(row) * square, width: square, height: square))
+                }
+            }
+            context.fill(path, with: .color(Color(cgColor: tones.1.cgColor)))
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The rendered picture in its chosen colors, over a checkerboard where it
+/// is transparent. Changing colors cross-fades unless Reduce Motion is on.
+private struct PreviewImageThumbnailPicture: View {
+    let image: UIImage
+    let colors: KeyboardImageColors
+    let size: CGSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            ZStack {
+                if colors.isTransparent { KeyboardCheckerboard(tones: colors.checkerboardTones) }
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.high)
+            }
+            .frame(width: size.width, height: size.height)
+            .id(colors)
+            .transition(reduceMotion ? .identity : .opacity)
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: colors)
+    }
+}
+
+/// Copy Image colors: the caption, five preset chips and, for Custom, the
+/// Text and Background swatch lines plus any readability caution.
+private struct PreviewImageColorsSection: View {
+    let choice: KeyboardImageColorChoice
+    let enabled: Bool
+    let select: (KeyboardImageColorChoice) -> Void
+    @Environment(\.displayScale) private var displayScale
+
+    private var hairline: CGFloat { 1 / max(1, displayScale) }
+    private var separator: Color { Color(uiColor: .separator) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(verbatim: KeyboardImageColorCopy.caption(choice))
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(KeyboardImageColorPreset.allCases) { chip($0) }
+                    }
+                    // 4pt clearance on every side inside the scroll content, so the
+                    // selection ring outside each chip is never clipped by the row.
+                    .padding(4)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text(verbatim: KeyboardImageColorCopy.groupLabel))
+            .accessibilityIdentifier("keyboard.previewImage.colors")
+            if choice.preset == .custom {
+                VStack(alignment: .leading, spacing: 8) {
+                    swatchLine(KeyboardImageColorCopy.textLine,
+                               items: KeyboardImagePalette.colors.map { KeyboardImageBackground.color($0.rgb) },
+                               selected: .color(choice.customText), identifier: "text") { background in
+                        guard case .color(let rgb) = background else { return }
+                        var next = choice
+                        next.customText = rgb
+                        select(next)
+                    }
+                    swatchLine(KeyboardImageColorCopy.backgroundLine, items: KeyboardImagePalette.backgrounds,
+                               selected: choice.customBackground, identifier: "background") { background in
+                        var next = choice
+                        next.customBackground = background
+                        select(next)
+                    }
+                }
+            }
+            if let note = KeyboardImageColorCopy.readabilityNote(choice.colors.readability) {
+                Label {
+                    Text(verbatim: note).fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.circle")
+                }
+                .font(.footnote).foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("keyboard.previewImage.readability")
+            }
+        }
+        .disabled(!enabled)
+    }
+
+    private func chip(_ preset: KeyboardImageColorPreset) -> some View {
+        let selected = choice.preset == preset
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return Button {
+            var next = choice
+            next.preset = preset
+            select(next)
+        } label: {
+            ZStack {
+                if let colors = preset.fixedColors {
+                    switch colors.background {
+                    case .transparent: KeyboardCheckerboard(tones: colors.checkerboardTones)
+                    case .color(let rgb): Color(cgColor: rgb.cgColor)
+                    }
+                    // Fixed size: the caption above carries the name.
+                    Text(verbatim: "Aa").font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color(cgColor: colors.text.cgColor))
+                } else {
+                    Color(uiColor: .tertiarySystemFill)
+                    Image(systemName: "paintpalette").font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(Color(uiColor: .label))
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(separator, lineWidth: hairline))
+            .overlay {
+                if selected {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(KeyboardPalette.accent, lineWidth: 2)
+                        .padding(-4)
+                }
+            }
+            .contentShape(shape)
+        }
+        .buttonStyle(KeyboardPressStyle())
+        .accessibilityLabel(Text(verbatim: preset.accessibilityLabel))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("keyboard.previewImage.colors.\(preset.rawValue)")
+    }
+
+    private func swatchLine(_ title: String, items: [KeyboardImageBackground], selected: KeyboardImageBackground,
+                            identifier: String, pick: @escaping (KeyboardImageBackground) -> Void) -> some View {
+        HStack(spacing: 8) {
+            Text(verbatim: title).font(.footnote).foregroundStyle(.secondary)
+                .fixedSize()
+                .frame(minWidth: 76, alignment: .leading)
+                .accessibilityHidden(true)
+            ScrollView(.horizontal) {
+                HStack(spacing: 0) {
+                    ForEach(items, id: \.storedValue) { item in
+                        swatch(item, isSelected: item == selected, line: title, identifier: identifier) { pick(item) }
+                    }
+                }
+                // Same 4pt ring clearance as the chip row.
+                .padding(4)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func swatch(_ item: KeyboardImageBackground, isSelected: Bool, line: String, identifier: String,
+                        action: @escaping () -> Void) -> some View {
+        let name = KeyboardImagePalette.name(of: item)
+        return Button(action: action) {
+            ZStack {
+                switch item {
+                case .transparent: KeyboardCheckerboard(tones: KeyboardImageColors.checkerboardTones(forText: .black), square: 7)
+                case .color(let rgb): Color(cgColor: rgb.cgColor)
+                }
+            }
+            .frame(width: 28, height: 28)
+            .clipShape(Circle())
+            .overlay(Circle().strokeBorder(separator, lineWidth: hairline))
+            .overlay {
+                if isSelected {
+                    Circle().strokeBorder(KeyboardPalette.accent, lineWidth: 2).frame(width: 36, height: 36)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(KeyboardPressStyle())
+        .accessibilityLabel(Text(verbatim: String(localized: "\(line), \(name)")))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("keyboard.previewImage.\(identifier).\(item.storedValue)")
+    }
+}
+
+/// Caps the height offered to its content without growing to the cap the way
+/// `.frame(maxHeight:)` does: short content keeps its own height, taller content
+/// is offered at most `cap` (so a `ViewThatFits` inside picks its scrolling form).
+private struct PreviewImageHeightCap: ViewModifier {
+    let cap: CGFloat
+
+    func body(content: Content) -> some View {
+        CapLayout(cap: cap) { content }
+    }
+
+    private struct CapLayout: Layout {
+        let cap: CGFloat
+
+        private func capped(_ proposal: ProposedViewSize) -> ProposedViewSize {
+            ProposedViewSize(width: proposal.width, height: min(proposal.height ?? cap, cap))
+        }
+
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+            guard let subview = subviews.first else { return .zero }
+            let size = subview.sizeThatFits(capped(proposal))
+            return CGSize(width: size.width, height: min(size.height, cap))
+        }
+
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+            subviews.first?.place(at: bounds.origin, anchor: .topLeading,
+                                  proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+        }
+    }
+}
+
 private struct KeyboardPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -1492,12 +1789,19 @@ private struct UnicodeKeyboardView: View {
             .padding(.horizontal, 8)
             .padding(.top, 4)
             .padding(.bottom, 6)
-            .allowsHitTesting(!model.hasSymbolBoardOverlay)
-            .accessibilityHidden(model.hasSymbolBoardOverlay)
+            .allowsHitTesting(!model.hasSymbolBoardOverlay && model.previewImageExport == nil)
+            .accessibilityHidden(model.hasSymbolBoardOverlay || model.previewImageExport != nil)
 
         }
         .accessibilityElement(children: .contain)
         .background(KeyboardTray().ignoresSafeArea())
+        .overlay {
+            // Copy Image stays inside the keyboard's own bounds, over its keys.
+            if let export = model.previewImageExport {
+                previewImagePanel(export).transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: model.previewImageExport?.id)
         .overlay(alignment: .top) {
             if let message = model.symbolBoardActionError {
                 HStack(spacing: 8) {
@@ -1562,7 +1866,7 @@ private struct UnicodeKeyboardView: View {
             panelButton
             if model.showsUnicode { sectionMenu }
             // A single fixed trailing key in search, browsing and inspection.
-            RepeatingDeleteKey(action: delete, isQuery: model.isSearching, route: model.inputModeID,
+            RepeatingDeleteKey(action: delete, isQuery: false, route: model.inputModeID,
                 enabled: model.showsUnicodeToolbar && !model.hasSymbolBoardOverlay)
                 .frame(width: 42, height: headerHeight)
                 .keyboardControlSurface()
@@ -1683,30 +1987,259 @@ private struct UnicodeKeyboardView: View {
 
     /// The host's text around the caret, each character in the font Uniboard
     /// would preview it with, so Private Use and unsupported characters show
-    /// as this keyboard draws them.
+    /// as this keyboard draws them. The row draws exactly the measured
+    /// excerpt, so Copy Image can freeze what is visible and nothing more.
     private var textPreviewRow: some View {
-        HStack(spacing: 0) {
-            Text(previewText(model.hostTextBefore)).lineLimit(1).truncationMode(.head).layoutPriority(1)
-            Rectangle().fill(KeyboardPalette.accent).frame(width: 2, height: 22)
-            Text(previewText(model.hostTextAfter)).lineLimit(1).truncationMode(.tail)
-            Spacer(minLength: 0)
+        GeometryReader { geometry in
+            let textWidth = max(0, geometry.size.width - KeyboardTextPreviewLayout.actionsButtonWidth)
+            let excerpt = KeyboardTextPreviewLayout.excerpt(before: model.hostTextBefore, after: model.hostTextAfter,
+                                                            availableWidth: textWidth)
+            HStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    Text(previewText(excerpt.before)).lineLimit(1).fixedSize()
+                    Rectangle().fill(KeyboardPalette.accent).frame(width: KeyboardTextPreviewLayout.caretWidth, height: 22)
+                    Text(previewText(excerpt.after)).lineLimit(1).fixedSize()
+                    Spacer(minLength: 0)
+                }
+                .frame(width: textWidth, height: geometry.size.height, alignment: .leading)
+                .clipped()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Text preview")
+                .accessibilityValue(model.hostTextBefore + model.hostTextAfter)
+                .accessibilityIdentifier("keyboard.textPreview")
+                Button {
+                    controller?.openPreviewImagePanel(excerpt: excerpt, availableWidth: textWidth,
+                                                      visibleHeight: geometry.size.height)
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(KeyboardPalette.accent)
+                        .frame(width: KeyboardTextPreviewLayout.actionsButtonWidth, height: max(44, geometry.size.height))
+                        .frame(height: geometry.size.height)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(KeyboardPressStyle())
+                .disabled(model.previewImageExport != nil)
+                .accessibilityLabel("Preview actions")
+                .accessibilityIdentifier("keyboard.textPreview.actions")
+            }
         }
-        .padding(.horizontal, 10)
+        .padding(.leading, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(KeyboardPalette.key.opacity(0.55), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Text preview")
-        .accessibilityValue(model.hostTextBefore + model.hostTextAfter)
-        .accessibilityIdentifier("keyboard.textPreview")
+        // Always before, caret, after from the left, the order Copy Image renders.
+        .environment(\.layoutDirection, .leftToRight)
     }
     private func previewText(_ text: String) -> AttributedString {
         var result = AttributedString()
         for character in text {
             var run = AttributedString(String(character))
-            run.font = Font(UnicodeFontSupport.font(for: String(character), size: 18, enabled: true))
+            run.font = Font(KeyboardTextPreviewLayout.font(for: String(character)))
             result += run
         }
         return result
+    }
+
+    /// A compact panel over the keys: the frozen picture, what it contains,
+    /// and one explicit Copy Image action. Outside taps and Close dismiss it.
+    private func previewImagePanel(_ export: KeyboardPreviewImageExport) -> some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.18)
+                    .contentShape(Rectangle())
+                    .onTapGesture { controller?.closePreviewImagePanel() }
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        Text("Text preview").font(.headline)
+                            .accessibilityAddTraits(.isHeader)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button { controller?.closePreviewImagePanel() } label: {
+                            Image(systemName: "xmark").font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(KeyboardPressStyle())
+                        .accessibilityLabel("Close")
+                        .accessibilityIdentifier("keyboard.previewImage.close")
+                    }
+                    .frame(height: 44)
+                    .layoutPriority(2)
+                    // Larger text scrolls inside the keyboard; the header with Close
+                    // stays pinned above and the action stays pinned below.
+                    ViewThatFits(in: .vertical) {
+                        previewImagePanelBody(export)
+                        ScrollView(.vertical) { previewImagePanelBody(export) }
+                    }
+                    // The action is laid out first, so it never falls off the keyboard.
+                    previewImagePanelFooter(export, availableHeight: geometry.size.height)
+                        .layoutPriority(1)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+                .padding(.top, 4)
+                .frame(width: max(0, min(geometry.size.width - 16, 360)))
+                .background(Color(uiColor: .secondarySystemGroupedBackground),
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("keyboard.previewImage.panel")
+                .padding(.vertical, 4)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+
+    private func previewImagePanelBody(_ export: KeyboardPreviewImageExport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            previewImageThumbnail(export)
+                .accessibilitySortPriority(6)
+            if export.image != nil {
+                PreviewImageColorsSection(choice: model.previewImageColors, enabled: export.phase != .copying) {
+                    controller?.selectPreviewImageColors($0)
+                }
+                .accessibilitySortPriority(5)
+            }
+            Text(verbatim: previewImageExplanation(export))
+                .font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilitySortPriority(3)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    /// The pinned bottom of the panel: any notice that belongs with the action,
+    /// then the action itself (Copy Image, or OK when copying isn't possible).
+    private func previewImagePanelFooter(_ export: KeyboardPreviewImageExport, availableHeight: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let notice = previewImageNotice(export.phase) {
+                // A long notice at large text sizes scrolls on its own rather than
+                // pushing the action off the keyboard or crowding out the picture.
+                ViewThatFits(in: .vertical) {
+                    previewImageNoticeLabel(notice)
+                    ScrollView(.vertical) { previewImageNoticeLabel(notice) }
+                }
+                .modifier(PreviewImageHeightCap(cap: max(44, availableHeight * 0.35)))
+                .accessibilitySortPriority(2)
+            }
+            previewImagePrimaryAction(export)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+                .accessibilitySortPriority(1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func previewImageNoticeLabel(_ notice: PreviewImageNotice) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(notice.title).font(.footnote.weight(.semibold))
+                Text(notice.body).font(.footnote)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle")
+        }
+        .foregroundStyle(notice.isError ? Color(uiColor: .systemRed) : Color.secondary)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("keyboard.previewImage.message")
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The base explanation, then the color sentences that apply to this picture.
+    private func previewImageExplanation(_ export: KeyboardPreviewImageExport) -> String {
+        let base = String(localized: "Copies only the text shown here as a picture. Paste into apps that accept images. The text in the picture isn’t editable.")
+        guard let image = export.image else { return base }
+        return base + KeyboardImageColorCopy.explanationSuffix(colors: image.colors,
+                                                               containsColorGlyphs: image.containsColorGlyphs)
+    }
+
+    @ViewBuilder private func previewImageThumbnail(_ export: KeyboardPreviewImageExport) -> some View {
+        let neutral = Color(uiColor: .tertiarySystemFill)
+        if let image = model.previewImageThumbnail, let rendered = export.image {
+            let size = rendered.pointSize
+            ScrollView(size.height > 96 ? [.horizontal, .vertical] : .horizontal) {
+                PreviewImageThumbnailPicture(image: image, colors: rendered.colors, size: size)
+                    .frame(minHeight: 48)
+            }
+            .scrollIndicators(.automatic)
+            .frame(maxWidth: .infinity)
+            .frame(height: min(96, max(48, size.height)))
+            .background(neutral, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Image preview of visible text")
+            .accessibilityValue(rendered.accessibilityValue)
+            .accessibilityAddTraits(.isImage)
+            .accessibilityIdentifier("keyboard.previewImage.thumbnail")
+        } else if export.phase == .empty {
+            Text("Show some text in the preview to copy an image.")
+                .font(.footnote).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(neutral, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityIdentifier("keyboard.previewImage.empty")
+        }
+    }
+
+    private struct PreviewImageNotice { let title: LocalizedStringKey; let body: LocalizedStringKey; let isError: Bool }
+
+    private func previewImageNotice(_ phase: KeyboardPreviewImageExport.Phase) -> PreviewImageNotice? {
+        switch phase {
+        case .renderFailed, .copyFailed:
+            return PreviewImageNotice(title: "Couldn’t copy image", body: "Try again. Your text hasn’t changed.", isError: true)
+        case .fullAccessRequired:
+            return PreviewImageNotice(title: "Image copying unavailable",
+                body: "To copy images, allow Full Access for Uniboard in your keyboard settings. You can still type without it.",
+                isError: false)
+        case .ready, .empty, .copying, .copied:
+            return nil
+        }
+    }
+
+    @ViewBuilder private func previewImagePrimaryAction(_ export: KeyboardPreviewImageExport) -> some View {
+        switch export.phase {
+        case .fullAccessRequired, .renderFailed:
+            Button { controller?.closePreviewImagePanel() } label: {
+                Text("OK").font(.system(size: 17, weight: .semibold))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("keyboard.previewImage.ok")
+        default:
+            Button { controller?.copyPreviewImage() } label: {
+                Group {
+                    switch export.phase {
+                    case .copying:
+                        Label { Text("Creating image…") } icon: { ProgressView() }
+                    case .copied:
+                        Label("Image copied", systemImage: "checkmark")
+                    case .copyFailed:
+                        Label("Try Again", systemImage: "arrow.clockwise")
+                    default:
+                        Label("Copy Image", systemImage: "photo.on.rectangle")
+                    }
+                }
+                .font(.system(size: 17, weight: .semibold))
+                .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!export.canCopy)
+            .accessibilityLabel(export.phase == .ready || export.phase == .empty
+                ? Text("Copy preview as image") : Text(previewImageActionTitle(export.phase)))
+            .accessibilityHint(export.phase == .ready ? Text("Copies only the text shown in this preview, not the whole document.") : Text(""))
+            .accessibilityIdentifier("keyboard.previewImage.copy")
+        }
+    }
+
+    private func previewImageActionTitle(_ phase: KeyboardPreviewImageExport.Phase) -> LocalizedStringKey {
+        switch phase {
+        case .copying: return "Creating image…"
+        case .copied: return "Image copied"
+        case .copyFailed: return "Try Again"
+        default: return "Copy Image"
+        }
     }
 
     @ViewBuilder private var searchResultStrip: some View {
@@ -2242,7 +2775,7 @@ private struct UnicodeKeyboardView: View {
             searchKeyRow(Array("1234567890").map(String.init), rowHeight: rowHeight)
             searchKeyRow(Array("qwertyuiop").map(String.init), rowHeight: rowHeight)
             searchKeyRow(Array("asdfghjkl").map(String.init), rowHeight: rowHeight, inset: 10)
-            searchKeyRow(["+", "z", "x", "c", "v", "b", "n", "m", ":", "-"], rowHeight: rowHeight, includeDelete: true)
+            searchKeyRow(KeyboardQueryPolicy.bottomRow, rowHeight: rowHeight, includeDelete: true)
         }
     }
     private func searchKeyRow(_ keys: [String], rowHeight: CGFloat, inset: CGFloat = 0, includeDelete: Bool = false) -> some View {

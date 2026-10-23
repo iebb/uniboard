@@ -43,6 +43,24 @@ struct CharacterDetailView: View {
 
                     actions
 
+                    NavigationLink {
+                        CharacterFontsView(text: character.text, characterName: character.name)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("View Fonts").font(.headline)
+                                Text("Compare fonts available to Uniboard.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                        }
+                        .padding(16)
+                        .background(Color.groupedSurface, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("characterFonts.open")
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text(characterDescription)
                             .frame(maxWidth: .infinity, alignment: .leading)

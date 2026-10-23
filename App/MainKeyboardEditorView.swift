@@ -15,6 +15,12 @@ struct MainKeyboardEditorView: View {
     @State private var selection: Selection?
     @State private var width: CGFloat = 300
     @State private var failed = false
+    @StateObject private var drag = EditorDragSession()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Namespace private var motion
+    /// What a drag lifted from; any other arrangement refuses its drop.
+    private var dragFingerprint: String { alphabet.id + "|" + arrangement.layout + "|" + arrangement.keys.joined(separator: "\u{1F}") }
     private let spacing: CGFloat = 5
     private let digits = Array("1234567890").map(String.init)
 
@@ -27,7 +33,11 @@ struct MainKeyboardEditorView: View {
     }
     private var places: Layout { arrangement.places ?? Layout(rows: []) }
     private var keyWidth: CGFloat { Arrangement.keyWidth(for: arrangement.rows, available: width, spacing: spacing) }
-    private var position: Layout.Position? { if case .place(let position) = selection { return position }; return nil }
+    /// The selected place while it is on an item of the keyboard as it is now.
+    private var position: Layout.Position? {
+        if case .place(let position) = selection { return EditorReorder.selection(position, in: places) }
+        return nil
+    }
     /// The key in a place, by name.
     private func key(at position: Layout.Position) -> String? {
         places.keyIndex(at: position).flatMap { arrangement.keys.indices.contains($0) ? arrangement.keys[$0] : nil }
@@ -48,14 +58,14 @@ struct MainKeyboardEditorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if preferences.alphabets.count > 1 {
-                        Picker("Layout", selection: Binding(get: { alphabet.id }, set: { alphabetID = $0; selection = nil })) {
+                        Picker("Layout", selection: Binding(get: { alphabet.id }, set: { drag.reset(); alphabetID = $0; selection = nil })) {
                             ForEach(preferences.alphabets) { Text($0.nativeName).tag($0.id) }
                         }
                         .pickerStyle(.segmented)
                         .accessibilityIdentifier("mainKeyboard.layout")
                     }
                     canvas
-                    if let descriptor { layers(descriptor) }
+                    if let descriptor { layers(descriptor).disabled(drag.source != nil) }
                     if failed {
                         Text("This arrangement could not be saved.").font(.footnote).foregroundStyle(.red)
                             .accessibilityIdentifier("mainKeyboard.error")
@@ -67,7 +77,7 @@ struct MainKeyboardEditorView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = max(0, $0 - 32 - 16) }
             .background(Color(.systemGroupedBackground))
             Divider()
-            controls.padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
+            controls.disabled(drag.source != nil).padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
         }
         .navigationTitle("Keyboard")
         .navigationBarTitleDisplayMode(.inline)
@@ -82,10 +92,14 @@ struct MainKeyboardEditorView: View {
                     .disabled(keys.snapshot.arrangement(for: alphabet.id) == nil)
                     .accessibilityIdentifier("mainKeyboard.reset")
                 } label: { Image(systemName: "ellipsis.circle") }
+                .disabled(drag.source != nil)
                 .accessibilityLabel("More").accessibilityIdentifier("mainKeyboard.more")
             }
         }
-        .onAppear { keys.refresh() }
+        .onAppear { keys.refresh(); drag.fit(rowCounts: places.rows.map(\.count)) }
+        .onDisappear { drag.reset() }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { drag.reset() } }
+        .onChange(of: dragFingerprint) { _, _ in drag.reset(); drag.fit(rowCounts: places.rows.map(\.count)) }
     }
 
     private var canvas: some View {
@@ -98,7 +112,13 @@ struct MainKeyboardEditorView: View {
             }
             ForEach(places.rows.indices, id: \.self) { row in
                 HStack(spacing: spacing) {
-                    ForEach(places.rows[row].indices, id: \.self) { index in place(Layout.Position(row: row, index: index)) }
+                    ForEach(places.rows[row].indices.map { index in
+                        let position = Layout.Position(row: row, index: index)
+                        return EditorTilePosition(id: tileIdentity(position), position: position)
+                    }) { entry in
+                        place(entry.position)
+                            .matchedGeometryEffect(id: entry.id, in: motion)
+                    }
                 }
             }
         }
@@ -109,29 +129,48 @@ struct MainKeyboardEditorView: View {
         .accessibilityIdentifier("mainKeyboard.keys")
     }
 
+    /// Keys animate by name; gaps by their tracked identity.
+    private func tileIdentity(_ position: Layout.Position) -> String {
+        key(at: position).map { "key:" + $0 } ?? drag.tileID(position)
+    }
+
     @ViewBuilder private func place(_ position: Layout.Position) -> some View {
         let item = places.rows[position.row][position.index]
         let selected = selection == .place(position)
-        if item == .key, let key = key(at: position) {
-            tile(key, selected: selected, width: Arrangement.width(of: .key(key), keyWidth: keyWidth, spacing: spacing)) {
-                selection = selected ? nil : .place(position)
+        let active = drag.source == position
+        let current = arrangement, currentAlphabet = self.alphabet
+        EditorDragSurface(session: drag, position: position, fingerprint: dragFingerprint,
+                          currentFingerprint: { dragFingerprint },
+                          draggable: EditorReorder.canDragMainKeyboardItem(at: position, in: current),
+                          accepts: { EditorReorder.mainKeyboard(current, from: $0, to: position, alphabet: currentAlphabet) != nil },
+                          commit: { drop($0, at: position) }) {
+            if item == .key, let key = key(at: position) {
+                tile(key, selected: selected && !active, width: Arrangement.width(of: .key(key), keyWidth: keyWidth, spacing: spacing)) {
+                    guard !drag.isDragging else { return }
+                    selection = selected ? nil : .place(position)
+                }
+                .accessibilityIdentifier("mainKeyboard.key.\(Arrangement.isFunction(key) ? key : KeyboardKeySettings.identifier(forCharacter: key) ?? key)")
+            } else {
+                let cell: Arrangement.Cell = item == .halfGap ? .halfGap : .gap
+                Button { if !drag.isDragging { selection = selected ? nil : .place(position) } } label: {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(selected ? Color.accentColor : Color.secondary.opacity(0.5),
+                                      style: StrokeStyle(lineWidth: selected ? 2.5 : 1, dash: selected ? [] : [3, 3]))
+                        .frame(width: Arrangement.width(of: cell, keyWidth: keyWidth, spacing: spacing), height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item == .halfGap ? "Half-width gap" : "Full-width gap")
+                .accessibilityIdentifier("mainKeyboard.gap.\(position.row).\(position.index)")
             }
-            .draggable("\(position.row),\(position.index)") { Text(Self.label(key)).font(.title2).padding(8) }
-            .dropDestination(for: String.self) { items, _ in drop(items, at: position) }
-            .accessibilityIdentifier("mainKeyboard.key.\(Arrangement.isFunction(key) ? key : KeyboardKeySettings.identifier(forCharacter: key) ?? key)")
-        } else {
-            let cell: Arrangement.Cell = item == .halfGap ? .halfGap : .gap
-            Button { selection = selected ? nil : .place(position) } label: {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(selected ? Color.accentColor : Color.secondary.opacity(0.5),
-                                  style: StrokeStyle(lineWidth: selected ? 2.5 : 1, dash: selected ? [] : [3, 3]))
-                    .frame(width: Arrangement.width(of: cell, keyWidth: keyWidth, spacing: spacing), height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .dropDestination(for: String.self) { items, _ in drop(items, at: position) }
-            .accessibilityLabel(item == .halfGap ? "Half-width gap" : "Full-width gap")
-            .accessibilityIdentifier("mainKeyboard.gap.\(position.row).\(position.index)")
+        }
+        .opacity(active ? 0.35 : 1)
+        .animation(.editorFade(0.12, reduceMotion: reduceMotion), value: active)
+        // Centred in the gap before the place; inside the canvas at a row's start.
+        .overlay(alignment: .leading) {
+            EditorInsertionMark().offset(x: position.index == 0 ? 0 : -(spacing / 2 + 2))
+                .opacity(drag.target == position ? 1 : 0)
+                .animation(.editorFade(0.08, reduceMotion: reduceMotion), value: drag.target == position)
         }
     }
 
@@ -152,9 +191,8 @@ struct MainKeyboardEditorView: View {
                 } else {
                     Text(symbolKeyPreview(shown)).font(.system(size: 22)).minimumScaleFactor(0.4).lineLimit(1).padding(2)
                 }
-                if selected {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.accentColor, lineWidth: 2.5)
-                }
+                // Hidden from the moment a drag lifts, so its preview never shows it.
+                if selected { EditorSelectionBorder(cornerRadius: 7) }
             }
             .frame(width: width ?? keyWidth, height: 44)
             .contentShape(Rectangle())
@@ -203,7 +241,9 @@ struct MainKeyboardEditorView: View {
                 return keys.save(value.map { [$0] }, keyID: descriptor.id, gesture: .tap, replacing: original)
             })
         }, save: { changed in
-            keys.save(layers: changed.mapValues { Optional($0) }, keyID: descriptor.id)
+            let saved = keys.save(layers: changed.mapValues { Optional($0) }, keyID: descriptor.id)
+            failed = !saved
+            return saved
         })
     }
 
@@ -310,22 +350,53 @@ struct MainKeyboardEditorView: View {
         save(Arrangement(keys: order, layout: places.text), select: next)
     }
 
+    /// The arrow buttons: the VoiceOver and Switch Control way to move.
     private func move(from source: Layout.Position, to destination: Layout.Position, select next: Layout.Position?) {
-        var places = places, order = arrangement.keys
-        var keyMove: Layout.KeyMove?
-        guard places.move(from: source, to: destination, keyMove: &keyMove) else { return }
-        if let keyMove { order.move(fromOffsets: [keyMove.from], toOffset: keyMove.to > keyMove.from ? keyMove.to + 1 : keyMove.to) }
-        save(Arrangement(keys: order, layout: places.text), select: next.map { .place($0) })
+        guard let move = EditorReorder.mainKeyboard(arrangement, from: source, to: destination, alphabet: alphabet) else { return }
+        let label = key(at: source).map(Self.label) ?? String(localized: "Gap")
+        guard commit(move, select: { _ in next.map { Selection.place($0) } }) else { return }
+        if let next {
+            UIAccessibility.post(notification: .announcement,
+                                 argument: String(localized: "Moved \(label) to row \(next.row + 1), place \(next.index + 1)"))
+        }
     }
 
-    /// A dragged key lands before the place it is dropped on.
-    private func drop(_ items: [String], at destination: Layout.Position) -> Bool {
-        let parts = items.first?.split(separator: ",").compactMap { Int($0) } ?? []
-        guard parts.count == 2 else { return false }
-        let source = Layout.Position(row: parts[0], index: parts[1])
-        guard source != destination else { return false }
-        move(from: source, to: destination, select: nil)
-        return !failed
+    /// A drop: computed once from the saved arrangement, saved once. Hover
+    /// never gets here, and a refused or unchanged drop saves nothing.
+    private func drop(_ source: Layout.Position, at destination: Layout.Position) {
+        guard EditorReorder.canDragMainKeyboardItem(at: source, in: arrangement),
+              let move = EditorReorder.mainKeyboard(arrangement, from: source, to: destination, alphabet: alphabet),
+              move.changesValue else { return }
+        // Selection follows the item it was on, not its old row and place.
+        let selected = position.flatMap(drag.identity(at:))
+        let kept = selection
+        commit(move) { identities in
+            guard case .place = kept else { return kept }
+            return selected.flatMap(identities).map { Selection.place($0) }
+        }
+    }
+
+    /// Saves a computed move through the store, animating the settle. Nothing
+    /// else changes unless it saved, so a failed save leaves the old keys.
+    @discardableResult
+    private func commit(_ move: EditorReorder.Move<Arrangement>, select: ((Int) -> Layout.Position?) -> Selection?) -> Bool {
+        // Only a place on the saved keyboard is selected; never one past a row's end.
+        let next = move.value.places ?? Layout(rows: [])
+        func valid(_ choice: Selection?) -> Selection? {
+            guard case .place(let place) = choice else { return choice }
+            return EditorReorder.selection(place, in: next).map { Selection.place($0) }
+        }
+        guard move.changesValue else { selection = valid(select { drag.position(ofIdentity: $0) }); return true }
+        var saved = false
+        withAnimation(.editorReorder(reduceMotion: reduceMotion)) {
+            failed = !keys.saveArrangement(move.value, alphabetID: alphabet.id)
+            saved = !failed
+            if saved {
+                drag.moveIdentity(from: move.source, to: move.destination, removesEmptyRows: true)
+                selection = valid(select { drag.position(ofIdentity: $0) })
+            }
+        }
+        return saved
     }
 
     private func save(_ next: Arrangement, select: Selection?) {
@@ -340,4 +411,350 @@ extension Color {
         traits.userInterfaceStyle == .dark ? UIColor(red: 0.27, green: 0.29, blue: 0.33, alpha: 1)
             : UIColor(red: 0.68, green: 0.70, blue: 0.74, alpha: 1)
     })
+}
+
+// MARK: - Local editor drag sessions
+
+/// One editor's drag: which item is lifted and where the insertion line is,
+/// plus stable tile identities. It never holds or writes the arrangement; the
+/// rules live in `EditorDragState` and `EditorReorder`.
+final class EditorDragSession: ObservableObject {
+    typealias Position = SymbolPageLayout.Position
+    @Published private(set) var state = EditorDragState()
+    @Published private(set) var identities = EditorTileIdentities()
+    /// This editor, so another editor's or app's drags are never accepted.
+    let origin = UUID()
+    /// Lifted by UIKit, shown as lifted once its preview has been taken.
+    fileprivate var pending: EditorDragState.Lift?
+
+    var source: Position? { state.source }
+    var target: Position? { state.target }
+    var isDragging: Bool { state.isActive || pending != nil }
+
+    /// Cancel, dismissal, backgrounding or a changed arrangement: nothing to undo.
+    func reset() {
+        pending = nil
+        update { $0.cancel() }
+    }
+
+    fileprivate func cancel(token: UUID?) {
+        guard let token else { return }
+        if pending?.token == token { pending = nil }
+        if state.lift?.token == token { update { $0.cancel() } }
+    }
+
+    fileprivate func showLift() {
+        guard let lift = pending else { return }
+        pending = nil
+        update { $0.begin(at: lift.source, fingerprint: lift.fingerprint, token: lift.token) }
+    }
+
+    fileprivate func hover(_ destination: Position, token: UUID?, fingerprint: String, accepts: (Position) -> Bool) -> Bool {
+        update { $0.hover(destination, token: token, fingerprint: fingerprint, isValid: accepts) }
+    }
+
+    fileprivate func leave(_ destination: Position) { update { $0.leave(destination) } }
+
+    fileprivate func finish(token: UUID?, fingerprint: String) -> Position? {
+        update { $0.finish(token: token, fingerprint: fingerprint) }
+    }
+
+    /// Publishes only real changes, so pointer updates do not redraw the editor.
+    private func update<Result>(_ change: (inout EditorDragState) -> Result) -> Result {
+        var next = state
+        let result = change(&next)
+        if next != state { state = next }
+        return result
+    }
+
+    // Identities
+
+    func fit(rowCounts: [Int]) {
+        var next = identities
+        next.fit(rowCounts: rowCounts)
+        if next != identities { identities = next }
+    }
+    func tileID(_ position: Position) -> String {
+        identities.id(at: position).map { "t\($0)" } ?? "p\(position.row),\(position.index)"
+    }
+    func identity(at position: Position) -> Int? { identities.id(at: position) }
+    func position(ofIdentity id: Int) -> Position? { identities.position(of: id) }
+    func moveIdentity(from source: Position, to destination: Position, removesEmptyRows: Bool) {
+        identities.move(from: source, to: destination, removesEmptyRows: removesEmptyRows)
+    }
+}
+
+/// The insertion line: drawn over the gap before the place a drop lands in,
+/// never taking any row width.
+struct EditorInsertionMark: View {
+    var height: CGFloat = 40
+    var body: some View {
+        ZStack {
+            Capsule().frame(width: 2, height: height)
+            VStack(spacing: 0) {
+                Circle().frame(width: 4, height: 4)
+                Spacer(minLength: 0)
+                Circle().frame(width: 4, height: 4)
+            }
+            .frame(width: 4, height: height)
+        }
+        .foregroundStyle(.tint)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// What a drag carries: only which editor and which drag it belongs to.
+final class EditorDragToken {
+    let origin: UUID
+    let token: UUID
+    init(origin: UUID, token: UUID) { self.origin = origin; self.token = token }
+}
+
+/// Whether a drag is lifting the hosted item, so it can hide what its lift
+/// preview must not show, such as a selection border.
+private struct EditorDragLiftingKey: EnvironmentKey { static let defaultValue = false }
+
+extension EnvironmentValues {
+    var editorDragLifting: Bool {
+        get { self[EditorDragLiftingKey.self] }
+        set { self[EditorDragLiftingKey.self] = newValue }
+    }
+}
+
+/// A selected tile's border. It hides as soon as its tile is lifted, before
+/// UIKit takes the preview, and stays hidden for the rest of the drag.
+struct EditorSelectionBorder: View {
+    var cornerRadius: CGFloat
+    @Environment(\.editorDragLifting) private var lifting
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).strokeBorder(Color.accentColor, lineWidth: 2.5)
+            .opacity(lifting ? 0 : 1)
+    }
+}
+
+/// What a surface hosts: the parent's content plus what a UIKit-hosted view
+/// does not inherit from it, such as `.disabled`.
+struct EditorDragSurfaceRoot<Content: View>: View {
+    let content: Content
+    let isEnabled: Bool
+    let lifting: Bool
+    let hidesAccessibility: Bool
+    var body: some View {
+        content
+            .disabled(!isEnabled)
+            .environment(\.editorDragLifting, lifting)
+            .accessibilityHidden(hidesAccessibility)
+    }
+}
+
+/// Hosts the *same* cap shown at rest and gives it UIKit's native lift: the
+/// system preview follows the finger, returns on cancel and reports every end
+/// of a drag, including drops outside. No second scale, shadow or follower is
+/// stacked on top. Drop targets use it without dragging.
+struct EditorDragSurface<Content: View>: UIViewRepresentable {
+    typealias Position = SymbolPageLayout.Position
+    let session: EditorDragSession
+    let position: Position
+    /// The arrangement this surface was drawn for; hovering checks it.
+    let fingerprint: String
+    /// The arrangement as it is when a drop lands, read then rather than at
+    /// the last render, so a change that has not redrawn yet refuses the drop.
+    var currentFingerprint: (() -> String)? = nil
+    var draggable = true
+    /// Combined with the environment's, which the hosted content never sees.
+    var isEnabled = true
+    /// For content inside an element that speaks for it: the hosted views
+    /// would otherwise still be exposed to VoiceOver on their own.
+    var hidesAccessibility = false
+    var cornerRadius: CGFloat = 7
+    /// Whether the item lifted from a place may land here.
+    let accepts: (Position) -> Bool
+    /// Commits the drop of the item lifted from a place; at most once a drag.
+    let commit: (Position) -> Void
+    @ViewBuilder let content: () -> Content
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UIView {
+        let coordinator = context.coordinator
+        coordinator.isEnabled = isEnabled && context.environment.isEnabled
+        coordinator.render()
+        let view: UIView = coordinator.host.view
+        view.backgroundColor = .clear
+        view.accessibilityElementsHidden = hidesAccessibility
+        let drag = UIDragInteraction(delegate: coordinator)
+        drag.isEnabled = coordinator.canDrag
+        view.addInteraction(drag)
+        view.addInteraction(UIDropInteraction(delegate: coordinator))
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        coordinator.isEnabled = isEnabled && context.environment.isEnabled
+        coordinator.render()
+        view.accessibilityElementsHidden = hidesAccessibility
+        for case let drag as UIDragInteraction in view.interactions { drag.isEnabled = coordinator.canDrag }
+        view.invalidateIntrinsicContentSize()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIView, context: Context) -> CGSize? {
+        context.coordinator.host.sizeThatFits(in: CGSize(width: proposal.width ?? 10_000, height: proposal.height ?? 10_000))
+    }
+
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        // A tile that goes away mid-drag (its row changed) takes its drag with it.
+        coordinator.parent.session.cancel(token: coordinator.liftedToken)
+    }
+
+    final class Coordinator: NSObject, UIDragInteractionDelegate, UIDropInteractionDelegate {
+        var parent: EditorDragSurface
+        let host: UIHostingController<EditorDragSurfaceRoot<Content>>
+        fileprivate var liftedToken: UUID?
+        var isEnabled = true
+        /// From the lift until the drag ends; the content hides its selection border.
+        private var lifting = false
+
+        var canDrag: Bool { parent.draggable && isEnabled }
+
+        init(_ parent: EditorDragSurface) {
+            self.parent = parent
+            host = UIHostingController(rootView: EditorDragSurfaceRoot(content: parent.content(), isEnabled: true,
+                                                                      lifting: false, hidesAccessibility: parent.hidesAccessibility))
+            host.safeAreaRegions = []
+            host.view.backgroundColor = .clear
+        }
+
+        func render() {
+            host.rootView = EditorDragSurfaceRoot(content: parent.content(), isEnabled: isEnabled, lifting: lifting,
+                                                  hidesAccessibility: parent.hidesAccessibility)
+        }
+
+        private func setLifting(_ value: Bool) {
+            guard lifting != value else { return }
+            lifting = value
+            render()
+            // Applied now, so the preview UIKit takes next already reflects it.
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+        }
+
+        /// Ends this surface's lift, whether or not a drag ever began.
+        private func endLift(token: UUID?) {
+            let token = token ?? liftedToken
+            parent.session.cancel(token: token)
+            // A later lift of this surface keeps its own state.
+            guard token == liftedToken else { return }
+            liftedToken = nil
+            setLifting(false)
+        }
+
+        private func token(of session: UIDragDropSession) -> EditorDragToken? {
+            guard session.items.count == 1, let token = session.items.first?.localObject as? EditorDragToken,
+                  token.origin == parent.session.origin else { return nil }
+            return token
+        }
+
+        // MARK: Drag
+
+        func dragInteraction(_ interaction: UIDragInteraction, itemsForBeginning session: UIDragSession) -> [UIDragItem] {
+            let editor = parent.session
+            guard canDrag, !editor.isDragging else { return [] }
+            let lift = EditorDragState.Lift(token: UUID(), source: parent.position, fingerprint: parent.fingerprint)
+            editor.pending = lift
+            liftedToken = lift.token
+            setLifting(true)
+            // The lift is shown, or the drag ends, within moments of this. If
+            // neither happens no session started, and nothing may stay lifted.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak editor] in
+                guard let self, let editor, editor.pending?.token == lift.token else { return }
+                self.endLift(token: lift.token)
+            }
+            let item = UIDragItem(itemProvider: NSItemProvider())
+            item.localObject = EditorDragToken(origin: editor.origin, token: lift.token)
+            return [item]
+        }
+
+        func dragInteraction(_ interaction: UIDragInteraction, previewForLifting item: UIDragItem, session: UIDragSession) -> UITargetedDragPreview? {
+            guard let view = interaction.view, view.window != nil else {
+                // No preview, so no lift to show: the drag cannot block taps.
+                endLift(token: (item.localObject as? EditorDragToken)?.token)
+                return nil
+            }
+            let parameters = UIDragPreviewParameters()
+            parameters.backgroundColor = .clear
+            parameters.visiblePath = UIBezierPath(roundedRect: view.bounds, cornerRadius: parent.cornerRadius)
+            return UITargetedDragPreview(view: view, parameters: parameters)
+        }
+
+        func dragInteraction(_ interaction: UIDragInteraction, willAnimateLiftWith animator: UIDragAnimating, session: UIDragSession) {
+            // The preview is taken by now, so dimming the source cannot dim it.
+            parent.session.showLift()
+            let token = liftedToken
+            animator.addCompletion { [weak self, weak editor = parent.session] position in
+                guard position == .start else { return }
+                editor?.cancel(token: token)
+                guard let self else { return }
+                DispatchQueue.main.async { [weak self] in self?.endLift(token: token) }
+            }
+        }
+
+        func dragInteraction(_ interaction: UIDragInteraction, sessionWillBegin session: UIDragSession) {
+            parent.session.showLift()
+        }
+
+        func dragInteraction(_ interaction: UIDragInteraction, sessionIsRestrictedToDraggingApplication session: UIDragSession) -> Bool { true }
+
+        func dragInteraction(_ interaction: UIDragInteraction, session: UIDragSession, didEndWith operation: UIDropOperation) {
+            endLift(token: token(of: session)?.token ?? liftedToken)
+        }
+
+        // MARK: Drop
+
+        func dropInteraction(_ interaction: UIDropInteraction, canHandle session: UIDropSession) -> Bool {
+            session.localDragSession != nil && token(of: session) != nil
+        }
+
+        func dropInteraction(_ interaction: UIDropInteraction, sessionDidUpdate session: UIDropSession) -> UIDropProposal {
+            parent.session.showLift()
+            let valid = parent.session.hover(parent.position, token: token(of: session)?.token,
+                                             fingerprint: parent.fingerprint, accepts: parent.accepts)
+            return UIDropProposal(operation: valid ? .move : .forbidden)
+        }
+
+        func dropInteraction(_ interaction: UIDropInteraction, sessionDidExit session: UIDropSession) {
+            parent.session.leave(parent.position)
+        }
+
+        func dropInteraction(_ interaction: UIDropInteraction, performDrop session: UIDropSession) {
+            // Checked against the arrangement as it is now, not as last drawn.
+            let current = parent.currentFingerprint?() ?? parent.fingerprint
+            guard let source = parent.session.finish(token: token(of: session)?.token, fingerprint: current),
+                  current == parent.fingerprint, parent.accepts(source) else { return }
+            parent.commit(source)
+        }
+
+        func dropInteraction(_ interaction: UIDropInteraction, sessionDidEnd session: UIDropSession) {
+            parent.session.leave(parent.position)
+        }
+    }
+}
+
+/// A tile's place with the identity it animates by.
+struct EditorTilePosition: Identifiable {
+    let id: String
+    let position: SymbolPageLayout.Position
+}
+
+extension Animation {
+    /// The settle after a committed reorder; none with Reduce Motion.
+    static func editorReorder(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.90, blendDuration: 0)
+    }
+    /// Source dimming, and the insertion line (80 ms), or 100 ms opacity with Reduce Motion.
+    static func editorFade(_ duration: Double, reduceMotion: Bool) -> Animation {
+        .easeOut(duration: reduceMotion ? 0.1 : duration)
+    }
 }

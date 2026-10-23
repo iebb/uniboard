@@ -1,37 +1,19 @@
-Uniboard 1.3 beta.
+Uniboard 1.3 beta. New in this build:
 
-LAYOUTS
-Settings > Layouts adds base keyboards (Latin, Greek, Cyrillic), with your device's languages first. Drag to reorder, swipe to remove; one always stays. With two or more, the space bar names the current one: hold it, slide and lift to switch. A tap still types a space. Check Shift and Caps Lock across a switch, Turkish i/İ, Greek ς and Ά, 12-key Ukrainian and Hungarian rows, and that the keyboard remembers the layout with Full Access OFF.
+FONTS FOR THIS CHARACTER
+In a character's details, View Fonts compares the fonts Uniboard has: packs, your fonts and downloaded Google Fonts. Each preview is drawn only with the face it names, never with a fallback, and fonts that can't draw the character are listed apart. Open a face for its details and styles. Check a few scripts and symbols, and that Italic, Bold and other style icons match the face.
 
-GESTURES
-Hold gives the layout's accents first (French é è ê ë, Russian ё, Greek ά). Up gives superscript then subscript; Down gives styled forms: mathematical Latin, mathematical Greek (𝛂), or related Cyrillic letters (є э for е). Groups never repeat across Hold, Up and Down. Customize Keys has a layout menu.
+GOOGLE FONTS
+Browse Google Fonts, in Settings > Font Downloads or from a character's fonts, finds families by name. Download a single style, then check that it appears in the comparison, survives relaunch and offline use, and can be removed. Removing a download keeps an identical font you added yourself. The keyboard never goes online for fonts.
 
-PAGES
-Each page opens drawn like the keyboard: add keys, arrange rows and gaps, and select a key to see and edit its swipe-up, hold and swipe-down rows. Hold a choice to drag it between rows. Pages > Keyboard arranges letters, Shift, Delete, Tab and Caps Lock in up to three rows; check the keyboard draws it. The Pages menu exports and imports custom pages.
+COPY IMAGE
+With Text Preview on, the preview's actions offer Copy Image. It copies only the text shown in the preview, as a picture at 3x; typing and the host text are unchanged. Choose Black on White, White on Black, Black on Transparent or White on Transparent; transparent choices really are transparent (the checkerboard isn't copied). Check that the choice is remembered, that the button stays visible at the bottom of the panel, and paste into Notes, Messages or an image editor.
 
-TEXT AND EMOJI FORMS
-Characters with both presentations (☃, ⌚) show as text in charts and side by side in details. The picker adds each form separately. In keyboard search they appear twice, once per form; each inserts its exact sequence, and holding a page key offers the other form.
+ARRANGING KEYS
+In Pages and Pages > Keyboard, a held key lifts as the same key and the others make room as you drag. Nothing is saved until you drop; keys are never lost or duplicated. Check with Reduce Motion on as well.
 
-KEYBOARD UNICODE
-U opens search with its keys directly. Results stay in a row above the keys, also in landscape. With Text Preview on, the preview row stays above search. Result and browse keys are taller, with the code point and a wrapped name. Delete shows on every Unicode page. Browsing without keys makes the keyboard two rows taller.
+EXPLORE TILES
+Pinch now goes past 7 per row while tiles stay at least 32pt wide (9 on most iPhones, more on iPad). Small tiles and block charts show the Unicode version as a small corner triangle instead of the ribbon. Check pinching back in and that the setting is remembered.
 
-EXPLORE
-Tiles are 2 to 7 per row: pinch to change; search results are always tiles. Block pages also chart 8 or 16 per row (iPad adds 32), with up and down arrows for the previous and next block. Hold a block name for its info. Version ribbons run red (oldest) to blue (newest); ConScript reads CSUR. Explore, Blocks and Emoji switch the Unicode version from the menu under the search field. Private Use stays hidden unless Settings > Private Use Area is on; with ConScript on, its ranges still show.
-
-EDITIONS AND SIZE
-Only the Unicode 19 draft is bundled; Unicode 18, 17 and 16 limit it to their version. Check that newer characters read as unassigned and What's New lists only that version.
-
-FONTS
-Preview basics (Unifont, Noto Sans Symbols 2) download on demand in Settings > Font Downloads. Check U+0558 previews in app and keyboard with Full Access OFF, and cancel, retry, remove and offline use.
-
-EMOJI 18
-The Emoji previews pack is now one Noto Color Emoji font with all of Emoji 18, including the leftwards and rightwards thumb signs (U+1FAF9, U+1FAFA) in every skin tone. An earlier download shows as not downloaded: download it again, then check Emoji 18 in the Emoji tab and keyboard.
-
-YOUR FONTS AND TEXT PREVIEW
-Font Downloads > Add Font File adds a TTF or OTF file; Use Installed Font picks a font installed by a font app. Either previews characters first, including Private Use, in the app and keyboard. Settings > Text Preview adds a keyboard row showing the text around the caret as Uniboard draws it.
-
-CONSCRIPT (UCSUR)
-Settings > ConScript (UCSUR) tints registry Private Use characters blue (try U+F8D0 Klingon or U+E000 Tengwar) in the app and keyboard; details keep the Unicode name and add a ConScript group. Prefer ConScript over PUA names them as the registry does, lists ConScript blocks in Blocks, finds "tengwar letter tinco" in search and draws them with Fairfax HD first. The ConScript pack appears in Font Downloads only while ConScript is on. With ConScript off, nothing of it shows.
-
-PRIVACY AND FAVORITES
-App Favorites reach the keyboard with Full Access OFF; keyboard saves sync back only with Full Access. Nothing is sent over a network.
+STILL WORTH CHECKING
+Layouts and the space bar switch, Hold/Up/Down gestures, text and emoji forms, keyboard search, ConScript, Unicode editions, and Favorites with Full Access OFF behave as in the previous beta. Nothing you type is sent over a network.

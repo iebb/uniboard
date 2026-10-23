@@ -51,7 +51,9 @@ final class UnicodeFontSupportTests: XCTestCase {
         let missingBefore = UnicodeFontSupport.missingCodePoints(in: text, font: system)
         guard !missingBefore.isEmpty else { throw XCTSkip("This iOS runtime already renders the fixture; coverage probe records it separately.") }
         guard UnicodeFontSupport.resourceURL("unifont-18.0.01.otf") != nil else { throw XCTSkip("Preview basics are downloaded on demand") }
+        XCTAssertTrue(UnicodeFontSupport.stockFontsMiss(text))
         let fallback = UnicodeFontSupport.font(for: text, size: 32, enabled: true)
+        XCTAssertTrue(UnicodeFontSupport.stockFontsMiss(text), "A local preview font must not change the stock-font warning")
         XCTAssertNotNil(UnicodeFontSupport.sourceName(for: text, size: 32, enabled: true))
         XCTAssertNotEqual(fallback.fontName, system.fontName)
         XCTAssertTrue(UnicodeFontSupport.missingCodePoints(in: text, font: fallback).isEmpty)
@@ -96,12 +98,6 @@ final class UnicodeFontSupportTests: XCTestCase {
         XCTAssertEqual(UnicodeFontSupport.visibleGlyphCount(in: split, font: .systemFont(ofSize: 32)), 2)
         XCTAssertTrue(UnicodeFontSupport.stockFontsMiss(split, emoji: true))
         XCTAssertTrue(UnicodeFontSupport.stockFontsMiss("\u{0378}"))
-        // A Unicode 18 letter that a bundled fallback draws still counts:
-        // other apps showing it will not have that font.
-        let armenian = "\u{0558}"
-        XCTAssertNotEqual(UnicodeFontSupport.font(for: armenian, size: 32, enabled: true).fontName,
-                          UIFont.systemFont(ofSize: 32).fontName)
-        XCTAssertTrue(UnicodeFontSupport.stockFontsMiss(armenian))
         UnicodeFontSupport.clearCache()
     }
 

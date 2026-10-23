@@ -20,6 +20,14 @@ struct PageArrangeView: View {
     /// The width the keys and gaps of a row share.
     @State private var canvasWidth: CGFloat = 300
     @State private var failed = false
+    @StateObject private var drag = EditorDragSession()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Namespace private var motion
+    /// What a drag lifted from; any other arrangement refuses its drop.
+    private var dragFingerprint: String {
+        boardID + "|" + layout.text + "|" + (board?.keys.map(\.id).joined(separator: "\u{1F}") ?? "")
+    }
     private let spacing: CGFloat = 5
     /// The drop target that ends every row.
     private let rowEnd: CGFloat = 12
@@ -27,10 +35,14 @@ struct PageArrangeView: View {
     private var keyCount: Int { board?.keys.count ?? 0 }
     /// Exactly the keyboard's rows: every slot holds a key.
     private var layout: Layout { Layout.resolved(board?.layout, keyCount: keyCount).fitted(keyCount: keyCount) }
-    private var selectedItem: Layout.Item? { selection.flatMap(layout.item(at:)) }
+    /// The selection while it is on an item of the page as it is now.
+    private var selected: Layout.Position? { EditorReorder.selection(selection, in: layout) }
+    private var selectedItem: Layout.Item? { selected.flatMap(layout.item(at:)) }
     private var selectedKey: SymbolBoardKey? {
-        selection.flatMap(layout.keyIndex(at:)).flatMap { board?.keys.indices.contains($0) == true ? board?.keys[$0] : nil }
+        selected.flatMap(layout.keyIndex(at:)).flatMap { board?.keys.indices.contains($0) == true ? board?.keys[$0] : nil }
     }
+    /// A key as the store holds it now, not as the last render captured it.
+    private func liveKey(_ id: String) -> SymbolBoardKey? { board?.keys.first { $0.id == id } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,9 +55,9 @@ struct PageArrangeView: View {
                         canvas
                     }
                     if let key = selectedKey {
-                        layers(key)
+                        layers(key).disabled(drag.source != nil)
                     } else {
-                        pageOptions
+                        pageOptions.disabled(drag.source != nil)
                     }
                     if failed {
                         Text("This arrangement could not be saved.").font(.footnote).foregroundStyle(.red)
@@ -60,7 +72,7 @@ struct PageArrangeView: View {
             }
             .background(Color(.systemGroupedBackground))
             Divider()
-            controls.padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
+            controls.disabled(drag.source != nil).padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
         }
         .navigationTitle(board?.name ?? "Page")
         .navigationBarTitleDisplayMode(.inline)
@@ -81,10 +93,14 @@ struct PageArrangeView: View {
                         .disabled(board?.layout == nil)
                         .accessibilityIdentifier("arrange.reset")
                 } label: { Image(systemName: "ellipsis.circle") }
+                .disabled(drag.source != nil)
                 .accessibilityLabel("More").accessibilityIdentifier("page.more")
             }
         }
-        .onAppear { boards.refreshPages() }
+        .onAppear { boards.refreshPages(); drag.fit(rowCounts: layout.rows.map(\.count)) }
+        .onDisappear { drag.reset() }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { drag.reset() } }
+        .onChange(of: dragFingerprint) { _, _ in drag.reset(); drag.fit(rowCounts: layout.rows.map(\.count)) }
         .alert("Add Text", isPresented: $typing) {
             TextField("Characters", text: $typed).accessibilityIdentifier("page.addText.field")
             Button("Cancel", role: .cancel) {}
@@ -129,12 +145,27 @@ struct PageArrangeView: View {
         return VStack(alignment: .leading, spacing: 6) {
             ForEach(layout.rows.indices, id: \.self) { row in
                 HStack(spacing: spacing) {
-                    ForEach(layout.rows[row].indices, id: \.self) { index in
-                        tile(Layout.Position(row: row, index: index), keyWidth: width)
+                    ForEach(layout.rows[row].indices.map { index in
+                        let position = Layout.Position(row: row, index: index)
+                        return EditorTilePosition(id: tileIdentity(position), position: position)
+                    }) { entry in
+                        tile(entry.position, keyWidth: width)
+                            .matchedGeometryEffect(id: entry.id, in: motion)
                     }
                     // Dropping here puts an item at the end of the row.
-                    Color.clear.frame(width: rowEnd, height: 44).contentShape(Rectangle())
-                        .dropDestination(for: String.self) { items, _ in drop(items, at: .init(row: row, index: layout.rows[row].count)) }
+                    let end = Layout.Position(row: row, index: layout.rows[row].count)
+                    let current = layout
+                    EditorDragSurface(session: drag, position: end, fingerprint: dragFingerprint,
+                                      currentFingerprint: { dragFingerprint }, draggable: false,
+                                      accepts: { EditorReorder.page(current, from: $0, to: end) != nil },
+                                      commit: { drop($0, at: end) }) {
+                        Color.clear.frame(width: rowEnd, height: 44).contentShape(Rectangle())
+                    }
+                    .overlay(alignment: .leading) {
+                        EditorInsertionMark().offset(x: -(spacing / 2 + 2))
+                            .opacity(drag.target == end ? 1 : 0)
+                            .animation(.editorFade(0.08, reduceMotion: reduceMotion), value: drag.target == end)
+                    }
                 }
             }
         }
@@ -146,45 +177,63 @@ struct PageArrangeView: View {
         .accessibilityIdentifier("arrange.canvas")
     }
 
+    /// Keys animate by their own identity; gaps by their tracked one.
+    private func tileIdentity(_ position: Layout.Position) -> String {
+        if let index = layout.keyIndex(at: position), let keys = board?.keys, keys.indices.contains(index) { return "key:" + keys[index].id }
+        return drag.tileID(position)
+    }
+
     @ViewBuilder private func tile(_ position: Layout.Position, keyWidth: CGFloat) -> some View {
         let item = layout.rows[position.row][position.index]
         let selected = selection == position
         let key = layout.keyIndex(at: position).flatMap { board?.keys.indices.contains($0) == true ? board?.keys[$0] : nil }
         let cell: Layout.Cell = item == .key ? .key(0) : item == .halfGap ? .halfGap : .gap
         let width = item == .key ? keyWidth : Layout.gapWidth(cell, keyWidth: keyWidth, spacing: spacing)
-        Button { selection = selected ? nil : position } label: {
-            ZStack {
-                if let key {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color(.secondarySystemGroupedBackground))
-                        .shadow(color: .black.opacity(0.12), radius: 0, y: 1)
-                    Text(symbolKeyPreview(key.text)).font(.system(size: 22)).minimumScaleFactor(0.4).lineLimit(1).padding(2)
-                } else {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                    Text(item == .halfGap ? "½" : "1").font(.caption2).foregroundStyle(.secondary)
+        let active = drag.source == position
+        let current = layout
+        EditorDragSurface(session: drag, position: position, fingerprint: dragFingerprint,
+                          currentFingerprint: { dragFingerprint },
+                          accepts: { EditorReorder.page(current, from: $0, to: position) != nil },
+                          commit: { drop($0, at: position) }) {
+            Button { if !drag.isDragging { selection = selected ? nil : position } } label: {
+                ZStack {
+                    if let key {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color(.secondarySystemGroupedBackground))
+                            .shadow(color: .black.opacity(0.12), radius: 0, y: 1)
+                        Text(symbolKeyPreview(key.text)).font(.system(size: 22)).minimumScaleFactor(0.4).lineLimit(1).padding(2)
+                    } else {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        Text(item == .halfGap ? "½" : "1").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    // Hidden from the moment a drag lifts, so its preview never shows it.
+                    if selected && !active { EditorSelectionBorder(cornerRadius: 7) }
                 }
-                if selected {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.accentColor, lineWidth: 2.5)
-                }
+                .frame(width: width, height: 44)
+                .contentShape(Rectangle())
             }
-            .frame(width: width, height: 44)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel(key.map { "Key \(symbolKeyPreview($0.text))" } ?? (item == .halfGap ? "Half-width gap" : "Full-width gap"))
+            .accessibilityValue(key.map { $0.text.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ") }
+                                ?? "Row \(position.row + 1), place \(position.index + 1)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityIdentifier("arrange.\(position.row).\(position.index)")
         }
-        .buttonStyle(.plain)
-        .draggable("\(position.row),\(position.index)") {
-            Text(key.map { symbolKeyPreview($0.text) } ?? (item == .halfGap ? "½" : "1")).font(.title2).padding(8)
+        .opacity(active ? 0.35 : 1)
+        .animation(.editorFade(0.12, reduceMotion: reduceMotion), value: active)
+        // Centred in the gap before the place; inside the canvas at a row's start.
+        .overlay(alignment: .leading) {
+            EditorInsertionMark().offset(x: position.index == 0 ? 0 : -(spacing / 2 + 2))
+                .opacity(drag.target == position ? 1 : 0)
+                .animation(.editorFade(0.08, reduceMotion: reduceMotion), value: drag.target == position)
         }
-        .dropDestination(for: String.self) { items, _ in drop(items, at: position) }
-        .accessibilityLabel(key.map { "Key \(symbolKeyPreview($0.text))" } ?? (item == .halfGap ? "Half-width gap" : "Full-width gap"))
-        .accessibilityValue(key.map { $0.text.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ") }
-                            ?? "Row \(position.row + 1), place \(position.index + 1)")
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("arrange.\(position.row).\(position.index)")
     }
 
     /// The selected key's swipe-up, hold and swipe-down choices.
     private func layers(_ key: SymbolBoardKey) -> some View {
-        KeyLayersPanel(choices: { gesture in (choices(key, gesture) ?? [], false) }, destination: { gesture in
+        // Read through the store, so a drop checks and saves the key as it is now.
+        let id = key.id
+        return KeyLayersPanel(choices: { gesture in (choices(liveKey(id) ?? key, gesture) ?? [], false) }, destination: { gesture in
             KeyLayerEditor(title: "\(gesture.title) · \(symbolKeyPreview(key.text))", choices: choices(key, gesture) ?? []) { values in
                 switch gesture {
                 case .longPress: return boards.setVariants(boardID: boardID, keyID: key.id, variants: values)
@@ -192,6 +241,7 @@ struct PageArrangeView: View {
                 }
             }
         }, save: { changed in
+            guard let key = liveKey(id) else { failed = true; return false }
             let saved = boards.setLayers(boardID: boardID, keyID: key.id, variants: changed[.longPress] ?? key.variants,
                                          up: changed[.swipeUp] ?? key.up ?? [], down: changed[.swipeDown] ?? key.down ?? [])
             failed = !saved
@@ -208,26 +258,34 @@ struct PageArrangeView: View {
     }
 
     private var controls: some View {
-        let position = selection
+        let position = selected
         let item = selectedItem
-        let rows = layout.rows
+        let current = layout
+        let rows = current.rows
+        /// Only moves the keyboard would keep as saved.
+        let canMove = { (p: Layout.Position, to: Layout.Position) in EditorReorder.page(current, from: p, to: to) != nil }
         return VStack(spacing: 8) {
             HStack(spacing: 8) {
-                control("Move Left", "arrow.left", id: "arrange.left", enabled: (position?.index ?? 0) > 0) {
+                control("Move Left", "arrow.left", id: "arrange.left",
+                        enabled: position.map { $0.index > 0 && canMove($0, .init(row: $0.row, index: $0.index - 1)) } ?? false) {
                     guard let p = position else { return }
                     move(from: p, to: .init(row: p.row, index: p.index - 1), select: .init(row: p.row, index: p.index - 1))
                 }
                 control("Move Right", "arrow.right", id: "arrange.right",
-                        enabled: position.map { $0.index + 1 < rows[$0.row].count } ?? false) {
+                        enabled: position.map { $0.index + 1 < rows[$0.row].count && canMove($0, .init(row: $0.row, index: $0.index + 2)) } ?? false) {
                     guard let p = position else { return }
                     move(from: p, to: .init(row: p.row, index: p.index + 2), select: .init(row: p.row, index: p.index + 1))
                 }
-                control("Move Up", "arrow.up", id: "arrange.up", enabled: (position?.row ?? 0) > 0) {
+                control("Move Up", "arrow.up", id: "arrange.up", enabled: position.map {
+                    $0.row > 0 && canMove($0, .init(row: $0.row - 1, index: min($0.index, rows[$0.row - 1].count)))
+                } ?? false) {
                     guard let p = position else { return }
                     let index = min(p.index, rows[p.row - 1].count)
                     move(from: p, to: .init(row: p.row - 1, index: index), select: .init(row: p.row - 1, index: index))
                 }
-                control("Move Down", "arrow.down", id: "arrange.down", enabled: position.map { $0.row + 1 < rows.count } ?? false) {
+                control("Move Down", "arrow.down", id: "arrange.down", enabled: position.map {
+                    $0.row + 1 < rows.count && canMove($0, .init(row: $0.row + 1, index: min($0.index, rows[$0.row + 1].count)))
+                } ?? false) {
                     guard let p = position else { return }
                     let index = min(p.index, rows[p.row + 1].count)
                     // A row emptied by the move goes away, so the next row takes its place.
@@ -274,13 +332,13 @@ struct PageArrangeView: View {
             .frame(maxWidth: .infinity, minHeight: 40)
         }
         .buttonStyle(.bordered)
-        .disabled(!enabled || selection == nil)
+        .disabled(!enabled || selected == nil)
         .accessibilityLabel(title)
         .accessibilityIdentifier(id)
     }
 
     private func insert(_ gap: Layout.Item) {
-        guard let p = selection else { return }
+        guard let p = selected else { return }
         edit(select: p) { $0.insertGap(gap, at: p) }
     }
 
@@ -288,25 +346,48 @@ struct PageArrangeView: View {
         var value = layout
         guard change(&value) else { return }
         save(value)
-        if !failed { selection = next }
+        if !failed { selection = EditorReorder.selection(next, in: value.fitted(keyCount: keyCount)) }
     }
 
+    /// The arrow buttons: the VoiceOver and Switch Control way to move.
     private func move(from source: Layout.Position, to destination: Layout.Position, select next: Layout.Position?) {
-        var value = layout
-        var keyMove: Layout.KeyMove?
-        guard value.move(from: source, to: destination, keyMove: &keyMove) else { return }
-        save(value, keyMove: keyMove)
-        if !failed { selection = next }
+        guard let move = EditorReorder.page(layout, from: source, to: destination) else { return }
+        let label = layout.keyIndex(at: source).flatMap { index in board?.keys.indices.contains(index) == true ? board?.keys[index] : nil }
+            .map { symbolKeyPreview($0.text) } ?? String(localized: "Gap")
+        guard commit(move, select: { _ in next }) else { return }
+        if let next {
+            UIAccessibility.post(notification: .announcement,
+                                 argument: String(localized: "Moved \(label) to row \(next.row + 1), place \(next.index + 1)"))
+        }
     }
 
-    /// A dragged item lands before the place it is dropped on.
-    private func drop(_ items: [String], at destination: Layout.Position) -> Bool {
-        let parts = items.first?.split(separator: ",").compactMap { Int($0) } ?? []
-        guard parts.count == 2 else { return false }
-        let source = Layout.Position(row: parts[0], index: parts[1])
-        guard source != destination else { return false }
-        move(from: source, to: destination, select: nil)
-        return !failed
+    /// A drop: computed once from the saved page, saved once. Hover never
+    /// gets here, and a refused or unchanged drop saves nothing.
+    private func drop(_ source: Layout.Position, at destination: Layout.Position) {
+        guard let move = EditorReorder.page(layout, from: source, to: destination), move.changesValue else { return }
+        // Selection follows the item it was on, not its old row and place.
+        let kept = selected.flatMap(drag.identity(at:))
+        commit(move) { identities in kept.flatMap(identities) }
+    }
+
+    /// Saves a computed move through the store, animating the settle. Nothing
+    /// else changes unless it saved, so a failed save leaves the old page.
+    @discardableResult
+    private func commit(_ move: EditorReorder.Move<EditorReorder.PageMove>,
+                        select: ((Int) -> Layout.Position?) -> Layout.Position?) -> Bool {
+        // Only a place on the saved page is selected; never one past a row's end.
+        let next = move.value.layout
+        guard move.changesValue else { selection = EditorReorder.selection(select { drag.position(ofIdentity: $0) }, in: next); return true }
+        var saved = false
+        withAnimation(.editorReorder(reduceMotion: reduceMotion)) {
+            save(next, keyMove: move.value.keyMove)
+            saved = !failed
+            if saved {
+                drag.moveIdentity(from: move.source, to: move.destination, removesEmptyRows: true)
+                selection = EditorReorder.selection(select { drag.position(ofIdentity: $0) }, in: next)
+            }
+        }
+        return saved
     }
 
     private func save(_ value: Layout?, keyMove: Layout.KeyMove? = nil) {

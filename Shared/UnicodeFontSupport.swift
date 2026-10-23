@@ -83,8 +83,17 @@ enum UnicodeFontSupport {
     /// With ConScript preferred, its font draws Private Use text first, even
     /// where a stock font has a glyph of its own there.
     static var prefersConScript = false {
-        didSet { if prefersConScript != oldValue { choices.removeAllObjects() } }
+        didSet {
+            guard prefersConScript != oldValue else { return }
+            choices.removeAllObjects()
+            fontGeneration &+= 1
+        }
     }
+
+    /// Changes whenever the font chosen for some text may change: a cache
+    /// reset, a downloaded or added font refresh, or the ConScript preference.
+    /// Anything measured with these fonts is stale once it changes.
+    private(set) static var fontGeneration = 0
 
     static var loadedFontCount: Int { graphicsFonts.count }
 
@@ -104,7 +113,9 @@ enum UnicodeFontSupport {
     static func resourceURL(_ filename: String) -> URL? {
         guard Asset.isResourceFilename(filename) else { return nil }
         if let bundled = Bundle.main.url(forResource: filename, withExtension: nil, subdirectory: "Fonts") { return bundled }
-        if let custom = CustomFontStore.shared.url(forFilename: filename) { return custom }
+        // Keep paths from the loaded snapshot valid until the revision/cache refresh.
+        if customAssets.contains(where: { $0.filename == filename }),
+           let custom = CustomFontStore.shared.url(forRelativePath: filename) { return custom }
         guard let font = downloadable[filename] else { return nil }
         return UnicodeFontDownloadStore.shared.installedURL(for: font)
     }
@@ -118,6 +129,7 @@ enum UnicodeFontSupport {
         referenceFonts.removeAll()
         unavailableFonts.removeAll()
         fontRecency.removeAll()
+        fontGeneration &+= 1
     }
 
     static func font(for text: String, size: CGFloat, enabled: Bool) -> UIFont {

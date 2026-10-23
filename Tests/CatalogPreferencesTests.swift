@@ -310,4 +310,56 @@ final class CatalogPreferencesTests: XCTestCase {
         }
     }
 }
+
+final class TileGridLayoutTests: XCTestCase {
+    func testMaximumColumnsKeepTilesAtLeast32PointsWide() {
+        // iPhone portrait grid (402 − 32 padding): 9 tiles of 34pt; a 10th would make them 29.8pt.
+        XCTAssertEqual(TileGridLayout.maximumColumns(in: 370), 9)
+        XCTAssertGreaterThan(TileGridLayout.maximumColumns(in: 370), 7)
+        // iPad and landscape widths allow more.
+        XCTAssertEqual(TileGridLayout.maximumColumns(in: 748), 18)
+        XCTAssertEqual(TileGridLayout.maximumColumns(in: 780), 19)
+        for width: CGFloat in [100, 250, 370, 500, 748, 780, 1194] {
+            let maximum = TileGridLayout.maximumColumns(in: width)
+            XCTAssertGreaterThanOrEqual(TileGridLayout.tileWidth(columns: maximum, in: width), 32, "\(width)")
+            XCTAssertLessThan(TileGridLayout.tileWidth(columns: maximum + 1, in: width), 32, "\(width)")
+        }
+        // Exactly 32pt tiles still count.
+        XCTAssertEqual(TileGridLayout.maximumColumns(in: 32 * 5 + 8 * 4), 5)
+        // Never fewer than the minimum, and the old limit before the width is measured.
+        XCTAssertEqual(TileGridLayout.maximumColumns(in: 40), 2)
+        XCTAssertEqual(TileGridLayout.maximumColumns(in: 0), 7)
+    }
+
+    func testStoredColumnsAreClampedForDisplayOnly() {
+        XCTAssertEqual(TileGridLayout.columns(stored: 15, in: 780), 15)
+        // Rotating to a narrower width shows fewer columns without changing the stored value.
+        XCTAssertEqual(TileGridLayout.columns(stored: 15, in: 370), 9)
+        XCTAssertEqual(TileGridLayout.columns(stored: 1, in: 370), 2)
+        XCTAssertEqual(TileGridLayout.columns(stored: 3, in: 370), 3)
+        XCTAssertEqual(TileGridLayout.tileWidth(columns: 3, in: 0), 0)
+        XCTAssertEqual(TileGridLayout.tileWidth(columns: 4, in: 370), 86.5)
+    }
+
+    func testRibbonBecomesTriangleInBlockViewOrUnder80Points() {
+        XCTAssertTrue(TileGridLayout.showsLabeledRibbon(tileWidth: 80, blockView: false))
+        XCTAssertTrue(TileGridLayout.showsLabeledRibbon(tileWidth: 118, blockView: false))
+        XCTAssertFalse(TileGridLayout.showsLabeledRibbon(tileWidth: 79.9, blockView: false))
+        XCTAssertFalse(TileGridLayout.showsLabeledRibbon(tileWidth: 32, blockView: false))
+        XCTAssertFalse(TileGridLayout.showsLabeledRibbon(tileWidth: 200, blockView: true))
+        XCTAssertFalse(TileGridLayout.showsLabeledRibbon(tileWidth: 0, blockView: true))
+        // An unmeasured tile outside block view keeps the ribbon.
+        XCTAssertTrue(TileGridLayout.showsLabeledRibbon(tileWidth: 0, blockView: false))
+        // The narrowest tiles show only the glyph and triangle.
+        XCTAssertTrue(TileGridLayout.showsCodePoint(tileWidth: 46))
+        XCTAssertFalse(TileGridLayout.showsCodePoint(tileWidth: 32))
+    }
+
+    func testTriangleLegsFollowCornerRadius() {
+        XCTAssertEqual(VersionRibbon.triangleSide(cornerRadius: 12), 18)
+        XCTAssertEqual(VersionRibbon.triangleSide(cornerRadius: 8), 14)
+        XCTAssertEqual(VersionRibbon.triangleSide(cornerRadius: 4), 10)
+        XCTAssertEqual(VersionRibbon.triangleSide(cornerRadius: 0), 10)
+    }
+}
 #endif

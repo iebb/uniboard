@@ -47,6 +47,8 @@ enum KeyboardLayoutPolicy {
 }
 
 enum KeyboardQueryPolicy {
+    static let bottomRow = ["+", "z", "x", "c", "v", "b", "n", "m", "-"]
+
     static let maximumCharacters = 100
 
     struct Edit: Equatable {

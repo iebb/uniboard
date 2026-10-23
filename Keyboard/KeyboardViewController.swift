@@ -1065,11 +1065,14 @@ private final class KeyboardModel: ObservableObject {
     /// Keeps the current layout while it stays enabled, otherwise the one
     /// used last, otherwise the first.
     private func adoptLayouts(_ ids: [String], keepingCurrent: Bool) {
-        let enabled = ids.compactMap(KeyboardAlphabet.alphabet(id:))
+        // Each layout in the letter order the app arranged.
+        let enabled = ids.compactMap(KeyboardAlphabet.alphabet(id:)).map { $0.arranged(keySettings.arrangement(for: $0.id)) }
         let next = enabled.isEmpty ? [KeyboardAlphabet.english] : enabled
-        if layouts != next { layouts = next }
+        // Alphabets compare by id, so compare their rows too.
+        if layouts != next || layouts.map(\.rows) != next.map(\.rows) { layouts = next }
         let remembered = defaults.string(forKey: Self.layoutDefaultsKey).flatMap { id in next.first { $0.id == id } }
-        applyAlphabet(keepingCurrent && next.contains(typingState.alphabet) ? typingState.alphabet : remembered ?? next[0])
+        let current = keepingCurrent ? next.first { $0.id == typingState.alphabet.id } : nil
+        applyAlphabet(current ?? remembered ?? next[0])
     }
     /// The keyboard remembers the chosen layout in its own defaults, which
     /// needs no Full Access.
@@ -1080,7 +1083,8 @@ private final class KeyboardModel: ObservableObject {
         return true
     }
     private func applyAlphabet(_ alphabet: KeyboardAlphabet) {
-        guard alphabet != typingState.alphabet else { return }
+        // The same layout can come back rearranged.
+        guard alphabet != typingState.alphabet || alphabet.rows != typingState.alphabet.rows else { return }
         typing.update { $0.selectAlphabet(alphabet) }
         invalidateInputMode()
         presentationChanged?()
@@ -1117,7 +1121,12 @@ private final class KeyboardModel: ObservableObject {
             if reload { invalidateInputMode(); refreshCatalog() }
         }
         let keys = KeyboardKeySettings.shared.loadSnapshot()
-        if keySettings != keys { keySettings = keys; invalidateInputMode() }
+        if keySettings != keys {
+            let arranged = keySettings.arrangements != keys.arrangements
+            keySettings = keys
+            if arranged { adoptLayouts(layouts.map(\.id), keepingCurrent: true) }
+            invalidateInputMode()
+        }
     }
 
     deinit {

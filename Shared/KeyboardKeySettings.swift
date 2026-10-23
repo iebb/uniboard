@@ -10,8 +10,8 @@ import Glibc
 struct KeyboardKeySettings {
     enum Gesture: String, CaseIterable, Codable, Sendable { case tap, shiftedTap, longPress, swipeUp, swipeDown
         var maximumChoices: Int { self == .tap || self == .shiftedTap ? 1 : KeyboardVariantPolicy.maximumVariants }
-        /// The layers a key can be customized with. Taps always type the key
-        /// itself; tap values saved by earlier versions are kept but ignored.
+        /// The candidate layers a key can be customized with; a key's own
+        /// output is changed separately with `tap`.
         static let customizable: [Gesture] = [.swipeUp, .swipeDown, .longPress]
     }
     enum Kind: String, Sendable { case letter, digit, character }
@@ -80,8 +80,22 @@ struct KeyboardKeySettings {
 
     struct Snapshot: Codable, Equatable, Sendable {
         let overrides: [String: Overrides]
+        /// Rearranged letter orders by layout id; rows keep their lengths.
+        let arrangements: [String: [String]]
         static let defaults = Snapshot()
-        init(overrides: [String: Overrides] = [:]) { self.overrides = overrides }
+        init(overrides: [String: Overrides] = [:], arrangements: [String: [String]] = [:]) {
+            self.overrides = overrides; self.arrangements = arrangements
+        }
+        func arrangement(for alphabetID: String) -> [String]? { arrangements[alphabetID] }
+        /// nil, or the standard order, restores the layout's own rows.
+        func updatingArrangement(_ order: [String]?, for alphabetID: String) -> Snapshot? {
+            guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID) else { return nil }
+            var copy = arrangements
+            if let order, order != alphabet.keys { copy[alphabetID] = order } else { copy.removeValue(forKey: alphabetID) }
+            let result = Snapshot(overrides: overrides, arrangements: copy)
+            guard (try? KeyboardKeySettings.validate(result)) != nil else { return nil }
+            return result
+        }
         func candidates(for keyID: String, gesture: Gesture) -> [String]? {
             guard KeyboardKeySettings.descriptor(for: keyID) != nil else { return nil }
             return overrides[keyID]?.candidates(for: gesture)
@@ -103,20 +117,20 @@ struct KeyboardKeySettings {
             var copy = overrides
             let value = (copy[keyID] ?? Overrides()).replacing(candidates, for: gesture)
             if value.usesDefaults { copy.removeValue(forKey: keyID) } else { copy[keyID] = value }
-            let result = Snapshot(overrides: copy)
+            let result = Snapshot(overrides: copy, arrangements: arrangements)
             guard (try? KeyboardKeySettings.validate(result)) != nil else { return nil }
             return result
         }
         func removingOverride(for keyID: String) -> Snapshot {
             var copy = overrides; copy.removeValue(forKey: keyID)
-            return Snapshot(overrides: copy)
+            return Snapshot(overrides: copy, arrangements: arrangements)
         }
-        private enum CodingKeys: String, CodingKey { case schemaVersion, overrides }
+        private enum CodingKeys: String, CodingKey { case schemaVersion, overrides, arrangements }
         init(from decoder: Decoder) throws {
-            try KeyboardKeySettings.allowKeys(decoder, ["schemaVersion", "overrides"])
+            try KeyboardKeySettings.allowKeys(decoder, ["schemaVersion", "overrides", "arrangements"])
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let schema = try c.decode(Int.self, forKey: .schemaVersion)
-            guard schema == 1 || schema == 2 else { throw Invalid.settings }
+            guard (1...3).contains(schema), schema == 3 || !c.contains(.arrangements) else { throw Invalid.settings }
             let entries = try c.decode([Entry].self, forKey: .overrides)
             guard entries.count <= KeyboardKeySettings.descriptors.count + KeyboardKeySettings.legacyFunctionKeyIDs.count else { throw Invalid.settings }
             var seen = Set<String>()
@@ -132,15 +146,16 @@ struct KeyboardKeySettings {
                     result[entry.keyID] = entry.values
                 }
             }
-            self.init(overrides: result)
+            self.init(overrides: result, arrangements: try c.decodeIfPresent([String: [String]].self, forKey: .arrangements) ?? [:])
             try KeyboardKeySettings.validate(self)
         }
         func encode(to encoder: Encoder) throws {
             try KeyboardKeySettings.validate(self)
             var c = encoder.container(keyedBy: CodingKeys.self)
-            try c.encode(2, forKey: .schemaVersion)
+            try c.encode(3, forKey: .schemaVersion)
             let entries = overrides.sorted { $0.key < $1.key }.map { Entry(keyID: $0.key, values: $0.value) }
             try c.encode(entries, forKey: .overrides)
+            if !arrangements.isEmpty { try c.encode(arrangements, forKey: .arrangements) }
         }
     }
 
@@ -311,6 +326,10 @@ struct KeyboardKeySettings {
     }
     private static func validate(_ snapshot: Snapshot) throws {
         guard snapshot.overrides.count <= descriptors.count else { throw Invalid.settings }
+        for (alphabetID, order) in snapshot.arrangements {
+            guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID),
+                  KeyboardAlphabet.isArrangement(order, of: alphabet.keys) else { throw Invalid.settings }
+        }
         for (keyID, values) in snapshot.overrides {
             guard descriptorsByID[keyID] != nil else { throw Invalid.settings }
             try validate(values)

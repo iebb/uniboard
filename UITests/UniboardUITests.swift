@@ -1490,15 +1490,12 @@ final class UniboardUITests: XCTestCase {
         addTeardownBlock { @MainActor [self] in deleteAppPages(named: "qaone") }
         let page = createAppPage("qaone")
         addAppPageKey(query: "infinity", codepoint: "U+221E")
-        let key = app.buttons["page.key.0"].firstMatch
+        let key = app.buttons["arrange.0.0"].firstMatch
         XCTAssertTrue(key.waitForExistence(timeout: 5))
-        XCTAssertTrue(key.label.contains("U+221E"))
+        XCTAssertEqual(key.value as? String, "U+221E")
+        addAppPageKeyHoldChoice(key, query: "almost equal to", codepoint: "U+2248")
+        attachScreenshot("A page key's hold choices are edited on the page")
         key.tap()
-        app.buttons["variants.addUnicode"].tap()
-        pickAppUnicode(query: "almost equal to", codepoint: "U+2248")
-        XCTAssertTrue(app.staticTexts["variants.item.0"].waitForExistence(timeout: 5))
-        attachScreenshot("A page key's variants are edited in the app")
-        app.navigationBars.buttons.firstMatch.tap()
         let star = app.switches["page.star"].firstMatch
         XCTAssertTrue(star.waitForExistence(timeout: 5))
         tapSwitch(star)
@@ -1544,12 +1541,8 @@ final class UniboardUITests: XCTestCase {
         app.buttons["arrange.up"].tap()
         XCTAssertTrue(tile(0, 1).waitUntilLabelEquals("Key ∑"), "Moving a key up takes it to the row above")
         attachScreenshot("A page arranged into rows with a half-width gap")
-        app.navigationBars.buttons.firstMatch.tap()
-        let arrange = app.buttons["page.arrange"].firstMatch
-        XCTAssertTrue(arrange.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["page.key.1"].firstMatch.label.contains("U+2211"), "Keys keep the order their places give them")
-        openArrange()
-        app.buttons["arrange.reset"].tap()
+        app.buttons["page.more"].firstMatch.tap()
+        app.buttons["arrange.reset"].firstMatch.tap()
         XCTAssertTrue(tile(0, 2).waitUntilLabelEquals("Key ≈"))
         XCTAssertFalse(tile(1, 0).exists)
     }
@@ -1567,9 +1560,8 @@ final class UniboardUITests: XCTestCase {
         addTeardownBlock { @MainActor [self] in deleteAppPages(named: "qaforms") }
         _ = createAppPage("qaforms")
         addSnowmanPresentations()
-        XCTAssertTrue(app.buttons["page.key.0"].firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["page.key.0"].firstMatch.label.contains("U+2603 U+FE0E"))
-        XCTAssertTrue(app.buttons["page.key.1"].firstMatch.label.contains("U+2603 U+FE0F"), "Both forms are separate keys")
+        XCTAssertTrue(app.buttons["arrange.0.0"].firstMatch.waitUntilValueEquals("U+2603 U+FE0E"))
+        XCTAssertEqual(app.buttons["arrange.0.1"].firstMatch.value as? String, "U+2603 U+FE0F", "Both forms are separate keys")
         attachScreenshot("A page holds the text and emoji snowman as two keys")
     }
 
@@ -1692,11 +1684,23 @@ final class UniboardUITests: XCTestCase {
         XCTAssertTrue(key.waitUntilValueEquals("q"), "No value restores the key's own text")
     }
 
+    /// A page opens as its canvas.
     private func openArrange() {
-        let arrange = app.buttons["page.arrange"].firstMatch
-        XCTAssertTrue(arrange.waitForExistence(timeout: 5))
-        arrange.tap()
         XCTAssertTrue(app.descendants(matching: .any)["arrange.canvas"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    /// Selects a page key and adds a hold choice from the Unicode picker.
+    private func addAppPageKeyHoldChoice(_ key: XCUIElement, query: String, codepoint: String) {
+        XCTAssertTrue(key.waitForExistence(timeout: 5))
+        key.tap()
+        let hold = app.buttons["layers.longPress"].firstMatch
+        XCTAssertTrue(hold.waitForExistence(timeout: 5))
+        hold.tap()
+        app.buttons["layer.chooseUnicode"].firstMatch.tap()
+        pickAppUnicode(query: query, codepoint: codepoint)
+        app.buttons["layer.save"].firstMatch.tap()
+        XCTAssertTrue(hold.waitForExistence(timeout: 5))
+        XCTAssertNotEqual(hold.value as? String, "Off", "The key keeps its new hold choice")
     }
 
     func testSystemKeyboardDrawsAppArrangedRowsAndGaps() throws {
@@ -1735,10 +1739,9 @@ final class UniboardUITests: XCTestCase {
         deleteAppPages(named: "qaone")
         let page = createAppPage("qaone")
         addAppPageKey(query: "infinity", codepoint: "U+221E")
-        app.buttons["page.key.0"].firstMatch.tap()
-        app.buttons["variants.addUnicode"].tap()
-        pickAppUnicode(query: "almost equal to", codepoint: "U+2248")
-        app.navigationBars.buttons.firstMatch.tap()
+        let key = app.buttons["arrange.0.0"].firstMatch
+        addAppPageKeyHoldChoice(key, query: "almost equal to", codepoint: "U+2248")
+        key.tap()
         let star = app.switches["page.star"].firstMatch
         tapSwitch(star)
         XCTAssertTrue(star.waitUntilValueEquals("1"))

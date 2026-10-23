@@ -28,6 +28,20 @@ struct KeyboardAlphabet: Identifiable, Sendable {
     func lowercase(_ key: String) -> String { key.lowercased(with: casingLocale) }
     /// A key of this alphabet whose capital differs, so Shift changes it.
     func isCasedLetter(_ key: String) -> Bool { keys.contains(key) && uppercase(key) != key }
+
+    /// The same keys in `order`, each row keeping its length; any other order
+    /// leaves the standard rows.
+    func arranged(_ order: [String]?) -> KeyboardAlphabet {
+        guard let order, Self.isArrangement(order, of: keys) else { return self }
+        let starts = rows.indices.map { rows.prefix($0).reduce(0) { $0 + $1.count } }
+        let rows = zip(starts, rows).map { Array(order[$0..<($0 + $1.count)]) }
+        return KeyboardAlphabet(id: id, nativeName: nativeName, englishName: englishName, script: script,
+                                languageCode: languageCode, rows: rows, variants: variants)
+    }
+    /// Whether `order` holds exactly `keys`, each once.
+    static func isArrangement(_ order: [String], of keys: [String]) -> Bool {
+        order.count == keys.count && order.sorted() == keys.sorted() && Set(order).count == order.count
+    }
 }
 
 extension KeyboardAlphabet: Equatable, Hashable {

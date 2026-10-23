@@ -1,35 +1,57 @@
 import SwiftUI
 
-/// A selected key's three layers, swipe up, hold and swipe down, each
-/// opening its list of choices.
+/// A selected key's layers, one row each: its swipe-up, hold and swipe-down
+/// choices as they show on the key. A row opens that layer's editor.
 struct KeyLayersPanel<Destination: View>: View {
-    /// Each layer's choices as shown on the key, or nil for none.
     var layers: [KeyboardKeySettings.Gesture] = [.swipeUp, .longPress, .swipeDown]
-    let summary: (KeyboardKeySettings.Gesture) -> String
+    /// A layer's choices, and whether they are the built-in defaults.
+    let choices: (KeyboardKeySettings.Gesture) -> (values: [String], isDefault: Bool)
     let destination: (KeyboardKeySettings.Gesture) -> Destination
 
     var body: some View {
-        HStack(spacing: 8) {
+        VStack(spacing: 8) {
             ForEach(layers, id: \.rawValue) { gesture in
+                let layer = choices(gesture)
                 NavigationLink { destination(gesture) } label: {
-                    VStack(spacing: 2) {
-                        Image(systemName: gesture == .tap ? "character.cursor.ibeam" : gesture.icon).font(.body)
-                        Text(summary(gesture)).font(.caption).lineLimit(1).minimumScaleFactor(0.6)
+                    HStack(spacing: 10) {
+                        Image(systemName: gesture == .tap ? "character.cursor.ibeam" : gesture.icon)
+                            .font(.body.weight(.semibold)).foregroundStyle(.tint).frame(width: 24)
+                        if layer.values.isEmpty {
+                            Text("Off").foregroundStyle(.secondary)
+                        } else {
+                            // An overlay never widens the row, however many choices there are.
+                            Color.clear.frame(maxWidth: .infinity, minHeight: 34)
+                                .overlay(alignment: .leading) {
+                                    HStack(spacing: 6) {
+                                        ForEach(Array(layer.values.prefix(16).enumerated()), id: \.offset) { _, value in
+                                            Text(symbolKeyPreview(value)).font(.system(size: 20)).lineLimit(1)
+                                                .frame(minWidth: 30, minHeight: 34).padding(.horizontal, 2)
+                                                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                        }
+                                    }
+                                    .foregroundStyle(layer.isDefault ? .secondary : .primary)
+                                    .fixedSize()
+                                }
+                                .clipped()
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 40)
+                    .padding(.horizontal, 12).frame(minHeight: 52)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
                 .accessibilityLabel(gesture == .tap ? "Key" : gesture.title)
-                .accessibilityValue(summary(gesture))
+                .accessibilityValue(Self.summary(layer.values))
                 .accessibilityIdentifier("layers.\(gesture.rawValue)")
             }
         }
     }
 
     /// Choices joined as they show on a key.
-    static func summary(_ choices: [String]?) -> String {
-        guard let choices, !choices.isEmpty else { return "Off" }
-        return choices.map(symbolKeyPreview).joined(separator: " ")
+    static func summary(_ choices: [String]) -> String {
+        choices.isEmpty ? "Off" : choices.map(symbolKeyPreview).joined(separator: " ")
     }
 }
 

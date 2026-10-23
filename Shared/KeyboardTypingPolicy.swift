@@ -67,7 +67,8 @@ struct KeyboardTypingState: Equatable {
     /// Switching alphabets drops a one-shot capital; Caps Lock stays on, and
     /// automatic capitalization decides the next case afresh.
     mutating func selectAlphabet(_ alphabet: KeyboardAlphabet) {
-        guard alphabet != self.alphabet else { return }
+        // Alphabets compare by id; a rearranged layout has the same id.
+        guard alphabet != self.alphabet || alphabet.rows != self.alphabet.rows else { return }
         self.alphabet = alphabet
         if shift == .uppercase { shift = .lowercase }
         physicalSymbolShift = false

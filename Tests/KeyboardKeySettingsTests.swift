@@ -82,6 +82,36 @@ final class KeyboardKeySettingsTests: XCTestCase {
         XCTAssertNil(migrated.candidates(for: "letter.q", gesture: .tap))
         XCTAssertEqual(load(try data(migrated)), migrated)
     }
+    func testLayoutsCanBeRearrangedAndKeepTheirRows() throws {
+        let english = KeyboardAlphabet.english
+        var order = english.keys
+        order.swapAt(0, 1)
+        let swapped = try XCTUnwrap(Settings.Snapshot.defaults.updatingArrangement(order, for: "en"))
+        XCTAssertEqual(swapped.arrangement(for: "en"), order)
+        XCTAssertEqual(english.arranged(order).rows.first?.prefix(2), ["w", "q"])
+        XCTAssertEqual(english.arranged(order).rows.map(\.count), english.rows.map(\.count), "Each row keeps its length")
+        XCTAssertEqual(english.arranged(["q"]).rows, english.rows, "A partial order leaves the standard rows")
+        XCTAssertEqual(english.arranged(nil).rows, english.rows)
+        XCTAssertNil(swapped.updatingArrangement(english.keys, for: "en")?.arrangement(for: "en"), "The standard order clears it")
+        XCTAssertNil(swapped.updatingArrangement(nil, for: "en")?.arrangement(for: "en"))
+        XCTAssertNil(Settings.Snapshot.defaults.updatingArrangement(order, for: "xx"))
+        XCTAssertNil(Settings.Snapshot.defaults.updatingArrangement(Array(order.dropFirst()) + ["ä"], for: "en"))
+        // Key choices keep the arrangement, and it survives saving.
+        let both = try XCTUnwrap(swapped.updating(["x"], for: "letter.q", gesture: .tap))
+        XCTAssertEqual(both.arrangement(for: "en"), order)
+        XCTAssertEqual(both.removingOverride(for: "letter.q").arrangement(for: "en"), order)
+        XCTAssertEqual(load(try data(both)), both)
+        XCTAssertEqual(load(try data(.defaults)), .defaults)
+        for bad in [#"{"schemaVersion":2,"overrides":[],"arrangements":{}}"#,
+                    #"{"schemaVersion":3,"overrides":[],"arrangements":{"en":["q"]}}"#,
+                    #"{"schemaVersion":4,"overrides":[]}"#] {
+            XCTAssertEqual(load(json(bad)), .defaults)
+        }
+        var typing = KeyboardTypingState()
+        typing.selectAlphabet(english.arranged(order))
+        XCTAssertEqual(typing.alphabet.rows.first?.first, "w", "A rearranged layout replaces the same layout")
+    }
+
     private typealias Settings = KeyboardKeySettings
     private let container = URL(fileURLWithPath: "/injected-key-settings", isDirectory: true)
     private enum Failure: Error { case unavailable }
@@ -244,7 +274,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
         XCTAssertTrue(settings.save(expected)); XCTAssertEqual(saved, first)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: first) as? [String: Any])
         XCTAssertEqual(Set(object.keys), ["schemaVersion", "overrides"])
-        XCTAssertEqual(object["schemaVersion"] as? Int, 2)
+        XCTAssertEqual(object["schemaVersion"] as? Int, 3)
         let entries = try XCTUnwrap(object["overrides"] as? [[String: Any]])
         XCTAssertEqual(entries.compactMap { $0["keyID"] as? String }, ["letter.a", "letter.z"])
         XCTAssertEqual(Set(entries[0].keys), ["keyID", "longPress"])
@@ -318,7 +348,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
 
     func testEditableReadRequiresValidBoundedSnapshotWhileKeyboardRetainsSafeFallback() throws {
         let valid = try data(example)
-        let malformed = [Data(), Data([0xFF]), Data(valid.dropLast()), json(#"{"schemaVersion":3,"overrides":[]}"#),
+        let malformed = [Data(), Data([0xFF]), Data(valid.dropLast()), json(#"{"schemaVersion":4,"overrides":[]}"#),
                          json(#"{"schemaVersion":1,"overrides":[{"keyID":"unknown"}]}"#),
                          valid + Data(repeating: 0x20, count: Settings.maximumPayloadBytes + 1 - valid.count)]
         for bytes in malformed {

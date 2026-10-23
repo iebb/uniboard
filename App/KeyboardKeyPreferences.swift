@@ -37,6 +37,17 @@ final class KeyboardKeyPreferences: ObservableObject {
         return persist(updated)
     }
 
+    /// Saves a layout's letter order; nil restores its standard rows.
+    @discardableResult
+    func saveArrangement(_ order: [String]?, alphabetID: String) -> Bool {
+        guard let current = settings.loadForEditing() else { saveError = Self.readError; return false }
+        guard let updated = current.updatingArrangement(order, for: alphabetID) else {
+            saveError = "This arrangement could not be saved."
+            return false
+        }
+        return persist(updated)
+    }
+
     @discardableResult
     func reset(keyID: String) -> Bool {
         guard KeyboardKeySettings.descriptor(for: keyID) != nil else {

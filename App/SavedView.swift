@@ -65,12 +65,6 @@ struct SavedView: View {
         .onAppear { store.refreshFavorites() }
         .background(Color.groupedBackground)
         .navigationTitle("Favorites")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink("Arrange") { PageArrangeView(boardID: SymbolBoardStore.favoritesID) }
-                    .accessibilityIdentifier("favorites.arrange")
-            }
-        }
         .sheet(item: $selectedEmoji) { EmojiDetailView(emoji: $0, scratchpad: $scratchpad) }
     }
 }

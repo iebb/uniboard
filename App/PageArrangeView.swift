@@ -1,13 +1,22 @@
 import SwiftUI
 
-/// A page drawn as the keyboard shows it, for arranging its keys into rows
-/// with half-width and full-width gaps. Select a key or gap to move it or to
-/// add a gap or row break before it; keys can also be dragged onto a place.
+/// A page drawn as the keyboard shows it. Add keys, arrange them into rows
+/// with half-width and full-width gaps, and select a key to edit its swipe-up,
+/// hold and swipe-down choices; keys can also be dragged onto a place.
 struct PageArrangeView: View {
     typealias Layout = SymbolPageLayout
     let boardID: String
+    /// Opens the Favorites and Recently Used lists, for Favorites.
+    var savedList: AnyView? = nil
     @ObservedObject private var boards = SymbolBoardStore.shared
     @State private var selection: Layout.Position?
+    @State private var picking = false
+    @State private var typing = false
+    @State private var typed = ""
+    @State private var renaming = false
+    @State private var name = ""
+    /// Favorites come from saving characters, so they are not added or removed here.
+    private var isFavorites: Bool { boardID == SymbolBoardStore.favoritesID }
     /// The width the keys and gaps of a row share.
     @State private var canvasWidth: CGFloat = 300
     @State private var failed = false
@@ -28,10 +37,15 @@ struct PageArrangeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if keyCount == 0 {
-                        Text("Add keys to this page to arrange them.").foregroundStyle(.secondary)
+                        Text(isFavorites ? "Save characters to add them here." : "No keys yet.").foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, minHeight: 120)
                     } else {
                         canvas
+                    }
+                    if let key = selectedKey {
+                        layers(key)
+                    } else {
+                        pageOptions
                     }
                     if failed {
                         Text("This arrangement could not be saved.").font(.footnote).foregroundStyle(.red)
@@ -46,22 +60,67 @@ struct PageArrangeView: View {
             }
             .background(Color(.systemGroupedBackground))
             Divider()
-            VStack(spacing: 8) {
-                if let key = selectedKey { layers(key) }
-                controls
-            }
-            .padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
+            controls.padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
         }
-        .navigationTitle(board.map { "Arrange \($0.name)" } ?? "Arrange")
+        .navigationTitle(board?.name ?? "Page")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if let savedList {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink { savedList } label: { Image(systemName: "list.bullet") }
+                        .accessibilityLabel("Favorites and Recently Used").accessibilityIdentifier("page.list")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Rows of Ten") { selection = nil; save(nil) }
-                    .disabled(board?.layout == nil)
-                    .accessibilityIdentifier("arrange.reset")
+                Menu {
+                    if !isFavorites {
+                        Button { name = board?.name ?? ""; renaming = true } label: { Label("Rename", systemImage: "pencil") }
+                            .accessibilityIdentifier("page.rename")
+                    }
+                    Button { selection = nil; save(nil) } label: { Label("Rows of Ten", systemImage: "square.grid.3x3") }
+                        .disabled(board?.layout == nil)
+                        .accessibilityIdentifier("arrange.reset")
+                } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel("More").accessibilityIdentifier("page.more")
             }
         }
         .onAppear { boards.refreshPages() }
+        .alert("Add Text", isPresented: $typing) {
+            TextField("Characters", text: $typed).accessibilityIdentifier("page.addText.field")
+            Button("Cancel", role: .cancel) {}
+            // Each character becomes a key of its own.
+            Button("Add") { failed = !singleCharacters(typed).allSatisfy { boards.add(text: $0, to: boardID) != nil } }
+        }
+        .alert("Rename Page", isPresented: $renaming) {
+            TextField("Name", text: $name)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") { failed = !boards.renameBoard(boardID, to: name) }
+        }
+        .sheet(isPresented: $picking) {
+            KeyboardKeyUnicodePicker { text in failed = boards.add(text: text, to: boardID) == nil }
+        }
+    }
+
+    /// Shown while no key is selected: adding keys and the ★ page.
+    private var pageOptions: some View {
+        VStack(spacing: 8) {
+            if !isFavorites {
+                HStack(spacing: 8) {
+                    Button { picking = true } label: { Label("Add from Unicode", systemImage: "character.book.closed").frame(maxWidth: .infinity) }
+                        .accessibilityIdentifier("page.addUnicode")
+                    Button { typed = ""; typing = true } label: { Label("Add Text", systemImage: "plus").frame(maxWidth: .infinity) }
+                        .accessibilityIdentifier("page.addText")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!boards.canEdit || keyCount >= SymbolBoardStore.maximumKeys)
+            }
+            Toggle("Opens with ★", isOn: Binding(get: { boards.preferredStarBoardID == boardID }, set: { on in
+                failed = !boards.setPreferredStarBoard(on ? boardID : SymbolBoardStore.favoritesID)
+            }))
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .accessibilityIdentifier("page.star")
+        }
     }
 
     private var canvas: some View {
@@ -117,16 +176,15 @@ struct PageArrangeView: View {
         }
         .dropDestination(for: String.self) { items, _ in drop(items, at: position) }
         .accessibilityLabel(key.map { "Key \(symbolKeyPreview($0.text))" } ?? (item == .halfGap ? "Half-width gap" : "Full-width gap"))
-        .accessibilityValue("Row \(position.row + 1), place \(position.index + 1)")
+        .accessibilityValue(key.map { $0.text.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ") }
+                            ?? "Row \(position.row + 1), place \(position.index + 1)")
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("arrange.\(position.row).\(position.index)")
     }
 
     /// The selected key's swipe-up, hold and swipe-down choices.
     private func layers(_ key: SymbolBoardKey) -> some View {
-        KeyLayersPanel(summary: { gesture in
-            KeyLayersPanel<KeyLayerEditor>.summary(choices(key, gesture))
-        }, destination: { gesture in
+        KeyLayersPanel(choices: { gesture in (choices(key, gesture) ?? [], false) }, destination: { gesture in
             KeyLayerEditor(title: "\(gesture.title) · \(symbolKeyPreview(key.text))", choices: choices(key, gesture) ?? []) { values in
                 switch gesture {
                 case .longPress: return boards.setVariants(boardID: boardID, keyID: key.id, variants: values)
@@ -188,9 +246,14 @@ struct PageArrangeView: View {
                         edit(select: .init(row: p.row - 1, index: index)) { $0.joinRow(p.row) }
                     }
                 } else {
-                    control("Remove Gap", "minus.circle", id: "arrange.remove", enabled: item != nil && item != .key) {
+                    control("Remove", "minus.circle", id: "arrange.remove", enabled: item != nil && (item != .key || !isFavorites)) {
                         guard let p = position else { return }
-                        edit(select: nil) { $0.removeGap(at: p) }
+                        if item == .key, let key = selectedKey {
+                            failed = !boards.removeKey(boardID: boardID, keyID: key.id)
+                            if !failed { selection = nil }
+                        } else {
+                            edit(select: nil) { $0.removeGap(at: p) }
+                        }
                     }
                 }
             }

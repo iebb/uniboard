@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The main keyboard drawn as it types, for choosing each key's swipe-up,
-/// hold and swipe-down choices. Its keys keep the layout's places.
+/// The main keyboard drawn as it types. Select a key to change what it types
+/// and its swipe-up, hold and swipe-down choices; drag a letter onto another
+/// to swap them. Each row keeps its length.
 struct MainKeyboardEditorView: View {
     @EnvironmentObject private var preferences: CatalogPreferences
     @ObservedObject private var keys = KeyboardKeyPreferences.shared
@@ -12,7 +13,9 @@ struct MainKeyboardEditorView: View {
     private var alphabet: KeyboardAlphabet {
         preferences.alphabets.first { $0.id == alphabetID } ?? preferences.alphabets.first ?? .english
     }
-    private var rows: [[String]] { [Array("1234567890").map(String.init)] + alphabet.rows }
+    /// The layout's letters in the order the keyboard types them.
+    private var arranged: KeyboardAlphabet { alphabet.arranged(keys.snapshot.arrangement(for: alphabet.id)) }
+    private var rows: [[String]] { [Array("1234567890").map(String.init)] + arranged.rows }
     private var keyWidth: CGFloat {
         let columns = CGFloat(rows.map(\.count).max() ?? 10)
         return max(0, (width - spacing * (columns - 1)) / columns)
@@ -42,20 +45,34 @@ struct MainKeyboardEditorView: View {
                     .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("mainKeyboard.keys")
+                    if let descriptor { layers(descriptor) }
                 }
                 .padding(16)
             }
             // Measured outside the keys, so they always fit the screen.
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = max(0, $0 - 32 - 16) }
             .background(Color(.systemGroupedBackground))
-            if let descriptor {
-                Divider()
-                KeyLayersPanel(layers: [.tap, .swipeUp, .longPress, .swipeDown], summary: { gesture in
-                    // No saved choices means the built-in defaults; the key itself types its own text.
-                    let values = keys.snapshot.candidates(for: descriptor.id, gesture: gesture)
-                    if gesture == .tap { return symbolKeyPreview(values?.first ?? descriptor.text ?? descriptor.title) }
-                    return values == nil ? "Default" : KeyLayersPanel<AnyView>.summary(values)
-                }, destination: { (gesture: KeyboardKeySettings.Gesture) -> AnyView in
+        }
+        .navigationTitle("Keyboard")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Standard Order") { keys.saveArrangement(nil, alphabetID: alphabet.id) }
+                    .disabled(keys.snapshot.arrangement(for: alphabet.id) == nil)
+                    .accessibilityIdentifier("mainKeyboard.reset")
+            }
+        }
+        .onAppear { keys.refresh() }
+    }
+
+    /// The selected key's own output and its three candidate layers.
+    private func layers(_ descriptor: KeyboardKeySettings.Descriptor) -> some View {
+        KeyLayersPanel(layers: [.tap, .swipeUp, .longPress, .swipeDown], choices: { gesture in
+            // No saved choices means the built-in defaults; the key itself types its own text.
+            let values = keys.snapshot.candidates(for: descriptor.id, gesture: gesture)
+            if gesture == .tap { return ([values?.first ?? descriptor.text ?? descriptor.title], values == nil) }
+            return (values ?? KeyboardVariantPolicy.defaultCandidates(for: descriptor.id, gesture: gesture, alphabet: alphabet), values == nil)
+        }, destination: { (gesture: KeyboardKeySettings.Gesture) -> AnyView in
                     let original = keys.snapshot.candidates(for: descriptor.id, gesture: gesture)
                     guard gesture == .tap else {
                         return AnyView(KeyboardGestureSettingsView(descriptor: descriptor, gesture: gesture, alphabet: alphabet,
@@ -65,13 +82,15 @@ struct MainKeyboardEditorView: View {
                     return AnyView(KeyLayerEditor(title: "Key · \(descriptor.title)", choices: original ?? [], maximum: 1) { values in
                         keys.save(values.isEmpty ? nil : values, keyID: descriptor.id, gesture: .tap, replacing: original)
                     })
-                })
-                .padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
-            }
-        }
-        .navigationTitle("Keyboard")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear { keys.refresh() }
+        })
+    }
+
+    /// Dropping one letter on another swaps their places.
+    private func swap(_ dragged: String, with target: String) -> Bool {
+        var order = arranged.keys
+        guard dragged != target, let from = order.firstIndex(of: dragged), let to = order.firstIndex(of: target) else { return false }
+        order.swapAt(from, to)
+        return keys.saveArrangement(order == alphabet.keys ? nil : order, alphabetID: alphabet.id)
     }
 
     private func tile(_ key: String) -> some View {
@@ -93,8 +112,25 @@ struct MainKeyboardEditorView: View {
         }
         .buttonStyle(.plain)
         .disabled(id.flatMap(KeyboardKeySettings.descriptor(for:)) == nil)
+        .modifier(LetterDrag(letter: key, enabled: alphabet.keys.contains(key), drop: swap))
         .accessibilityLabel("Key \(key)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("mainKeyboard.key.\(id ?? key)")
+    }
+}
+
+/// Letters drag onto each other; the number row keeps its order.
+private struct LetterDrag: ViewModifier {
+    let letter: String
+    let enabled: Bool
+    let drop: (String, String) -> Bool
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .draggable(letter) { Text(letter).font(.title2).padding(8) }
+                .dropDestination(for: String.self) { items, _ in items.first.map { drop($0, letter) } ?? false }
+        } else {
+            content
+        }
     }
 }

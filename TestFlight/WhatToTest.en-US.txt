@@ -7,7 +7,7 @@ GESTURES
 Hold gives the layout's accents first (French é è ê ë, Russian ё, Greek ά). Up gives superscript then subscript; Down gives styled forms: mathematical Latin, mathematical Greek (𝛂), or related Cyrillic letters (є э for е). Groups never repeat across Hold, Up and Down. Customize Keys has a layout menu.
 
 PAGES
-The Pages tab sets up pages and the page Star opens. Arrange Keys places keys in rows with half-width and full-width gaps; select a key to edit its swipe-up, hold and swipe-down choices, and check the keyboard uses all three. Pages > Keyboard does the same for the main keys, and Key changes what a key types. The Pages menu exports and imports custom pages.
+Each page opens drawn like the keyboard: add keys, arrange rows and gaps, and select a key to see and edit its swipe-up, hold and swipe-down rows. Pages > Keyboard does the same for main keys, Key changes what one types, and dragging a letter onto another swaps them. The Pages menu exports and imports custom pages.
 
 TEXT AND EMOJI FORMS
 Characters with both presentations (☃, ⌚) show as text in charts and side by side in details. The picker adds each form separately. In keyboard search they appear twice, once per form; each inserts its exact sequence, and holding a page key offers the other form.

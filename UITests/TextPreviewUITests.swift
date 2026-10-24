@@ -7,10 +7,17 @@ final class TextPreviewUITests: UniboardUITestCase {
     func testUnicodeKeyOpensSearchUnderTheTextPreview() throws {
         try requirePhoneKeyboardIntegration()
         // The one test that turns the preview on with the Settings switch;
-        // the next setUp launch turns it off again.
+        // the next setUp launch turns it off again. Any relaunch with the
+        // setUp arguments turns it off too, so enable Uniboard in Settings
+        // (which needs a relaunch) before flipping the switch, and open the
+        // host without relaunching.
+        if enableUniboardInSettings() {
+            app.terminate()
+            app.launch()
+        }
         setAppTextPreview(true)
         addTeardownBlock { @MainActor [self] in restoreEnglishKeyboard() }
-        _ = openSystemKeyboardHost(initialText: "ab", unicodeBrowse: false)
+        _ = openSystemKeyboardHost(initialText: "ab", unicodeBrowse: false, afterSetUpLaunch: true)
         let toggle = app.buttons["keyboard.toggleUnicodeToolbar"].firstMatch
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         toggle.tap()
@@ -18,7 +25,7 @@ final class TextPreviewUITests: UniboardUITestCase {
                       "U opens search with its keys, not the browse grid")
         XCTAssertTrue(app.buttons["keyboard.query.u"].firstMatch.waitForExistence(timeout: 5))
         let preview = app.descendants(matching: .any)["keyboard.textPreview"].firstMatch
-        XCTAssertTrue(preview.exists, "The text preview stays above search")
+        XCTAssertTrue(preview.waitForExistence(timeout: 5), "The text preview stays above search")
         attachScreenshot("U opens search under the text preview")
     }
 

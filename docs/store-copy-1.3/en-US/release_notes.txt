@@ -1,0 +1,9 @@
+Explore fonts, inspect Unicode text and make your keyboard your own.
+
+• Compare available fonts, filter by family or style, and download Google Fonts on demand.
+• Set preferred fonts for code points, ranges and Unicode blocks.
+• Inspect normalization forms and UTF-8/UTF-16 values, with copy actions.
+• Copy preview text as an image with custom colors, transparency and 1×, 2× or 3× resolution.
+• Edit and rearrange number and letter keys, choose automatic capitalization, and transfer your setup with TOML import and export.
+
+Font choices affect Uniboard’s previews, not other apps. Copied images paste as pictures, not editable text.

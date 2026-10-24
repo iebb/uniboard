@@ -106,6 +106,15 @@ struct KeyboardKeySettings {
             guard (try? KeyboardKeySettings.validate(result)) != nil else { return nil }
             return result
         }
+        /// A layout being added types the stock number row, never digits saved
+        /// for it before, such as a migrated keyboard without them. Its other
+        /// saved keys stay; when the digits do not fit above them it gets the
+        /// standard keyboard. Other layouts never change. nil for an unknown layout.
+        func withStockNumberRow(for alphabetID: String) -> Snapshot? {
+            guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID) else { return nil }
+            guard let saved = arrangements[alphabetID] else { return self }
+            return updatingArrangement(saved.isValid(for: alphabet) ? saved.withStockNumberRow() : nil, for: alphabetID)
+        }
         /// An earlier file's arrangements with the number row they were shown
         /// with, once. With Number Row on, a layout without its own arrangement
         /// gets the standard one and a custom one gains the digits as its own

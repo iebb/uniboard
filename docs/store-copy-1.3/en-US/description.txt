@@ -1,0 +1,26 @@
+Find Unicode characters, customize your keyboard and explore how text looks in different fonts. Uniboard combines a literal typing keyboard, personal symbol pages and offline character search for iPhone and iPad.
+
+MAKE YOUR KEYBOARD YOURS
+Edit letter, number and symbol keys, arrange your pages and drag keys into place. The default keyboard includes an editable number row. Configure tap, shifted tap, hold and swipe actions while keeping exact character sequences intact. Choose automatic capitalization by sentence, word or letter, follow the typing app’s preference, or turn it off. Some fields disable automatic capitalization.
+
+SEARCH AND INSPECT
+Search character names, aliases and Unicode blocks, or look up a code point such as U+1F680. A cached catalog index speeds up searches without indexing what you type. In Unicode search, tap keys to edit the query or hold a key to type it directly into your text.
+
+Inspect the text shown in the keyboard preview: see code points, Unicode names, grapheme clusters, UTF-16 counts and normalization forms. Copy normalized text or UTF-8 and UTF-16 hexadecimal values without changing the input. Inspection doesn’t change your text or access the whole document.
+
+MOVE THROUGH YOUR TEXT
+Place the cursor in the font-rendered preview to move the real input cursor within the text the typing app exposes. Available context and cursor behavior depend on the app; this is not a replacement for its full text editor.
+
+EXPLORE FONTS
+Compare characters in fonts available to Uniboard. Filter accessible system, installed, bundled and downloaded fonts by family or style, and download Google Fonts on demand in the app. Availability can differ between the app and keyboard. Set preferred fonts for code points, ranges or Unicode blocks; missing or unsupported choices use fallback fonts. Font rules affect Uniboard’s rendering, not the font used by another app.
+
+COPY TEXT AS A PICTURE
+Copy the text visibly shown in the preview as an image with your chosen text and background colors, including transparency. Choose 1×, 2× or 3× resolution and see the resulting pixel dimensions. The image preserves its appearance without requiring the recipient to have the font. It pastes as a picture only where images are accepted, not as editable text.
+
+TAKE YOUR SETUP WITH YOU
+Export or import a TOML configuration with settings, layouts, favorites, font choices and Copy Image options. Review replacements and resets before importing, then use Undo Last Import if needed. Font files and typing history aren’t included. Favorites and custom key text may be personal. Copy Image colors and scale chosen in the keyboard without Full Access aren’t included in the file.
+
+LOCAL BY DESIGN
+No account, ads or analytics. Character catalogs and search work offline; optional font downloads need an internet connection. Typing and searches aren’t sent to a server. Ordinary typing and text inspection don’t require Full Access; some clipboard and keyboard-to-app sharing features do.
+
+Enable Uniboard in iOS Settings > General > Keyboard > Keyboards > Add New Keyboard, then hold the globe to select it. The interface and Unicode names and descriptions are English. Some apps and fields don’t allow custom keyboards. Font coverage and language-specific typing support vary.

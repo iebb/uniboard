@@ -152,6 +152,57 @@ final class KeyboardKeySettingsTests: XCTestCase {
         XCTAssertEqual(reader.loadSnapshot(), off)
     }
 
+    func testAnAddedLayoutTypesTheStockNumberRowWhileOtherLayoutsKeepTheirs() throws {
+        let english = KeyboardAlphabet.english
+        let russian = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "ru"))
+        let greek = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "el"))
+        // Layout A's number row customized: 2 before 1, a gap, and 0 moved after p.
+        var custom = MainKeyboardArrangement.standard(for: english)
+        custom.keys.swapAt(0, 1)
+        let zero = custom.keys.remove(at: 9)
+        custom.keys.insert(zero, at: 19)
+        custom.layout = "kkkkgkkkkk/kkkkkkkkkkk/kkkkkkkkk/kkkkkkkkk"
+        let customized = try XCTUnwrap(Settings.Snapshot(overrides: example.overrides).updatingArrangement(custom, for: "en"))
+        // Layout B, never arranged, is added: nothing to save, and it types the stock number row.
+        let added = try XCTUnwrap(customized.withStockNumberRow(for: "ru"))
+        XCTAssertEqual(added, customized)
+        XCTAssertEqual(added.effectiveArrangement(for: russian), .standard(for: russian))
+        XCTAssertEqual(Array(added.effectiveArrangement(for: russian).keys.prefix(10)), MainKeyboardArrangement.digits)
+        XCTAssertEqual(added.arrangement(for: "en"), custom)
+        XCTAssertNil(customized.withStockNumberRow(for: "xx"))
+
+        // After Number Row off was migrated every layout was saved without digits;
+        // A then gets its own number row, and B is added.
+        let migrated = Settings.Snapshot(arrangesNumberRow: false).migratingNumberRow(showsNumberRow: false)
+        XCTAssertEqual(migrated.effectiveArrangement(for: russian).missingDigits.count, 10)
+        let before = try XCTUnwrap(migrated.updatingArrangement(custom, for: "en")?.updating(["!"], for: "digit.1", gesture: .swipeUp))
+        let after = try XCTUnwrap(before.withStockNumberRow(for: "ru"))
+        XCTAssertNil(after.arrangement(for: "ru"), "Its own letters with the stock digits are the standard keyboard")
+        XCTAssertEqual(after.effectiveArrangement(for: russian), .standard(for: russian))
+        XCTAssertEqual(after.arrangement(for: "en"), custom, "A keeps its customized number row")
+        XCTAssertEqual(after.arrangement(for: "el"), .letters(for: greek), "Layouts not being added never change")
+        XCTAssertEqual(after.overrides, before.overrides)
+        XCTAssertEqual(load(try data(after)), after)
+
+        // B arranged before, removed and added again: its letters stay, its digits become the stock row.
+        var own = MainKeyboardArrangement.letters(for: russian)
+        own.keys.swapAt(0, 1)
+        var stale = own.prependingNumberRow
+        stale.keys.swapAt(0, 9)
+        stale.layout = "kkkkkhkkkkk/" + own.layout
+        let readded = try XCTUnwrap(try XCTUnwrap(before.updatingArrangement(stale, for: "ru")).withStockNumberRow(for: "ru"))
+        XCTAssertEqual(readded.arrangement(for: "ru"), own.prependingNumberRow)
+        XCTAssertEqual(readded.arrangement(for: "en"), custom)
+        // Letters in four rows leave no room above them: the standard keyboard.
+        var split = MainKeyboardArrangement.letters(for: russian)
+        var places = try XCTUnwrap(split.places)
+        XCTAssertTrue(places.breakRow(at: .init(row: 0, index: 4)))
+        split.layout = places.text
+        let full = try XCTUnwrap(before.updatingArrangement(split, for: "ru")?.withStockNumberRow(for: "ru"))
+        XCTAssertNil(full.arrangement(for: "ru"))
+        XCTAssertEqual(full.arrangement(for: "en"), custom)
+    }
+
     func testNumberRowMigrationSavesOnceAndNeverReplacesAnUnreadableFile() throws {
         try withContainer { directory in
             var legacyReads = 0

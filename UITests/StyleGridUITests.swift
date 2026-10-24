@@ -220,11 +220,11 @@ final class StyleGridUITests: XCTestCase {
     }
 
     private func openFamily(_ name: String) {
-        let field = app.searchFields["Search fonts by name"].firstMatch
+        let field = app.textFields["googleFonts.search"].firstMatch
         if !field.exists { app.swipeDown() }
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
-        if let value = field.value as? String, value != "Search fonts by name", !value.isEmpty {
+        if let value = field.value as? String, value != field.placeholderValue, !value.isEmpty {
             field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))
         }
         field.typeText(name + "\n")

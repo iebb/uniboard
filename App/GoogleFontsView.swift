@@ -28,6 +28,8 @@ final class GoogleFontsViewModel: ObservableObject {
 struct GoogleFontsView: View {
     var text: String? = nil
     @StateObject private var model = GoogleFontsViewModel()
+    /// The pushed family's id.
+    @State private var openedFamily: String?
 
     init(text: String? = nil) { self.text = text }
 
@@ -60,20 +62,39 @@ struct GoogleFontsView: View {
                     }
                 }
                 ForEach(model.families) { family in
-                    NavigationLink {
-                        FontFaceDetailView(family: family, catalog: catalog, coordinator: coordinator, text: text)
+                    // Ends search editing before the push; UIKit would
+                    // otherwise refocus the field (and keyboard) on Back.
+                    Button {
+                        FontSearchHeader.endEditing()
+                        openedFamily = family.id
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(family.name).font(.body.weight(.semibold))
-                            Text("\(family.styles.count) styles").font(.caption).foregroundStyle(.secondary)
-                        }.frame(minHeight: 52)
-                    }.accessibilityIdentifier("googleFonts.family.\(family.name)")
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(family.name).font(.body.weight(.semibold))
+                                Text("\(family.styles.count) styles").font(.caption).foregroundStyle(.secondary)
+                            }.frame(minHeight: 52)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .foregroundStyle(.primary)
+                    .accessibilityIdentifier("googleFonts.family.\(family.name)")
                 }
             }
         }
+        .navigationDestination(item: $openedFamily) { id in
+            if let catalog = model.catalog, let coordinator = model.coordinator,
+               let family = catalog.snapshot.families.first(where: { $0.id == id }) {
+                FontFaceDetailView(family: family, catalog: catalog, coordinator: coordinator, text: text)
+            }
+        }
+        // The screen owns its search field: a pushed `.searchable` drawer
+        // could outlive Back and float above the keyboard on later screens.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            FontSearchHeader(text: $model.query, placeholder: "Search fonts by name", identifier: "googleFonts.search")
+        }
         .navigationTitle("Google Fonts")
-        .searchable(text: $model.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search fonts by name")
-        .modifier(FontSearchToolbarVisibility())
         .task { await model.load() }
     }
 }

@@ -48,6 +48,19 @@ final class KeyboardKeyPreferences: ObservableObject {
         return persist(updated)
     }
 
+    /// Before a layout is added: it types the stock number row, whatever was
+    /// saved for it. Saves only when that changes something. An unreadable
+    /// file is left alone, since the keyboard then types the standard rows.
+    @discardableResult
+    func useStockNumberRow(alphabetID: String) -> Bool {
+        guard let current = settings.loadForEditing() else { return true }
+        guard let updated = current.withStockNumberRow(for: alphabetID) else {
+            saveError = "This arrangement could not be saved."
+            return false
+        }
+        return updated == current || persist(updated)
+    }
+
     /// Saves several layers of one key as one change, such as a candidate
     /// moved from one layer to another.
     @discardableResult

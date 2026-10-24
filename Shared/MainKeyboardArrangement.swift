@@ -83,6 +83,20 @@ struct MainKeyboardArrangement: Codable, Equatable, Sendable {
         return MainKeyboardArrangement(keys: next, layout: SymbolPageLayout(rows: rows).text)
     }
 
+    /// These rows with the stock number row: every digit taken from where it
+    /// is, rows left without a key dropped, then all ten as their own first
+    /// row, as `standard` has them. Letters, gaps and other keys stay put.
+    /// Nil when the layout is unreadable or the rows leave no room on top.
+    func withStockNumberRow() -> MainKeyboardArrangement? {
+        guard var places, places.keySlots == keys.count else { return nil }
+        var next = keys
+        for index in keys.indices.reversed() where Self.isDigit(keys[index]) {
+            places.removeKeySlot(index); next.remove(at: index)
+        }
+        guard !places.rows.isEmpty, places.rows.count < Self.maximumRows else { return nil }
+        return MainKeyboardArrangement(keys: next, layout: places.text).prependingNumberRow
+    }
+
     /// The number row added as a new first row above these rows. Used on
     /// arrangements without digits, which then have the standard top row.
     var prependingNumberRow: MainKeyboardArrangement {

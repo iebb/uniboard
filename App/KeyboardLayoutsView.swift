@@ -38,7 +38,9 @@ struct KeyboardLayoutsView: View {
         .toolbar { EditButton() }
         .sheet(isPresented: $adding) {
             AddLayoutView(enabled: Set(preferences.layouts)) { id in
-                failed = !preferences.selectLayouts(preferences.layouts + [id])
+                // A new layout starts with the stock number row, never digits saved for it before.
+                failed = !KeyboardKeyPreferences.shared.useStockNumberRow(alphabetID: id)
+                    || !preferences.selectLayouts(preferences.layouts + [id])
             }
         }
     }

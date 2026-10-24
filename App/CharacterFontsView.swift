@@ -71,6 +71,7 @@ struct CharacterFontsView: View {
     @State private var presentation = FontPresentation.original
     @State private var refresh = UUID()
     @State private var inspectedFace: FontFaceRecord?
+    @State private var browsesCatalog = false
     init(text: String, characterName: String) {
         self.text = text; self.characterName = characterName
     }
@@ -132,6 +133,7 @@ struct CharacterFontsView: View {
                     LazyVGrid(columns: columns(width: geometry.size.width), spacing: 12) {
                         ForEach(model.faces) { face in
                             Button {
+                                FontSearchHeader.endEditing()
                                 inspectedFace = face
                             } label: {
                                 VStack(alignment: .leading, spacing: 8) {
@@ -151,18 +153,23 @@ struct CharacterFontsView: View {
                             .accessibilityValue(face.source.explorationLabel)
                         }
                     }
-                    NavigationLink("Browse Google Fonts") { GoogleFontsView(text: inspection.previewText) }
-                        .frame(minHeight: 44)
+                    Button("Browse Google Fonts") {
+                        FontSearchHeader.endEditing()
+                        browsesCatalog = true
+                    }
+                    .frame(minHeight: 44)
                 }.padding(16).frame(maxWidth: 960)
                     .frame(maxWidth: .infinity)
             }.background(Color.groupedBackground)
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            FontSearchHeader(text: $model.query, placeholder: "Search available fonts", identifier: "characterFonts.search")
+        }
         .navigationTitle("Fonts for This Character").navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $model.query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search available fonts")
-        .modifier(FontSearchToolbarVisibility())
         .navigationDestination(item: $inspectedFace) { face in
             FontFaceDetailView(face: face, inspection: inspection)
         }
+        .navigationDestination(isPresented: $browsesCatalog) { GoogleFontsView(text: inspection.previewText) }
         .task(id: refresh) { await model.scan(inspection) }
         .onChange(of: presentation) { _, _ in refresh = UUID() }
         .onChange(of: phase) { _, value in if value == .active { refresh = UUID() } }
@@ -181,13 +188,25 @@ func codepoints(_ text: String) -> String {
     text.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
 }
 
-/// iOS 17.0 retains its standard Close-search affordance; newer systems keep Back visible.
-struct FontSearchToolbarVisibility: ViewModifier {
-    @ViewBuilder func body(content: Content) -> some View {
-        if #available(iOS 17.1, *) {
-            content.searchPresentationToolbarBehavior(.avoidHidingContent)
-        } else {
-            content
-        }
+/// The font screens' always-visible search, pinned above their scrolling
+/// content. It is the app's own field rather than `.searchable`, so its
+/// focus and keyboard end with the screen instead of following Back.
+struct FontSearchHeader: View {
+    @Binding var text: String
+    let placeholder: String
+    let identifier: String
+
+    var body: some View {
+        SearchBar(text: $text, placeholder: placeholder, identifier: identifier)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(Color.groupedBackground)
+    }
+
+    /// Called before a push: UIKit would refocus a field that was editing
+    /// when its screen was covered, reopening the keyboard on Back.
+    static func endEditing() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }

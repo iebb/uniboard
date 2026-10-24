@@ -16,10 +16,10 @@ final class FontExplorationUITests: XCTestCase {
 
     func testGoogleCatalogSearchIsLocalAndOpensExactFamily() {
         openCatalogFromSettings()
-        let searchField = app.searchFields["Search fonts by name"].firstMatch
+        let searchField = app.textFields["googleFonts.search"].firstMatch
         XCTAssertTrue(searchField.waitForExistence(timeout: 5))
         XCTAssertTrue(searchField.isHittable, "Catalog search must be discoverable without a pull-down gesture")
-        search("Roboto", placeholder: "Search fonts by name")
+        search("Roboto", field: "googleFonts.search")
         let family = app.buttons["googleFonts.family.Roboto"].firstMatch
         XCTAssertTrue(family.waitForExistence(timeout: 15))
         family.tap()
@@ -34,7 +34,7 @@ final class FontExplorationUITests: XCTestCase {
     func testCharacterFontsInspectWithoutChangingCopyAction() {
         openLatinCharacterFonts()
         XCTAssertTrue(app.staticTexts["Fonts change the preview here. Other apps choose how inserted text looks."].exists)
-        search("Helvetica", placeholder: "Search available fonts")
+        search("Helvetica", field: "characterFonts.search")
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "characterFonts.face.")).firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout: 60), "The public inventory should verify a local Latin face; no mocked tile is injected")
         let inspectedFamily = tile.label.components(separatedBy: ",").first ?? "Helvetica"
@@ -60,11 +60,11 @@ final class FontExplorationUITests: XCTestCase {
             throw XCTSkip("Real Google font download acceptance requires explicit network-test opt-in")
         }
         openLatinCharacterFonts()
-        search("Roboto", placeholder: "Search available fonts")
+        search("Roboto", field: "characterFonts.search")
         let browse = app.buttons["Browse Google Fonts"].firstMatch
         reveal(browse)
         browse.tap()
-        search("Roboto", placeholder: "Search fonts by name")
+        search("Roboto", field: "googleFonts.search")
         let family = app.buttons["googleFonts.family.Roboto"].firstMatch
         XCTAssertTrue(family.waitForExistence(timeout: 15))
         family.tap()
@@ -83,7 +83,7 @@ final class FontExplorationUITests: XCTestCase {
         // Go back through the retained catalog and verify the new local comparison result.
         navigateBack(from: "Roboto", to: "Google Fonts")
         navigateBack(from: "Google Fonts", to: "Fonts for This Character")
-        search("Roboto", placeholder: "Search available fonts")
+        search("Roboto", field: "characterFonts.search")
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS[c] %@", "characterFonts.face.", "Roboto")).firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout: 60))
         tile.tap()
@@ -167,12 +167,13 @@ final class FontExplorationUITests: XCTestCase {
         if floating.exists { floating.tap() } else { app.buttons[name].firstMatch.tap() }
     }
 
-    private func search(_ query: String, placeholder: String) {
-        let field = app.searchFields[placeholder].firstMatch
+    /// The font screens' own search field, by its accessibility identifier.
+    private func search(_ query: String, field identifier: String) {
+        let field = app.textFields[identifier].firstMatch
         if !field.exists { app.swipeDown() }
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
-        if let value = field.value as? String, value != placeholder, !value.isEmpty {
+        if let value = field.value as? String, value != field.placeholderValue, !value.isEmpty {
             field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))
         }
         field.typeText(query + "\n")

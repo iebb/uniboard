@@ -149,6 +149,37 @@ final class MainKeyboardArrangementTests: XCTestCase {
         XCTAssertEqual(joined.layout, "kkkkkkkkkk/kkkkkkkkkk/kkkkkkkkk/kkkkkkkkk")
     }
 
+    func testStockNumberRowTakesEveryDigitOutAndPutsTheStandardRowOnTop() throws {
+        let english = KeyboardAlphabet.english
+        // A customized number row: 2 before 1, a gap, and 0 moved after p.
+        var custom = Arrangement.standard(for: english)
+        custom.keys.swapAt(0, 1)
+        let zero = custom.keys.remove(at: 9)
+        custom.keys.insert(zero, at: 19)
+        custom.layout = "kkkkgkkkkk/kkkkkkkkkkk/kkkkkkkkk/kkkkkkkkk"
+        XCTAssertTrue(custom.isValid(for: english))
+        XCTAssertEqual(custom.withStockNumberRow(), .standard(for: english))
+        XCTAssertEqual(Arrangement.standard(for: english).withStockNumberRow(), .standard(for: english))
+        XCTAssertEqual(Arrangement.letters(for: english).withStockNumberRow(), .standard(for: english))
+        // Rearranged letters and gaps stay where they are.
+        var letters = Arrangement.letters(for: english)
+        letters.keys.swapAt(0, 1)
+        letters.layout = "hkkkkkkkkkk/kkkkkkkkk/kkkkkkkkk"
+        var digits = letters.prependingNumberRow
+        digits.keys.swapAt(3, 8)
+        let stock = try XCTUnwrap(digits.withStockNumberRow())
+        XCTAssertEqual(stock, letters.prependingNumberRow)
+        XCTAssertEqual(Array(stock.keys.prefix(10)), Arrangement.digits)
+        XCTAssertTrue(stock.isValid(for: english))
+        // Four rows of letters leave no room on top; an unreadable layout has nothing to keep.
+        var split = Arrangement.letters(for: english)
+        split.layout = "kkkkk/kkkkk/kkkkkkkkk/kkkkkkkkk"
+        XCTAssertNil(split.withStockNumberRow())
+        var unreadable = custom
+        unreadable.layout = "x"
+        XCTAssertNil(unreadable.withStockNumberRow())
+    }
+
     func testFunctionKeysAreWiderAndEveryRowFits() {
         let standard = Arrangement.standard(for: .english)
         XCTAssertEqual(standard.rows.count, 4)

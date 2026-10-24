@@ -1,10 +1,16 @@
 # Uniboard
 
+<p align="center">
+  <img src="marketing/github/banner.png" width="100%" alt="Uniboard: Your keyboard. Your characters. Two iPhones showing the Uniboard keyboard typing and searching Unicode.">
+</p>
+
 Uniboard is an iPhone and iPad app with a custom keyboard extension for browsing, searching and typing every Unicode character and emoji, offline. The app (`ad.neko.uniboard`) explores the Unicode catalog and configures the keyboard; the keyboard (`ad.neko.uniboard.keyboard`) types literally into any app that allows custom keyboards and adds Unicode search, symbol pages and favorites. There are no accounts, ads or analytics, and typing and searches are never sent to a server.
 
 The App Store currently has version 1.1. The next release is **1.3** (`MARKETING_VERSION` in `project.yml`).
 
 ## Features (1.3)
+
+<img src="marketing/github/promo-keyboard.png" width="100%" alt="Find the character you need. Search Unicode. Make the keyboard yours. Two iPhones: the Uniboard keyboard with its text preview row, and keyboard search for heart with results.">
 
 - **Explore and search.** Explore every block or every assigned character as tiles or as a code chart, browse Blocks and Emoji, and see what each edition adds in What's New. Search by name, alias, annotation, block name, NamesList heading, code point (`U+1F680`, `0x1F680`, `1F680`, `decimal:128640`) or the character itself. Character details show the official name, properties, encodings, and the text and emoji forms where both exist.
 - **Keyboard search.** The U key opens Unicode search inside the keyboard. Tapping a key edits the local query; holding a key types that character into the document without changing the query. A search index cached in the App Group speeds up searches and contains only catalog data, never typed text.
@@ -12,8 +18,14 @@ The App Store currently has version 1.1. The next release is **1.3** (`MARKETING
 - **Pages and Favorites.** Create, order and edit symbol pages in the Pages tab. Each page opens on a canvas drawn as the keyboard draws it, with rows, gaps and drag-and-drop. Pages can be exported to a file and imported again. Favorites are shared between the app and the keyboard's Favorites page.
 - **Auto-capitalization.** Follow App, Off, Sentences, Words or All Characters (Settings → Auto-Capitalization).
 - **Text Preview.** An optional row above the keys shows the text around the caret, drawn with Uniboard's preview fonts. Tapping or dragging in the preview moves the real cursor within the text the receiving app exposes.
+
+<img src="marketing/github/promo-inspect.png" width="100%" alt="Look closer. Share the look. Inspect code points or copy preview text as an image. Images paste as pictures, not editable text. Two iPhones: Inspect Text on Café with an emoji and x squared, and the Copy Image panel.">
+
 - **Inspect Text.** A read-only panel for the visible preview text: code points with names and metadata, grapheme clusters, the NFC, NFD, NFKC and NFKD forms, and UTF-8 and UTF-16 hex. It never changes the document.
 - **Copy Image.** Copies the visible preview text as a PNG at 1×, 2× or 3×, in black or white on a solid or transparent background, or in custom colors. It pastes as a picture, not as editable text.
+
+<img src="marketing/github/promo-fonts.png" width="100%" alt="Choose how your text looks here. Compare fonts and set rules for Uniboard's previews. Two iPhones: the Preferred Font picker for Greek with Roboto expanded, and the keyboard's text preview drawing Greek in Roboto Bold Italic.">
+
 - **Preview fonts.** Extra Unicode Fonts is off by default. Optional font packs download on demand. You can add your own TrueType or OpenType file, or use a font installed on the device. **Font Rules** choose a preferred font for a code point, range or Unicode block. **View Fonts** in a character's details compares every available face. A bundled **Google Fonts** catalog lists families by name, and its **styles grid** downloads single styles or files. Preview fonts affect only Uniboard's own rendering, never the receiving app.
 - **ConScript (UCSUR).** An optional setting shows the ConScript Unicode Registry's names and blocks for Private Use characters.
 - **Configuration file.** Export and import one TOML file containing settings, layouts and keys, favorites, font choices and rules, and Copy Image options. Before an import replaces anything you can review the changes, and Undo Last Import restores the previous state.

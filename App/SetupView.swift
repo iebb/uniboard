@@ -24,8 +24,6 @@ struct SetupView: View {
                     LabeledContent("Layouts", value: preferences.alphabets.map(\.nativeName).joined(separator: ", "))
                 }
                 .accessibilityIdentifier("keyboardLayouts")
-                NavigationLink("Customize Keys") { KeyboardKeySettingsView() }
-                    .accessibilityIdentifier("keyboardKeySettings")
                 NavigationLink { AutoCapitalizationSettingsView() } label: {
                     LabeledContent(AutoCapitalizationCopy.title, value: preferences.autoCapitalization.title)
                 }
@@ -64,7 +62,7 @@ struct SetupView: View {
             } header: {
                 Text("Set Up Uniboard")
             } footer: {
-                Text("The keyboard shows the pages you set up in Pages, including Favorites. Allow Full Access to sync favorites saved in the keyboard back to the app, and for light haptics on supported iPhones. Without it, pages and app favorites still reach the keyboard. Recently Used stays separate.")
+                Text("The keyboard shows the pages you set up in Keyboard, including Favorites. Allow Full Access to sync favorites saved in the keyboard back to the app, and for light haptics on supported iPhones. Without it, pages and app favorites still reach the keyboard. Recently Used stays separate.")
             }
 
             Section {

@@ -122,11 +122,11 @@ final class AppBrowsingUITests: UniboardUITestCase {
         // Edition survives ordinary test launches, so establish this fixture
         // through its real Settings UI rather than resetting shared storage.
         selectAppEdition("latest")
-        for tab in ["Explore", "Emoji", "Blocks", "Pages"] {
+        for tab in ["Explore", "Emoji", "Blocks", "Keyboard"] {
             appTab(tab).tap()
             let version = app.buttons["unicodeEdition.current"].firstMatch
-            if tab == "Pages" {
-                XCTAssertFalse(version.exists, "Pages show no version")
+            if tab == "Keyboard" {
+                XCTAssertFalse(version.exists, "Keyboard shows no version")
             } else {
                 XCTAssertTrue(version.waitForExistence(timeout: 5), "\(tab) shows a version menu")
                 XCTAssertEqual(version.value as? String, "latest")

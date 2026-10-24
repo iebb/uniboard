@@ -76,7 +76,7 @@ struct MainKeyboardEditorView: View {
             Divider()
             controls.disabled(drag.source != nil).padding(.horizontal, 12).padding(.vertical, 10).background(.bar)
         }
-        .navigationTitle("Keyboard")
+        .navigationTitle("Main Keyboard")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

@@ -88,7 +88,7 @@ final class KeyboardKeyPreferences: ObservableObject {
     @discardableResult
     func resetAll() -> Bool { persist(.defaults) }
 
-    private static let readError = "Couldn’t read your saved keyboard keys. Please try again. Restore all defaults only if you want to replace the saved configuration."
+    private static let readError = "Couldn’t read your saved keyboard keys. Please try again. Restore All Key Defaults in Keyboard → Symbol Keys only if you want to replace the saved configuration."
 
     private func persist(_ value: KeyboardKeySettings.Snapshot) -> Bool {
         guard settings.save(value) else {

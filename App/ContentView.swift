@@ -27,7 +27,7 @@ struct ContentView: View {
                 .tag(AppTab.blocks)
 
             NavigationStack { PagesView(select: select, scratchpad: $scratchpad) }
-                .tabItem { Label("Pages", systemImage: "star") }
+                .tabItem { Label("Keyboard", systemImage: "keyboard") }
                 .tag(AppTab.pages)
 
             NavigationStack { SetupView() }

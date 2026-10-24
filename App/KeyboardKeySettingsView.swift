@@ -9,16 +9,24 @@ extension KeyboardKeySettings.Gesture {
     }
 }
 
+/// A grid of keys, each opening its own swipe up, swipe down and long press
+/// choices. Keyboard › Symbol Keys shows only the symbol keys; letters and
+/// digits are edited in Main Keyboard.
 struct KeyboardKeySettingsView: View {
+    /// The kinds of key listed, in this order.
+    let kinds: [KeyboardKeySettings.Kind]
     @StateObject private var keys = KeyboardKeyPreferences.shared
     @EnvironmentObject private var preferences: CatalogPreferences
     @State private var query = ""
     @State private var resetConfirmation = false
     @State private var selectedKeyID: String?
     @State private var layoutID: String?
+    init(kinds: [KeyboardKeySettings.Kind] = [.letter, .digit, .character]) { self.kinds = kinds }
     private var groups: [(String, KeyboardKeySettings.Kind)] {
-        [("Letters", .letter), ("Numbers", .digit), ("Symbols", .character)]
+        [("Letters", .letter), ("Numbers", .digit), ("Symbols", .character)].filter { kinds.contains($0.1) }
     }
+    /// Only letters follow the layout; symbol keys are the same in every one.
+    private var symbolsOnly: Bool { kinds == [.character] }
     private var alphabet: KeyboardAlphabet {
         layoutID.flatMap(KeyboardAlphabet.alphabet(id:)) ?? preferences.alphabets.first ?? .english
     }
@@ -40,11 +48,17 @@ struct KeyboardKeySettingsView: View {
                 Section { Text(error).foregroundStyle(.red).accessibilityIdentifier("keySettings.saveError") }
             }
             Section {
-                Text("Choose a letter, number or symbol key to set its swipe up, swipe down and long press choices. After swiping, slide left or right to select a choice, then lift to insert.")
-                Text("A tap always types the key itself. Each layer can hold several literal choices.")
+                if symbolsOnly {
+                    Text("Edit the symbol keys on the 123 and #+= keyboards. Edit letters and numbers in Main Keyboard.")
+                } else {
+                    Text("Choose a letter, number or symbol key to set its swipe up, swipe down and long press choices. After swiping, slide left or right to select a choice, then lift to insert.")
+                }
+                Text(symbolsOnly
+                     ? "Tapping a symbol key types the symbol shown. Swipe and long-press actions can offer several choices."
+                     : "A tap always types the key itself. Each layer can hold several literal choices.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if preferences.alphabets.count > 1 {
+            if kinds.contains(.letter) && preferences.alphabets.count > 1 {
                 Section {
                     Picker("Layout", selection: Binding(get: { alphabet.id }, set: { layoutID = $0 })) {
                         ForEach(preferences.alphabets) { Text($0.nativeName).tag($0.id) }
@@ -56,7 +70,8 @@ struct KeyboardKeySettingsView: View {
             ForEach(groups, id: \.0) { title, kind in
                 let descriptors = descriptors(kind)
                 if !descriptors.isEmpty {
-                    Section(title) {
+                    // Symbols-only mode has a single group; its title would only repeat the screen's.
+                    Section {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 46), spacing: 8)], spacing: 8) {
                             ForEach(descriptors) { descriptor in
                                 Button { selectedKeyID = descriptor.id } label: {
@@ -74,18 +89,28 @@ struct KeyboardKeySettingsView: View {
                                 .accessibilityIdentifier("keySettings.key.\(descriptor.id)")
                             }
                         }
+                    } header: {
+                        if !symbolsOnly { Text(title) }
                     }
                 }
             }
             Section {
-                Button("Restore all key defaults", role: .destructive) { resetConfirmation = true }
-                    .disabled(keys.snapshot.overrides.isEmpty && keys.saveError == nil)
+                Button("Restore All Key Defaults", role: .destructive) { resetConfirmation = true }
+                    .disabled(keys.snapshot.overrides.isEmpty && keys.snapshot.arrangements.isEmpty && keys.saveError == nil)
                     .accessibilityIdentifier("keySettings.resetAll")
+                    // Anchored to the button so the popover's arrow points at it.
+                    .confirmationDialog("Restore all key defaults?", isPresented: resetConfirmationBinding(anchoredOnButton: true),
+                                        titleVisibility: .visible) { resetConfirmationActions } message: { resetConfirmationMessage }
             } footer: {
-                Text("Only letters, numbers and symbols are configurable. Space, Shift, Backspace, Return and other function keys retain their standard behavior, as do search typing and the iOS globe key. Saved choices stay on this device; Full Access is not required.")
+                VStack(alignment: .leading, spacing: 8) {
+                    // The full scope, visible before the confirmation.
+                    Text("Resets letters, numbers and symbols, and every layout’s arrangement.")
+                        .accessibilityIdentifier("keySettings.resetAll.scope")
+                    Text("Only letters, numbers and symbols are configurable. Space, Shift, Backspace, Return and other function keys retain their standard behavior, as do search typing and the iOS globe key. Choices are saved locally and can be included in configuration exports. Full Access is not required to edit them.")
+                }
             }
         }
-        .navigationTitle("Keyboard keys").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(symbolsOnly ? "Symbol Keys" : "Keyboard keys").navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $selectedKeyID) { keyID in
             if let descriptor = KeyboardKeySettings.descriptor(for: keyID) {
                 KeyboardSingleKeySettingsView(descriptor: descriptor, alphabet: alphabet, keys: keys)
@@ -93,9 +118,20 @@ struct KeyboardKeySettingsView: View {
         }
         .searchable(text: $query, prompt: "Find a key")
         .onAppear { keys.refresh() }
-        .confirmationDialog("Restore every key’s defaults?", isPresented: $resetConfirmation, titleVisibility: .visible) {
-            Button("Restore all defaults", role: .destructive) { keys.resetAll() }
-        } message: { Text("Your pages and favorites are kept.") }
+        .confirmationDialog("Restore all key defaults?", isPresented: resetConfirmationBinding(anchoredOnButton: false),
+                            titleVisibility: .visible) { resetConfirmationActions } message: { resetConfirmationMessage }
+    }
+    /// Symbols-only mode anchors the confirmation to the Restore All button; the full mode keeps it on the list.
+    private func resetConfirmationBinding(anchoredOnButton: Bool) -> Binding<Bool> {
+        Binding(get: { resetConfirmation && symbolsOnly == anchoredOnButton }, set: { resetConfirmation = $0 })
+    }
+    @ViewBuilder private var resetConfirmationActions: some View {
+        Button("Restore All Key Defaults", role: .destructive) { keys.resetAll() }
+            .accessibilityIdentifier("keySettings.resetAll.confirm")
+        Button("Cancel", role: .cancel) {}
+    }
+    private var resetConfirmationMessage: Text {
+        Text("This resets all letter, number and symbol key actions, including taps, and restores the standard key arrangement and number row for every layout. Your symbol pages, favorites, enabled layouts and other settings are kept.")
     }
 }
 

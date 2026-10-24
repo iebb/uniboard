@@ -1,7 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The keyboard's pages, configured here and shown there in this order:
+/// The Keyboard tab: the main keyboard's editor and its symbol keys, then
+/// the keyboard's pages, configured here and shown there in this order:
 /// Favorites, the Symbols page and any custom pages.
 struct PagesView: View {
     var select: (UnicodeCharacter) -> Void
@@ -17,9 +18,13 @@ struct PagesView: View {
         List {
             Section {
                 NavigationLink { MainKeyboardEditorView() } label: {
-                    Label("Keyboard", systemImage: "keyboard")
+                    Label("Main Keyboard", systemImage: "keyboard")
                 }
                 .accessibilityIdentifier("pages.keyboard")
+                NavigationLink { KeyboardKeySettingsView(kinds: [.character]) } label: {
+                    Label("Symbol Keys", systemImage: "textformat.123")
+                }
+                .accessibilityIdentifier("pages.symbolKeys")
             }
             Section {
                 ForEach(boards.boards) { board in
@@ -47,7 +52,7 @@ struct PagesView: View {
                 Text(issue.rawValue).foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Pages")
+        .navigationTitle("Keyboard")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) { EditButton() }
             ToolbarItem(placement: .topBarTrailing) {

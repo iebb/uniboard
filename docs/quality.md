@@ -114,7 +114,7 @@ to the latest release; tests must distinguish that fallback from successful
 non-default app-to-keyboard delivery. Settings labels and preference resolution
 read only the draft's bounded manifest, never a full catalog.
 
-The app navigation includes Settings → Customize Keys, Settings →
+The app navigation includes Keyboard → Main Keyboard, Keyboard → Symbol Keys, Settings →
 Try Your Keyboard and Settings → Font Licenses. Privacy declarations remain
 Data Not Collected. Only choices explicitly entered in the key editor enter
 the key settings file; document typing and search queries never enter it.

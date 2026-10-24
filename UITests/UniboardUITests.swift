@@ -200,23 +200,49 @@ class UniboardUITestCase: XCTestCase {
         XCTAssertFalse(app.otherElements["keyboard.typing.favorites"].exists, file: file, line: line)
     }
 
+    /// Keyboard › Main Keyboard: restores every layer of a main-keyboard
+    /// key to its default, the key's own tap output included.
     func resetAppKey(_ keyID: String) {
-        openAppSettings()
-        app.buttons["keyboardKeySettings"].tap()
-        let key = app.buttons["keySettings.key.\(keyID)"].firstMatch
-        revealByScrolling(key, in: app)
-        key.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["keySettings.detail.\(keyID)"].firstMatch.waitForExistence(timeout: 5))
-        // Restore is disabled when the key already has its defaults.
-        let restore = app.buttons["keySettings.resetKey"].firstMatch
-        if restore.isEnabled {
-            restore.tap()
-            app.buttons["Restore defaults"].tap()
+        openMainKeyboardEditor()
+        selectMainKeyboardKey(keyID)
+        for gesture in ["swipeUp", "longPress", "swipeDown"] {
+            let layer = app.buttons["layers.\(gesture)"].firstMatch
+            revealByScrolling(layer, in: app)
+            layer.tap()
+            let save = app.buttons["keySettings.save"].firstMatch
+            XCTAssertTrue(save.waitForExistence(timeout: 5))
+            // Reset to Default is disabled when the layer already has its defaults.
+            let reset = app.buttons["keySettings.resetGesture"].firstMatch
+            revealByScrolling(reset, in: app)
+            if reset.isEnabled {
+                reset.tap()
+                XCTAssertTrue(app.staticTexts["keySettings.isDefault"].waitForExistence(timeout: 5))
+                save.tap()
+            } else {
+                app.navigationBars.buttons.firstMatch.tap()
+            }
+            XCTAssertTrue(layer.waitForExistence(timeout: 5))
         }
-        XCTAssertTrue(app.buttons["keySettings.gesture.swipeUp"].waitUntilValueEquals("Default"))
-        app.navigationBars.buttons.firstMatch.tap()
-        app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        // No value restores the key's own text.
+        let tap = app.buttons["layers.tap"].firstMatch
+        revealByScrolling(tap, in: app)
+        tap.tap()
+        let output = app.textFields["layer.choice.0"].firstMatch
+        XCTAssertTrue(output.waitForExistence(timeout: 5))
+        if let value = output.value as? String, !value.isEmpty, value != output.placeholderValue {
+            output.tap()
+            output.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))
+        }
+        app.buttons["layer.save"].firstMatch.tap()
+        XCTAssertTrue(tap.waitForExistence(timeout: 5))
+    }
+
+    /// Selects a key on the open main keyboard editor so its layers show.
+    func selectMainKeyboardKey(_ keyID: String) {
+        let key = app.buttons["mainKeyboard.key.\(keyID)"].firstMatch
+        XCTAssertTrue(key.waitForExistence(timeout: 5), keyID)
+        key.tap()
+        XCTAssertTrue(app.buttons["layers.swipeUp"].firstMatch.waitForExistence(timeout: 5), "\(keyID) shows its layers")
     }
 
     func flickMainKey(_ key: XCUIElement, up: Bool, horizontal: CGFloat = 0, pressDuration: TimeInterval = 0.05,
@@ -245,16 +271,13 @@ class UniboardUITestCase: XCTestCase {
         }
     }
 
+    /// Keyboard › Main Keyboard: replaces one layer of a key with exact choices.
     func configureAppKeyGesture(keyID: String, gesture: String, choices: [String]) {
-        openAppSettings()
-        let settings = app.buttons["keyboardKeySettings"].firstMatch
-        revealByScrolling(settings, in: app)
-        settings.tap()
-        let key = app.buttons["keySettings.key.\(keyID)"].firstMatch
-        revealByScrolling(key, in: app)
-        key.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["keySettings.detail.\(keyID)"].firstMatch.waitForExistence(timeout: 5))
-        app.buttons["keySettings.gesture.\(gesture)"].tap()
+        openMainKeyboardEditor()
+        selectMainKeyboardKey(keyID)
+        let layer = app.buttons["layers.\(gesture)"].firstMatch
+        revealByScrolling(layer, in: app)
+        layer.tap()
         XCTAssertTrue(app.buttons["keySettings.save"].firstMatch.waitForExistence(timeout: 5))
         // A long default list can leave Remove All below the fold, not yet created.
         let removeAll = app.buttons["keySettings.removeAll"].firstMatch
@@ -269,10 +292,7 @@ class UniboardUITestCase: XCTestCase {
             XCTAssertTrue(field.waitUntilValueEquals(value))
         }
         app.buttons["keySettings.save"].tap()
-        XCTAssertTrue(app.buttons["keySettings.gesture.\(gesture)"].waitUntilValueEquals(choices.joined(separator: "  ")))
-        app.navigationBars.buttons.firstMatch.tap()
-        app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(layer.waitUntilValueEquals(choices.joined(separator: " ")))
     }
 
     func typeHostTypingKeys(_ text: String, layout: String = "letters") {
@@ -663,16 +683,16 @@ class UniboardUITestCase: XCTestCase {
             back.tap()
         }
         dismissAppSearchKeyboard()
-        selectAppTab("Pages")
+        selectAppTab("Keyboard")
         for _ in 0..<3 {
-            let back = app.navigationBars.buttons["Pages"].firstMatch
+            let back = app.navigationBars.buttons["Keyboard"].firstMatch
             guard back.exists else { break }
             back.tap()
         }
-        XCTAssertTrue(app.navigationBars["Pages"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Keyboard"].waitForExistence(timeout: 5))
     }
 
-    /// Favorites is the first stop under the app's Pages tab.
+    /// Favorites is the first page under the app's Keyboard tab.
     func openAppFavorites() {
         openAppPages()
         let favorites = app.buttons["pages.page.migrated-favorites"].firstMatch
@@ -689,7 +709,7 @@ class UniboardUITestCase: XCTestCase {
         savedList.tap()
     }
 
-    /// Creates a page in the app and opens it; returns its row in Pages.
+    /// Creates a page in the app and opens it; returns its row in Keyboard.
     func createAppPage(_ name: String) -> XCUIElement {
         openAppPages()
         app.buttons["pages.new"].firstMatch.tap()
@@ -833,13 +853,22 @@ class UniboardUITestCase: XCTestCase {
         toggle.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: -36, dy: 0)).tap()
     }
 
-    /// Pages › Keyboard: the main keyboard's editor.
+    /// Keyboard › Main Keyboard: the main keyboard's editor.
     func openMainKeyboardEditor() {
         openAppPages()
         let keyboard = app.buttons["pages.keyboard"].firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
         keyboard.tap()
         XCTAssertTrue(app.descendants(matching: .any)["mainKeyboard.keys"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    /// Keyboard › Symbol Keys: the symbol keys' own swipe and hold choices.
+    func openSymbolKeys() {
+        openAppPages()
+        let symbolKeys = app.buttons["pages.symbolKeys"].firstMatch
+        XCTAssertTrue(symbolKeys.waitForExistence(timeout: 5))
+        symbolKeys.tap()
+        XCTAssertTrue(app.navigationBars["Symbol Keys"].waitForExistence(timeout: 5))
     }
 
     /// Standard Layout: the number row and the layout's own rows.

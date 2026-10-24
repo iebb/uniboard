@@ -1,7 +1,7 @@
 import XCTest
 import UIKit
 
-/// Layouts, the main keyboard's arrangement, key settings and gestures, pad templates.
+/// Layouts, the main keyboard's arrangement, its keys' layers and gestures, pad templates.
 @MainActor
 final class KeyboardLayoutUITests: UniboardUITestCase {
     func testLayoutsAreAddedRemovedAndKeepAtLeastOne() {
@@ -27,41 +27,34 @@ final class KeyboardLayoutUITests: UniboardUITestCase {
         let link = app.buttons["keyboardLayouts"].firstMatch
         XCTAssertTrue(link.waitForExistence(timeout: 5))
         XCTAssertTrue(link.label.contains("Ελληνικά, Русский"), link.label)
-        let keys = app.buttons["keyboardKeySettings"].firstMatch
-        revealByScrolling(keys, in: app)
-        keys.tap()
-        let menu = app.descendants(matching: .any)["keySettings.layout"].firstMatch
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        let alpha = app.buttons["keySettings.key.letter.03B1"].firstMatch
-        XCTAssertTrue(alpha.waitForExistence(timeout: 5), "Customize Keys shows the first layout's letters")
-        XCTAssertFalse(app.buttons["keySettings.key.letter.q"].exists)
-        menu.tap()
+        // Keyboard › Main Keyboard edits each layout chosen in Settings.
+        openMainKeyboardEditor()
+        let alpha = app.buttons["mainKeyboard.key.letter.03B1"].firstMatch
+        XCTAssertTrue(alpha.waitForExistence(timeout: 5), "Main Keyboard shows the first layout's letters")
+        XCTAssertFalse(app.buttons["mainKeyboard.key.letter.q"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["mainKeyboard.layout"].firstMatch.waitForExistence(timeout: 5))
         let russian = app.buttons["Русский"].firstMatch
         XCTAssertTrue(russian.waitForExistence(timeout: 5))
         russian.tap()
-        XCTAssertTrue(app.buttons["keySettings.key.letter.0436"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["mainKeyboard.key.letter.0436"].firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(alpha.exists)
-        attachScreenshot("Customize Keys lists the chosen layout's letters")
+        attachScreenshot("Main Keyboard shows the chosen layout's letters")
         app.navigationBars.buttons.firstMatch.tap()
     }
 
     func testKeyboardKeySettingsSavesExactChoicesDisablesAndRestoresDefaults() {
         resetAppKey("letter.q")
         openAppSettings()
-        let settings = app.buttons["keyboardKeySettings"].firstMatch
-        XCTAssertTrue(settings.waitForExistence(timeout: 5))
-        revealByScrolling(settings, in: app)
-        settings.tap()
-        for id in ["space", "shift", "delete", "return", "layout", "favorites", "unicode", "collapse"] {
-            XCTAssertFalse(app.buttons["keySettings.key.utility.\(id)"].exists)
-        }
-        XCTAssertFalse(app.staticTexts["Function keys"].exists)
-        let key = app.buttons["keySettings.key.letter.q"].firstMatch
-        XCTAssertTrue(key.waitForExistence(timeout: 5))
-        key.tap()
-        XCTAssertTrue(app.navigationBars["Q key"].waitForExistence(timeout: 5), "The selected grid key must open its own editor")
-        let gesture = app.buttons["keySettings.gesture.swipeUp"].firstMatch
-        XCTAssertTrue(gesture.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["keyboardLayouts"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["keyboardKeySettings"].exists, "Settings no longer has a separate Customize Keys screen")
+        openMainKeyboardEditor()
+        // Function keys move but have no layers.
+        let shift = app.buttons["mainKeyboard.key.{shift}"].firstMatch
+        XCTAssertTrue(shift.waitForExistence(timeout: 5))
+        shift.tap()
+        XCTAssertFalse(app.buttons["layers.swipeUp"].firstMatch.waitForExistence(timeout: 1), "Shift has no layers")
+        selectMainKeyboardKey("letter.q")
+        let gesture = app.buttons["layers.swipeUp"].firstMatch
         gesture.tap()
         // The editor lists the default candidates; replace them with one choice.
         XCTAssertTrue(app.staticTexts["keySettings.isDefault"].waitForExistence(timeout: 5))
@@ -84,16 +77,14 @@ final class KeyboardLayoutUITests: UniboardUITestCase {
             hierarchy.lifetime = .keepAlways
             add(hierarchy)
         }
-        XCTAssertTrue(saved, "Saving must return to the key page with its exact saved choice")
-        attachScreenshot("App key settings save a literal multi-character swipe choice")
+        XCTAssertTrue(saved, "Saving must return to the key's layers with its exact saved choice")
+        attachScreenshot("Main Keyboard saves a literal multi-character swipe choice")
 
         app.terminate()
         app.launchArguments = []
         app.launch()
-        openAppSettings()
-        app.buttons["keyboardKeySettings"].tap()
-        app.buttons["keySettings.key.letter.q"].tap()
-        XCTAssertTrue(app.navigationBars["Q key"].waitForExistence(timeout: 5))
+        openMainKeyboardEditor()
+        selectMainKeyboardKey("letter.q")
         XCTAssertTrue(gesture.waitUntilValueEquals("xy"), "Explicit key settings survive an ordinary app relaunch")
         gesture.tap()
         XCTAssertTrue(app.buttons["keySettings.save"].firstMatch.waitForExistence(timeout: 5))
@@ -104,12 +95,98 @@ final class KeyboardLayoutUITests: UniboardUITestCase {
         XCTAssertTrue(gesture.waitUntilValueEquals("Off"))
         gesture.tap()
         XCTAssertTrue(app.staticTexts["keySettings.off"].waitForExistence(timeout: 5), "Removing every choice turns the gesture off")
+        let reset = app.buttons["keySettings.resetGesture"].firstMatch
+        revealByScrolling(reset, in: app)
+        XCTAssertTrue(reset.isEnabled)
+        reset.tap()
+        XCTAssertTrue(app.staticTexts["keySettings.isDefault"].waitForExistence(timeout: 5))
+        app.buttons["keySettings.save"].tap()
+        XCTAssertTrue(gesture.waitForExistence(timeout: 5))
+        // Q has no superscript or subscript, so its default swipe up is empty
+        // too; reopening tells the restored default from the explicit Off.
+        gesture.tap()
+        XCTAssertTrue(app.staticTexts["keySettings.isDefault"].waitForExistence(timeout: 5), "Reset to Default restores the saved defaults")
+        revealByScrolling(reset, in: app)
+        XCTAssertFalse(reset.isEnabled)
+        attachScreenshot("Disabled swipe and restored defaults are separate saved states")
         app.navigationBars.buttons.firstMatch.tap()
-        app.buttons["keySettings.resetKey"].tap()
+    }
+
+    func testSymbolKeysSaveExactChoicesPersistAndRestoreDefaults() {
+        openSymbolKeys()
+        XCTAssertFalse(app.buttons["keySettings.key.letter.q"].exists, "Letters are edited in Main Keyboard")
+        XCTAssertFalse(app.buttons["keySettings.key.digit.1"].exists, "Numbers are edited in Main Keyboard")
+        XCTAssertFalse(app.descendants(matching: .any)["keySettings.layout"].exists, "Symbol keys are the same in every layout")
+        let period = app.buttons["keySettings.key.symbol.002E"].firstMatch
+        func openPeriod() {
+            revealByScrolling(period, in: app)
+            period.tap()
+            XCTAssertTrue(app.descendants(matching: .any)["keySettings.detail.symbol.002E"].firstMatch.waitForExistence(timeout: 5))
+        }
+        let restore = app.buttons["keySettings.resetKey"].firstMatch
+        let gesture = app.buttons["keySettings.gesture.swipeUp"].firstMatch
+        openPeriod()
+        if restore.isEnabled {
+            restore.tap()
+            app.buttons["Restore defaults"].tap()
+        }
+        XCTAssertTrue(gesture.waitUntilValueEquals("Default"))
+        gesture.tap()
+        XCTAssertTrue(app.buttons["keySettings.save"].firstMatch.waitForExistence(timeout: 5))
+        let removeAll = app.buttons["keySettings.removeAll"].firstMatch
+        revealByScrolling(removeAll, in: app)
+        removeAll.tap()
+        app.buttons["keySettings.addChoice"].tap()
+        let choice = app.textFields["keySettings.choice.0"].firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 5))
+        choice.tap()
+        choice.typeText("xy")
+        XCTAssertTrue(choice.waitUntilValueEquals("xy"))
+        app.buttons["keySettings.save"].tap()
+        XCTAssertTrue(gesture.waitUntilValueEquals("xy"), "Saving returns to the key with its exact choice")
+        attachScreenshot("Symbol Keys saves a literal swipe-up choice on the period key")
+
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        openSymbolKeys()
+
+        // Restore All shows its full scope before asking; dismissing the confirmation keeps every choice.
+        let restoreAll = app.buttons["keySettings.resetAll"].firstMatch
+        revealByScrolling(restoreAll, in: app)
+        XCTAssertEqual(restoreAll.label, "Restore All Key Defaults")
+        XCTAssertTrue(restoreAll.isEnabled, "A saved symbol choice enables Restore All")
+        let scope = app.staticTexts["keySettings.resetAll.scope"].firstMatch
+        XCTAssertTrue(scope.exists)
+        XCTAssertEqual(scope.label, "Resets letters, numbers and symbols, and every layout’s arrangement.")
+        restoreAll.tap()
+        let confirmTitle = app.staticTexts["Restore all key defaults?"].firstMatch
+        XCTAssertTrue(confirmTitle.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["keySettings.resetAll.confirm"].firstMatch.label, "Restore All Key Defaults")
+        attachScreenshot("Restore All asks before resetting every key")
+        scope.tap()
+        XCTAssertTrue(confirmTitle.waitForNonExistence(timeout: 5))
+
+        openPeriod()
+        XCTAssertTrue(gesture.waitUntilValueEquals("xy"), "Symbol key choices survive an ordinary app relaunch and a dismissed Restore All")
+        XCTAssertTrue(restore.isEnabled)
+        restore.tap()
         app.buttons["Restore defaults"].tap()
         XCTAssertTrue(gesture.waitUntilValueEquals("Default"))
-        XCTAssertFalse(app.buttons["keySettings.resetKey"].isEnabled)
-        attachScreenshot("Disabled swipe and restored per-key defaults are separate saved states")
+        XCTAssertFalse(restore.isEnabled)
+        attachScreenshot("Restoring the period key's defaults")
+
+        // Find a key narrows the symbol grid.
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Symbol Keys"].waitForExistence(timeout: 5))
+        let search = app.searchFields["Find a key"].firstMatch
+        if !(search.waitForExistence(timeout: 2) && search.isHittable) { app.collectionViews.firstMatch.swipeDown() }
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("§")
+        XCTAssertTrue(app.buttons["keySettings.key.symbol.00A7"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["keySettings.key.symbol.002E"].firstMatch.waitForNonExistence(timeout: 5), "Search hides other symbol keys")
+        attachScreenshot("Find a key filters Symbol Keys")
     }
 
     func testSystemKeyboardWidePadHasStockFunctionsAndExactTypingAcrossRotation() throws {

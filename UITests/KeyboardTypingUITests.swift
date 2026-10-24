@@ -167,7 +167,7 @@ final class KeyboardTypingUITests: UniboardUITestCase {
         attachScreenshot("English and Unicode share exact host insertion while retaining an isolated local query")
     }
 
-    /// Settings → Keyboard → Auto-Capitalization sits after Customize Keys,
+    /// Settings → Keyboard → Auto-Capitalization sits after Layouts,
     /// lists the five modes with Follow App by default, and Words makes the
     /// real keyboard start each new word with a capital.
     func testAutoCapitalizationSettingWordsCapitalizesEachNewWordInTheKeyboard() throws {
@@ -175,9 +175,10 @@ final class KeyboardTypingUITests: UniboardUITestCase {
         openAppSettings()
         let row = app.buttons["keyboardAutoCapitalization"].firstMatch
         revealByScrolling(row, in: app)
-        let customize = app.descendants(matching: .any)["keyboardKeySettings"].firstMatch
-        XCTAssertTrue(customize.exists)
-        XCTAssertGreaterThan(row.frame.minY, customize.frame.minY, "Auto-Capitalization follows Customize Keys")
+        let layouts = app.descendants(matching: .any)["keyboardLayouts"].firstMatch
+        XCTAssertTrue(layouts.exists)
+        XCTAssertGreaterThan(row.frame.minY, layouts.frame.minY, "Auto-Capitalization follows Layouts")
+        XCTAssertFalse(app.descendants(matching: .any)["keyboardKeySettings"].firstMatch.exists, "No separate Customize Keys row")
         XCTAssertTrue(row.label.contains("Auto-Capitalization"), row.label)
         XCTAssertTrue(row.label.contains("Follow App") || (row.value as? String) == "Follow App", "Follow App is the default: \(row.label)")
         row.tap()

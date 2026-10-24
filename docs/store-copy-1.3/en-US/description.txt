@@ -18,7 +18,7 @@ COPY TEXT AS A PICTURE
 Copy the text visibly shown in the preview as an image with your chosen text and background colors, including transparency. Choose 1×, 2× or 3× resolution and see the resulting pixel dimensions. The image preserves its appearance without requiring the recipient to have the font. It pastes as a picture only where images are accepted, not as editable text.
 
 TAKE YOUR SETUP WITH YOU
-Export or import a TOML configuration with settings, layouts, favorites, font choices and Copy Image options. Review replacements and resets before importing, then use Undo Last Import if needed. Font files and typing history aren’t included. Favorites and custom key text may be personal. Copy Image colors and scale chosen in the keyboard without Full Access aren’t included in the file.
+Export or import a TOML configuration with settings, layouts, favorites, font choices and Copy Image options. Edit your configuration in the app and validate changes before applying them. Review replacements and resets before applying edits or imports, then use Undo Last Configuration Change if needed. Font files and typing history aren’t included. Favorites and custom key text may be personal. Copy Image colors and scale chosen in the keyboard without Full Access aren’t included in the file.
 
 LOCAL BY DESIGN
 No account, ads or analytics. Character catalogs and search work offline; optional font downloads need an internet connection. Typing and searches aren’t sent to a server. Ordinary typing and text inspection don’t require Full Access; some clipboard and keyboard-to-app sharing features do.

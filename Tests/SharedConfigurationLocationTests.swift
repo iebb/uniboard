@@ -132,6 +132,41 @@ final class SharedConfigurationLocationTests: XCTestCase {
         XCTAssertFalse(ConfigurationPointer(generation: 3, directory: "g-000003", importedAt: .infinity).isValid)
         XCTAssertTrue(ConfigurationPointer(generation: 1, directory: "g-000001").isValid)
         XCTAssertNil(ConfigurationUndoStatus(fingerprint: digest, hasNewerEdits: false).importedAt)
+        XCTAssertNil(ConfigurationUndoStatus(fingerprint: digest, hasNewerEdits: false).source)
+    }
+
+    /// The change source is optional: a pointer written before it existed,
+    /// or naming a source this build doesn't know, stays valid.
+    func testPointerChangeSourceIsOptionalAndLenient() throws {
+        let digest = String(repeating: "c", count: 64)
+        let older = Data(#"{"directory":"g-000003","generation":3,"importFingerprint":"\#(digest)","previous":"g-000002","schemaVersion":1}"#.utf8)
+        guard case let .valid(pointer) = SharedConfigurationLocation.pointerState(older) else { return XCTFail("An older pointer stays valid") }
+        XCTAssertNil(pointer.changeSource)
+        let newer = ConfigurationPointer(generation: 3, directory: "g-000003", previous: "g-000002", importFingerprint: digest, changeSource: "sync")
+        XCTAssertTrue(newer.isValid)
+        XCTAssertEqual(SharedConfigurationLocation.pointerState(try SharedConfigurationLocation.encoder.encode(newer)), .valid(newer))
+        XCTAssertEqual(ConfigurationChangeSource(rawValue: "import"), .importFile)
+        XCTAssertEqual(ConfigurationChangeSource(rawValue: "editor"), .editor)
+        XCTAssertNil(ConfigurationChangeSource(rawValue: "sync"))
+    }
+
+    func testAnEditorApplyRecordsItsSourceAndUndoesLikeAnImport() throws {
+        let root = try makeRoot()
+        var (location, _) = try migrated(root)
+        location.now = { Date(timeIntervalSince1970: 1_800_000_000) }
+        let expected = try XCTUnwrap(location.currentFingerprint(presentation: presentation))
+        let files = try payloads()
+        guard case let .applied(pointer) = location.apply(files, expecting: expected, currentPresentation: presentation, source: .editor)
+        else { return XCTFail() }
+        XCTAssertEqual(pointer.changeSource, "editor")
+        XCTAssertEqual(pointer.previous, "g-000001", "The same backup an import keeps")
+        let applied = try XCTUnwrap(files[AppPresentationSettings.filename])
+        let status = try XCTUnwrap(location.undoStatus(presentation: applied))
+        XCTAssertEqual(status.source, .editor)
+        XCTAssertEqual(status.importedAt, Date(timeIntervalSince1970: 1_800_000_000))
+        guard case let .applied(restored) = location.undoLastImport(expecting: status.fingerprint, currentPresentation: applied) else { return XCTFail() }
+        XCTAssertNil(restored.changeSource, "Undo isn't itself undoable")
+        XCTAssertNil(location.undoStatus(presentation: presentation))
     }
 
     func testReadingWithoutAContainerOrPointerFallsBackToTheRoot() throws {
@@ -267,8 +302,10 @@ final class SharedConfigurationLocationTests: XCTestCase {
         let imported = try XCTUnwrap(files[AppPresentationSettings.filename])
         XCTAssertEqual(pointer.importFingerprint, location.currentFingerprint(presentation: imported))
         XCTAssertEqual(pointer.importedAt, 1_800_000_000)
+        XCTAssertEqual(pointer.changeSource, "import", "An apply records an import unless told otherwise")
         XCTAssertEqual(location.undoStatus(presentation: imported), ConfigurationUndoStatus(fingerprint: pointer.importFingerprint!, hasNewerEdits: false,
-                                                                                           importedAt: Date(timeIntervalSince1970: 1_800_000_000)))
+                                                                                           importedAt: Date(timeIntervalSince1970: 1_800_000_000),
+                                                                                           source: .importFile))
         XCTAssertEqual(FontRuleStore(directory: location.currentDirectory).load(), [rule("one", .codePoint(0x41))])
         XCTAssertEqual(AutoCapitalizationSetting(directory: location.currentDirectory).load(), .words)
 

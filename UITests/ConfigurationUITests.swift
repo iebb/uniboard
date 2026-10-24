@@ -2,7 +2,8 @@ import XCTest
 import UIKit
 
 /// Settings › Configuration: export, the Review Import sheet for a changed,
-/// identical and invalid file, Replace, and Undo Last Import. Files come
+/// identical and invalid file, Replace, Edit Configuration, and Undo Last
+/// Configuration Change. Files come
 /// from the DEBUG `-UniboardConfigurationFixture` hook, which stands in for
 /// the Files picker.
 @MainActor
@@ -101,7 +102,7 @@ final class ConfigurationUITests: XCTestCase {
         undo.tap()
         let restore = app.buttons["Restore Previous Configuration"]
         XCTAssertTrue(restore.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Undo last import?"].exists)
+        XCTAssertTrue(app.staticTexts["Undo last configuration change?"].exists)
         restore.tap()
         XCTAssertTrue(element("configuration.undoCaption").waitForExistence(timeout: 5))
         XCTAssertEqual(element("configuration.undoCaption").label, "Previous configuration restored")
@@ -198,6 +199,106 @@ final class ConfigurationUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Configuration"].waitForExistence(timeout: 5))
     }
 
+    /// Edit Configuration: a broken edit is listed and never applied; a small
+    /// valid edit goes through Review Changes, and Undo restores it.
+    func testEditValidateApplyAndUndo() {
+        launch()
+        setUnicodeFonts(false)
+        openConfiguration()
+        let edit = app.buttons["configuration.edit"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        XCTAssertTrue(edit.label.hasPrefix("Edit Configuration"), edit.label)
+        edit.tap()
+        let text = app.textViews["configurationEditor.text"]
+        XCTAssertTrue(text.waitForExistence(timeout: 10))
+        XCTAssertEqual(text.label, "Configuration text")
+        let apply = app.buttons["configurationEditor.apply"]
+        let validate = app.buttons["configurationEditor.validate"]
+        XCTAssertFalse(apply.isEnabled, "Apply waits for an edit")
+        XCTAssertTrue(app.staticTexts[editorHelper].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Opens without the keyboard")
+        let lines = (text.value as? String ?? "").components(separatedBy: "\n")
+        XCTAssertGreaterThan(lines.count, 5)
+        XCTAssertEqual(lines[4], "extra_unicode_fonts = false")
+        attachScreenshot("editor")
+
+        // Past the end of line 5, below the 12 pt inset.
+        let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: .monospacedSystemFont(ofSize: 15, weight: .regular))
+        text.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: text.frame.width - 24, dy: 12 + font.lineHeight * 4.5)).tap()
+        text.typeText("x")
+        XCTAssertTrue((text.value as? String ?? "").contains("extra_unicode_fonts = falsex\n"), "The cursor was at the end of line 5")
+        XCTAssertTrue(app.staticTexts["Edits haven’t been checked."].exists)
+        validate.tap()
+        let invalid = app.staticTexts["Fix these errors before applying"]
+        XCTAssertTrue(invalid.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Your settings haven’t changed."].exists)
+        let problem = element("configurationEditor.problem.0")
+        XCTAssertTrue(problem.label.hasPrefix("Check line 5, column "), problem.label)
+        XCTAssertFalse(problem.label.contains("\u{200B}"), "VoiceOver reads the checker's message")
+        XCTAssertLessThan(invalid.frame.minY, problem.frame.minY)
+        XCTAssertLessThan(problem.frame.minY, app.staticTexts["Your settings haven’t changed."].frame.minY,
+                          "The error comes before “Your settings haven’t changed.” (rev. 4)")
+        attachScreenshot("editor-invalid")
+        apply.tap()
+        XCTAssertTrue(invalid.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.navigationBars["Review Changes"].waitForExistence(timeout: 2), "An invalid edit is never reviewed")
+
+        text.typeText(XCUIKeyboardKey.delete.rawValue + String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5) + "true")
+        XCTAssertTrue((text.value as? String ?? "").contains("extra_unicode_fonts = true\n"))
+        validate.tap()
+        let valid = app.staticTexts["Configuration is valid. Your settings haven’t changed."]
+        XCTAssertTrue(valid.waitForExistence(timeout: 10))
+        attachScreenshot("editor-valid")
+        // Cancel with edits asks first, with the keyboard down; Keep Editing
+        // (on iPhone, a tap outside the popover) keeps the text.
+        app.buttons["configurationEditor.cancel"].tap()
+        let discard = app.buttons["Discard Edits"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Discard edits?"].exists)
+        XCTAssertTrue(app.keyboards.firstMatch.waitUntilAbsent(), "Nothing types behind the dialog")
+        let keep = app.buttons["Keep Editing"]
+        if keep.exists { keep.tap() } else { text.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).tap() }
+        XCTAssertTrue(discard.waitUntilAbsent())
+        XCTAssertTrue((text.value as? String ?? "").contains("extra_unicode_fonts = true\n"), "Keep Editing keeps the text")
+
+        apply.tap()
+
+        XCTAssertTrue(app.navigationBars["Review Changes"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["These edits will replace your current configuration."].exists)
+        XCTAssertTrue(app.staticTexts["Extra Unicode Fonts: Off → On"].waitForExistence(timeout: 5))
+        XCTAssertFalse(element("reviewImport.fileCaption").exists, "No file name or size line")
+        XCTAssertFalse(app.buttons["reviewImport.cancel"].exists, "Back is the way out")
+        let primary = app.buttons["reviewImport.primary"]
+        XCTAssertEqual(primary.label, "Apply")
+        attachScreenshot("review-changes")
+        primary.tap()
+        let applied = element("reviewImport.imported")
+        XCTAssertTrue(applied.waitForExistence(timeout: 10))
+        XCTAssertEqual(applied.label, "Configuration applied")
+        app.buttons["reviewImport.done"].tap()
+        XCTAssertTrue(text.waitUntilAbsent(), "Done closes the editor")
+
+        let caption = element("configuration.undoCaption")
+        XCTAssertTrue(caption.waitForExistence(timeout: 5))
+        XCTAssertEqual(caption.label, "Configuration applied")
+        let undo = app.buttons["configuration.undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(undo.label.contains("Undo Last Configuration Change"), undo.label)
+        XCTAssertTrue(undo.label.contains("Applied "), undo.label)
+        attachScreenshot("editor-undo-row")
+        undo.tap()
+        let restore = app.buttons["Restore Previous Configuration"]
+        XCTAssertTrue(restore.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Undo last configuration change?"].exists)
+        restore.tap()
+        XCTAssertTrue(caption.waitUntilLabelEquals("Previous configuration restored"))
+        XCTAssertTrue(undo.waitUntilAbsent())
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(revealExtraUnicodeFonts().waitUntilValueEquals("0"), "Undo restored the switch")
+    }
+
     func testExportOpensTheShareSheet() {
         launch()
         openConfiguration()
@@ -214,6 +315,7 @@ final class ConfigurationUITests: XCTestCase {
     // MARK: Steps
 
     private let header = "Save your settings, layouts, favorites, font rules and Copy Image options in a TOML file, or import a configuration from Files."
+    private let editorHelper = "Edit your configuration in TOML. Validate checks your edits without changing your settings. Apply saves them."
     private let privacy = "Favorites and custom key text are included and may be personal. Typing history, scratchpad text and font files aren’t included."
 
     private func element(_ identifier: String) -> XCUIElement {

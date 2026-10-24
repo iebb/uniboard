@@ -2,7 +2,7 @@
 
 Supersedes docs/store-copy-1.3.0.md. Version is 1.3. Names, subtitles and keywords remain unchanged. Final editorial handoff to Ampo; no metadata has been uploaded by naming. Release verification and required approval remain with the submission owner. No 1.4/1.5 features or purchase claims. Plain field files are in docs/store-copy-1.3/{en-US,ja}/.
 
-## en-US description (3294 characters)
+## en-US description (3402 characters)
 
 Find Unicode characters, customize your keyboard and explore how text looks in different fonts. Uniboard combines a literal typing keyboard, personal symbol pages and offline character search for iPhone and iPad.
 
@@ -24,7 +24,7 @@ COPY TEXT AS A PICTURE
 Copy the text visibly shown in the preview as an image with your chosen text and background colors, including transparency. Choose 1×, 2× or 3× resolution and see the resulting pixel dimensions. The image preserves its appearance without requiring the recipient to have the font. It pastes as a picture only where images are accepted, not as editable text.
 
 TAKE YOUR SETUP WITH YOU
-Export or import a TOML configuration with settings, layouts, favorites, font choices and Copy Image options. Review replacements and resets before importing, then use Undo Last Import if needed. Font files and typing history aren’t included. Favorites and custom key text may be personal. Copy Image colors and scale chosen in the keyboard without Full Access aren’t included in the file.
+Export or import a TOML configuration with settings, layouts, favorites, font choices and Copy Image options. Edit your configuration in the app and validate changes before applying them. Review replacements and resets before applying edits or imports, then use Undo Last Configuration Change if needed. Font files and typing history aren’t included. Favorites and custom key text may be personal. Copy Image colors and scale chosen in the keyboard without Full Access aren’t included in the file.
 
 LOCAL BY DESIGN
 No account, ads or analytics. Character catalogs and search work offline; optional font downloads need an internet connection. Typing and searches aren’t sent to a server. Ordinary typing and text inspection don’t require Full Access; some clipboard and keyboard-to-app sharing features do.
@@ -43,7 +43,7 @@ Explore fonts, inspect Unicode text and make your keyboard your own.
 
 Font choices affect Uniboard’s previews, not other apps. Copied images paste as pictures, not editable text.
 
-## ja description (1717 characters)
+## ja description (1795 characters)
 
 Unicode文字を探し、キーボードを自分好みに整え、フォントによる見え方を比べられるアプリです。Uniboardは、文字をそのまま入力するキーボード、カスタム記号ページ、オフライン文字検索をiPhoneとiPadで利用できます。
 
@@ -67,7 +67,7 @@ Uniboardから利用できるシステム・インストール済み・同梱・
 プレビューに見えている文字だけを画像にできます。文字色・背景色・透明背景を選び、1倍・2倍・3倍の解像度と実際のピクセル寸法を確認してコピー。相手が同じフォントを持っていなくても、画像として見た目を保てます。画像の貼り付けに対応するアプリで利用でき、編集可能な文字としては貼り付けられません。
 
 設定をファイルで持ち運ぶ
-設定、配列、お気に入り、フォントの選択、画像コピーのオプションをTOMLファイルで書き出し・読み込みできます。置き換えや初期化される項目を事前に確認し、最後の読み込みを取り消すこともできます。フォントファイルや入力履歴は含まれません。お気に入りやカスタムキーの文字列には個人的な内容が含まれることがあります。フルアクセスなしでキーボード側から選んだ画像の色と倍率は、書き出すファイルに含まれません。
+設定、配列、お気に入り、フォントの選択、画像コピーのオプションをTOMLファイルで書き出し・読み込みできます。アプリ内で設定を直接編集し、適用前に内容を検証できます。編集内容や読み込みを適用する前に、置き換えや初期化される項目を確認できます。「Undo Last Configuration Change」で最後の設定変更を取り消すこともできます。フォントファイルや入力履歴は含まれません。お気に入りやカスタムキーの文字列には個人的な内容が含まれることがあります。フルアクセスなしでキーボード側から選んだ画像の色と倍率は、書き出すファイルに含まれません。
 
 端末内で使う
 アカウント、広告、アクセス解析はありません。文字カタログと検索はオフラインで使え、任意のフォントダウンロードには通信が必要です。入力内容や検索語をサーバーへ送りません。通常の入力と文字の確認にフルアクセスは不要ですが、一部のコピー機能やキーボードからアプリへの共有機能では必要です。

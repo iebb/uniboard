@@ -1,13 +1,17 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Settings → Configuration (design.md §6): export, import and undo.
+/// Settings → Configuration (design.md §6): export, import, edit
+/// (design/config-editor/design.md) and undo.
 struct ConfigurationView: View {
     @State private var exporting = false
     @State private var exportCaption: String?
     @State private var exportFailed = false
     @State private var choosingFile = false
     @State private var importModel: ConfigurationImportModel?
+    @State private var editorModel: ConfigurationEditorModel?
+    /// The editor being shown, still readable in the sheet's onDismiss (which runs after the item is cleared).
+    @State private var lastEditor: ConfigurationEditorModel?
     @State private var undoStatus: ConfigurationUndoStatus?
     @State private var confirmingUndo = false
     @State private var undoCaption: String?
@@ -32,10 +36,15 @@ struct ConfigurationView: View {
                 }
                 .disabled(exporting)
                 .accessibilityIdentifier("configuration.import")
+                Button(action: openEditor) {
+                    rowLabel(ConfigurationCopy.edit, symbol: "square.and.pencil", caption: nil)
+                }
+                .disabled(exporting)
+                .accessibilityIdentifier("configuration.edit")
                 if let undoStatus {
                     Button { confirmingUndo = true } label: {
                         rowLabel(ConfigurationCopy.undo, symbol: "arrow.uturn.backward",
-                                 caption: undoStatus.importedAt.map { ConfigurationCopy.importedAt($0) })
+                                 caption: undoStatus.importedAt.map { ConfigurationCopy.changedAt($0, source: undoStatus.source) })
                     }
                     .accessibilityIdentifier("configuration.undo")
                     // Anchored to the row, not the top of the form.
@@ -43,7 +52,7 @@ struct ConfigurationView: View {
                         Button(ConfigurationCopy.restore, role: .destructive, action: undo)
                         Button("Cancel", role: .cancel) {}
                     } message: {
-                        Text(ConfigurationCopy.undoBody + (undoStatus.hasNewerEdits ? " " + ConfigurationCopy.undoNewer : ""))
+                        Text(ConfigurationCopy.undoBody)
                     }
                 }
             } header: {
@@ -73,6 +82,9 @@ struct ConfigurationView: View {
         }
         .sheet(item: $importModel, onDismiss: refreshUndo) { model in
             ReviewImportView(model: model)
+        }
+        .sheet(item: $editorModel, onDismiss: editorClosed) { model in
+            ConfigurationEditorView(model: model)
         }
         .alert(ConfigurationCopy.exportFailed, isPresented: $exportFailed) {
             Button(ConfigurationCopy.tryAgain, action: export)
@@ -104,6 +116,19 @@ struct ConfigurationView: View {
 
     private func refreshUndo() {
         undoStatus = ConfigurationService().undoStatus()
+    }
+
+    private func openEditor() {
+        let model = ConfigurationEditorModel.live()
+        lastEditor = model
+        editorModel = model
+    }
+
+    /// The editor closed: after an apply, say so and offer Undo.
+    private func editorClosed() {
+        refreshUndo()
+        if let model = lastEditor, model.didApply { show(ConfigurationCopy.applied, in: .undo) }
+        lastEditor = nil
     }
 
     private func chooseFile() {

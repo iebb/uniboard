@@ -411,7 +411,7 @@ Access stays in the keyboard, like its colors.
   back, renames it to the next generation and finally replaces the pointer
   atomically. That rename is the moment the keyboard sees the change. An
   interruption at any earlier step leaves the last good generation current.
-- **Undo Last Import** is available while the pointer names a `previous`
+- **Undo Last Configuration Change** (formerly Undo Last Import; also covers in-app editor applies) is available while the pointer names a `previous`
   generation. It copies that backup into a new generation, so both processes
   notice: favorites get a new replacement id (they are adopted wholesale, not
   merged) and image colors a new revision. If anything changed after the

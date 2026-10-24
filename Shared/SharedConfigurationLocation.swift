@@ -22,6 +22,10 @@ struct ConfigurationPointer: Codable, Equatable, Sendable {
     /// When that import was applied on this device (seconds since 1970),
     /// for "Imported {date, time}". Not the file's own date.
     var importedAt: Double? = nil
+    /// What made that change (`ConfigurationChangeSource`), for the Undo
+    /// row's caption. Optional and free text: older pointers have none, and
+    /// a value this build doesn't know never makes the pointer invalid.
+    var changeSource: String? = nil
 
     var isValid: Bool {
         SharedConfigurationLocation.generationNumber(directory) == generation
@@ -56,12 +60,20 @@ enum ConfigurationOutcome: Equatable, Sendable {
     case failed(ConfigurationStep)
 }
 
+/// What replaced the configuration: an imported file or the in-app editor.
+enum ConfigurationChangeSource: String, Equatable, Sendable {
+    case importFile = "import"
+    case editor
+}
+
 struct ConfigurationUndoStatus: Equatable, Sendable {
     let fingerprint: String
     /// Changes were made after the import; undoing replaces them too.
     let hasNewerEdits: Bool
     /// When the import was applied; nil for a pointer written before this was recorded.
     var importedAt: Date? = nil
+    /// nil when the pointer didn't record it (older pointers) or names an unknown source.
+    var source: ConfigurationChangeSource? = nil
 }
 
 /// The shared configuration location in the App Group:
@@ -258,7 +270,7 @@ struct SharedConfigurationLocation {
     /// built from; any change since then is a conflict. The current
     /// generation stays as the Undo backup, completed with today's app
     /// presentation defaults.
-    func apply(_ files: [String: Data], expecting expected: String, currentPresentation: Data,
+    func apply(_ files: [String: Data], expecting expected: String, currentPresentation: Data, source: ConfigurationChangeSource = .importFile,
                validators: [String: (Data) -> Bool] = ConfigurationSnapshotValidation.validators) -> ConfigurationOutcome {
         guard Set(files.keys) == Set(Self.snapshotFiles), files.allSatisfy({ validators[$0.key]?($0.value) == true }) else { return .invalidPayload }
         return locked {
@@ -266,7 +278,7 @@ struct SharedConfigurationLocation {
             let current = folder.appendingPathComponent(pointer.directory, isDirectory: true)
             guard fingerprint(of: current, generation: pointer.generation, presentation: currentPresentation) == expected else { return .conflict }
             guard (try? Self.replaceFile(currentPresentation, at: current.appendingPathComponent(AppPresentationSettings.filename))) != nil else { return .failed(.stage) }
-            return publish(files, after: pointer, importedPresentation: files[AppPresentationSettings.filename]!)
+            return publish(files, after: pointer, importedPresentation: files[AppPresentationSettings.filename]!, source: source)
         }
     }
 
@@ -276,7 +288,8 @@ struct SharedConfigurationLocation {
               isComplete(folder.appendingPathComponent(previous, isDirectory: true), generation: Self.generationNumber(previous)!) else { return nil }
         let current = fingerprint(of: folder.appendingPathComponent(pointer.directory, isDirectory: true), generation: pointer.generation, presentation: presentation)
         return ConfigurationUndoStatus(fingerprint: current, hasNewerEdits: current != imported,
-                                       importedAt: pointer.importedAt.map(Date.init(timeIntervalSince1970:)))
+                                       importedAt: pointer.importedAt.map(Date.init(timeIntervalSince1970:)),
+                                       source: pointer.changeSource.flatMap(ConfigurationChangeSource.init(rawValue:)))
     }
 
     /// Restores the pre-import backup as a new generation, so both processes
@@ -345,7 +358,7 @@ struct SharedConfigurationLocation {
     /// With `importedPresentation` (an import), the replaced generation stays
     /// as the Undo backup and the new one's fingerprint is recorded.
     private func publish(_ files: [String: Data], placeholders: [String] = [], after current: ConfigurationPointer?,
-                         importedPresentation: Data? = nil) -> ConfigurationOutcome {
+                         importedPresentation: Data? = nil, source: ConfigurationChangeSource? = nil) -> ConfigurationOutcome {
         let folder = self.folder!
         let generation = (current?.generation ?? 0) + 1
         let name = Self.directoryName(generation)
@@ -370,7 +383,8 @@ struct SharedConfigurationLocation {
             try fault(step)
             let pointer = ConfigurationPointer(generation: generation, directory: name, previous: importedPresentation.flatMap { _ in current?.directory },
                 importFingerprint: importedPresentation.map { fingerprint(of: target, generation: generation, presentation: $0) },
-                importedAt: importedPresentation.map { _ in now().timeIntervalSince1970 })
+                importedAt: importedPresentation.map { _ in now().timeIntervalSince1970 },
+                changeSource: importedPresentation.flatMap { _ in source?.rawValue })
             try Self.replaceFile(try Self.encoder.encode(pointer), at: folder.appendingPathComponent(Self.pointerFilename))
             return .applied(pointer)
         } catch {

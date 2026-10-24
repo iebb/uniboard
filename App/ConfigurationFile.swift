@@ -13,7 +13,8 @@ enum ConfigurationCopy {
     static let title = "Configuration"
     static let export = "Export Configuration"
     static let importTitle = "Import Configuration"
-    static let undo = "Undo Last Import"
+    /// Undo covers imports and editor applies alike: one recovery history (msg702).
+    static let undo = "Undo Last Configuration Change"
     static let header = "Save your settings, layouts, favorites, font rules and Copy Image options in a TOML file, or import a configuration from Files."
     static let privacy = "Favorites and custom key text are included and may be personal. Typing history, scratchpad text and font files aren’t included."
     static let portability = "Fonts aren’t included or downloaded automatically. Some font choices may need fonts added on the other device."
@@ -53,22 +54,53 @@ enum ConfigurationCopy {
     static let ignoredSettingsFooter = "These older settings won’t be applied. Your editable keyboard layout takes precedence."
     static func ignoredSetting(_ name: String) -> String { "Ignored setting, \(name)" }
 
-    static let undoTitle = "Undo last import?"
-    static let undoBody = "Restore the configuration you had before the last import."
-    static let undoNewer = "Changes made since that import will also be replaced."
+    static let undoTitle = "Undo last configuration change?"
+    static let undoBody = "Restore your previous configuration. Changes made since then will also be replaced."
     static let restore = "Restore Previous Configuration"
     static let restored = "Previous configuration restored"
     static let restoreFailed = "Couldn’t restore configuration"
 
+    // The configuration editor (docs/config-editor-copy.md, design/config-editor/design.md).
+    static let edit = "Edit Configuration"
+    static let editTextLabel = "Configuration text"
+    static let editHelper = "Edit your configuration in TOML. Validate checks your edits without changing your settings. Apply saves them."
+    static let editUnchecked = "Edits haven’t been checked."
+    static let editChecking = "Checking configuration…"
+    static let editValid = "Configuration is valid. Your settings haven’t changed."
+    static let editValidWarnings = "Configuration is valid. Review the warnings before applying."
+    static let editInvalid = "Fix these errors before applying"
+    static let editUnchanged = "Your settings haven’t changed."
+    static let editEmpty = "Enter a configuration before validating or applying."
+    static let editErrorHint = "Moves the cursor to this line."
+    static let editValidate = "Validate"
+    static let editApply = "Apply"
+    static let discardTitle = "Discard edits?"
+    static let discardBody = "Your edits haven’t been applied."
+    static let discard = "Discard Edits"
+    static let keepEditing = "Keep Editing"
+    static let applied = "Configuration applied"
+    static let editChangedBody = "Settings changed while you were editing. Review the changes again before applying."
+
     static func checking(_ name: String) -> String { "Checking \(name)…" }
     /// "Imported today at 18:40", "Imported yesterday at 9:05", "Imported 3 Oct 2026 at 18:40".
     static func importedAt(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
-        let time = date.formatted(date: .omitted, time: .shortened)
-        if calendar.isDate(date, inSameDayAs: now) { return "Imported today at \(time)" }
-        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
-            return "Imported yesterday at \(time)"
+        changedAt(date, source: .importFile, now: now, calendar: calendar)
+    }
+    /// The Undo row's caption: "Imported …" after an import, "Applied …"
+    /// after an editor apply, "Changed …" when the pointer didn't record
+    /// which (docs/config-editor-copy.md).
+    static func changedAt(_ date: Date, source: ConfigurationChangeSource?, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let verb = switch source {
+        case .importFile: "Imported"
+        case .editor: "Applied"
+        case nil: "Changed"
         }
-        return "Imported \(date.formatted(date: .abbreviated, time: .omitted)) at \(time)"
+        let time = date.formatted(date: .omitted, time: .shortened)
+        if calendar.isDate(date, inSameDayAs: now) { return "\(verb) today at \(time)" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
+            return "\(verb) yesterday at \(time)"
+        }
+        return "\(verb) \(date.formatted(date: .abbreviated, time: .omitted)) at \(time)"
     }
     static func fontsUnavailable(_ count: Int) -> String { count == 1 ? "1 font unavailable" : "\(count.formatted()) fonts unavailable" }
     static func moreProblems(_ count: Int) -> String { count == 1 ? "1 More Problem" : "\(count.formatted()) More Problems" }
@@ -76,6 +108,45 @@ enum ConfigurationCopy {
     static func fileCaption(bytes: Int, version: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) + " · Format version \(version)"
     }
+}
+
+/// The review's wording in each mode: an import keeps its own strings
+/// unchanged; the editor's come from docs/config-editor-copy.md.
+struct ConfigurationReviewWording: Equatable {
+    let title: String
+    let intro: String
+    let noChanges: String
+    let missingSections: String
+    let backup: String
+    let primary: String
+    let inProgress: String
+    let success: String
+    /// The error screen's title, when the text can't be read.
+    let problemsTitle: String
+    let failureTitle: String
+    /// Only when the previous configuration is verified in use.
+    let failureBody: String
+    let changedBody: String
+
+    static let importFile = ConfigurationReviewWording(
+        title: ConfigurationCopy.review, intro: ConfigurationCopy.intro, noChanges: ConfigurationCopy.noChanges,
+        missingSections: ConfigurationCopy.missingSections, backup: ConfigurationCopy.backup, primary: ConfigurationCopy.replace,
+        inProgress: ConfigurationCopy.replacing, success: ConfigurationCopy.imported, problemsTitle: ConfigurationCopy.importFailed,
+        failureTitle: ConfigurationCopy.replaceFailed, failureBody: ConfigurationCopy.replaceFailedBody, changedBody: ConfigurationCopy.changedBody)
+
+    static let editor = ConfigurationReviewWording(
+        title: "Review Changes", intro: "These edits will replace your current configuration.", noChanges: "No changes to apply",
+        missingSections: "Sections missing from this configuration will reset to defaults.",
+        backup: "Your previous configuration will be kept so you can undo these changes.", primary: ConfigurationCopy.editApply,
+        inProgress: "Applying configuration…", success: ConfigurationCopy.applied, problemsTitle: ConfigurationCopy.editInvalid,
+        failureTitle: "Couldn’t apply configuration",
+        // True only because the editor keeps the draft whenever an apply fails.
+        failureBody: "Your previous configuration is still in use. Your edits are still here.",
+        changedBody: ConfigurationCopy.editChangedBody)
+}
+
+extension ConfigurationImportModel.Mode {
+    var wording: ConfigurationReviewWording { self == .editor ? .editor : .importFile }
 }
 
 /// The app's side of the configuration: what is in effect now, export, and

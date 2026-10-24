@@ -6,5 +6,8 @@ Google Fonts (Settings > Font Downloads) and a character's View Fonts now use th
 ADDING A LANGUAGE
 A language added in Settings > Layouts starts with the standard 1 to 0 number row, even if you rearranged the number row of another language. Your other languages keep their own arrangements.
 
+EDITING THE CONFIGURATION
+Settings > Configuration > Edit Configuration shows your configuration as text. Break a line and tap Validate: you should see the line and column, and tapping the error moves the cursor there. Validate never changes your settings. Make a small valid change, tap Apply, check Review Changes, then Apply. Undo Last Configuration Change should bring back the previous configuration.
+
 STILL WORTH CHECKING
 Font Rules and the font picker, the styles grid and downloads, Inspect Text (copy each normalized form, UTF-8 and UTF-16), the text preview cursor, Copy Image at 1x, 2x or 3x, importing and exporting the configuration file, and Auto-Capitalization. Without Full Access, typing, search and the preview still work. Nothing you type is sent over a network.

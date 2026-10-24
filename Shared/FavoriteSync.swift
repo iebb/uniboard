@@ -20,6 +20,12 @@ struct FavoriteSync {
     struct Snapshot: Codable { var version = 1; var texts: [String]; var replacementID: String? = nil }
     enum Issue: Error { case unavailable, invalid, capacity }
     struct Result { let texts: [String]; let baseline: [String]; let written: Bool; let replacementID: String? }
+    /// Sorted keys: the same list is always the same bytes.
+    static func encode(_ snapshot: Snapshot) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(snapshot)
+    }
     /// The directory holding the favorites file.
     let container: () -> URL?
     /// The directory holding the lock file.
@@ -83,23 +89,28 @@ struct FavoriteSync {
         guard fstat(lock, &lockInfo) == 0, (lockInfo.st_mode & S_IFMT) == S_IFREG else { throw Issue.invalid }
         guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw Issue.unavailable }
         defer { flock(lock, LOCK_UN) }
-        let (url, remote) = try remoteState(base: base)
+        let (url, remote, stored) = try remoteState(base: base)
         if let replaced = adopted(remote, replacementID, written: true) { return replaced }
         let texts = try Self.merge(base: base, local: local, remote: remote.texts)
-        let data = try JSONEncoder().encode(Snapshot(version: remote.replacementID == nil ? 1 : 2, texts: texts, replacementID: remote.replacementID))
+        let result = Result(texts: texts, baseline: texts, written: true, replacementID: remote.replacementID ?? replacementID)
+        // Nothing to change: the file keeps its bytes, so the configuration's
+        // fingerprint doesn't move under an open review or editor.
+        if stored, texts.map({ Array($0.utf16) }) == remote.texts.map({ Array($0.utf16) }) { return result }
+        let data = try Self.encode(Snapshot(version: remote.replacementID == nil ? 1 : 2, texts: texts, replacementID: remote.replacementID))
         guard data.count <= Self.maximumBytes else { throw Issue.capacity }
         // Reject links even though atomic replacement would not follow one.
         guard (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil else { throw Issue.invalid }
         try write(data, url)
-        return Result(texts: texts, baseline: texts, written: true, replacementID: remote.replacementID ?? replacementID)
+        return result
     }
 
-    private func remoteState(base: [String]) throws -> (url: URL, snapshot: Snapshot) {
+    /// `stored` is false when there is no file yet.
+    private func remoteState(base: [String]) throws -> (url: URL, snapshot: Snapshot, stored: Bool) {
         guard let root = container(), root.isFileURL else { throw Issue.unavailable }
         let url = root.appendingPathComponent(Self.filename)
-        guard let data = try read(url) else { return (url, Snapshot(texts: base)) }
+        guard let data = try read(url) else { return (url, Snapshot(texts: base), false) }
         guard let state = Self.decode(data) else { throw Issue.invalid }
-        return (url, state)
+        return (url, state, true)
     }
 
     private func adopted(_ remote: Snapshot, _ replacementID: String?, written: Bool) -> Result? {
@@ -119,7 +130,7 @@ struct FavoriteSync {
     /// new replacement id.
     static func replacementPayload(_ texts: [String], id: String = UUID().uuidString) -> Data? {
         guard valid(texts), SharedConfigurationLocation.isRevision(id),
-              let data = try? JSONEncoder().encode(Snapshot(version: 2, texts: texts, replacementID: id)), data.count <= maximumBytes else { return nil }
+              let data = try? encode(Snapshot(version: 2, texts: texts, replacementID: id)), data.count <= maximumBytes else { return nil }
         return data
     }
 

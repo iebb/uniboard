@@ -18,7 +18,10 @@ struct ConfigurationImportEnvironment {
     /// Lets the app's stores read the replacement.
     var adopt: @MainActor () -> Void
 
-    @MainActor static var live: ConfigurationImportEnvironment {
+    @MainActor static var live: ConfigurationImportEnvironment { live(source: .importFile) }
+
+    /// `source` is recorded with the replacement for the Undo row's caption.
+    @MainActor static func live(source: ConfigurationChangeSource) -> ConfigurationImportEnvironment {
         let service = ConfigurationService()
         return ConfigurationImportEnvironment(
             read: { try ConfigurationService.readImport($0) },
@@ -26,7 +29,7 @@ struct ConfigurationImportEnvironment {
             unavailableFonts: { service.unavailableFaces($0) },
             presentation: { service.presentation },
             apply: { files, expected, presentation in
-                service.location.apply(files, expecting: expected, currentPresentation: presentation)
+                service.location.apply(files, expecting: expected, currentPresentation: presentation, source: source)
             },
             currentFingerprint: { service.location.currentFingerprint(presentation: $0) },
             adopt: { service.adoptCurrentConfiguration() })
@@ -59,6 +62,14 @@ struct ConfigurationReview: Equatable {
 /// in effect still matches the one the review compared against.
 @MainActor
 final class ConfigurationImportModel: ObservableObject, Identifiable {
+    /// A file from Files, or the configuration editor's text (design/config-editor/design.md §5):
+    /// the same check, review, Replace and recovery; only the wording and
+    /// presentation differ.
+    enum Mode: Equatable {
+        case importFile
+        case editor
+    }
+
     enum Phase: Equatable {
         case checking(String)
         /// Every problem, the first shown as a card.
@@ -80,13 +91,17 @@ final class ConfigurationImportModel: ObservableObject, Identifiable {
 
     let id = UUID()
     let fileName: String
+    let mode: Mode
     @Published private(set) var phase: Phase
     @Published var alert: Alert?
+    /// Called once Replace succeeds (the editor records that it applied).
+    var onImported: (() -> Void)?
     private let environment: ConfigurationImportEnvironment
     private var data: Data?
 
-    init(fileName: String, environment: ConfigurationImportEnvironment) {
+    init(fileName: String, mode: Mode = .importFile, environment: ConfigurationImportEnvironment) {
         self.fileName = fileName
+        self.mode = mode
         self.environment = environment
         phase = .checking(fileName)
     }
@@ -153,6 +168,7 @@ final class ConfigurationImportModel: ObservableObject, Identifiable {
         case .applied:
             environment.adopt()
             phase = .imported(unavailableFonts: review.unavailableFonts)
+            onImported?()
         case .conflict:
             phase = .review(review)
             alert = .changed
@@ -171,7 +187,7 @@ final class ConfigurationImportModel: ObservableObject, Identifiable {
     }
 }
 
-/// Undo Last Import (design.md §6b).
+/// Undo Last Configuration Change (design.md §6b): imports and editor applies alike.
 enum ConfigurationUndo {
     enum Result: Equatable {
         case restored

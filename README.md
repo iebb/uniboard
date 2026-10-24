@@ -28,7 +28,7 @@ The App Store currently has version 1.1. The next release is **1.3** (`MARKETING
 
 - **Preview fonts.** Extra Unicode Fonts is off by default. Optional font packs download on demand. You can add your own TrueType or OpenType file, or use a font installed on the device. **Font Rules** choose a preferred font for a code point, range or Unicode block. **View Fonts** in a character's details compares every available face. A bundled **Google Fonts** catalog lists families by name, and its **styles grid** downloads single styles or files. Preview fonts affect only Uniboard's own rendering, never the receiving app.
 - **ConScript (UCSUR).** An optional setting shows the ConScript Unicode Registry's names and blocks for Private Use characters.
-- **Configuration file.** Export and import one TOML file containing settings, layouts and keys, favorites, font choices and rules, and Copy Image options. Before an import replaces anything you can review the changes, and Undo Last Import restores the previous state.
+- **Configuration file.** Export and import one TOML file containing settings, layouts and keys, favorites, font choices and rules, and Copy Image options. You can also edit the configuration as text in the app: Validate checks it without changing anything, and Apply shows the same review as an import. Before an import or an edit replaces anything you can review the changes, and Undo Last Configuration Change restores the previous state.
 
 ### Full Access
 

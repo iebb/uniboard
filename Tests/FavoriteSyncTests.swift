@@ -127,6 +127,32 @@ final class FavoriteSyncTests: XCTestCase {
             XCTAssertEqual(try sync.synchronize(base: [], local: [], canWrite: false).texts, ["b", "a"])
         }
     }
+    /// A sync with nothing to change never rewrites the file: its bytes are
+    /// part of the configuration fingerprint an open editor or review holds.
+    func testANoChangeSyncLeavesTheFileUntouched() throws {
+        try fixture { root, sync, _, _ in
+            let file = root.appendingPathComponent(FavoriteSync.filename)
+            var writes = 0
+            var counting = sync
+            counting.write = { writes += 1; try sync.write($0, $1) }
+            XCTAssertTrue(try counting.synchronize(base: [], local: ["a"], canWrite: true).written)
+            XCTAssertEqual(String(decoding: try Data(contentsOf: file), as: UTF8.self), #"{"texts":["a"],"version":1}"#)
+            // Stored in another key order, as an earlier version may have written it.
+            let stored = Data(#"{"version":1,"texts":["a"]}"#.utf8)
+            try stored.write(to: file)
+            for _ in 0..<3 {
+                let result = try counting.synchronize(base: ["a"], local: ["a"], canWrite: true)
+                XCTAssertTrue(result.written)
+                XCTAssertEqual(result.texts, ["a"])
+            }
+            XCTAssertEqual(writes, 1)
+            XCTAssertEqual(try Data(contentsOf: file), stored)
+            // A real change still writes, with sorted keys.
+            XCTAssertEqual(try counting.synchronize(base: ["a"], local: ["a", "b"], canWrite: true).texts, ["b", "a"])
+            XCTAssertEqual(writes, 2)
+            XCTAssertEqual(String(decoding: try Data(contentsOf: file), as: UTF8.self), #"{"texts":["b","a"],"version":1}"#)
+        }
+    }
     func testUnavailableContainersAndMalformedSharedDataNeverOverwriteLocalOrRemote() throws {
         for root: URL? in [nil, URL(string: "https://invalid.example/")] {
             XCTAssertThrowsError(try FavoriteSync(container: { root }).synchronize(base: [], local: [], canWrite: true))

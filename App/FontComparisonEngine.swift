@@ -208,7 +208,7 @@ struct PublicFontInventory: FontInventoryProviding {
             let locator = FontLocator.process(postScriptName: ps, variations: axes)
             let id = Self.identity(locator)
             if records[id] == nil {
-                let source: FontSource = url?.path.hasPrefix("/System/Library/Fonts/") == true ? .system : .available
+                let source: FontSource = url.map { FontPickerSection.isSystemFontFile($0.path) } == true ? .system : .available
                 records[id] = FontFaceRecord(id: id, family: CTFontDescriptorCopyAttribute(descriptor, kCTFontFamilyNameAttribute) as? String ?? ps, style: CTFontDescriptorCopyAttribute(descriptor, kCTFontStyleNameAttribute) as? String ?? "Regular", postScriptName: ps, source: source, locator: locator, assetID: nil)
             }
         }
@@ -360,6 +360,30 @@ actor FontComparisonEngine: FontComparing {
         return snapshot
     }
     func invalidate() { scanTask?.cancel(); scanTask = nil; generation &+= 1; cache.removeAll(); recency.removeAll(); inventoryCache = nil }
+    /// Proofs for chosen faces only (the preferred-font picker), sharing this
+    /// engine's verifier and cache without cancelling a running scan.
+    func proofs(for inspection: FontInspection, faces: [FontFaceRecord]) async throws -> [FontFaceID: FontProof] {
+        let snapshot = try await inventorySnapshot()
+        let bytes = Data(inspection.previewText.utf8), originalBytes = Data(inspection.originalText.utf8)
+        var result: [FontFaceID: FontProof] = [:]
+        for face in faces {
+            await Task.yield()
+            try Task.checkCancellation()
+            let key = Key(bytes: bytes, originalBytes: originalBytes, face: face.id, inventory: snapshot.generation, presentation: inspection.presentation, scaffold: inspection.scaffold)
+            if let cached = cache[key] {
+                cacheHitCount += 1
+                result[face.id] = cached
+                continue
+            }
+            let proof = autoreleasepool { FontLineVerifier.line(face: face, inspection: inspection, size: 64, provider: provider).0 }
+            if cacheLimit > 0 {
+                if cache.count >= cacheLimit, !recency.isEmpty { cache.removeValue(forKey: recency.removeFirst()) }
+                if cache.count < cacheLimit { cache[key] = proof; recency.append(key) }
+            }
+            result[face.id] = proof
+        }
+        return result
+    }
     func scan(_ inspection: FontInspection) -> AsyncThrowingStream<FontScanUpdate, Error> {
         scanTask?.cancel()
         generation &+= 1

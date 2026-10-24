@@ -341,7 +341,7 @@ private extension KeyboardKeyUnicodePicker {
         Button { select(text); dismiss() } label: {
             HStack(spacing: 14) {
                 Text(glyph)
-                    .font(Font(UnicodeFontSupport.font(for: glyph, size: 28, enabled: preferences.useUnicodeFonts)))
+                    .font(Font(UnicodeFontSupport.font(for: glyph, size: 28, enabled: preferences.useUnicodeFonts, anchor: character.fontRuleAnchor)))
                     .frame(width: 42)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(character.name).foregroundStyle(.primary)

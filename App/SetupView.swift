@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SetupView: View {
     @EnvironmentObject private var preferences: CatalogPreferences
+    @ObservedObject private var fontRules = FontRulePreferences.shared
     /// Explore's Private Use rows and planes, hidden by default.
     @AppStorage("exploreShowsPrivateUse") private var showsPrivateUse = false
     var body: some View {
@@ -25,14 +26,10 @@ struct SetupView: View {
                 .accessibilityIdentifier("keyboardLayouts")
                 NavigationLink("Customize Keys") { KeyboardKeySettingsView() }
                     .accessibilityIdentifier("keyboardKeySettings")
-                Picker("Top Row", selection: Binding(get: { preferences.topRow }, set: { preferences.selectTopRow($0) })) {
-                    ForEach(KeyboardTopRow.allCases, id: \.rawValue) { Text($0.title).tag($0).accessibilityIdentifier("keyboardTopRow.option.\($0.rawValue)") }
+                NavigationLink { AutoCapitalizationSettingsView() } label: {
+                    LabeledContent(AutoCapitalizationCopy.title, value: preferences.autoCapitalization.title)
                 }
-                .pickerStyle(.menu)
-                .accessibilityIdentifier("keyboardTopRow")
-                .accessibilityValue(preferences.topRow.rawValue)
-                Toggle("Number Row", isOn: Binding(get: { preferences.showsNumberRow }, set: { preferences.selectNumberRow($0) }))
-                    .accessibilityIdentifier("showKeyboardNumberRow")
+                .accessibilityIdentifier("keyboardAutoCapitalization")
                 Toggle("Text Preview", isOn: Binding(get: { preferences.showsTextPreview }, set: { preferences.selectTextPreview($0) }))
                     .accessibilityIdentifier("showKeyboardTextPreview")
                 Toggle("Hide Keyboard Key", isOn: Binding(get: { preferences.showsCollapseKey }, set: { preferences.selectCollapseKey($0) }))
@@ -40,7 +37,7 @@ struct SetupView: View {
             } header: {
                 Text("Keyboard")
             } footer: {
-                Text("Top Row adds a row of symbols or a Unicode search field above the keys. Turn off Number Row for a shorter keyboard; digits stay on the 123 page and in Unicode search. Hide Keyboard Key adds a key that closes the keyboard; wide iPad layouts always have one.")
+                Text("Hide Keyboard Key adds a key that closes the keyboard; wide iPad layouts always have one.")
             }
 
             if UIDevice.current.userInterfaceIdiom == .pad {
@@ -51,7 +48,7 @@ struct SetupView: View {
                 } header: {
                     Text("iPad Keyboard")
                 } footer: {
-                    Text("On a wide landscape iPad, choose iPad styling, compact ANSI punctuation, or a full ANSI number row, which stays even with Number Row off. Reopen the keyboard to apply; Full Access is not required.")
+                    Text("On a wide landscape iPad, choose iPad styling, compact ANSI punctuation, or a full ANSI number row. Reopen the keyboard to apply; Full Access is not required.")
                 }
             }
 
@@ -83,12 +80,21 @@ struct SetupView: View {
                 }
                 NavigationLink("Font Downloads") { FontPackDownloadsView() }
                     .accessibilityIdentifier("fontDownloads")
+                NavigationLink { FontRulesView() } label: {
+                    LabeledContent("Font Rules", value: FontRuleCopy.ruleCount(fontRules.rules.count))
+                }
+                .accessibilityIdentifier("fontRules")
                 NavigationLink("Font Licenses") { FontLicenseView() }
                     .accessibilityIdentifier("fontLicenses")
             } header: {
                 Text("Preview Fonts")
             } footer: {
                 Text("Off by default. When iOS can’t draw a character or emoji, Uniboard previews it with a downloaded font instead. Characters iOS can’t draw itself are tinted red either way, since other apps use their own fonts. Applies to the app and keyboard without Full Access.")
+            }
+
+            Section {
+                NavigationLink(ConfigurationCopy.title) { ConfigurationView() }
+                    .accessibilityIdentifier("configuration")
             }
 
             Section {
@@ -115,6 +121,60 @@ struct SetupView: View {
         } icon: {
             Image(systemName: "\(number).circle.fill").foregroundStyle(.tint)
         }
+    }
+}
+
+/// Settings → Keyboard → Auto-Capitalization: the five modes, each saved
+/// as soon as it's chosen. Affects new typing in the keyboard only.
+struct AutoCapitalizationSettingsView: View {
+    @EnvironmentObject private var preferences: CatalogPreferences
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(AutoCapitalizationMode.allCases, id: \.self) { mode in
+                    let selected = preferences.autoCapitalization == mode
+                    Button {
+                        preferences.selectAutoCapitalization(mode)
+                    } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                // Explicit label colors: a List button would tint them.
+                                Text(mode.title).foregroundStyle(Color(uiColor: .label))
+                                Text(mode.summary).font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            if selected {
+                                Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(.tint)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        .frame(minHeight: 56 - 16)
+                        .contentShape(Rectangle())
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(mode.title)
+                    .accessibilityValue(mode.summary)
+                    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityIdentifier("autoCapitalization.\(mode.rawValue)")
+                }
+            } header: {
+                // No explicit .secondary: inside a header it fades a level, to about 1.85:1.
+                Text(AutoCapitalizationCopy.header).font(.footnote).textCase(nil)
+            } footer: {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(AutoCapitalizationCopy.footer)
+                    Text(AutoCapitalizationCopy.footerDetail)
+                    if let message = preferences.autoCapitalizationSaveError {
+                        Text(message).foregroundStyle(.red).accessibilityIdentifier("autoCapitalization.saveError")
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle(AutoCapitalizationCopy.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("autoCapitalizationList")
     }
 }
 
@@ -155,7 +215,7 @@ struct KeyboardTestView: View {
                 }
             }
             .padding(.horizontal, compact ? 8 : 22).padding(.vertical, compact ? 0 : 22)
-        }.background(Color.groupedBackground)
+        }.background { Color.groupedBackground.ignoresSafeArea() } // also behind the keyboard's corners
             .navigationTitle("Try Uniboard").navigationBarTitleDisplayMode(.inline)
             .toolbar(compactPhone ? .hidden : .visible, for: .navigationBar)
     }

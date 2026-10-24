@@ -11,18 +11,30 @@ import Glibc
 struct FavoriteSync {
     static let shared = FavoriteSync()
     static let filename = "favorites-v1.json"
+    /// Also the shared configuration's writer lock; it stays in the group root.
+    static let lockFilename = "favorites-v1.lock"
     static let maximumBytes = 512 * 1024
     static let maximumCount = 4096
-    struct Snapshot: Codable { var version = 1; var texts: [String] }
+    /// Version 2 carries the id of the import or undo that replaced the list
+    /// wholesale. Ordinary syncs keep whatever id they read.
+    struct Snapshot: Codable { var version = 1; var texts: [String]; var replacementID: String? = nil }
     enum Issue: Error { case unavailable, invalid, capacity }
-    struct Result { let texts: [String]; let baseline: [String]; let written: Bool }
+    struct Result { let texts: [String]; let baseline: [String]; let written: Bool; let replacementID: String? }
+    /// The directory holding the favorites file.
     let container: () -> URL?
+    /// The directory holding the lock file.
+    let lockContainer: () -> URL?
     var read: (URL) throws -> Data? = readFile
     var write: (Data, URL) throws -> Void = { try $0.write(to: $1, options: .atomic) }
 
-    init(container: @escaping () -> URL? = {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: UnicodeEditionSettings.groupIdentifier)
-    }) { self.container = container }
+    /// The file and its lock in one directory.
+    init(container: @escaping () -> URL?) { self.container = container; lockContainer = container }
+
+    /// The file in the current configuration generation, resolved only after
+    /// the lock is held; the lock in the group root.
+    init(location: SharedConfigurationLocation = .shared) {
+        container = location.currentDirectory; lockContainer = location.root
+    }
 
     static func valid(_ texts: [String]) -> Bool {
         texts.count <= maximumCount && Set(texts.map { Array($0.utf16) }).count == texts.count
@@ -49,24 +61,19 @@ struct FavoriteSync {
         return result
     }
 
-    func synchronize(base: [String], local: [String], canWrite: Bool) throws -> Result {
-        guard let root = container(), root.isFileURL else { throw Issue.unavailable }
-        let url = root.appendingPathComponent(Self.filename)
-        func remoteTexts() throws -> [String] {
-            let remote: [String]
-            if let data = try read(url) {
-                guard !data.isEmpty, data.count <= Self.maximumBytes,
-                      let state = try? JSONDecoder().decode(Snapshot.self, from: data), state.version == 1,
-                      Self.valid(state.texts) else { throw Issue.invalid }
-                remote = state.texts
-            } else { remote = base }
-            return remote
-        }
+    /// `replacementID` is the replacement this process last adopted. A
+    /// different one on disk means an import or undo replaced the list: it is
+    /// adopted wholesale instead of merged, so pending local edits don't
+    /// bring back what the replacement removed.
+    func synchronize(base: [String], local: [String], canWrite: Bool, replacementID: String? = nil) throws -> Result {
         guard canWrite else {
-            let remote = try remoteTexts()
-            return Result(texts: try Self.merge(base: base, local: local, remote: remote), baseline: remote, written: false)
+            let remote = try remoteState(base: base).snapshot
+            if let replaced = adopted(remote, replacementID, written: false) { return replaced }
+            return Result(texts: try Self.merge(base: base, local: local, remote: remote.texts), baseline: remote.texts, written: false,
+                          replacementID: remote.replacementID ?? replacementID)
         }
-        let lock = root.appendingPathComponent("favorites-v1.lock").withUnsafeFileSystemRepresentation { path -> Int32 in
+        guard let lockRoot = lockContainer(), lockRoot.isFileURL else { throw Issue.unavailable }
+        let lock = lockRoot.appendingPathComponent(Self.lockFilename).withUnsafeFileSystemRepresentation { path -> Int32 in
             guard let path else { return -1 }
             return open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, S_IRUSR | S_IWUSR)
         }
@@ -76,13 +83,51 @@ struct FavoriteSync {
         guard fstat(lock, &lockInfo) == 0, (lockInfo.st_mode & S_IFMT) == S_IFREG else { throw Issue.invalid }
         guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw Issue.unavailable }
         defer { flock(lock, LOCK_UN) }
-        let texts = try Self.merge(base: base, local: local, remote: remoteTexts())
-        let data = try JSONEncoder().encode(Snapshot(texts: texts))
+        let (url, remote) = try remoteState(base: base)
+        if let replaced = adopted(remote, replacementID, written: true) { return replaced }
+        let texts = try Self.merge(base: base, local: local, remote: remote.texts)
+        let data = try JSONEncoder().encode(Snapshot(version: remote.replacementID == nil ? 1 : 2, texts: texts, replacementID: remote.replacementID))
         guard data.count <= Self.maximumBytes else { throw Issue.capacity }
         // Reject links even though atomic replacement would not follow one.
         guard (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil else { throw Issue.invalid }
         try write(data, url)
-        return Result(texts: texts, baseline: texts, written: true)
+        return Result(texts: texts, baseline: texts, written: true, replacementID: remote.replacementID ?? replacementID)
+    }
+
+    private func remoteState(base: [String]) throws -> (url: URL, snapshot: Snapshot) {
+        guard let root = container(), root.isFileURL else { throw Issue.unavailable }
+        let url = root.appendingPathComponent(Self.filename)
+        guard let data = try read(url) else { return (url, Snapshot(texts: base)) }
+        guard let state = Self.decode(data) else { throw Issue.invalid }
+        return (url, state)
+    }
+
+    private func adopted(_ remote: Snapshot, _ replacementID: String?, written: Bool) -> Result? {
+        guard let id = remote.replacementID, id != replacementID else { return nil }
+        return Result(texts: remote.texts, baseline: remote.texts, written: written, replacementID: id)
+    }
+
+    /// A usable shared file: version 1 without, or version 2 with, a replacement id.
+    static func decode(_ data: Data) -> Snapshot? {
+        guard !data.isEmpty, data.count <= maximumBytes, let state = try? JSONDecoder().decode(Snapshot.self, from: data),
+              state.version == 1 ? state.replacementID == nil : state.version == 2 && state.replacementID.map(SharedConfigurationLocation.isRevision) == true,
+              valid(state.texts) else { return nil }
+        return state
+    }
+
+    /// The favorites file an import or undo writes: the exact list under a
+    /// new replacement id.
+    static func replacementPayload(_ texts: [String], id: String = UUID().uuidString) -> Data? {
+        guard valid(texts), SharedConfigurationLocation.isRevision(id),
+              let data = try? JSONEncoder().encode(Snapshot(version: 2, texts: texts, replacementID: id)), data.count <= maximumBytes else { return nil }
+        return data
+    }
+
+    /// For Undo: the same list under a new replacement id; unusable data is
+    /// kept as it is. (A backup without a favorites file carries the current
+    /// one over instead: see `SharedConfigurationLocation.undoLastImport`.)
+    static func renewedReplacement(_ data: Data) -> Data {
+        decode(data).flatMap { replacementPayload($0.texts) } ?? data
     }
 
     static func readFile(_ url: URL) throws -> Data? {

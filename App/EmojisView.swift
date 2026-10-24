@@ -26,7 +26,7 @@ struct EmojisView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }.padding(.horizontal, 16).padding(.bottom, 24).frame(maxWidth: 780).frame(maxWidth: .infinity)
         }
-        .background(Color.groupedBackground)
+        .background { Color.groupedBackground.ignoresSafeArea() } // also behind the keyboard's corners
         .navigationTitle("Emoji")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

@@ -100,6 +100,16 @@ func symbolBoardPreview(_ text: String) -> String {
     return text
 }
 
+/// Font rules follow the text a key inserts, never a substitute picture:
+/// a "◌" scaffold defers to its mark, and pictures for spaces and controls
+/// take no rule.
+func symbolBoardFontAnchor(_ text: String) -> FontRuleAnchor {
+    let preview = symbolBoardPreview(text)
+    if preview == text { return .automatic }
+    if preview == "\u{25CC}" + text, let anchor = FontRuleSet.anchor(of: text) { return .scalar(anchor) }
+    return .none
+}
+
 func symbolBoardKeyLabel(_ text: String) -> String {
     let points = text.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
     return "\(symbolBoardPreview(text)), \(points)"

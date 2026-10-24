@@ -36,6 +36,17 @@ struct ContentView: View {
                 .tag(AppTab.settings)
         }
         .onOpenURL { url in
+#if DEBUG
+            if let fixture = FontRuleFixtures.fixtureName(url) {
+                FontRuleFixtures.apply(named: fixture)
+                return
+            }
+            if let fixture = FontRuleFixtures.libraryFixtureName(url) {
+                FontRuleFixtures.applyLibrary(named: fixture)
+                return
+            }
+            if ConfigurationFixtures.handle(url) { return }
+#endif
             guard CompanionAppRoute.isSettings(url) else { return }
             selectedCharacter = nil
             selectedEmoji = nil
@@ -195,7 +206,8 @@ struct ExploreView: View {
         }
         .frame(maxWidth: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { screenWidth = $0 }
-        .background(Color.groupedBackground)
+        // A ShapeStyle background stops at the keyboard; fill behind its rounded corners too.
+        .background { Color.groupedBackground.ignoresSafeArea() }
         .navigationTitle("Explore")
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $openedBlock) { BlockDetailView(block: $0, select: select) }

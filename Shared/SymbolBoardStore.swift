@@ -48,13 +48,13 @@ final class SymbolBoardStore: ObservableObject {
     private static let isApp = Bundle.main.bundleURL.pathExtension != "appex"
     static let shared = SymbolBoardStore(sync: .shared, pages: .shared, sharedWriteAllowed: isApp, configuresPages: isApp)
     static let storageKey = "keyboard.symbolBoards.v1"
-    static let stockID = "stock-symbols"
-    static let favoritesID = "migrated-favorites"
-    static let maximumBoards = 16
-    static let maximumKeys = 256
-    static let maximumMigratedFavorites = 4096
-    static let maximumVariants = 16
-    static let maximumTextScalars = 64
+    static let stockID = SymbolPageRules.stockID
+    static let favoritesID = SymbolPageRules.favoritesID
+    static let maximumBoards = SymbolPageRules.maximumBoards
+    static let maximumKeys = SymbolPageRules.maximumKeys
+    static let maximumMigratedFavorites = SymbolPageRules.maximumFavorites
+    static let maximumVariants = SymbolPageRules.maximumVariants
+    static let maximumTextScalars = SymbolPageRules.maximumTextScalars
     static let maximumPayloadBytes = 512 * 1024
 
     enum LoadIssue: String {
@@ -70,6 +70,8 @@ final class SymbolBoardStore: ObservableObject {
         var preferredStarBoardID: String?
         var boards: [SymbolBoard]
         var favoriteBaseline: [String]? = nil
+        /// The shared favorites replacement (import or undo) last adopted.
+        var favoriteReplacementID: String? = nil
     }
     @Published private(set) var boards: [SymbolBoard]
     @Published private(set) var activeBoardID: String
@@ -86,6 +88,7 @@ final class SymbolBoardStore: ObservableObject {
     let configuresPages: Bool
     private var sharedWriteAllowed: Bool
     private var favoriteBaseline: [String] = []
+    private var favoriteReplacementID: String?
     private var syncing = false
     private let persist: (Data) -> Bool
     var activeBoard: SymbolBoard { Self.selectedBoard(in: boards, activeBoardID: activeBoardID) }
@@ -127,6 +130,7 @@ final class SymbolBoardStore: ObservableObject {
             if state.version == 1 { state.preferredStarBoardID = Self.favoritesID }
             guard state.favoriteBaseline.map(FavoriteSync.valid) ?? true, let preferred = state.preferredStarBoardID, Self.valid(state) else { loadIssue = .unreadable; return }
             favoriteBaseline = state.favoriteBaseline ?? []
+            favoriteReplacementID = state.favoriteReplacementID
             boards = state.boards
             activeBoardID = state.activeBoardID
             preferredStarBoardID = preferred
@@ -354,7 +358,8 @@ final class SymbolBoardStore: ObservableObject {
         guard canEdit else { return false }
         let selectedPreferred = preferred ?? preferredStarBoardID
         let state = State(version: 2, activeBoardID: active ?? activeBoardID,
-                          preferredStarBoardID: selectedPreferred, boards: next, favoriteBaseline: sync == nil ? nil : favoriteBaseline)
+                          preferredStarBoardID: selectedPreferred, boards: next, favoriteBaseline: sync == nil ? nil : favoriteBaseline,
+                          favoriteReplacementID: sync == nil ? nil : favoriteReplacementID)
         guard let data = Self.encoded(state) else { return false }
         if let pages, Self.shareable(next) != Self.shareable(boards) || selectedPreferred != preferredStarBoardID {
             // A page change is published to the shared file before it is adopted.
@@ -404,19 +409,28 @@ final class SymbolBoardStore: ObservableObject {
         syncing = true
         defer { syncing = false }
         do {
-            let result = try sync.synchronize(base: favoriteBaseline, local: favoriteTexts, canWrite: sharedWriteAllowed)
+            let result = try sync.synchronize(base: favoriteBaseline, local: favoriteTexts, canWrite: sharedWriteAllowed,
+                                              replacementID: favoriteReplacementID)
             let baseline = result.baseline
             var next = boards
             guard let index = next.firstIndex(where: { $0.id == Self.favoritesID }) else { return }
             let old = Dictionary(uniqueKeysWithValues: next[index].keys.map { (Array($0.text.utf16), $0) })
             next[index].keys = result.texts.map { old[Array($0.utf16)] ?? SymbolBoardKey(id: UUID().uuidString.lowercased(), text: $0, variants: []) }
             let state = State(version: 2, activeBoardID: activeBoardID, preferredStarBoardID: preferredStarBoardID,
-                              boards: next, favoriteBaseline: baseline)
+                              boards: next, favoriteBaseline: baseline, favoriteReplacementID: result.replacementID)
             guard let data = Self.encoded(state), persist(data) else { syncStatus = .unavailable; return }
             favoriteBaseline = baseline
+            favoriteReplacementID = result.replacementID
             if boards != next { boards = next }
             syncStatus = result.written ? .current : .fullAccessRequired
         } catch { syncStatus = .unavailable }
+    }
+
+    /// After this app replaced or restored the configuration: adopt the
+    /// shared pages, and the shared favorites wholesale.
+    func adoptReplacement() {
+        refreshPages()
+        refreshFavorites()
     }
 
     @discardableResult func clearFavorites() -> Bool {
@@ -426,49 +440,20 @@ final class SymbolBoardStore: ObservableObject {
         return commit(next)
     }
 
-    private static func keyLimit(_ id: String) -> Int { id == favoritesID ? maximumMigratedFavorites : maximumKeys }
-    private static func validText(_ text: String) -> Bool { !text.isEmpty && text.unicodeScalars.prefix(maximumTextScalars + 1).count <= maximumTextScalars }
-    private static func validName(_ name: String) -> String? {
-        let result = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !result.isEmpty, result.utf8.count <= 512, result.unicodeScalars.prefix(129).count <= 128, result.count <= 32,
-              !result.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
-        return result
-    }
-    private static func validID(_ id: String) -> Bool {
-        (1...80).contains(id.utf8.count) && id.utf8.allSatisfy {
-            (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 95].contains($0)
-        }
-    }
+    private static func keyLimit(_ id: String) -> Int { SymbolPageRules.keyLimit(id) }
+    private static func validText(_ text: String) -> Bool { SymbolPageRules.validText(text) }
+    private static func validName(_ name: String) -> String? { SymbolPageRules.validName(name) }
     private static func valid(_ state: State) -> Bool {
         guard state.favoriteBaseline.map(FavoriteSync.valid) ?? true, let preferred = state.preferredStarBoardID,
-              (2...maximumBoards).contains(state.boards.count),
-              state.boards.contains(where: { $0.id == stockID }), state.boards.contains(where: { $0.id == favoritesID }),
-              state.boards.contains(where: { $0.id == state.activeBoardID }),
-              state.boards.contains(where: { $0.id == preferred }),
-              Set(state.boards.map(\.id)).count == state.boards.count else { return false }
-        return state.boards.allSatisfy { board in
-            guard validID(board.id), validName(board.name) == board.name, board.keys.count <= keyLimit(board.id),
-                  board.layout.map({ SymbolPageLayout($0) != nil }) ?? true,
-                  Set(board.keys.map(\.id)).count == board.keys.count,
-                  uniqueExact(board.keys.map(\.text)).count == board.keys.count else { return false }
-            return board.keys.allSatisfy { key in
-                validID(key.id) && validText(key.text) && key.variants.count <= maximumVariants
-                    && key.variants.allSatisfy(validText)
-                    && uniqueExact([key.text] + key.variants).count == key.variants.count + 1
-                    && [key.up, key.down].allSatisfy { swipe in
-                        swipe.map { !$0.isEmpty && $0.count <= maximumVariants && $0.allSatisfy(validText) && uniqueExact($0).count == $0.count } ?? true
-                    }
-            }
-        }
+              state.favoriteReplacementID.map(SharedConfigurationLocation.isRevision) ?? true,
+              state.boards.contains(where: { $0.id == state.activeBoardID }) else { return false }
+        return SymbolPageRules.validPages(state.boards, starPageID: preferred)
     }
     private static func encoded(_ state: State) -> Data? {
         guard valid(state), let data = try? JSONEncoder().encode(state), data.count <= maximumPayloadBytes else { return nil }
         return data
     }
-    private static func uniqueExact(_ strings: [String]) -> [String] {
-        var seen = Set<[UInt16]>()
-        return strings.filter { seen.insert(Array($0.utf16)).inserted }
-    }
+    private static func uniqueExact(_ strings: [String]) -> [String] { SymbolPageRules.uniqueExact(strings) }
     private static func legacyFavorites(in defaults: UserDefaults) -> [SymbolBoardKey]? {
         var texts: [String] = []
         var seen = Set<[UInt16]>()
@@ -500,7 +485,66 @@ final class SymbolBoardStore: ObservableObject {
             SymbolBoardKey(id: "legacy.\($0.offset)", text: $0.element, variants: [])
         }
     }
-    private static func initialBoards(favorites: [SymbolBoardKey]) -> [SymbolBoard] {
+    private static func initialBoards(favorites: [SymbolBoardKey]) -> [SymbolBoard] { SymbolPageRules.initialBoards(favorites: favorites) }
+}
+
+
+/// The page rules the store enforces, free of actor isolation so the
+/// configuration codec can check imported pages with exactly the same rules.
+enum SymbolPageRules {
+    static let stockID = "stock-symbols"
+    static let favoritesID = "migrated-favorites"
+    static let maximumBoards = 16
+    static let maximumKeys = 256
+    static let maximumFavorites = 4096
+    static let maximumVariants = 16
+    static let maximumTextScalars = 64
+
+    static func keyLimit(_ id: String) -> Int { id == favoritesID ? maximumFavorites : maximumKeys }
+    static func validText(_ text: String) -> Bool { !text.isEmpty && text.unicodeScalars.prefix(maximumTextScalars + 1).count <= maximumTextScalars }
+    static func validName(_ name: String) -> String? {
+        let result = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !result.isEmpty, result.utf8.count <= 512, result.unicodeScalars.prefix(129).count <= 128, result.count <= 32,
+              !result.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
+        return result
+    }
+    static func validID(_ id: String) -> Bool {
+        (1...80).contains(id.utf8.count) && id.utf8.allSatisfy {
+            (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 95].contains($0)
+        }
+    }
+    static func uniqueExact(_ strings: [String]) -> [String] {
+        var seen = Set<[UInt16]>()
+        return strings.filter { seen.insert(Array($0.utf16)).inserted }
+    }
+    /// The swipe choices of a key: off (nil), or 1–16 unique valid texts.
+    static func validSwipe(_ swipe: [String]?) -> Bool {
+        swipe.map { !$0.isEmpty && $0.count <= maximumVariants && $0.allSatisfy(validText) && uniqueExact($0).count == $0.count } ?? true
+    }
+    static func validKey(_ key: SymbolBoardKey) -> Bool {
+        validID(key.id) && validText(key.text) && key.variants.count <= maximumVariants
+            && key.variants.allSatisfy(validText)
+            && uniqueExact([key.text] + key.variants).count == key.variants.count + 1
+            && validSwipe(key.up) && validSwipe(key.down)
+    }
+    static func validBoard(_ board: SymbolBoard) -> Bool {
+        validID(board.id) && validName(board.name) == board.name && board.keys.count <= keyLimit(board.id)
+            && (board.layout.map({ SymbolPageLayout($0) != nil }) ?? true)
+            && Set(board.keys.map(\.id)).count == board.keys.count
+            && uniqueExact(board.keys.map(\.text)).count == board.keys.count
+            && board.keys.allSatisfy(validKey)
+    }
+    /// 2–16 pages with unique ids, both built-in pages, and the star key's
+    /// page among them.
+    static func validPages(_ boards: [SymbolBoard], starPageID: String) -> Bool {
+        (2...maximumBoards).contains(boards.count)
+            && boards.contains(where: { $0.id == stockID }) && boards.contains(where: { $0.id == favoritesID })
+            && boards.contains(where: { $0.id == starPageID })
+            && Set(boards.map(\.id)).count == boards.count
+            && boards.allSatisfy(validBoard)
+    }
+
+    static func initialBoards(favorites: [SymbolBoardKey]) -> [SymbolBoard] {
         let stock: [(String, [String])] = [
             ("!", ["¡", "‼"]), ("?", ["¿", "‽"]), ("@", []), ("#", []),
             ("$", ["€", "£", "¥", "¢", "₹", "₩"]), ("%", ["‰", "‱"]), ("&", []), ("*", ["×", "⋅"]),

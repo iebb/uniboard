@@ -23,7 +23,8 @@ enum KeyboardPadSymbolMapping: String, CaseIterable {
     }
 }
 
-/// Three typing rows, plus the digit row unless Settings turns it off.
+/// Three typing rows, plus a fourth above them when the main keyboard's
+/// arrangement has four rows, such as the standard one with its number row.
 struct KeyboardTypingLayoutPlan: Equatable {
     let keyHeight: CGFloat
     let rowSpacing: CGFloat
@@ -74,7 +75,6 @@ enum KeyboardTypingLayoutPolicy {
     }
     private static let digits = Array("1234567890").map(String.init)
     private static let auxiliarySymbols = ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="]
-    private static let secondarySymbols = ["_", "\\", "|", "~", "<", ">", "€", "£", "¥", "•"]
     private static let extraSymbols = ["§", "±", "×", "÷", "°", "©", "®", "™", "…", "·"]
     static let ansiRows: [[String]] = ["`1234567890-=", "qwertyuiop[]\\", "asdfghjkl;'", "zxcvbnm,./"]
         .map { row in row.map { String($0) } }
@@ -94,26 +94,25 @@ enum KeyboardTypingLayoutPolicy {
         return ansiPad && state.shiftsANSISymbols && shiftedANSI[key] != nil
     }
 
-    /// The number page already contains its sole digit row. Its auxiliary row
-    /// supplies symbols; the letters and symbols pages instead gain digits.
+    /// The fourth row of a four-row keyboard: the digits on every page, so
+    /// they stay in place, except the wide ANSI iPad's symbols page.
     static func auxiliaryRow(for layout: KeyboardTypingLayout, ansiPad: Bool = false) -> [String] {
-        if ansiPad && layout == .symbols { return extraSymbols }
-        return layout == .numbers ? auxiliarySymbols : digits
+        ansiPad && layout == .symbols ? extraSymbols : digits
     }
 
     static func auxiliaryRowOutput(for key: String, layout: KeyboardTypingLayout, ansiPad: Bool = false) -> String? {
         auxiliaryRow(for: layout, ansiPad: ansiPad).contains(key) ? key : nil
     }
 
-    /// The expanded number page is entered from QWERTY's persistent digit
-    /// row. Its own main rows supply symbols instead of repeating any digits.
+    /// With the digits above it, the number page's own digit row becomes a
+    /// row of symbols, so digits never repeat and stay on the 123 page.
     static func rows(for layout: KeyboardTypingLayout, hasAuxiliaryRow: Bool, widePad: Bool = false, ansiPad: Bool = false,
                      padLayout: KeyboardPadLayout = .ansiNumbers, alphabet: KeyboardAlphabet = .english) -> [[String]] {
         if layout == .letters && widePad && ansiPad && padLayout != .stock { return padLayout == .ansiNumbers ? ansiRows : compactANSIRows }
         let base = layout.rows(for: alphabet)
         if layout == .letters && widePad { return Array(base.prefix(2)) + [base[2] + [",", "."]] }
         guard layout == .numbers && hasAuxiliaryRow else { return base }
-        return [secondarySymbols] + base.dropFirst()
+        return [auxiliarySymbols] + base.dropFirst()
     }
 
     /// Membership follows the rendered core rows. Auxiliary keys remain a
@@ -151,13 +150,14 @@ enum KeyboardTypingLayoutPolicy {
     }
 
     /// Heights are the space inside the typing panel, excluding the shared
-    /// toolbar, grip and footer. The ordinary three rows remain on every page.
-    /// A full ANSI layout keeps its own digit row whatever `showsNumberRow` says.
+    /// toolbar, grip and footer. The ordinary three rows remain on every page;
+    /// `keyRows` is the arrangement's row count, and a fourth row is added
+    /// above them. A full ANSI layout keeps its own digit row whatever it is.
     static func plan(availableHeight: CGFloat, availableWidth: CGFloat,
                      compact: Bool, layout: KeyboardTypingLayout,
                      isPad: Bool = false, isLandscape: Bool = false,
                      padLayout: KeyboardPadLayout = .ansiNumbers,
-                     showsNumberRow: Bool = true) -> KeyboardTypingLayoutPlan? {
+                     keyRows: Int = MainKeyboardArrangement.maximumRows) -> KeyboardTypingLayoutPlan? {
         let spacing: CGFloat = isPad && availableWidth >= 650 ? 6 : rowSpacing
         let keySpacing: CGFloat = isPad ? 7 : 5
         guard availableHeight.isFinite, availableWidth.isFinite,
@@ -165,7 +165,7 @@ enum KeyboardTypingLayoutPolicy {
         let ansiNumbers = usesANSI(availableWidth: availableWidth, isPad: isPad,
             isLandscape: isLandscape, padLayout: padLayout) && padLayout == .ansiNumbers && layout == .letters
         let ideal = typingKeyHeight(availableWidth: availableWidth, isPad: isPad)
-        let numberRows = !ansiNumbers && showsNumberRow ? 1 : 0
+        let numberRows = ansiNumbers ? 0 : min(1, max(0, keyRows - 3))
         let rows = CGFloat((ansiNumbers ? 4 : 3) + numberRows)
         return KeyboardTypingLayoutPlan(keyHeight: min(ideal, (availableHeight - spacing * (rows - 1)) / rows),
             rowSpacing: spacing, keySpacing: keySpacing, numberRowCount: numberRows,

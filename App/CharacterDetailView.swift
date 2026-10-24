@@ -5,6 +5,7 @@ struct CharacterDetailView: View {
     @Binding var scratchpad: String
     @EnvironmentObject private var store: CharacterStore
     @EnvironmentObject private var preferences: CatalogPreferences
+    @ObservedObject private var fontRules = FontRulePreferences.shared
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
     @State private var added = false
@@ -22,7 +23,7 @@ struct CharacterDetailView: View {
                         }
                     } else {
                         Text(character.displayText)
-                            .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts)))
+                            .font(Font(UnicodeFontSupport.font(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts, anchor: character.fontRuleAnchor)))
                             .accessibilityIdentifier("characterGlyph")
                             .minimumScaleFactor(0.5).lineLimit(1)
                             .padding(24)
@@ -42,6 +43,8 @@ struct CharacterDetailView: View {
                     }
 
                     actions
+
+                    preferredFontCard
 
                     NavigationLink {
                         CharacterFontsView(text: character.text, characterName: character.name)
@@ -99,9 +102,64 @@ struct CharacterDetailView: View {
         .presentationDragIndicator(.visible)
     }
 
+    /// "Set Preferred Font" / "Change Preferred Font": this code point's own
+    /// rule, saved on tap in the picker. The caption names the font really used.
+    private var preferredFontCard: some View {
+        let ownRule = fontRules.codePointRule(character.codePoint)
+        let lines = preferredFontCaption(ownRule)
+        let headline = ownRule == nil ? "Set Preferred Font" : "Change Preferred Font"
+        return NavigationLink {
+            FontRulePickerView(selector: .codePoint(character.codePoint), selection: ownRule?.face,
+                               choose: { fontRules.setFace($0, forCodePoint: character.codePoint) },
+                               clear: ownRule == nil ? nil : { fontRules.clear(codePoint: character.codePoint) })
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(headline).font(.headline)
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                        HStack(spacing: 4) {
+                            if index == 0, lines.count > 1 {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            }
+                            Text(line).foregroundStyle(.secondary)
+                        }
+                        .font(.caption)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .background(Color.groupedSurface, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(headline)
+        .accessibilityValue(lines.joined(separator: ", "))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("characterPreferredFont")
+    }
+
+    /// One line when the font really used is described; two when this code
+    /// point's own rule was passed over (the reason, then what's used instead).
+    private func preferredFontCaption(_ ownRule: FontRule?) -> [String] {
+        let resolution = UnicodeFontSupport.resolution(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts,
+                                                       anchor: character.fontRuleAnchor)
+        let set = UnicodeFontSupport.ruleSet
+        var used: FontRule?
+        if case let .rule(match) = resolution.source, set.rules.indices.contains(match.ruleIndex) { used = set.rules[match.ruleIndex] }
+        if let ownRule, used?.id != ownRule.id,
+           let skip = resolution.skipped.first(where: { set.rules.indices.contains($0.match.ruleIndex) && set.rules[$0.match.ruleIndex].id == ownRule.id }) {
+            let reason = skip.reason == .unavailable ? FontRuleCopy.unavailable : FontRuleCopy.cannotDisplay
+            return [reason, used == nil ? FontRuleCopy.usingDefaultFonts : FontRuleCopy.usingNextMatchingFont]
+        }
+        guard let used else { return [FontRuleCopy.usingDefaultFonts] }
+        return [FontRuleCopy.using(resolution.faceName) + " · " + FontRuleCopy.source(used.selector)]
+    }
+
     private func presentationTile(_ form: String, title: String, identifier: String) -> some View {
         Text(form)
-            .font(Font(UnicodeFontSupport.font(for: form, size: 84, enabled: preferences.useUnicodeFonts)))
+            .font(Font(UnicodeFontSupport.font(for: form, size: 84, enabled: preferences.useUnicodeFonts, anchor: character.fontRuleAnchor)))
             .minimumScaleFactor(0.5).lineLimit(1)
             .accessibilityIdentifier(identifier)
             .padding(12)
@@ -172,7 +230,7 @@ struct CharacterDetailView: View {
     }
 
     private var previewFont: String? {
-        UnicodeFontSupport.sourceName(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts)
+        UnicodeFontSupport.sourceName(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts, anchor: character.fontRuleAnchor)
     }
     private var glyphMissing: Bool {
         UnicodeFontSupport.stockFontsMiss(character.displayText)
@@ -204,7 +262,7 @@ struct CharacterDetailView: View {
         var rows: [PropertyRow] = [
             .init(title: "Status", value: character.category == "Cn" ? "Unassigned" : "Assigned", identifier: "characterProperties.status", monospaced: false),
         ]
-        if let source = UnicodeFontSupport.sourceName(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts) {
+        if let source = UnicodeFontSupport.sourceName(for: character.displayText, size: 104, enabled: preferences.useUnicodeFonts, anchor: character.fontRuleAnchor) {
             rows.append(.init(title: "Preview font", value: source, identifier: "characterProperties.fontSource", monospaced: false))
         }
         rows += [
@@ -283,7 +341,7 @@ struct ScratchpadView: View {
                     .font(.footnote).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }
-            .padding(16).background(Color.groupedBackground)
+            .padding(16).background { Color.groupedBackground.ignoresSafeArea() } // also behind the keyboard's corners
             .navigationTitle("Scratchpad").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }

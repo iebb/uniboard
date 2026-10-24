@@ -2,168 +2,258 @@
 
 ## Existing App Intents inventory
 
-**0 App Intents actions found:** no declared Shortcuts, App Shortcuts, Spotlight, Siri, widget/control Intent entry points, or Apple Intelligence schemas were found in the inspected app and keyboard targets.
+**Uniboard declares 0 App Intents actions.** No Shortcuts, App Shortcuts, Spotlight, Siri, widget or control entry points are declared, and nothing adopts an Apple Intelligence schema.
 
 | Business action | Intent / shortcut / entity / query evidence | Wiring today | Evidence limits |
 | --- | --- | --- | --- |
-| None declared | Searched `App/`, `Shared/`, `Keyboard/`, `Tests/`, `UITests/`, `Uniboard.xcodeproj/` and `project.yml` for `AppIntent`, `AppShortcut`, `AppShortcutsProvider`, `AppEntity`, `EntityQuery`, assistant macros, legacy `INIntent`/`import Intents` and intent-definition references; no matches | Ordinary app UI and keyboard extension only | Static source/configuration inventory, not installed-system discovery. No widget or control target in the project. |
+| None declared | I searched all 103 Swift files in `App/`, `Shared/` and `Keyboard/`, plus `Tests/`, `UITests/`, `Uniboard.xcodeproj/`, `project.yml` and `Package.swift`. Patterns: `AppIntent`, `AppShortcut`, `AppShortcutsProvider`, `AppEntity`, `EntityQuery`, `AppEnum`, `IntentParameter`, `@AssistantIntent`/`@AssistantEntity`, `@AppIntent(`/`@AppEntity(`, `INIntent`, `import Intents`, `intentdefinition`, `WidgetKit`, `ControlWidget`. No matches. `App/Info.plist`, `Keyboard/Info.plist` and `project.yml` have no `NSUserActivityTypes` or document types. The app also has no `CoreSpotlight` or `NSUserActivity` code. | Ordinary app UI and the keyboard extension only. The only external route is `uniboard://settings`: `Shared/CompanionAppRoute.swift`, `isSettings(_:)`, handled by `ContentView.onOpenURL`. In DEBUG, `onOpenURL` also accepts test fixture URLs. | This is a static source inventory, not a check of what the installed system shows. The project has no widget or control target. |
 
 ## Project and scope
 
-- **Analysis:** 2026-10-23, updated after font-feature implementation (read-only snapshot initially around 06:18 UTC; identity/cache follow-up around 06:27 UTC); imported app. This revises the initial import assessment, not an implementation authorization.
-- **Baseline:** `master`, commit `be61e58a851d0336aae813f5018a00ca915066ad`. Working tree is now **dirty**. Modified files include character detail/download/layout UI, keyboard controller/policy, font support/store, package/project configuration and tests. New files include the seven app font exploration/catalog/preview sources, `Shared/FontLibraryContracts.swift`, `Shared/FontLibraryStorage.swift`, bundled Google metadata, generation scripts, font tests, `design/`, and `docs/` briefs/API notes; this report is untracked. This is a live working-tree snapshot, not a committed release. `docs/brief.md` now exists; its “missing” font-feature descriptions are historical and superseded by the actual bodies inspected below. Font engine review is ongoing; stable API shape is not proof of finished rendering/identity behavior.
-- Read actual action bodies, callers, models, stores, entitlement files, `project.yml`, committed project settings/source membership, `Package.swift`, and `.airbuild/airbuild.yaml`. Main evidence is enumerated below. No app launch, build, test, signing change, permission change, or business operation was performed.
-- **Environment distinction:** the parent reports a builder observation from another project: Xcode **27.0 (27A266a)** and an **iOS 27 / iPhone 18 Pro** simulator. This is **not a proven Uniboard build or selected SDK declaration inspection**. This shell has no `xcodebuild` on PATH; `/Applications` and `/Library/Developer` were unavailable. A bounded search of `/opt`, `/usr/local`, and `/run/airbuild` found no readable AppIntents Swift interfaces or iPhoneOS SDK. Remote builder SDK contents were not inspected.
-- Workflow references read: `find-intent`, ordinary `apple-integrations` reference, and runtime system skill `airbuild-ios-development/SKILL.md` (the latter is not installed at `/run/airbuild/skills/ios-development`). No remote build or simulator interaction was requested.
-- In the **prior assessment**, Apple documentation **was reachable**. One guessed parameter-initializer URL returned HTTP 404; this is not a network outage. Protocol-level evidence below is verified, but the complete overload/dependency closure for the proposed integrations is not.
+- **Project:** Uniboard, an imported iOS app: a Unicode keyboard extension plus its companion app. Release 1.3.0 is being prepared (`MARKETING_VERSION: "1.3"`).
+- **Analysis date:** 2026-10-24, read-only. The code was a live, shared working tree that other agents were editing during the analysis.
+- **Baseline:** branch `master`, HEAD `26d9cd060a81aac93b02833df6f03f47d098788c` (committed 2026-10-23 10:56 UTC). The previous report used `be61e58`; commit `26d9cd0` added that report.
+- **Working tree:** dirty. 47 tracked files are modified (+5354/−919), and about 33 source files are new and untracked. New app files include `ConfigurationFile`, `ConfigurationImportModel`, `ConfigurationView`, `ReviewImportView`, `FontRule*Views`, `FontRulePreferences`, `FontRangeCoverage` and `StyleGridView`. New shared files include `AutoCapitalizationSetting`, `Configuration{Codec,Diff,Model}`, `FontPickerCatalog`, `FontRule{Editing,FaceLoader,Store}`, `FontRules`, `ImageColorSettings`, `KeyboardPreviewCursor*`, `KeyboardQueryHold*`, `SharedConfigurationLocation`, `StyleGrid`, `TOMLDocument`, `TextInspection` and `UnicodeSearchIndex*`. `Keyboard/KeyboardSearchTimingProbe.swift` is also new.
+- **Reason for this update:** the 1.3.0 feature set changed substantially since the previous report (2026-10-23 06:27, `be61e58`). New features: font rules, TOML configuration import/export, Inspect Text in the keyboard, Copy Image scale and colors, a font picker over all accessible fonts, a style grid with per-file downloads, a movable preview cursor, an auto-capitalization setting, and search in landscape. `docs/store-copy-1.3.0.md` says the cursor and the expanded font picker were unfinished when it was drafted. I treat those two as in-progress code.
+- **Read for this update:**
+  - Briefs: `docs/font-rules-brief.md` and `docs/inspection-capitalization-brief.md`.
+  - Settings: `project.yml` and `.pbxproj` source phases.
+  - Code: the function bodies and callers listed under each action below. Prior action chains were rechecked for continued existence.
+  - Not done: no app launch, build, test, simulator run, git state change or business operation.
+- **Tools available:** this shell has no `xcodebuild`, `xcrun` or `swift`, and there is no `/Applications` directory. Apple's online documentation was reachable (DocC JSON, HTTP 200).
 
 | Target / configuration | Relevant sources | Deployment target | SDK / toolchain evidence | Unknowns |
 | --- | --- | --- | --- | --- |
-| `Uniboard`, Debug/Release | `App/` + `Shared/`; bundled catalogs/fonts | iOS 17.0, inherited project settings; Swift language mode 5.0 | `SDKROOT=iphoneos`; generation input requests Xcode 27.0; committed project used by `.airbuild/airbuild.yaml` | Actual selected SDK/compiler and build outcome not established |
-| `UniboardKeyboard`, Debug/Release | `Keyboard/` + `Shared/`; embedded app extension | iOS 17.0 inherited | Same base settings; `APPLICATION_EXTENSION_API_ONLY=YES` | Actual signing/App Group access and host lifecycle untested |
-| `UniboardTests`, Debug/Release | `Tests/`, app dependency | iOS 17.0 inherited | Same project SDK base | No tests run |
-| `UniboardUITests`, Debug/Release | `UITests/`, app dependency | iOS 17.0 inherited | Same project SDK base | No tests run |
-| `UniboardCore` Swift package / tests | Explicit subset of `Shared/` and `Tests/` | Package declares macOS 13, not an iOS app deployment override | Swift tools manifest 5.9 | Not a separately shipping Intent target |
+| `Uniboard` app, Debug/Release (source phase `E17E8EA272032DA22C8E9942`) | `App/` + all of `Shared/` (it contains `TextInspection.swift`, `KeyboardPreviewImageExport.swift`, `ConfigurationCodec.swift`, `FontRules.swift`, `StyleGrid.swift`) | iOS 17.0 (project setting; no target override found) | `SDKROOT=iphoneos`, `SWIFT_VERSION=5.0`. `project.yml` asks for `xcodeVersion: "27.0"`. | Selected SDK, compiler and build result were not inspected. |
+| `UniboardKeyboard` extension (phase `403420D087165E9E66B28DEE`) | `Keyboard/` + `Shared/`, minus the TOML, configuration-codec and font-rule-editing files | iOS 17.0 | `APPLICATION_EXTENSION_API_ONLY=YES` | Proposed intents belong in the app, not the extension. |
+| `UniboardTests`, `UniboardUITests` | `Tests/` (includes `TextInspectionTests`, `ConfigurationCodecTests`), `UITests/` | iOS 17.0 | Same base settings | No tests were run. |
+| `UniboardCore` Swift package | Explicit subset of `Shared/`/`Tests/` | Declares macOS 13 | tools 5.9 | Does not ship an Intent. |
 
-
-**Current membership rechecked:** the working `project.pbxproj` maps `Uniboard` to source phase `E17E8EA272032DA22C8E9942`, containing all seven new app font files (including `VerifiedFontPreview`) plus both shared library files. `UniboardKeyboard` source phase `403420D087165E9E66B28DEE` contains the shared contracts/storage, not the app catalog/coordinator/UI/engine. GoogleFonts is a folder resource in the app resource phase. Five new font unit-test sources are in the unit-test phase; the final membership recheck also finds `UITests/FontExplorationUITests.swift` in the UI-test source phase (the project changed during this live inspection). `Package.swift` includes contracts and excludes storage. Both project configuration deployment entries remain **17.0**, with no target deployment override found; generation input remains iOS 17.0. Source membership is not compilation evidence. Remote configuration overrides/selected SDK remain uninspected.
-
-The two shipping targets declare `group.ad.neko.uniboard` in their entitlement files. Proposed integrations belong in the containing app; sharing source with the keyboard does not make keyboard host insertion callable from a system action. Keep deployment targets and existing behavior unchanged.
+Both shipping targets declare the App Group `group.ad.neko.uniboard`. Keep the iOS 17 target and the existing behavior unchanged.
 
 ## Decision summary
 
-**Ready first batch: zero.** Seven worthwhile implemented capabilities are pending, not implementation-ready integrations. The verified base protocol floor is below the app's iOS 17 target, but that does not establish the parameter/result overloads, entity contracts, exposure APIs, or routing/lifecycle needed by these paths. Do not infer those requirements from a guide example or a newer builder runtime.
+**Ready first batch: three background, value-returning actions.** None needs app routing, a foreground launch or entities. Each one's essential APIs are verified (iOS 16.0 floor, below the iOS 17 target) in Apple documentation and in an iOS 17.0 SDK interface (evidence A1–A14).
 
-| Order | Pending action | Ordinary verdict | Why / rough cost |
-| --- | --- | --- | --- |
-| 1 | Search Unicode in Uniboard | **Needs verification** | Strong core task, read-only, useful system-to-app handoff. **M:** foreground routing, cold-launch query delivery, parameter evidence |
-| 4 | Get exact Unicode text | **Needs verification** | Useful Shortcuts composition without clipboard or host-document side effects. **S–M:** exact-ID validation, String input/output API evidence, edition policy |
-| 6 | Add Unicode text to Favorites | **Needs verification** | Saves explicit symbols for later keyboard use. **M:** preserve exact text, surface persistence/sync outcomes and define protected-data behavior |
+| Order | Action | Verdict | Why first / rough cost | Evidence |
+| --- | --- | --- | --- | --- |
+| 1 | **8. Inspect Unicode text**: get a normalized form, code points, or UTF-8/UTF-16 hex | **Recommended** | Distinctive 1.3 capability. The logic is pure and already in the app target. Text goes in, text comes out, and nothing is stored. **S.** | A1–A3, A5–A12, A14 |
+| 2 | **9. Export Uniboard configuration**: get the current settings as a `.toml` file | **Recommended (product decision on privacy wording)** | Enables automated backups and transfers. Reuses the existing capture and encode functions without a share sheet. **S–M.** | A1–A3, A8–A10, A13, A14 |
+| 3 | **2. Get exact Unicode text**: code point or emoji ID → text | **Recommended (the API part, previously pending, is now verified)** | Complements #1. Uses the edition-aware catalog. **S–M.** Needs a new guard against unassigned code points (proposal). | A1–A3, A5–A10, A14 |
 
-Additional pending font actions (action numbers below preserve prior identities):
-
-| Order | Pending action | Ordinary verdict | Why / rough cost |
-| --- | --- | --- | --- |
-| 2 | Compare fonts for Unicode text (action 4) | **Needs verification** | Direct access to a core new task; M–L, route and scan/identity review |
-| 3 | Search Google Fonts (action 5) | **Needs verification** | Offline metadata discovery; M, query routing and API closure |
-| 5 | Open a font detail (action 6) | **Needs verification** | Valuable precise specimen/license destination; M, persistent identity and routing |
-| 7 | Download a Google font style (action 7) | **Needs verification** | Real service exists; L, network/cancellation/storage/lifecycle acceptance |
-
-Ranking is qualitative; no usage/adoption data was available. Product should choose **Unicode search first**, with font comparison/catalog search the next verification priorities, then exact-text output if automation is desired; keep Favorites behind persistence/safety acceptance. App Shortcut tiles/phrases, Spotlight indexing, and schema enhancements are separate pending scopes, not implied by these proposals.
+- **Pending, needs verification (not counted in the batch):**
+  - 10. Make image of Unicode text (Copy Image).
+  - 1. Search Unicode in Uniboard.
+  - 4. Compare fonts for Unicode text.
+  - 5. Search Google Fonts.
+  - 6. Open a font detail.
+  - 11. Set a preferred font rule.
+  - 3. Add Unicode text to Favorites.
+  - 7. Download a Google font style.
+- **What blocks them:** the foreground handoff needs a deprecated-API strategy plus new routing (G3). Font and image actions need entity or rendering-lifecycle work (G5). Favorites needs a decision on what a persistence and sync result reports.
+- **Not recommended:** 12. Import/replace configuration and Undo Last Import, plus everything in the exclusion table.
+- **Shared limits for the batch:** App Shortcut tiles, Siri phrases, Spotlight indexing and schema enhancements are outside the ready scope (G2, G4). The ready scope means user-composed Shortcuts actions only. Ranking is qualitative; no usage data was available.
 
 ## Assessed actions
 
-### 1. Search Unicode in Uniboard — find a symbol without navigating tabs
+Numbering keeps the identities 1–7 from the previous report. Actions 8–12 are new.
 
-- **Business state: implemented.** `App/ContentView.swift` → `ExploreView` search field → `CatalogSearch.update(_:catalog:limit:)` cancels/debounces work and calls `CatalogWorker.run` → `Shared/UnicodeCatalog.swift`, `UnicodeCatalog.search(_:limit:order:)`. The parser handles names, explicit code points and literals, bounds UTF-8 input to 4096 bytes, and supports cancellation. `App/CatalogPreferences.swift`, `catalog`, selects the persisted edition and ConScript policy. This is not an Intent today.
-- **Direction (proposal):** required query String; no entity required for the minimal foreground action. Open Explore with the supplied query and show matching results, not an arbitrary first match. Multiple matches stay a result list; no match stays an empty-result state. Repeating replaces the query rather than appending or mutating favorites. Keep the existing default limit of 240 and surface truncation. Reject blank/oversized input rather than silently interpreting it as a full browse.
-- **Missing link:** `ContentView.selectedTab` and `ExploreView.query` are private view state. `CompanionAppRoute.isSettings(_:)` accepts only the strict Settings URL, and `ContentView.onOpenURL` only handles that route. A foreground search handoff and cold-launch delivery are **new integration work**, not existing deep-link support. Pure catalog work is independent of a view; navigation is not.
-- **Access/safety:** public bundled catalog, no login/owner scope found in this chain. Refresh persisted edition preferences before both lookup and execution. No destructive confirmation needed; do not expose query history or scratchpad through suggestions. Device-unlock/foreground behavior must be verified separately from the absence of app login.
-- **Ordinary path — needs verification:** proposed `AppIntent` with String parameter and foreground execution, evidence A1–A8, gaps G1/G3. The verified older foreground flag supports the low deployment target but is deprecated on newer OS versions; inspect the replacement and compatibility strategy before choosing implementation. No newer-target bump is justified.
-- **Schema enhancement — needs verification, optional:** generic in-app search is a possible semantic direction from the reference, but no exact Apple schema member, required parameter/result contract, facet group or dependent entities were verified. No schema/version promise. Ordinary search must remain the fallback if enhancement is unavailable.
-- **System entry points:** Shortcuts action is the initial desired surface. Automatic App Shortcut/Siri phrase exposure requires separately verified provider, initializer and phrase-token work (G2). Spotlight action discovery and content indexing are distinct and both untested; do not index the entire Unicode catalog as a default. Apple Intelligence discovery, hardware, language/region and feature conditions remain unverified (G4).
-- **Priority/cost:** #1, M, low data risk; assumes reuse of existing search UI rather than a new result UI. Next verify the String parameter initializer and foreground APIs, then design/test query delivery for terminated/running app, edition changes, cancellation, no matches and oversized queries. No compilation, visibility or execution checked.
+### 8. Inspect Unicode text — new first-batch item #1
 
-### 2. Get exact Unicode text — supply a character or complete emoji to another shortcut step
+- **Business state: logic implemented; new input source proposed.** `Shared/TextInspection.swift` holds the logic:
+  - `TextNormalizationForm.normalize(_:)` maps NFC/NFD/NFKC/NFKD to Foundation's `precomposed…`/`decomposed…Mapping`.
+  - `TextEncodingResult.init(form:text:)` gives uppercase hex, space-separated, with no BOM or prefix.
+  - `TextInspection.codePointSequence` gives `U+XXXX` labels.
+  - `TextInspection.analyze(before:after:catalogVersion:lookup:systemAssigns:)` sets a normalization status to `.unavailable` (`canCopy == false`) when the catalog assigns a scalar that this OS's Unicode data does not.
+  - `copyValue(for:)` returns exactly what the panel copies.
+  - Today the only UI entry is the keyboard: `Keyboard/KeyboardViewController.swift`, `openTextInspection(excerpt:)` → `TextInspectionState.inspect(...)` (refuses secure fields; `maximumScalars = 1024`) → `copyTextInspection(_:)`, which writes the pasteboard and needs Full Access. The app has no screen for this. The brief defers in-app inspection of pasted text ("can follow later"). The file is a member of the app's source phase, and `Tests/TextInspectionTests.swift` exists.
+- **Direction (proposal):** an action named "Inspect Unicode Text".
+  - Parameters: required `text: String`, and required `representation`, a proposed `AppEnum` with NFC, NFD, NFKC, NFKD, Code Points, UTF-8 Hex and UTF-16 Hex.
+  - Result: a `String` value equal to `TextInspection.analyze(before: text, after: "", …).copyValue(for:)`.
+  - The text is used exactly as given: no trimming, because whitespace and invisible characters are significant.
+  - Proposed guards:
+    - Reject empty input.
+    - Reject input over 1024 scalars, reusing the existing bound unless product chooses a different bound for intents.
+    - For a normalized form whose status is `.unavailable`, throw a clear error instead of returning a possibly wrong result. This mirrors `canCopy`. Code points and hex are always available.
+  - Calls are deterministic for the same OS Unicode data. There is no clipboard, host text, persistence or logging.
+- **Access and safety:** no login, account or permission is involved, and no Full Access, because the app process is not the keyboard. The user's text may be sensitive. Keep the existing promise that inspected text is never stored, and add no donation or logging of parameters (proposal). No confirmation is needed; the action is read-only.
+- **Ordinary path: recommended.**
+  - Background execution: the default, with no `openAppWhenRun` or `supportedModes`.
+  - Parameters: `@Parameter` String (A6) and an AppEnum parameter (A11, A12).
+  - Result: `ReturnsValue<String>` via `.result(value:)` (A9, A10).
+  - `lookup` needs `UnicodeCatalog.shared` loaded in the intent process. Cold-launch cost has not been measured (G5).
+- **Schema enhancement:** none determined. No Unicode or text-transform domain appears in the reference's domain list (a guide lead, not proof), and the schema database was not readable (G4). Do not force this into `wordProcessor` or `notes`.
+- **Entry points:**
+  - Shortcuts action: yes (proposed).
+  - App Shortcut or Siri phrase: not in scope (G2). Spoken output also fits poorly for hex or invisible characters.
+  - Spotlight and Apple Intelligence: not evaluated, and not implied.
+- **Priority and cost:** #1. **S:** one intent, one enum, and a thin adapter over the existing function. Next: compile against the selected Xcode 27 SDK. Then check metadata extraction and run in Shortcuts with decomposed accents, ZWJ emoji, a supplementary scalar, an empty string, 1025 scalars, and a scalar newer than the OS.
 
-- **Business state: implemented lookup/text extraction; new system result adapter proposed.** `ContentView.select(_:)` presents `App/CharacterDetailView.swift`; its Copy Character action reads `character.text`, writes the clipboard and records use. `copyFormButton` preserves presentation selectors. `Shared/UnicodeCatalog.swift`, `character(at:)`, validates Unicode scalars and returns properties (including an unassigned placeholder when appropriate). `Shared/EmojiCatalog.swift`, `UnicodeEmojiEntry.text`, reconstructs the complete scalar sequence, preserving VS/ZWJ. These model operations can be used without an active view.
-- **Direction (proposal):** required exact identifier String: a single explicit `U+XXXX` scalar or a canonical hyphen-separated emoji ID. Return original text as a String, **not** the preview glyph/dotted-circle text. Default to current persisted edition; no optional parameters initially. Resolve scalar IDs against that edition and sequence IDs against its emoji entries. No name search in this action: reject ambiguous/free-text input, invalid scalars, unknown sequence IDs, and unassigned `Cn` results. This guard is proposed; `character(at:)` alone does not reject unassigned code points. Preserve identity across relaunch by code point/scalar sequence, never display name or row position. Revalidate after catalog updates.
-- **Repeat behavior:** identical valid inputs return identical text under the same edition/catalog. Unlike today's Copy UI, the proposed result adapter does **not** write the clipboard, append scratchpad, insert host text or record recents. Returning a value is new integration behavior over existing model data.
-- **Access/safety:** public catalog; no account/owner permission needed in lookup. Background direction is plausible from the view-independent catalog, not proven system execution. Preserve invisible/control and combining characters exactly, but expose a clear name/code-point description before the user chains output into other actions. Do not silently substitute visible glyphs. Check locked-device resource availability; do not treat device authentication as an app login.
-- **Ordinary path — needs verification:** A1–A7/A9 establish only base types; G1 includes the exact String parameter initializer, `result(value:)` overload, String compatibility and metadata dependencies. No entity/query is necessary for this minimal exact-ID scope. Friendly entity selection is a later improvement, not a second integration of the same task.
-- **Schema enhancement:** not determined; no verified Unicode lookup schema fit. Do not repurpose a notes/document schema merely because the output is text. Optional enhancement remains G4 and must not replace the ordinary path.
-- **System entry points:** focus on user-composed Shortcuts; no automatic tile, Siri phrase, Spotlight indexing or Apple Intelligence behavior promised. Those are independently pending G2/G4. Spoken output is a poor primary representation for invisible characters.
-- **Priority/cost:** rank #4, S–M assuming direct exact-ID parsing and String output, without entity UI. Next verify the overload closure and cold resource loading; test invalid surrogate/code points, draft-versus-release membership, missing sequences, variation selectors, ZWJ and repeated calls. No build or execution checked.
+### 9. Export Uniboard configuration — new first-batch item #2
 
-### 3. Add Unicode text to Favorites — keep a symbol for later keyboard use
+- **Business state: implemented.** The chain is `App/ConfigurationView.swift`, `export()` → `App/ConfigurationFile.swift`, `ConfigurationService.current()` (`@MainActor`) → `ConfigurationCodec.encode(_:inLibrary:)` → `ConfigurationService.writeExport` → `ConfigurationShareSheet.present`.
+  - `current()` first calls `SymbolBoardStore.shared.refreshFavorites()`, which may merge and persist favorites. Export already has this side effect today.
+  - `encode` produces deterministic UTF-8 TOML. It returns nil (never truncated) above `TOMLLimits.maximumBytes` (4,000,000).
+  - Filename: `ConfigurationCodec.exportFilename(date:)` gives `Uniboard-Configuration-YYYY-MM-DD.toml`.
+  - Type: `UTType.uniboardConfiguration` (`App/ConfigurationFile.swift`).
+- **Direction (proposal):** an action named "Export Uniboard Configuration". It takes no parameters and returns `IntentFile(data:filename:type: .uniboardConfiguration)` with the encoded bytes, with no temporary folder and no share sheet. An encode failure throws an error. Repeated calls return the current configuration each time. Other than the existing favorites sync, nothing is mutated.
+- **Access and safety:** the file includes favorites and custom key text. `ConfigurationCopy.privacy` already warns: "may be personal". The intent description should carry the same warning (proposal). Product must accept that a personal automation could run the export unattended; data leaves the device only if the shortcut sends it somewhere. Existing limitation: Copy Image colors chosen in the keyboard without Full Access are not included (`ConfigurationCopy.keyboardColors`). No login is involved. App Group access while the device is locked has not been verified (G5).
+- **Ordinary path: recommended.** Background mode, with `perform` on the main actor because `ConfigurationService` is `@MainActor`. Result: `ReturnsValue<IntentFile>` (A9, A10, A13).
+- **Schema:** the reference lists a `files` domain, but its semantics (an app's file library) were not verified to fit a settings export (G4). Not determined.
+- **Entry points:** Shortcuts action only. No Spotlight indexing of configuration content.
+- **Priority and cost:** #2, **S–M**. Next: compile, then verify that the exported file round-trips through the existing Import review. Test before migration (no shared location yet), with favorites sync unavailable, and with the device locked.
 
-- **Business state: implemented.** `CharacterDetailView.actions` → `CharacterStore.toggleFavorite(_:)` → `toggleBoardFavorite(_:)` refreshes shared favorites then adds or removes the exact text. `Shared/SymbolBoardStore.swift`, `add(text:to:)`, already supports **idempotent addition**: returns an existing key ID for exact UTF-16 equality, otherwise checks editability/capacity/text bounds, creates a key and commits it. `App/SavedView.swift` reads that collection; `UniboardApp` refreshes it on foreground. There is no existing Intent.
-- **Direction (proposal):** required exact catalog identifier using **the same identity/ambiguity policy as action 2**; resolve under current preferences and reject invalid/unassigned/stale results. Add the exact resolved text only to `SymbolBoardStore.favoritesID`; no destination ambiguity and no arbitrary user text in the first scope. Call the add operation, **not the UI toggle**: repeated execution must leave the item saved, not remove it. Persisted key UUIDs are storage details; scalar/sequence identity is the stable integration key.
-- **Data/lifecycle:** `SymbolBoardStore.shared` is main-actor, independent of views; it persists a versioned UserDefaults payload with readback (not durable-disk acknowledgment). `commit` adopts local state then refreshes favorites. `FavoriteSync.synchronize` uses an App Group file, bounded validation, nonblocking lock, three-way merge and atomic replacement. An add can succeed locally while shared sync is unavailable. A truthful result/status adapter and retry behavior are proposed requirements.
-- **Access/safety:** no login/account scope; this is device-local user data. `App/Uniboard.entitlements` and `Keyboard/UniboardKeyboard.entitlements` share the group. `KeyboardViewController` passes `hasFullAccess` to `refreshFavorites(canWrite:)`; app writes and keyboard permission are not interchangeable. Do not require keyboard Full Access to run the app action or claim immediate synchronization into an already-open keyboard. Honor `canEdit`, capacity, malformed data and `syncStatus`; preserve existing bytes on failure. Prefer unlocked execution until protected-data behavior is established. Explicit addition is reversible in Saved; do not expose remove/clear through the same action. No confirmation requirement is inferred from a schema.
-- **Ordinary path — needs verification:** A1–A8 are partial API evidence; G1/G3 block readiness. Background execution is a proposed direction only; it requires store initialization, protected-data and persistence outcome checks. No entity query is needed for exact input; any future suggestions should use bounded catalog choices, not leak private favorite text to system surfaces by default.
-- **Schema enhancement:** not determined; no exact domain/member verified for Unicode favorites. Keep ordinary behavior independent of any future schema; G4.
-- **System entry points:** Shortcuts first; Siri phrase/provider and Spotlight action tiles separately pending G2. Private collection indexing and Apple Intelligence exposure are out of first scope, not automatic effects of declaring an action.
-- **Priority/cost:** rank #6, M, moderate persistence/privacy risk. Next verify action API dependencies and explicitly test already-saved text, canonical-equivalent-but-different sequences, capacity, unavailable group, malformed data, cold launch, locked device and pending sync with Full Access off/on. No compilation or runtime validation performed.
+### 2. Get exact Unicode text — supply a character or full emoji to another step (first-batch item #3)
 
-### 4. Compare fonts for Unicode text — inspect truthful local previews
+- **Business state: lookup implemented; result adapter proposed.** Unchanged chain:
+  - Copy actions: `App/CharacterDetailView.swift`, `actions`/`copyFormButton` (pasteboard plus `recordUse`).
+  - Lookup: `Shared/UnicodeCatalog.swift`, `character(at:)`.
+  - Emoji: `Shared/EmojiCatalog.swift`, `UnicodeEmojiEntry.text` (keeps variation selectors and ZWJ).
+  - The catalog does not depend on any view. The edition comes from the persisted preference (`App/CatalogPreferences.swift`).
+- **Direction (proposal), unchanged:**
+  - Input: a required exact identifier, either `U+XXXX` or a canonical hyphen-separated emoji sequence ID, under the current edition.
+  - Result: the original text as a `String`, not the preview/dotted-circle text.
+  - Reject free-text names, invalid or surrogate scalars, unknown sequences and unassigned (`Cn`) code points. This is a new guard: `character(at:)` returns an unassigned placeholder.
+  - No clipboard, recents or scratchpad. The same input and edition give the same output.
+- **Access and safety:** public catalog data. The result may be an invisible or combining character, so a name and code-point description should come with it (proposal).
+- **Ordinary path: recommended (changed from needs verification).** The previous gaps (G1: the String parameter initializer and `result(value:)` for String) are now closed by A6, A7 and A10. Background execution.
+- **Schema:** none determined. **Entry points:** Shortcuts only.
+- **Priority and cost:** #3, **S–M**. Product decision: use the current edition only, or add an optional edition parameter later. Next: compile, then test draft versus release membership, variation selectors/ZWJ, invalid and unassigned input, and a cold launch.
 
-- **Business state: implemented; ordinary integration needs verification.** `App/CharacterDetailView.swift` links to `CharacterFontsView(text:characterName:)` → `FontExplorationViewModel.scan` → `App/FontComparisonEngine.swift`, `FontComparing.scan` / `inventorySnapshot`. `FontComparisonEngine.inventorySnapshot` awaits `FontInventoryProviding.snapshot() async throws`; `PublicFontInventory.snapshot` combines persisted local faces, bundled fonts, downloaded packs and public process-visible descriptors. File hashing is chunked, cancellable and yields cooperatively. The engine caches inventory by local-library generation plus font-pack revision, checks generation/cancellation and rechecks the fingerprint before caching; a nil fingerprint opts out. Its bounded proof cache keys exact original/preview bytes, face ID, inventory generation, presentation and scaffold. New scans cancel prior scan tasks; `invalidate` cancels and clears both caches. These are in-process mechanisms, not persistent background jobs. `Shared/FontLibraryContracts.swift` defines records/locators/snapshots; `CustomFontStore.readLibraryState` supplies persistent library data. No Intent exists.
-- **Proposed input/result:** exact catalog identifier with action 2's scalar/sequence resolution and rejection policy; foreground comparison screen, original presentation by default. Optional local font-name filter only after routing is designed. Repeat replaces the inspection and rescans, never applies a font preference, copies scaffold text or inserts into a host. `FontInspection` retains original text, limits presentation switching, and handles dotted-circle scaffolding and invisible text. UI filtering searches verified family/style/PostScript names, **not** the Google catalog.
-- **Truthfulness:** scan updates distinguish partial/complete, verified and unknown counts. `FontLineVerifier` checks face/variation identity and rejects fallback; complex shaping and collection-face uncertainty can remain unknown. Unknown is not unsupported and an incomplete scan is not zero coverage. Inventory/cache are process-local and require invalidation after font changes; no universal-device font claim. Review remains active; no correctness/test pass inferred.
-- **Access/lifecycle:** public catalog plus private local font inventory; no login found. Never index imported font names or transmit inspected text by default. App Group unavailable/corrupt storage fails scans rather than proving an empty library. Engine actor is view-independent, but rendering/process availability and protected-data access are not proven in background. Foreground is the proposed direction; no destructive confirmation needed.
-- **Integration/cost:** rank #2, M–L. No existing external route for this screen; add cold/warm-launch delivery and bounded input validation. A1–A8 are only partial ordinary evidence (G1/G3); any enum/entity support is additionally unverified. Next verify parameter/result/foreground APIs and review exact sequence, scan cancellation, missing font, and identity behavior before integration. No builds or business actions run.
+### 10. Make image of Unicode text (Copy Image) — needs verification
 
-### 5. Search Google Fonts — find an available family offline
+- **Business state: implemented in the keyboard only.**
+  - Entry: `Keyboard/KeyboardViewController.swift`, `copyPreviewImage()` writes a frozen PNG via `KeyboardPreviewClipboard.write` (needs Full Access).
+  - Renderer: `Shared/KeyboardPreviewImageExport.swift`, `KeyboardPreviewImageRenderer.render(_:availableWidth:visibleHeight:colors:scale:font:)` (`@MainActor`). It draws a `KeyboardPreviewExcerpt` and clips it to the row window. It fails with `.empty`, `.tooLarge` or `.encodingFailed`.
+  - Limits: 4800×1200 px and 2.4 MP (`KeyboardImageCanvas` in `Shared/ImageColorSettings.swift`).
+  - Options: scale `KeyboardImageScale` (x1/x2/x3) and colors `KeyboardImageColorPreset` (black on white, black on transparent, white on black, white on transparent, custom).
+  - Fonts: through `UnicodeFontSupport.font(for:size:enabled:)`, which applies font rules via the static `ruleSet`.
+  - The file is in the app's source phase.
+- **Why pending:** the renderer is designed for a bounded keyboard-row excerpt. An app action needs a new layout policy: compute the width from the text, decide on single versus multiple lines, and report over-limit input truthfully. It also needs to confirm that font rules (`UnicodeFontSupport.ruleSet`) and downloaded fonts are loaded in a cold background launch (G5).
+- **Proposed shape:** text plus preset and scale enums → `IntentFile` PNG (A13). Reject empty input and input that is too large. **M.** This has high sharing value (it shows rare glyphs to recipients who lack the fonts), so it is the first pending item to verify.
 
-- **Business state: implemented; ordinary integration needs verification.** `App/FontPackDownloadsView.swift` and `CharacterFontsView` → `App/GoogleFontsView.swift` → `GoogleFontsViewModel.load` → `App/GoogleFontCatalog.swift`, `load` / `search`. Bundled `App/Resources/GoogleFonts/catalog.json` is validated against the pinned repository commit, IDs, paths and license hashes. Search trims whitespace, matches family names case/diacritic-insensitively and sorts deterministically. Empty query currently browses all families. It neither downloads binaries nor establishes character coverage.
-- **Proposal:** required query String; open Google Fonts with matching family list. Blank query may deliberately mean browse-all (unlike action 1); multiple matches remain a list, absent matches stay empty. Repeating replaces the query, with no storage mutation. Propose an input-size bound for external input; none is claimed in `search`. Optional specimen text is omitted initially. Private view query/navigation state requires a new route and cold-launch handoff.
-- **Identity/data/access:** public offline metadata, no login or keyboard Full Access requirement. Use catalog family ID rather than name/index for subsequent detail resolution; re-resolve after snapshot changes and report missing IDs. Snapshot data persists in the app bundle; view model/coordinator state does not. Search can be called outside a view; background system execution is untested. No download confirmation needed for metadata-only search; loading the UI also reads local library status without treating failure as an empty library.
-- **Integration/cost:** rank #3, M, low data risk. Proposed foreground ordinary action needs G1/G3 (partial A1–A8). Next verify APIs and routing, offline/missing/corrupt catalog, ambiguous results and relaunch. It is not a remote Google Developer API integration or API-key workflow.
+### 1. Search Unicode in Uniboard — needs verification (unchanged)
 
-### 6. Open a font detail — inspect one face or catalog family/style and its license
+- **Chain:** `App/ContentView.swift`, `ExploreView` → `CatalogSearch.update(_:catalog:limit:)` → `CatalogWorker.run` → `UnicodeCatalog.search(_:limit:order:indexStore:)`. Search now uses the persisted `UnicodeSearchIndexStore` (App Group caches) and falls back to scanning.
+- **Missing link:** `ContentView.selectedTab` and `ExploreView.query` are still private `@State`. The only route is Settings. Delivering a query, including on a cold launch, is new work.
+- **API:** the String parameter is now verified (A6). The foreground path is not:
+  - `openAppWhenRun` is iOS 16.0 but deprecated in 26.0 (A4).
+  - `supportedModes` is iOS 26.0 (A4b).
+  - Combining both for an iOS 17 target, and the runtime behavior on iOS 26+, are unverified (G3).
+- **Cost and next step:** **M.** It remains the most valuable foreground action once G3 and routing are designed.
 
-- **Business state: implemented navigation; ordinary integration needs verification.** `CharacterFontsView` face links and `GoogleFontsView` family links → `App/FontFaceDetailView.swift` initializers. Local detail uses `VerifiedFontPreview`; catalog detail shows style, pinned size/license and download controls. Selecting a style changes only local view state; no global preference or implicit download. `FontDetailSelection.defaultStyleID` chooses Regular or first style for normal family browsing, not an explicit-ID resolution policy.
-- **Proposal:** required identity with explicit namespace (catalog family/style or local face); for smallest scope prefer catalog family ID plus optional exact style ID. Reject missing/ambiguous IDs, never silently replace a requested style with Regular. Return the foreground destination, not “font applied” or “installed.” Repeating opens the same resolved item without mutation. Private detail view state and lack of external routing remain new integration work.
-- **Identity fix now present in code:** catalog family/style/file IDs remain separate; several styles can share one file. `PublicFontInventory.localRepresentatives` preserves persisted navigation IDs, preferring Google download records over imported aliases; `snapshot` uses locator-based physical identity only as a deduplication key rather than replacing record IDs. `axisIdentifier` / `canonicalAxes` unify four-byte OpenType tags and decimal CoreText identifiers, rejecting invalid/nonfinite/conflicting coordinates; `axisKey`, physical matching and font loading use that representation. `FontDetailIdentity.matches` compares file digest, face index and canonical axes, not only a `google:` ID string. `selection(for:catalog:state:)` additionally requires matching stored asset/path and receipt digest; among matching aliases it prefers exact Google ID, then family/style names, then stable catalog-ID order. This fixes the previously reported ID-normalization/consumer mismatch at source level; native rendering and navigation verification remain pending. Persisted records survive launch; process-visible availability does not. The proposed explicit-ID action must still reject missing IDs rather than reuse the UI alias-selection fallback silently.
-- **Receipt/selection state:** local detail loads the catalog then `FontReceiptViewModel.load(face:catalog:)`, which performs one detached `readLibraryState`, resolves selection and receipt from that same state, and publishes them only for the current request token. `View.body` reads published state rather than decoding storage. `load(fileID:)` similarly resolves a requested receipt; catalog preview uses `FontDetailIdentity.matches` against verified scan results. This is per-view cached/published state, not a persistent or globally synchronized resolver. The requested name `resolveLibraryState` was not found in this snapshot; the concrete observed implementation is the `FontReceiptViewModel.load` chain just cited.
-- **Access/integration/cost:** rank #5, M (larger for local faces). Public catalog is low risk; local inventory names/receipts are user data and must not be broadly suggested/indexed by default. No account found, protected data and process context untested. No confirmation for inspection; download/removal remain separate explicit actions. G1/G3 and identity/routing checks block ordinary readiness; entity/query/display APIs are **not verified** if richer selection is chosen. Test stale IDs, shared files, license lookup and cold-launch navigation after review; no execution here.
+### 4. Compare fonts for Unicode text · 5. Search Google Fonts · 6. Open a font detail — needs verification (unchanged chains)
 
-### 7. Download a Google font style — make an explicitly selected file available in Uniboard
+- **Compare fonts:** `CharacterFontsView` → `FontExplorationViewModel.scan` → `App/FontComparisonEngine.swift`.
+- **Search Google Fonts:** `GoogleFontsView` → `GoogleFontCatalog.search`.
+- **Open a font detail:** `App/FontFaceDetailView.swift`. Version 1.3 adds `StyleGridView`: a weight × italic grid with a Width/Variant menu, built in `Shared/StyleGrid.swift`.
+- **What blocks all three:** each is a foreground destination behind private view state, with no external route (G3). A font face or family entity would additionally need `AppEntity`/`EntityQuery` evidence, which was not read for this update. The previous verdicts and cost estimates (M–L, M, M) still stand.
 
-- **Business state: implemented; ordinary integration needs verification.** `FontFaceDetailView.swift`, `CatalogFontFaceDetail.perform(.download)` → `App/GoogleFontDownloadCoordinator.swift`, `download(styleID:)` → validated `GoogleFontCatalog.downloadURL(for:)` → `PinnedGoogleFontTransport.fetch` → `Shared/FontLibraryStorage.swift`, `CustomFontStore.installGoogleFont`. No Intent exists. This is **app-local**, not OS-wide installation or styled host insertion.
-- **Proposed input/result:** exact catalog style ID; resolve family/style/file freshly, reject stale/unavailable IDs and never pick a family’s first style for an ambiguous request. No arbitrary URL, bulk fetch or automatic download during search/preview. Proposed foreground status/result says downloaded/already available only on authoritative completion; errors/cancellation remain distinct. Repeating returns early when the receipt-mapped file exists; missing bytes go through validated repair. The early return checks existence, not a fresh digest. Concurrent jobs deduplicate by file within one coordinator; styles sharing a file share download state and effect. Cross-instance job deduplication is not established.
-- **Storage/network:** coordinator bounds concurrent transfers to two; ephemeral HTTPS transport restricts authority/path, rejects redirects and non-server authentication, bounds bytes and checks exact expected size. Store verifies digest, licenses and font identity, enforces 16 saved font entries/40 MiB per file, retains imported membership, and atomically publishes receipt/licenses/membership together in `library-v2.json` in the existing App Group directory. Read errors are failures, not an empty library. Writer lock is process-local, not proven cross-process coordination. Stored bytes/receipts survive relaunch; jobs/progress are in-memory. No durable background transfer/lifecycle resumption is implemented here.
-- **Access/safety:** no app login/API key needed. Network requests carry pinned font paths, not inspection text; do not promise no network metadata exposure. Explicit consent to selected file/size/license and shared-style effect is a proposed system-action requirement; no silent eviction at capacity. App execution must not require keyboard Full Access or promise keyboard availability from app success. Locked-device storage, registration/preview availability and cancellation near commit need validation. Coordinator cancellation waits for publication outcome; success may win the race. Removal is separate and excluded below.
-- **Integration/cost:** rank #7, L, moderate network/storage risk. Prefer foreground handoff to existing explicit controls before attempting direct automation; do not call that handoff a completed download. A direct execution adapter needs lifecycle ownership, bounded waiting, truthful result/error mapping and shared coordinator policy. Partial A1–A8 do not close G1/G3; richer entity selection and any confirmation API also need exact documentation. Next verify those declarations and test offline, already-present/missing bytes, cancellation/commit, capacity, corrupt manifest, shared-file styles and relaunch after product approval. No download was executed.
+### 11. Set a preferred font rule — needs verification (new)
 
-**System surfaces and optional enhancement for actions 4–7:** user-composed Shortcuts is the proposed ordinary starting surface, but none is ready. App Shortcut tiles/Siri phrases require G2 provider/initializer/token evidence and explicit exposure design; no Siri support is inferred from navigation or service existence. Spotlight action discovery differs from content indexing; neither is implemented or tested, and private library indexing is out of scope. Optional Apple Intelligence schema enhancement is **needs verification / semantic fit not determined** (G4): no exact font domain/member, dependent entity contract, OS/SDK, hardware or language/region requirement has been verified. Do not invent a schema or infer its availability from the macro. Keep any eventual ordinary iOS 17-compatible path independent of newer optional enhancement. No compilation, metadata visibility, simulator or real-device execution evidence was added.
+- **Business state: implemented.**
+  - Character detail: `preferredFontCard` → `FontRulePickerView` → `App/FontRulePreferences.swift`, `setFace(_:forCodePoint:)` → `FontRuleOrdering.settingFace`. This is a *set* operation, so repeating it is idempotent. `clear(codePoint:)` is also available.
+  - Settings rule editor: `App/FontRuleEditorView.swift`, `save()` → `FontRulePreferences.save` → `Shared/FontRuleStore.swift`, `save(_:blocks:)`. It validates, refuses rather than repairs, and atomically replaces `font-rules-v1.json` in the current configuration generation. The keyboard reads it via `FontRuleSnapshotReader`.
+  - Selectors are code point, inclusive range, or Unicode **block** (`FontRuleKind`). **No script-based selector exists.**
+  - Saving never turns on Extra Unicode Fonts.
+- **Why pending:**
+  - It needs a font face entity over the picker catalog (`Shared/FontPickerCatalog.swift`, sections yours/google/preview/system/other), with `FontFaceReference` identity.
+  - The picker marks fonts as "App Only" or "Keyboard Unverified" (`KeyboardFontStatus`). An action result would have to state that the keyboard may fall back.
+  - Entity and query APIs were not verified, and value is moderate: rules are configured once, not used every day. **L.**
+
+### 3. Add Unicode text to Favorites — needs verification (unchanged)
+
+- **Chain:** `SymbolBoardStore.add(text:to:)` is an idempotent add, unlike `CharacterStore.toggleFavorite`. `FavoriteSync` shares favorites through the App Group.
+- **What has changed:** the API evidence is now verified (A6).
+- **What still blocks it:** the result must truthfully report local versus shared-sync outcomes (`syncStatus`), and protected-data behavior on a locked device must be defined. Configuration import (action 12) can now replace favorites wholesale, so an add racing with an import also needs a policy. **M.**
+
+### 7. Download a Google font style — needs verification (unchanged; per-file grid added)
+
+- **Chain:** the 1.3 style grid offers "Download File (n Styles)". The download still goes through `FontFaceDetailView` → `GoogleFontDownloadCoordinator.download(styleID:)`, which resolves the style's file. One download affects every style that shares that file.
+- **What blocks it:** network, storage and lifecycle checks, plus result semantics. These are unchanged from the previous report. **L.**
+
+### 12. Import / replace configuration · Undo Last Import — not recommended (new)
+
+- **Business state: implemented.**
+  - Import: `ConfigurationView` `fileImporter` → `ConfigurationImportModel.load` → `check` (validates and diffs, no writes) → the user reviews the diff in `ReviewImportView` → `replace()`.
+  - Writing: `replace()` calls `SharedConfigurationLocation.apply(_:expecting:currentPresentation:)`, a fingerprint-checked, generation-switched write. It also sets up undo.
+  - Undo: `ConfigurationUndo.run`.
+- **Reason:** both actions replace favorites, key layouts and rules wholesale. The design depends on the user seeing a review diff and confirming it, and on a generation-conflict alert. A system action would bypass or duplicate that safeguard. The app also declares no document types, so a Files "Open in Uniboard" handoff does not exist either.
+- **What would change the decision:** a foreground handoff that opens the existing review screen, after a separate safety assessment.
 
 ## API and availability evidence
 
-**Preserved prior official-document evidence, not re-fetched in this update.** All verification dates below are **2026-10-23**. The prior report records that Apple DocC JSON was read directly, including each listed symbol's declaration and its own platform metadata. Links use the exact read JSON URLs. **SDK/toolchain column for every row:** documentation verifies an API floor, not the installed SDK; the minimum Xcode/compiler package and selected remote SDK declarations remain unverified. No version is inferred from the guides. A1 response reported Last-Modified 2026-10-08.
+All rows were verified on **2026-10-24**.
 
-| ID | Exact symbol / declaration read | Documented iOS minimum | Surface / conditions | Source |
+- **Docs:** Apple DocC JSON at `https://developer.apple.com/tutorials/data/documentation/<path>.json`. Responses carry Last-Modified 2026-10-08, the LocalizedStringResource pages 2026-10-08 15:4x. The docs record each symbol's own declaration and iOS platform metadata.
+- **SDK17:** `iPhoneOS17.0.sdk/.../AppIntents.swiftmodule/arm64e-apple-ios.swiftinterface` (Swift 5.9, `-target arm64e-apple-ios17.0`). Source: the third-party mirror `raw.githubusercontent.com/xybp888/iOS-SDKs/master/…`. Line numbers below refer to that file. It shows the declarations existed in the iOS 17.0 SDK. It is **not** the selected Xcode 27 SDK.
+- **Selected SDK:** not inspected. A compile check is the remaining step.
+
+| ID | Exact symbol | Documented iOS min | Evidence (docs path · SDK17) | Gap / next check |
 | --- | --- | --- | --- | --- |
-| A1 | `AppIntent` protocol | 16.0 | Overview describes actions discoverable through Shortcuts, Siri, Apple Intelligence and other experiences; not a visibility guarantee | [Apple JSON](https://developer.apple.com/tutorials/data/documentation/appintents/appintent.json) |
-| A2 | `AppIntent.perform() async throws -> Self.PerformResult` | 16.0 | Execution requirement only | [Apple JSON](https://developer.apple.com/tutorials/data/documentation/appintents/appintent/perform().json) |
-| A3 | `AppIntent.title: LocalizedStringResource` | 16.0 | Metadata requirement; does not verify the referenced resource initializer | [Apple JSON](https://developer.apple.com/tutorials/data/documentation/appintents/appintent/title.json) |
-| A4 | `AppIntent.openAppWhenRun: Bool` | 16.0; deprecated 26.0 | Older foreground direction; docs request `supportedModes` instead, whose declaration was not verified here | [Apple JSON](https://developer.apple.com/tutorials/data/documentation/appintents/appintent/openappwhenrun.json) |
-| A5 | `AppIntent.Parameter = IntentParameter` | 16.0 | Alias only, not an initializer | [Apple JSON](https://developer.apple.com/tutorials/data/documentation/appintents/appintent/parameter.json) |
-| A6 | `@propertyWrapper final class IntentParameter<Value>` with `_IntentValue`, `Sendable` constraints | 16.0 | Wrapper declaration, not String overload/conformance proof | [Apple JSON](https://developer.apple.com/tutorials/data/documentation/appintents/intentparameter.json) |
-| A7 | `IntentResult: Sendable` | 16.0 | Result protocol only | [Apple JSON](https://developer.apple.com/tutorials/data/documentation/appintents/intentresult.json) |
-| A8 | `IntentResult.result()`, constrained to `IntentResultContainer<Never, Never, Never, Never>` | 16.0 | Empty-result factory only; container itself not separately verified | [Apple JSON](https://developer.apple.com/tutorials/data/documentation/appintents/intentresult/result().json) |
-| A9 | `ReturnsValue<Value>: IntentResult` | 16.0 | Value-return protocol, not the value-return factory | [Apple JSON](https://developer.apple.com/tutorials/data/documentation/appintents/returnsvalue.json) |
+| A1 | `protocol AppIntent : PersistentlyIdentifiable, _SupportsAppDependencies, Sendable` | 16.0 | `appintents/appintent` · l.185 | Compile on the selected SDK |
+| A2 | `AppIntent.perform() async throws -> Self.PerformResult` | 16.0 | `appintents/appintent/perform()` | — |
+| A3 | `static var title: LocalizedStringResource`; `LocalizedStringResource.init(stringLiteral:)` | 16.0; 16.0 | `appintents/appintent/title` · l.187; `foundation/localizedstringresource/init(stringliteral:)` | — |
+| A4 | `static var openAppWhenRun: Bool` | 16.0, deprecated 26.0 | `appintents/appintent/openappwhenrun` · l.188 | Foreground strategy for an iOS 17 target on iOS 26+ (G3). Not used by the ready batch. |
+| A4b | `static var supportedModes: IntentModes` | 26.0 | `appintents/appintent/supportedmodes` | Above the target; would need runtime gating (G3) |
+| A5 | `@propertyWrapper final class IntentParameter<Value> where Value: _IntentValue, Sendable` | 16.0 | `appintents/intentparameter` | — |
+| A6 | `IntentParameter.init(title:description:default:inputOptions:requestValueDialog:inputConnectionBehavior:)`, constrained to `Value.ValueType == String` | 16.0 | `appintents/intentparameter/init(title:description:default:inputoptions:requestvaluedialog:inputconnectionbehavior:)` · l.3176 in `extension IntentParameter where Value.ValueType == Swift.String` (iOS 16.0) | — |
+| A7 | `extension Swift.String : AppIntents._IntentValue` | 16.0 (SDK17 annotation) | No Apple page (underscored protocol) · SDK17 l.2630 | Shown only in SDK17; confirm on the selected SDK |
+| A8 | `protocol IntentResult : Sendable`; `struct IntentResultContainer<Value, OpensAppIntent, Snippet, Dialog>` | 16.0; 16.0 | `appintents/intentresult`, `appintents/intentresultcontainer` · l.1934 | — |
+| A9 | `protocol ReturnsValue<Value> : IntentResult`; `extension IntentResultContainer : ReturnsValue` | 16.0 | `appintents/returnsvalue` · l.1917, l.1940 | — |
+| A10 | `static func result<Value>(value: Value) -> Self where Self == IntentResultContainer<Value, Never, Never, Never>, Value: _IntentValue` | 16.0 | `appintents/intentresult/result(value:)` · l.1957 | — |
+| A11 | `protocol AppEnum : AppValue, StaticDisplayRepresentable, RawRepresentable`; `AppValue`; `CaseDisplayRepresentable.caseDisplayRepresentations`; `TypeDisplayRepresentable.typeDisplayRepresentation`; `DisplayRepresentation`/`TypeDisplayRepresentation : ExpressibleByStringLiteral` | all 16.0 | `appintents/appenum`, `/appvalue`, `/casedisplayrepresentable/casedisplayrepresentations`, `/typedisplayrepresentable/typedisplayrepresentation`, `/displayrepresentation`, `/typedisplayrepresentation` · l.2469, 948, 460, 432, 2274, 435 | — |
+| A12 | `IntentParameter.init(title:description:default:requestValueDialog:requestDisambiguationDialog:inputConnectionBehavior:supportedValues:)` where `Value.ValueType: AppEnum` (the `-2wsgy` overload; the AppEntity & AppEnum variant `-9lv7y` is deprecated in 18.0) | 16.0 | `appintents/intentparameter/init(…supportedvalues:)-2wsgy` · l.3422–3423 | — |
+| A13 | `struct IntentFile : Sendable`; `init(data: Data, filename: String, type: UTType? = nil)`; `extension IntentFile : _IntentValue` | 16.0 | `appintents/intentfile`, `appintents/intentfile/init(data:filename:type:)` · l.17, 34, 59 | The custom `UTType(importedAs:)` already exists in the app; compile status unknown |
+| A14 | `static var description: IntentDescription?`; `struct IntentDescription : ExpressibleByStringLiteral` | 16.0 | `appintents/appintent/description`, `appintents/intentdescription` · l.527 | — |
+| A15 | `protocol AppShortcutsProvider` | 16.0 | `appintents/appshortcutsprovider` · l.1315 | Protocol only. `AppShortcut` initializer and phrase tokens unread (G2). Not in the ready scope. |
 
-### Blocking gaps and next checks
+### Remaining gaps
 
-| ID | Missing evidence | Concrete next check |
+| ID | Missing evidence | Next check |
 | --- | --- | --- |
-| G1 | Complete ordinary API closure, including exact String `IntentParameter` initializer; `LocalizedStringResource` construction; result container and String value-result overload/conformance | Resolve overload links from Apple symbol pages, read their own declarations/platform metadata, and inspect selected builder SDK interfaces. The attempted unsuffixed `intentparameter/init(title:description:default:requestvaluedialog:inputoptions:)` JSON URL returned 404; do not treat it as evidence that the API is absent. Verify `IntentResult.result(value:)` for action 2. Record exact SDK/compiler requirements before recommending a ready path. |
-| G2 | `AppShortcutsProvider`, exact `AppShortcut` initializer, phrase type/application-name token and any parameter-summary dependencies; Spotlight indexing contracts | Verify each exact symbol independently before adding automatic shortcuts/Siri phrases. Do not count these surfaces in an ordinary core recommendation until their own evidence is complete. Indexing is separate work and optional. |
-| G3 | Foreground replacement API compatibility and actual app lifecycle / storage access | Read `supportedModes` and chosen mode declarations before proposing newer API gates; preserve the verified older-target path where appropriate. Design cold-launch search routing. Inspect remote SDK/build settings; later compile selected integration and test protected data/store startup. Builds alone will not prove visibility or execution. |
-| G4 | Exact optional schema member, entity dependencies, required action groups, availability, hardware/language/region conditions | Read official domain/member docs and selected SDK schema declarations/database only after product selects a task. Reference guides were read for ordinary intents and the iOS 27 schema/entity/availability sections, but are leads, not symbol proof. No verified schema enhancement or minimum version is assigned. |
+| G1 | Selected Xcode 27 SDK declarations; App Intents metadata extraction; Swift 5 mode / strict-concurrency diagnostics for the proposed types | Build the app target with the batch intents (separate task) |
+| G2 | `AppShortcut` initializer, phrase/application-name token, Spotlight action discovery | Read the exact symbol docs before adding tiles or Siri phrases; optional |
+| G3 | Foreground mode strategy (A4 vs A4b) for iOS 17–26+, plus query/destination routing (none exists) | Read the `IntentModes` member docs, design `ContentView` routing, then test cold and warm launch |
+| G4 | Schema fit (domain/member, required entities); the toolchain schema database could not be read here | Only after product picks a schema-worthy task; do not assign versions |
+| G5 | Cold background launch in the app process: `UnicodeCatalog.shared` load time, App Group/protected-data access while locked, font-rule and download state for rendering | Device run of each intent with the device locked and unlocked |
 
-These gaps are **not** a claim that Apple docs are inaccessible or that App Intents cannot support Uniboard. They limit this report's ready scope. Nothing was compiled, indexed, installed or exercised from Shortcuts, Spotlight, Siri, simulator or physical device.
+No compilation, metadata visibility check, Shortcuts/Siri/Spotlight run, simulator run or real-device run was done.
 
 ## Planned, uncertain and excluded features
 
-`docs/brief.md` now supplies the font exploration brief. Comparison, Google catalog search and explicit download/detail have implementation bodies and are no longer merely tentative font opportunities. Broader IMEs, transliteration/conversion and whole-language support remain roadmap items, not implemented Intent candidates. Their absence must not be hidden by font coverage claims. The integration plumbing above remains proposed.
-
-| Feature / user task | Business state and evidence | Verdict / defer reason | What would change the decision |
+| Feature / user task | Business state and evidence | Verdict / reason | What would change it |
 | --- | --- | --- | --- |
-| Type directly into another app | Implemented only inside `Keyboard/KeyboardViewController.swift`, `insertHostText(_:literalToken:)`: checks current document/write scope and uses live `textDocumentProxy` | **Not recommended** as an Intent: depends on active keyboard host context, not an app-level insertion service | Verified platform route and safe document authorization; do not claim one exists |
-| Append/clear scratchpad | Implemented in `CharacterDetailView.actions`, `ScratchpadView`; persisted via `ContentView`'s `@AppStorage("scratchpad")`; clear has confirmation | **Not recommended** for first batch: repeat appends duplicate content; potentially sensitive output and destructive clearing | Explicit automation need, shared service, concurrency/confirmation policy |
-| Open Favorites / a custom page | `PagesView` navigates to `SavedView`/page editor; `SymbolBoardStore` has persisted board IDs | **Not recommended** in first batch: useful later, but less task value than search and still needs route/entity resolution | Demand for quick saved-content access; ID-based routing with missing-page handling, never silently open a fallback for a requested missing ID |
-| Create/import/export/delete pages | Implemented `PagesView` actions and `SymbolBoardStore.createBoard`, `importPages`, `exportedPages`, `deleteBoard` | **Not recommended** initially: file access, duplicate imports, destructive operations and user-created content expand risk | Explicit workflow demand and separate file/confirmation/privacy assessment |
-| Pure keyboard input changes (colon key / top backspace) | User is removing the colon key and routing top backspace to the live host rather than the query; `Keyboard/KeyboardViewController.swift` and `Shared/KeyboardInteractionPolicy.swift` are dirty | **Not recommended**: input routing/key layout, not an app-level business task; no Intent candidate regardless of review status | Keep outside discovery/integration scope; no implementation or acceptance claim here |
-| Remove downloaded font | `CatalogFontFaceDetail` confirms removal → coordinator `remove(fileID:)` → `CustomFontStore.removeGoogleFont`; removes membership, retaining immutable bytes for existing snapshots | **Not recommended** initially: file-level effect covers shared styles; not guaranteed disk reclamation or system uninstall | Separate destructive-action confirmation, stale-ID and shared-style assessment; never remove system/included faces |
-| Appearance/layout/font toggles | Settings/configuration sources in `App/` and `CatalogPreferences`; not a primary user task here | **Not recommended** as quota-filling actions | Concrete automation scenario; Google font download is assessed separately above; arbitrary import remains outside this scope |
-| Enable keyboard / Full Access | `README.md` describes OS Settings setup; strict companion Settings route exists | **Not recommended** as an automatic business action; setup and OS permission are user decisions | At most a clearly labeled foreground setup destination, not permission automation |
-| Schema-enhanced Siri / Apple Intelligence | No schema declarations found; exact semantic contract unverified | **Needs verification**, optional and outside current batch | G4, after product selection; do not force Unicode data into unrelated schemas |
+| Preview cursor (drag/move caret in the preview) | `Shared/KeyboardPreviewCursorControl.swift`, `KeyboardPreviewCursorPolicy.swift`. Store copy calls it unfinished. | **Excluded:** keyboard-only interaction with a live host | — |
+| Auto-capitalization setting | `Shared/AutoCapitalizationSetting.swift` (`save` is app-only, read by the keyboard), set via `CatalogPreferences` | **Excluded:** one-time setup toggle. A set-to-value intent would be possible but fills a quota. | Real automation demand |
+| Landscape search, query hold, search index | `Keyboard/` and `Shared/KeyboardQueryHold*`, `UnicodeSearchIndex*` | **Excluded:** keyboard layout and performance work; the index serves action 1 | — |
+| Inspect Text copy / Copy Image inside the keyboard | `KeyboardViewController.copyTextInspection`, `copyPreviewImage` | Covered by app-side actions 8 and 10. The keyboard's own pasteboard flow cannot be called from a system action. | — |
+| Type directly into another app | `KeyboardViewController.insertHostText(_:literalToken:)` via `textDocumentProxy` | **Not recommended:** needs an active keyboard host | — |
+| Scratchpad append/clear; open/create/import/export/delete pages; remove downloaded font | Unchanged from the previous report (`CharacterDetailView`, `PagesView`, `SymbolBoardStore`, `CustomFontStore.removeGoogleFont`) | **Not recommended initially:** duplicate appends, destructive effects, file handling | Explicit workflow demand plus a confirmation policy |
+| Clear a font rule / reorder rules | `FontRulePreferences.clear(codePoint:)`, `remove(id:)`, `move(...)` | **Not recommended:** destructive or ordering edits belong in the rule list UI | Considered with action 11 |
+| Enable keyboard / Full Access | OS Settings; companion Settings route only | **Not recommended:** a user permission decision | At most a foreground setup destination |
+| Script-based font rules | No script selector exists (`FontRuleKind` = codePoint/range/block) | **Not implemented**, not a candidate | Implement first |
+| Schema-enhanced Siri / Apple Intelligence | No schema declarations; no verified fit | **Needs verification**, optional (G4) | — |
 
 ## Product handoff
 
-**Select no implementation-ready actions yet.** Preferred follow-up is verification for **Search Unicode in Uniboard**, **Compare fonts for Unicode text** and **Search Google Fonts**; retain exact-text and Favorites identities for later selection. Font detail is valuable navigation, not font application; direct download remains behind storage/network/lifecycle acceptance. The prior normalized-local-ID versus Google-ID mismatch is now addressed in the inspected engine/UI code, including canonical-axis matching and receipt-backed published detail state; native verification of previews, alias management, licenses, cancellation and cache invalidation is still pending. Source fixes do not close the App Intents API or routing gaps. Re-read the finalized implementation before integration. Resolve G1/G3 first, independently decide whether G2 exposure is worth adding, and defer G4 schema work. Preserve iOS 17 behavior and all existing setup/configuration.
+**Proposed first batch (in order):**
+1. **Inspect Unicode Text**
+2. **Export Uniboard Configuration**
+3. **Get exact Unicode text**
 
-This analysis changed only `intent-opportunities.md` in the repository. No app/configuration edits or business actions were performed. Integration, builds, metadata visibility checks and real-device acceptance are separate future tasks after product approval.
+All three are ordinary background Shortcuts actions in the `Uniboard` app target. Each is a thin adapter over existing code, and their APIs are verified from iOS 16.0 (A1–A14). The iOS 17 deployment target stays unchanged.
+
+**Decisions needed before implementation:**
+- Inspect: the input bound (keep 1024 scalars?) and erroring when the OS normalization data is older than the catalog.
+- Export: the privacy wording, and whether unattended automation of a file containing personal favorites is acceptable.
+- Exact text: current edition only, and the unassigned-code-point guard.
+
+**Next to verify:**
+1. Make image of Unicode text (layout policy, G5).
+2. Search Unicode and the font destinations (foreground strategy and routing, G3).
+3. Font rule entity, Favorites result semantics, and font download. These are lower priority.
+
+App Shortcut phrases, Spotlight and schema work stay optional and are deferred (G2, G4).
+
+This analysis changed only `intent-opportunities.md`. It made no app or configuration edits, no git state changes, no builds or tests, and no business operations. Integration, compilation and device acceptance are separate tasks after product approval.

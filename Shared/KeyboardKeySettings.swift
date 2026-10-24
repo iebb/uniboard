@@ -82,20 +82,46 @@ struct KeyboardKeySettings {
         let overrides: [String: Overrides]
         /// Rearranged main keyboards by layout id.
         let arrangements: [String: MainKeyboardArrangement]
+        /// Whether the arrangements hold the number row (schema 4). Earlier
+        /// files arranged only the letters, and Settings' Number Row added
+        /// the digits above them; `migratingNumberRow` reads such a file once.
+        let arrangesNumberRow: Bool
         static let defaults = Snapshot()
-        init(overrides: [String: Overrides] = [:], arrangements: [String: MainKeyboardArrangement] = [:]) {
-            self.overrides = overrides; self.arrangements = arrangements
+        init(overrides: [String: Overrides] = [:], arrangements: [String: MainKeyboardArrangement] = [:], arrangesNumberRow: Bool = true) {
+            self.overrides = overrides; self.arrangements = arrangements; self.arrangesNumberRow = arrangesNumberRow
         }
         func arrangement(for alphabetID: String) -> MainKeyboardArrangement? { arrangements[alphabetID] }
+        /// The layout's keyboard as it types: the saved arrangement while it
+        /// is valid, otherwise the standard one with the number row.
+        func effectiveArrangement(for alphabet: KeyboardAlphabet) -> MainKeyboardArrangement {
+            arrangements[alphabet.id].flatMap { $0.isValid(for: alphabet) ? $0 : nil } ?? .standard(for: alphabet)
+        }
         /// nil, or the standard arrangement, restores the layout's own rows.
         func updatingArrangement(_ arrangement: MainKeyboardArrangement?, for alphabetID: String) -> Snapshot? {
             guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID) else { return nil }
             var copy = arrangements
             if let arrangement, arrangement != .standard(for: alphabet) { copy[alphabetID] = arrangement }
             else { copy.removeValue(forKey: alphabetID) }
-            let result = Snapshot(overrides: overrides, arrangements: copy)
+            let result = Snapshot(overrides: overrides, arrangements: copy, arrangesNumberRow: arrangesNumberRow)
             guard (try? KeyboardKeySettings.validate(result)) != nil else { return nil }
             return result
+        }
+        /// An earlier file's arrangements with the number row they were shown
+        /// with, once. With Number Row on, a layout without its own arrangement
+        /// gets the standard one and a custom one gains the digits as its own
+        /// first row. With it off, a custom one stays as it is and the others
+        /// get the standard letters without digits. Overrides never change.
+        func migratingNumberRow(showsNumberRow: Bool) -> Snapshot {
+            guard !arrangesNumberRow else { return self }
+            var result: [String: MainKeyboardArrangement] = [:]
+            for alphabet in KeyboardAlphabet.catalog {
+                let letters = MainKeyboardArrangement.letters(for: alphabet)
+                let saved = arrangements[alphabet.id] ?? letters
+                // Earlier files hold no digits in at most three rows, so the number row always fits on top.
+                let next = showsNumberRow ? saved.prependingNumberRow : saved
+                if next != .standard(for: alphabet) { result[alphabet.id] = next }
+            }
+            return Snapshot(overrides: overrides, arrangements: result)
         }
         func candidates(for keyID: String, gesture: Gesture) -> [String]? {
             guard KeyboardKeySettings.descriptor(for: keyID) != nil else { return nil }
@@ -118,20 +144,20 @@ struct KeyboardKeySettings {
             var copy = overrides
             let value = (copy[keyID] ?? Overrides()).replacing(candidates, for: gesture)
             if value.usesDefaults { copy.removeValue(forKey: keyID) } else { copy[keyID] = value }
-            let result = Snapshot(overrides: copy, arrangements: arrangements)
+            let result = Snapshot(overrides: copy, arrangements: arrangements, arrangesNumberRow: arrangesNumberRow)
             guard (try? KeyboardKeySettings.validate(result)) != nil else { return nil }
             return result
         }
         func removingOverride(for keyID: String) -> Snapshot {
             var copy = overrides; copy.removeValue(forKey: keyID)
-            return Snapshot(overrides: copy, arrangements: arrangements)
+            return Snapshot(overrides: copy, arrangements: arrangements, arrangesNumberRow: arrangesNumberRow)
         }
         private enum CodingKeys: String, CodingKey { case schemaVersion, overrides, arrangements }
         init(from decoder: Decoder) throws {
             try KeyboardKeySettings.allowKeys(decoder, ["schemaVersion", "overrides", "arrangements"])
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let schema = try c.decode(Int.self, forKey: .schemaVersion)
-            guard (1...3).contains(schema), schema == 3 || !c.contains(.arrangements) else { throw Invalid.settings }
+            guard (1...4).contains(schema), schema >= 3 || !c.contains(.arrangements) else { throw Invalid.settings }
             let entries = try c.decode([Entry].self, forKey: .overrides)
             guard entries.count <= KeyboardKeySettings.descriptors.count + KeyboardKeySettings.legacyFunctionKeyIDs.count else { throw Invalid.settings }
             var seen = Set<String>()
@@ -147,13 +173,15 @@ struct KeyboardKeySettings {
                     result[entry.keyID] = entry.values
                 }
             }
-            self.init(overrides: result, arrangements: try c.decodeIfPresent([String: MainKeyboardArrangement].self, forKey: .arrangements) ?? [:])
+            self.init(overrides: result, arrangements: try c.decodeIfPresent([String: MainKeyboardArrangement].self, forKey: .arrangements) ?? [:],
+                      arrangesNumberRow: schema == 4)
             try KeyboardKeySettings.validate(self)
         }
         func encode(to encoder: Encoder) throws {
             try KeyboardKeySettings.validate(self)
             var c = encoder.container(keyedBy: CodingKeys.self)
-            try c.encode(3, forKey: .schemaVersion)
+            // An earlier file that was never migrated keeps its own meaning.
+            try c.encode(arrangesNumberRow ? 4 : 3, forKey: .schemaVersion)
             let entries = overrides.sorted { $0.key < $1.key }.map { Entry(keyID: $0.key, values: $0.value) }
             try c.encode(entries, forKey: .overrides)
             if !arrangements.isEmpty { try c.encode(arrangements, forKey: .arrangements) }
@@ -265,41 +293,71 @@ struct KeyboardKeySettings {
     typealias ContainerProvider = () -> URL?
     typealias PrefixReader = (URL, Int) throws -> Data
     typealias AtomicWriter = (Data, URL) throws -> Void
+    /// The retired Settings Number Row choice stored beside this file in a
+    /// directory; read only while this file has not been migrated.
+    typealias NumberRowReader = (URL) -> Bool
     private let containerURL: ContainerProvider
     private let readPrefix: PrefixReader
     private let writeAtomically: AtomicWriter
+    private let legacyShowsNumberRow: NumberRowReader
+    /// The default reads the current shared configuration generation, or
+    /// the group root before migration.
     init(containerURL: @escaping ContainerProvider = {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: KeyboardKeySettings.groupIdentifier)
+        SharedConfigurationLocation.shared.currentDirectory()
     }, readPrefix: @escaping PrefixReader = KeyboardKeySettings.readFilePrefix,
-         writeAtomically: @escaping AtomicWriter = KeyboardKeySettings.writeFileAtomically) {
+         writeAtomically: @escaping AtomicWriter = KeyboardKeySettings.writeFileAtomically,
+         legacyShowsNumberRow: @escaping NumberRowReader = { directory in
+        UnicodeEditionSettings(containerURL: { directory }).loadSnapshot().showsNumberRow
+    }) {
         self.containerURL = containerURL; self.readPrefix = readPrefix; self.writeAtomically = writeAtomically
+        self.legacyShowsNumberRow = legacyShowsNumberRow
     }
     func loadSnapshot() -> Snapshot {
         loadForEditing() ?? .defaults
     }
     /// A merge requires trustworthy existing state. Only an explicitly missing
     /// file is an editable empty configuration; malformed/unreadable data is
-    /// retained until the app's separately confirmed reset-all action.
+    /// retained until the app's separately confirmed reset-all action. An
+    /// earlier file, or none, is read with the number row it was shown with.
     func loadForEditing() -> Snapshot? {
-        guard let container = containerURL(), container.isFileURL else { return nil }
+        guard let container = containerURL(), container.isFileURL, let stored = loadStored(in: container) else { return nil }
+        return stored.arrangesNumberRow ? stored : stored.migratingNumberRow(showsNumberRow: legacyShowsNumberRow(container))
+    }
+    /// Saves the number row migration once, so the retired Number Row choice
+    /// is never read again. True when it saved; false when there was nothing
+    /// to migrate or the file is unreadable, which is never replaced here.
+    @discardableResult func migrateNumberRowIfNeeded() -> Bool {
+        guard let container = containerURL(), container.isFileURL, let stored = loadStored(in: container),
+              !stored.arrangesNumberRow else { return false }
+        return save(stored.migratingNumberRow(showsNumberRow: legacyShowsNumberRow(container)))
+    }
+    private func loadStored(in container: URL) -> Snapshot? {
         let data: Data
         do { data = try readPrefix(container.appendingPathComponent(Self.filename), Self.maximumPayloadBytes + 1) }
         catch {
             let error = error as NSError
             let missing = error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT)
                 || error.domain == NSCocoaErrorDomain && error.code == CocoaError.Code.fileReadNoSuchFile.rawValue
-            return missing ? .defaults : nil
+            return missing ? Snapshot(arrangesNumberRow: false) : nil
         }
-        guard !data.isEmpty, data.count <= Self.maximumPayloadBytes,
+        return Self.decode(data)
+    }
+    /// nil when the payload is empty, oversized or invalid.
+    static func decode(_ data: Data) -> Snapshot? {
+        guard !data.isEmpty, data.count <= maximumPayloadBytes,
               let result = try? JSONDecoder().decode(Snapshot.self, from: data) else { return nil }
         return result
+    }
+    /// The store's own encoding (sorted keys); nil over the size cap.
+    static func encode(_ snapshot: Snapshot) -> Data? {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(snapshot), data.count <= maximumPayloadBytes else { return nil }
+        return data
     }
     /// No in-memory preference is mutated. The caller retains its prior value
     /// on false; only the containing app invokes this atomic writer.
     @discardableResult func save(_ snapshot: Snapshot) -> Bool {
-        guard let container = containerURL(), container.isFileURL else { return false }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(snapshot), data.count <= Self.maximumPayloadBytes else { return false }
+        guard let container = containerURL(), container.isFileURL, let data = Self.encode(snapshot) else { return false }
         do { try writeAtomically(data, container.appendingPathComponent(Self.filename)); return true }
         catch { return false }
     }
@@ -328,7 +386,8 @@ struct KeyboardKeySettings {
     private static func validate(_ snapshot: Snapshot) throws {
         guard snapshot.overrides.count <= descriptors.count else { throw Invalid.settings }
         for (alphabetID, arrangement) in snapshot.arrangements {
-            guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID), arrangement.isValid(for: alphabet) else { throw Invalid.settings }
+            guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID), arrangement.isValid(for: alphabet),
+                  snapshot.arrangesNumberRow || arrangement.isLetterOnly else { throw Invalid.settings }
         }
         for (keyID, values) in snapshot.overrides {
             guard descriptorsByID[keyID] != nil else { throw Invalid.settings }

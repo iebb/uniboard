@@ -7,26 +7,34 @@ final class CatalogPreferences: ObservableObject {
     @Published private(set) var editionSaveError: String?
     @Published private(set) var useUnicodeFonts: Bool
     @Published private(set) var showsCollapseKey: Bool
-    @Published private(set) var showsSymbolBar: Bool
-    @Published private(set) var searchBarInsteadOfSymbols: Bool
-    @Published private(set) var showsNumberRow: Bool
+    /// The retired Top Row and Number Row choices, kept as stored so a save
+    /// writes them back unchanged for an earlier version. Nothing reads them.
+    private var retired: (showsSymbolBar: Bool, searchBarInsteadOfSymbols: Bool, showsNumberRow: Bool)
     @Published private(set) var showsTextPreview: Bool
     @Published private(set) var showsUCSUR: Bool
     @Published private(set) var prefersUCSUR: Bool
     @Published private(set) var layouts: [String]
     @Published private(set) var padLayout: KeyboardPadLayout
     @Published private(set) var padSymbolMapping: KeyboardPadSymbolMapping
+    /// When letter keys use capitals automatically; Follow App by default.
+    @Published private(set) var autoCapitalization: AutoCapitalizationMode
+    @Published private(set) var autoCapitalizationSaveError: String?
+    private let autoCapitalizationSetting: AutoCapitalizationSetting
     private let editionSettings: UnicodeEditionSettings
+    private let fontRules: FontRuleStore?
 
-    init(editionSettings: UnicodeEditionSettings = .shared) {
+    /// `fontRules` nil leaves the rules previews use unchanged.
+    init(editionSettings: UnicodeEditionSettings = .shared, fontRules: FontRuleStore? = .shared,
+         autoCapitalization: AutoCapitalizationSetting = .shared) {
         self.editionSettings = editionSettings
+        autoCapitalizationSetting = autoCapitalization
+        self.autoCapitalization = autoCapitalization.load()
+        self.fontRules = fontRules
         let snapshot = editionSettings.loadSnapshot()
         edition = snapshot.edition
         useUnicodeFonts = snapshot.useUnicodeFonts
         showsCollapseKey = snapshot.showsCollapseKey
-        showsSymbolBar = snapshot.showsSymbolBar
-        searchBarInsteadOfSymbols = snapshot.searchBarInsteadOfSymbols
-        showsNumberRow = snapshot.showsNumberRow
+        retired = (snapshot.showsSymbolBar, snapshot.searchBarInsteadOfSymbols, snapshot.showsNumberRow)
         showsTextPreview = snapshot.showsTextPreview
         showsUCSUR = snapshot.showsUCSUR
         prefersUCSUR = snapshot.prefersUCSUR
@@ -34,6 +42,18 @@ final class CatalogPreferences: ObservableObject {
         layouts = snapshot.layouts
         padLayout = snapshot.padLayout
         padSymbolMapping = snapshot.padSymbolMapping
+        // Extra Unicode Fonts is the master switch: off pauses rules, never deletes them.
+        UnicodeFontSupport.rulesEnabled = snapshot.useUnicodeFonts
+        reloadFontRules()
+    }
+    /// Reads the saved font rules again (validated against the base Unicode
+    /// block table) and redraws every preview when they changed.
+    func reloadFontRules() {
+        guard let fontRules else { return }
+        let rules = fontRules.load(blocks: UnicodeCatalog.shared.blocks) ?? []
+        guard rules != UnicodeFontSupport.ruleSet.rules else { return }
+        UnicodeFontSupport.ruleSet = FontRuleSet(rules: rules)
+        objectWillChange.send()
     }
     /// With ConScript preferred, Private Use reads as the registry assigns it.
     var catalog: UnicodeCatalog {
@@ -54,9 +74,6 @@ final class CatalogPreferences: ObservableObject {
     func selectCollapseKey(_ enabled: Bool) {
         edit { $0.showsCollapseKey = enabled }
     }
-    func selectSymbolBar(_ enabled: Bool) { edit { $0.showsSymbolBar = enabled } }
-    func selectSearchBarInsteadOfSymbols(_ enabled: Bool) { edit { $0.searchBarInsteadOfSymbols = enabled } }
-    func selectNumberRow(_ enabled: Bool) { edit { $0.showsNumberRow = enabled } }
     func selectTextPreview(_ enabled: Bool) { edit { $0.showsTextPreview = enabled } }
     func selectUCSUR(_ enabled: Bool) { edit { $0.showsUCSUR = enabled } }
     func selectPrefersUCSUR(_ enabled: Bool) { edit { $0.prefersUCSUR = enabled } }
@@ -70,22 +87,12 @@ final class CatalogPreferences: ObservableObject {
         return layouts == ids
     }
     var alphabets: [KeyboardAlphabet] { layouts.compactMap(KeyboardAlphabet.alphabet(id:)) }
-    /// The keyboard's optional row above the keys, as one choice.
-    var topRow: KeyboardTopRow {
-        guard showsSymbolBar else { return .off }
-        return searchBarInsteadOfSymbols ? .search : .symbols
-    }
-    func selectTopRow(_ row: KeyboardTopRow) {
-        edit {
-            $0.showsSymbolBar = row != .off
-            if row != .off { $0.searchBarInsteadOfSymbols = row == .search }
-        }
-    }
     func selectPadLayout(_ layout: KeyboardPadLayout) { edit { $0.padLayout = layout } }
     private func edit(_ change: (inout UnicodeEditionSettings.Snapshot) -> Void) {
         var value = UnicodeEditionSettings.Snapshot(edition: edition, useUnicodeFonts: useUnicodeFonts,
-            showsCollapseKey: showsCollapseKey, showsSymbolBar: showsSymbolBar, searchBarInsteadOfSymbols: searchBarInsteadOfSymbols,
-            showsNumberRow: showsNumberRow, layouts: layouts, showsTextPreview: showsTextPreview, showsUCSUR: showsUCSUR,
+            showsCollapseKey: showsCollapseKey, showsSymbolBar: retired.showsSymbolBar,
+            searchBarInsteadOfSymbols: retired.searchBarInsteadOfSymbols,
+            showsNumberRow: retired.showsNumberRow, layouts: layouts, showsTextPreview: showsTextPreview, showsUCSUR: showsUCSUR,
             prefersUCSUR: prefersUCSUR,
             padLayout: padLayout, padSymbolMapping: padSymbolMapping)
         change(&value)
@@ -105,10 +112,9 @@ final class CatalogPreferences: ObservableObject {
             useUnicodeFonts = snapshot.useUnicodeFonts
             if !useUnicodeFonts { UnicodeFontSupport.clearCache() }
         }
+        UnicodeFontSupport.rulesEnabled = useUnicodeFonts
         if showsCollapseKey != snapshot.showsCollapseKey { showsCollapseKey = snapshot.showsCollapseKey }
-        if showsSymbolBar != snapshot.showsSymbolBar { showsSymbolBar = snapshot.showsSymbolBar }
-        if searchBarInsteadOfSymbols != snapshot.searchBarInsteadOfSymbols { searchBarInsteadOfSymbols = snapshot.searchBarInsteadOfSymbols }
-        if showsNumberRow != snapshot.showsNumberRow { showsNumberRow = snapshot.showsNumberRow }
+        retired = (snapshot.showsSymbolBar, snapshot.searchBarInsteadOfSymbols, snapshot.showsNumberRow)
         if showsTextPreview != snapshot.showsTextPreview { showsTextPreview = snapshot.showsTextPreview }
         if showsUCSUR != snapshot.showsUCSUR { showsUCSUR = snapshot.showsUCSUR }
         if prefersUCSUR != snapshot.prefersUCSUR { prefersUCSUR = snapshot.prefersUCSUR }
@@ -119,6 +125,18 @@ final class CatalogPreferences: ObservableObject {
     }
     func refreshEdition() {
         apply(editionSettings.loadSnapshot())
+        reloadFontRules()
+        let mode = autoCapitalizationSetting.load()
+        if autoCapitalization != mode { autoCapitalization = mode }
+    }
+    /// Saves at once; the keyboard reads it the next time it appears.
+    func selectAutoCapitalization(_ mode: AutoCapitalizationMode) {
+        guard autoCapitalizationSetting.save(mode) else {
+            autoCapitalizationSaveError = "Couldn’t save these keyboard settings. Please try again."
+            return
+        }
+        autoCapitalizationSaveError = nil
+        if autoCapitalization != mode { autoCapitalization = mode }
     }
     func reset(preservingEdition: Bool = false) {
         // UI-test launches preserve the complete shared snapshot so opening
@@ -127,16 +145,6 @@ final class CatalogPreferences: ObservableObject {
     }
 }
 
-enum KeyboardTopRow: String, CaseIterable {
-    case off, symbols, search
-    var title: String {
-        switch self {
-        case .off: return "Off"
-        case .symbols: return "Symbols"
-        case .search: return "Search"
-        }
-    }
-}
 
 /// The edition selector in the app's Settings tab.
 struct CatalogEditionPicker: View {

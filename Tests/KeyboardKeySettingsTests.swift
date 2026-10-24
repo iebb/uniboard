@@ -85,7 +85,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
     func testMainKeyboardArrangementsSaveAndLoad() throws {
         let english = KeyboardAlphabet.english
         var moved = MainKeyboardArrangement.standard(for: english)
-        moved.keys.swapAt(0, 1)
+        moved.keys.swapAt(10, 11) // q and w, below the number row
         let swapped = try XCTUnwrap(Settings.Snapshot.defaults.updatingArrangement(moved, for: "en"))
         XCTAssertEqual(swapped.arrangement(for: "en"), moved)
         XCTAssertNil(swapped.updatingArrangement(.standard(for: english), for: "en")?.arrangement(for: "en"), "The standard rows clear it")
@@ -102,12 +102,86 @@ final class KeyboardKeySettingsTests: XCTestCase {
         XCTAssertEqual(load(try data(.defaults)), .defaults)
         for bad in [#"{"schemaVersion":2,"overrides":[],"arrangements":{}}"#,
                     #"{"schemaVersion":3,"overrides":[],"arrangements":{"en":{"keys":["q"],"layout":"k"}}}"#,
-                    #"{"schemaVersion":4,"overrides":[]}"#] {
+                    #"{"schemaVersion":5,"overrides":[]}"#,
+                    // An earlier file's arrangements never held digits or a fourth row.
+                    #"{"schemaVersion":3,"overrides":[],"arrangements":{"en":{"keys":["1","q","w","e","r","t","y","u","i","o","p","a","s","d","f","g","h","j","k","l","{shift}","z","x","c","v","b","n","m","{delete}"],"layout":"kkkkkkkkkkk/kkkkkkkkk/kkkkkkkkk"}}}"#] {
             XCTAssertEqual(load(json(bad)), .defaults)
         }
         var typing = KeyboardTypingState()
         typing.selectAlphabet(english.arranged(moved.letterRows))
         XCTAssertEqual(typing.alphabet.rows.first?.first, "w", "A rearranged layout replaces the same layout")
+    }
+
+    func testNumberRowMigrationFollowsTheRetiredChoiceAndKeepsCustomArrangements() throws {
+        let english = KeyboardAlphabet.english
+        let russian = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "ru"))
+        var custom = MainKeyboardArrangement.letters(for: english)
+        custom.keys.swapAt(0, 1)
+        let earlier = Settings.Snapshot(overrides: example.overrides, arrangements: ["en": custom], arrangesNumberRow: false)
+        // Number Row on: the standard keyboard where there was none, the digits as a custom one's first row.
+        let on = earlier.migratingNumberRow(showsNumberRow: true)
+        XCTAssertTrue(on.arrangesNumberRow)
+        XCTAssertEqual(on.overrides, example.overrides, "Key choices never change")
+        XCTAssertEqual(on.arrangement(for: "en"), custom.addingDigits())
+        XCTAssertEqual(on.arrangement(for: "en")?.layout, "kkkkkkkkkk/kkkkkkkkkk/kkkkkkkkk/kkkkkkkkk")
+        XCTAssertEqual(on.arrangement(for: "en")?.keys.first, "1")
+        XCTAssertNil(on.arrangement(for: "ru"))
+        XCTAssertEqual(on.effectiveArrangement(for: russian), .standard(for: russian))
+        var broken = custom
+        broken.layout = "kk"
+        XCTAssertEqual(Settings.Snapshot(arrangements: ["en": broken]).effectiveArrangement(for: english), .standard(for: english),
+                       "An unusable arrangement types as the standard keyboard")
+        // Number Row off: a custom one stays as it was, the others lose the digits.
+        let off = earlier.migratingNumberRow(showsNumberRow: false)
+        XCTAssertEqual(off.arrangement(for: "en"), custom)
+        XCTAssertEqual(off.arrangement(for: "ru"), .letters(for: russian))
+        for alphabet in KeyboardAlphabet.catalog {
+            XCTAssertEqual(off.effectiveArrangement(for: alphabet).missingDigits.count, 10, alphabet.id)
+            XCTAssertTrue(on.effectiveArrangement(for: alphabet).missingDigits.isEmpty, alphabet.id)
+        }
+        // Already migrated: never again.
+        XCTAssertEqual(off.migratingNumberRow(showsNumberRow: true), off)
+        XCTAssertEqual(load(try data(off)), off)
+        XCTAssertEqual(load(try data(on)), on)
+        // An earlier file is read with the digits it was shown with, and saves as it was until migrated.
+        let stored = try data(earlier)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: stored) as? [String: Any])?["schemaVersion"] as? Int, 3)
+        let reader = Settings(containerURL: { self.container }, readPrefix: { _, _ in stored },
+                              writeAtomically: { _, _ in XCTFail("A read never migrates the file") },
+                              legacyShowsNumberRow: { _ in false })
+        XCTAssertEqual(reader.loadSnapshot(), off)
+    }
+
+    func testNumberRowMigrationSavesOnceAndNeverReplacesAnUnreadableFile() throws {
+        try withContainer { directory in
+            var legacyReads = 0
+            var showsNumberRow = false
+            let settings = Settings(containerURL: { directory }, legacyShowsNumberRow: { url in
+                XCTAssertEqual(url, directory); legacyReads += 1; return showsNumberRow
+            })
+            // No file yet: Number Row off is saved as keyboards without digits.
+            XCTAssertTrue(settings.migrateNumberRowIfNeeded())
+            XCTAssertEqual(legacyReads, 1)
+            let saved = settings.loadSnapshot()
+            XCTAssertTrue(saved.arrangesNumberRow)
+            XCTAssertEqual(saved.arrangement(for: "en"), .letters(for: .english))
+            let file = directory.appendingPathComponent(Settings.filename)
+            let object = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]
+            XCTAssertEqual(object?["schemaVersion"] as? Int, 4)
+            // Recorded as done: a later Number Row value is never read again.
+            showsNumberRow = true
+            XCTAssertFalse(settings.migrateNumberRowIfNeeded())
+            XCTAssertEqual(settings.loadSnapshot(), saved)
+            XCTAssertEqual(legacyReads, 1)
+            // An earlier file with Number Row on migrates to the standard keyboard.
+            try data(Settings.Snapshot(overrides: example.overrides, arrangesNumberRow: false)).write(to: file)
+            XCTAssertTrue(settings.migrateNumberRowIfNeeded())
+            XCTAssertEqual(settings.loadSnapshot(), Settings.Snapshot(overrides: example.overrides))
+            // Unreadable bytes stay as they are.
+            try Data([0xFF]).write(to: file)
+            XCTAssertFalse(settings.migrateNumberRowIfNeeded())
+            XCTAssertEqual(try Data(contentsOf: file), Data([0xFF]))
+        }
     }
 
     private typealias Settings = KeyboardKeySettings
@@ -209,7 +283,8 @@ final class KeyboardKeySettingsTests: XCTestCase {
             try JSONDecoder().decode(Settings.Snapshot.self,
                 from: JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "overrides": entries]))
         }
-        XCTAssertEqual(try decode(functions), .defaults)
+        // Schema 1 predates the number row joining the arrangement.
+        XCTAssertEqual(try decode(functions), Settings.Snapshot(arrangesNumberRow: false))
         let characters = Settings.descriptors.map { ["keyID": $0.id, "swipeDown": ["x"]] as [String: Any] }
         XCTAssertEqual(try decode(characters + functions).overrides.count, Settings.descriptors.count)
         XCTAssertThrowsError(try decode(characters + functions + [functions[0]]))
@@ -272,7 +347,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
         XCTAssertTrue(settings.save(expected)); XCTAssertEqual(saved, first)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: first) as? [String: Any])
         XCTAssertEqual(Set(object.keys), ["schemaVersion", "overrides"])
-        XCTAssertEqual(object["schemaVersion"] as? Int, 3)
+        XCTAssertEqual(object["schemaVersion"] as? Int, 4, "Written after the number row joined the arrangement")
         let entries = try XCTUnwrap(object["overrides"] as? [[String: Any]])
         XCTAssertEqual(entries.compactMap { $0["keyID"] as? String }, ["letter.a", "letter.z"])
         XCTAssertEqual(Set(entries[0].keys), ["keyID", "longPress"])
@@ -292,7 +367,12 @@ final class KeyboardKeySettingsTests: XCTestCase {
     }
 
     func testDefaultProviderUsesOnlyDeclaredGroupWithInjectedReadAndNoActualFileAccess() throws {
-        let expectedContainer = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Settings.groupIdentifier)
+        // The group root before migration; the current configuration generation in it after.
+        let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Settings.groupIdentifier)
+        let expectedContainer = SharedConfigurationLocation.shared.currentDirectory()
+        if let group, let expectedContainer {
+            XCTAssertTrue(expectedContainer.standardizedFileURL.path.hasPrefix(group.standardizedFileURL.path))
+        } else { XCTAssertNil(expectedContainer) }
         let bytes = try data(example); var reads = 0
         let settings = Settings(readPrefix: { url, maximum in
             reads += 1
@@ -346,7 +426,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
 
     func testEditableReadRequiresValidBoundedSnapshotWhileKeyboardRetainsSafeFallback() throws {
         let valid = try data(example)
-        let malformed = [Data(), Data([0xFF]), Data(valid.dropLast()), json(#"{"schemaVersion":4,"overrides":[]}"#),
+        let malformed = [Data(), Data([0xFF]), Data(valid.dropLast()), json(#"{"schemaVersion":5,"overrides":[]}"#),
                          json(#"{"schemaVersion":1,"overrides":[{"keyID":"unknown"}]}"#),
                          valid + Data(repeating: 0x20, count: Settings.maximumPayloadBytes + 1 - valid.count)]
         for bytes in malformed {

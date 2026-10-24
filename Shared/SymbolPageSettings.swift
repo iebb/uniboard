@@ -28,8 +28,10 @@ struct SymbolPageSettings {
     private let readPrefix: PrefixReader
     private let writeAtomically: AtomicWriter
 
+    /// The default reads the current shared configuration generation, or
+    /// the group root before migration.
     init(containerURL: @escaping ContainerProvider = {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: SymbolPageSettings.groupIdentifier)
+        SharedConfigurationLocation.shared.currentDirectory()
     }, readPrefix: @escaping PrefixReader = SymbolPageSettings.readFilePrefix,
          writeAtomically: @escaping AtomicWriter = SymbolPageSettings.writeFileAtomically) {
         self.containerURL = containerURL; self.readPrefix = readPrefix; self.writeAtomically = writeAtomically
@@ -38,18 +40,28 @@ struct SymbolPageSettings {
     /// nil when no pages have been configured yet, or the file is unusable.
     func load() -> Snapshot? {
         guard let container = containerURL(), container.isFileURL,
-              let data = try? readPrefix(container.appendingPathComponent(Self.filename), Self.maximumPayloadBytes + 1),
-              !data.isEmpty, data.count <= Self.maximumPayloadBytes,
+              let data = try? readPrefix(container.appendingPathComponent(Self.filename), Self.maximumPayloadBytes + 1) else { return nil }
+        return Self.decode(data)
+    }
+
+    /// nil when the payload is empty, oversized, malformed or of an unknown schema.
+    static func decode(_ data: Data) -> Snapshot? {
+        guard !data.isEmpty, data.count <= maximumPayloadBytes,
               let file = try? JSONDecoder().decode(File.self, from: data), file.schemaVersion == 1 else { return nil }
         return Snapshot(pages: file.pages, starPageID: file.starPageID)
     }
 
+    /// The store's own encoding (sorted keys); nil over the size cap.
+    static func encode(_ snapshot: Snapshot) -> Data? {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(File(schemaVersion: 1, pages: snapshot.pages, starPageID: snapshot.starPageID)),
+              data.count <= maximumPayloadBytes else { return nil }
+        return data
+    }
+
     /// Only the containing app calls this.
     @discardableResult func save(_ snapshot: Snapshot) -> Bool {
-        guard let container = containerURL(), container.isFileURL else { return false }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        let file = File(schemaVersion: 1, pages: snapshot.pages, starPageID: snapshot.starPageID)
-        guard let data = try? encoder.encode(file), data.count <= Self.maximumPayloadBytes else { return false }
+        guard let container = containerURL(), container.isFileURL, let data = Self.encode(snapshot) else { return false }
         do { try writeAtomically(data, container.appendingPathComponent(Self.filename)); return true }
         catch { return false }
     }

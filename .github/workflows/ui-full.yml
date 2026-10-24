@@ -1,0 +1,82 @@
+name: UI full
+
+# The complete UI suite, by feature area, as parallel jobs. Manual only: the
+# default check is the smoke run and per-change runs use the area classes
+# (docs/ui-test-shards.md).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-full-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui-tests:
+    if: github.repository == 'iebb/uniboard'
+    name: UI ${{ matrix.area }}
+    runs-on: macos-15
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - area: browsing-and-configuration
+            classes: AppBrowsingUITests ConfigurationUITests
+          - area: fonts
+            classes: FontSettingsUITests FontRulesUITests FontExplorationUITests StyleGridUITests
+          - area: layouts
+            classes: KeyboardLayoutUITests
+          - area: pages
+            classes: PagesUITests
+          - area: typing
+            classes: SmokeUITests KeyboardTypingUITests
+          - area: search-and-inspect
+            classes: KeyboardSearchUITests KeyboardInspectUITests
+          - area: text-preview
+            classes: TextPreviewUITests
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the exact source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Select the Liquid Glass SDK
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          xcodebuild -version
+
+      - name: Run the ${{ matrix.area }} UI tests
+        env:
+          CLASSES: ${{ matrix.classes }}
+        run: |
+          set -euo pipefail
+          test_destination="$(python3 Scripts/select_ios_test_destination.py)"
+          only_testing=()
+          for class in $CLASSES; do only_testing+=("-only-testing:UniboardUITests/$class"); done
+          # The scheme hands UNIBOARD_KEYBOARD_INTEGRATION=$(UNIBOARD_KEYBOARD_INTEGRATION)
+          # to the test runner, so it is set as a build setting, as on AirBuild.
+          # Simulator builds are signed to run locally, which keeps the app
+          # group the app and the keyboard share.
+          xcodebuild \
+            -project Uniboard.xcodeproj -scheme Uniboard \
+            -configuration Debug -destination "$test_destination" \
+            -derivedDataPath "$RUNNER_TEMP/UniboardDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/UniboardUITests-${{ matrix.area }}.xcresult" \
+            -parallel-testing-enabled NO \
+            "${only_testing[@]}" \
+            UNIBOARD_KEYBOARD_INTEGRATION=1 \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            test
+
+      - name: Preserve the result bundle
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-${{ matrix.area }}-xcresult
+          path: ${{ runner.temp }}/UniboardUITests-${{ matrix.area }}.xcresult
+          if-no-files-found: warn
+          retention-days: 14

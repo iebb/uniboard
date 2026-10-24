@@ -15,6 +15,12 @@ final class KeyboardViewController: UIInputViewController {
     private var expectedHostEdit: ExpectedHostEdit?
     private var literalWriteTransaction = KeyboardLiteralWriteTransaction()
     private var literalWriteToken: UUID?
+    /// The movable cursor in the text preview (design/preview-cursor).
+    private let previewCursorDriver = KeyboardPreviewCursorDriver()
+    private let keyTouchObserver = KeyboardKeyTouchObserver.make()
+    /// Between viewWillAppear and viewWillDisappear: the preview caret may blink.
+    private var isKeyboardShown = false
+    private weak var previewCursorControl: KeyboardPreviewCursorControl?
     private typealias HostSignature = KeyboardHostInputSignature
     private struct ExpectedHostEdit {
         let document: UUID
@@ -73,6 +79,23 @@ final class KeyboardViewController: UIInputViewController {
         ])
         host.didMove(toParent: self)
         hostingController = host
+        previewCursorDriver.host = self
+        previewCursorDriver.publish = { [weak self] state in
+            guard let self, self.model.previewCursor != state else { return }
+            self.model.previewCursor = state
+        }
+        // Key touches, seen without taking part, guard the preview (§5).
+        keyTouchObserver.ignores = { view in
+            var current = view
+            while let candidate = current {
+                if candidate is KeyboardPreviewCursorControl { return true }
+                current = candidate.superview
+            }
+            return false
+        }
+        // Any key press keeps the preview caret solid for a moment (§1a).
+        keyTouchObserver.onKeyActivity = { [weak self] in self?.previewCursorControl?.noteCaretActivity() }
+        view.addGestureRecognizer(keyTouchObserver)
         model.presentationChanged = { [weak self] in self?.updateKeyboardHeight() }
         model.queryEdited = { [weak self] in
             self?.doubleSpaceState.reset()
@@ -100,8 +123,14 @@ final class KeyboardViewController: UIInputViewController {
         SymbolBoardStore.shared.refreshPages()
         SymbolBoardStore.shared.refreshFavorites(canWrite: hasFullAccess)
         KeyboardTouchFeedback.hapticsAllowed = hasFullAccess
+        if hasFullAccess {
+            // The app's font picker tags fonts the keyboard can't open (design/font-picker §4).
+            DispatchQueue.global(qos: .utility).async { KeyboardFontEvidenceStore.appGroup.record(.current()) }
+        }
         synchronizeHostTraits()
         updateKeyboardHeight()
+        isKeyboardShown = true
+        updatePreviewCaretLiveness()
     }
 
     override func didReceiveMemoryWarning() {
@@ -112,6 +141,9 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         synchronizeHostTraits()
+        #if DEBUG
+        cursorProbeHostEvent(.appear) // DEBUG-only cursor probe
+        #endif
     }
 
 
@@ -126,7 +158,12 @@ final class KeyboardViewController: UIInputViewController {
         deleteInteractionID = UUID()
         model.symbolBoardManagerPresented = false
         closePreviewImagePanel()
+        closeTextInspection()
         KeyboardVariantButton.cancelInteractions(in: view)
+        previewCursorControl?.cancelGestures()
+        isKeyboardShown = false
+        updatePreviewCaretLiveness()
+        previewCursorDriver.reset()
         doubleSpaceState.reset()
         expectedHostEdit = nil
         super.viewWillDisappear(animated)
@@ -134,12 +171,18 @@ final class KeyboardViewController: UIInputViewController {
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
+        #if DEBUG
+        cursorProbeHostEvent(.text) // DEBUG-only cursor probe
+        #endif
         acknowledgeHostChange()
         synchronizeHostTraits()
     }
 
     override func selectionDidChange(_ textInput: UITextInput?) {
         super.selectionDidChange(textInput)
+        #if DEBUG
+        cursorProbeHostEvent(.selection) // DEBUG-only cursor probe
+        #endif
         // A selection move can leave the same preceding suffix. Never infer
         // permission for a destructive Space edit from that suffix alone.
         doubleSpaceState.reset()
@@ -161,24 +204,32 @@ final class KeyboardViewController: UIInputViewController {
     /// The picture uses the remembered fixed sRGB colors, never the
     /// keyboard's appearance, so light and dark keyboards copy the same PNG.
     fileprivate func openPreviewImagePanel(excerpt: KeyboardPreviewExcerpt, availableWidth: CGFloat, visibleHeight: CGFloat) {
-        let choice = KeyboardImageColorStore.load()
+        // Adopts an imported or restored choice; reads the shared file only here.
+        let choice = KeyboardImageColorStore.load(shared: .shared, hasFullAccess: hasFullAccess)
         if model.previewImageColors != choice { model.previewImageColors = choice }
         let export = KeyboardPreviewImageExport.prepare(excerpt: excerpt, availableWidth: availableWidth,
-            visibleHeight: visibleHeight, colors: choice.colors, hasFullAccess: hasFullAccess)
-        model.previewImageThumbnail = export.image.flatMap { UIImage(data: $0.png, scale: $0.scale) }
+            visibleHeight: visibleHeight, colors: choice.colors, scale: choice.scale, hasFullAccess: hasFullAccess)
+        model.previewImageThumbnail = export.thumbnail()
         model.previewImageExport = export
+        updatePreviewCaretLiveness()
+        // An iPhone in portrait grows to fit the panel.
+        updateKeyboardHeight(animated: true)
     }
 
-    /// Re-renders the frozen excerpt in new colors and remembers the choice
-    /// (preset id and the two Custom colors only). Ignored while copying.
+    /// Re-renders the frozen excerpt in new colors or at a new scale and
+    /// remembers the choice (preset id, the two Custom colors and the scale
+    /// only). Ignored while copying.
     fileprivate func selectPreviewImageColors(_ choice: KeyboardImageColorChoice) {
         guard let export = model.previewImageExport, export.phase != .copying else { return }
         guard choice != model.previewImageColors else { return }
         model.previewImageColors = choice
-        KeyboardImageColorStore.save(choice)
-        guard choice.colors != export.colors,
-              let recolored = export.recolored(choice.colors, hasFullAccess: hasFullAccess) else { return }
-        model.previewImageThumbnail = recolored.image.flatMap { UIImage(data: $0.png, scale: $0.scale) }
+        KeyboardImageColorStore.save(choice, shared: .shared, hasFullAccess: hasFullAccess)
+        guard choice.colors != export.colors || choice.scale != export.scale,
+              let recolored = export.recolored(choice.colors, scale: choice.scale, hasFullAccess: hasFullAccess) else { return }
+        // A scale-only change keeps the thumbnail: same canvas, text and layout.
+        if recolored.colors != export.colors || model.previewImageThumbnail == nil || recolored.image == nil {
+            model.previewImageThumbnail = recolored.thumbnail()
+        }
         model.previewImageExport = recolored
     }
 
@@ -209,18 +260,94 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     fileprivate func closePreviewImagePanel() {
-        if model.previewImageExport != nil { model.previewImageExport = nil }
+        let open = model.previewImageExport != nil
+        if open { model.previewImageExport = nil }
+        updatePreviewCaretLiveness()
         if model.previewImageThumbnail != nil { model.previewImageThumbnail = nil }
+        if open { updateKeyboardHeight(animated: view.window != nil) }
     }
 
-    /// The host's text either side of the caret, when the preview row shows it.
+    // MARK: Inspect Text
+
+    /// Freezes exactly the excerpt the preview row is drawing (without its
+    /// "…" marks) and inspects it. Nothing beyond the visible excerpt is
+    /// read, kept or logged; Full Access is never needed to inspect.
+    fileprivate func openTextInspection(excerpt: KeyboardPreviewExcerpt) {
+        guard model.previewImageExport == nil else { return }
+        let proxy = textDocumentProxy
+        // No context at all while the field reports text: the host isn't sharing it.
+        let contextAvailable = proxy.documentContextBeforeInput != nil || proxy.documentContextAfterInput != nil || !proxy.hasText
+        let catalog = model.catalog
+        let state = TextInspectionState.inspect(before: excerpt.before, after: excerpt.after,
+            beforeTruncated: excerpt.beforeTruncated, afterTruncated: excerpt.afterTruncated,
+            contextAvailable: contextAvailable, restricted: KeyboardHostInputTraits(reading: proxy).isSecureTextEntry,
+            catalogVersion: catalog.resourceError == nil ? catalog.version : nil,
+            lookup: { catalog.character(at: $0) })
+        model.textInspection = KeyboardTextInspection(excerpt: excerpt, state: state,
+                                                      copy: TextInspectionCopyState(hasFullAccess: hasFullAccess))
+        updatePreviewCaretLiveness()
+        // An iPhone in portrait grows to fit the panel, as for Copy Image.
+        updateKeyboardHeight(animated: true)
+    }
+
+    /// Copies the frozen excerpt, its original scalars as U+ labels, one
+    /// normalized form of it, or its UTF-8/UTF-16 hex, only on this explicit
+    /// tap. The host's text and the panel never change; the pasteboard is
+    /// never read.
+    fileprivate func copyTextInspection(_ target: TextInspectionCopyTarget) {
+        guard let panel = model.textInspection, let inspection = panel.state.inspection, panel.copy.canCopy,
+              let value = inspection.copyValue(for: target) else { return }
+        let outcome: TextInspectionCopyOutcome
+        if !hasFullAccess {
+            outcome = .fullAccessRequired
+        } else {
+            let pasteboard = UIPasteboard.general
+            let before = pasteboard.changeCount
+            pasteboard.string = value
+            outcome = pasteboard.changeCount != before ? .copied : .failed
+        }
+        model.textInspection?.copy.record(outcome, for: target)
+        guard outcome == .copied else { return }
+        UIAccessibility.post(notification: .announcement, argument: TextInspectionWording.copied(target))
+        let id = panel.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.model.textInspection?.id == id else { return }
+            self.model.textInspection?.copy.endConfirmation(target)
+        }
+    }
+
+    /// Close, the backdrop, or switching away: typing, caret and Shift are untouched.
+    fileprivate func closeTextInspection() {
+        guard model.textInspection != nil else { return }
+        model.textInspection = nil
+        updatePreviewCaretLiveness()
+        updateKeyboardHeight(animated: view.window != nil)
+    }
+
+    /// The cursor's line, read from up to 96 characters either side, when
+    /// the preview row shows it; confirms a preview move in flight.
     private func refreshTextPreview() {
         guard model.showsTextPreview else { return }
-        let proxy = textDocumentProxy
-        let before = String((proxy.documentContextBeforeInput ?? "").suffix(48))
-        let after = String((proxy.documentContextAfterInput ?? "").prefix(24))
-        if model.hostTextBefore != before { model.hostTextBefore = before }
-        if model.hostTextAfter != after { model.hostTextAfter = after }
+        previewCursorDriver.refresh()
+    }
+
+    /// The excerpt the preview row is drawing right now, frozen by Inspect
+    /// and Copy Image.
+    fileprivate func currentPreviewExcerpt() -> KeyboardPreviewExcerpt {
+        previewCursorControl?.visibleExcerpt() ?? .empty
+    }
+
+    fileprivate func attachPreviewCursor(_ control: KeyboardPreviewCursorControl) {
+        guard previewCursorControl !== control else { return }
+        previewCursorControl = control
+        control.delegate = self
+        updatePreviewCaretLiveness()
+    }
+
+    /// The preview caret blinks only while the keyboard is shown and no Copy
+    /// Image or Inspect panel covers the row (§1a).
+    private func updatePreviewCaretLiveness() {
+        previewCursorControl?.isCaretLive = isKeyboardShown && !model.hasKeyboardPanel
     }
 
     private func synchronizeHostTraits() {
@@ -248,16 +375,13 @@ final class KeyboardViewController: UIInputViewController {
             model.hostDidEdit(invalidateMode: true)
         }
         guard !model.isSearching else { return }
-        let capitalization: KeyboardAutomaticCapitalization
-        if !permitsEnglishAssistance { capitalization = .none }
-        else {
-            switch proxy.autocapitalizationType ?? .sentences {
-            case .none: capitalization = .none
-            case .words: capitalization = .words
-            case .allCharacters: capitalization = .allCharacters
-            default: capitalization = .sentences
-            }
-        }
+        // Follow App keeps the host's own request; the other modes replace
+        // it. Restricted fields (URL, email, credentials, secure entry,
+        // non-default keyboards) never get automatic capitals.
+        let capitalization = KeyboardAutoCapitalizationPolicy.effectiveMode(
+            setting: model.autoCapitalization,
+            host: KeyboardAutoCapitalizationPolicy.hostMode(rawValue: (proxy.autocapitalizationType ?? .sentences).rawValue),
+            permitsAssistance: permitsEnglishAssistance)
         let literalScope = currentLiteralWriteScope()
         guard !literalWriteTransaction.matches(scope: literalScope) else { return }
         model.synchronizeCapitalization(KeyboardEnglishInputPolicy.shouldCapitalize(mode: capitalization, before: proxy.documentContextBeforeInput))
@@ -300,6 +424,7 @@ final class KeyboardViewController: UIInputViewController {
             expectedHostEdit = ExpectedHostEdit(document: document,
                 before: Self.contextSuffix(before + text), expires: ProcessInfo.processInfo.systemUptime + 1)
         } else { expectedHostEdit = nil }
+        previewCursorDriver.keyboardWillEdit()
         proxy.insertText(text)
         return true
     }
@@ -334,12 +459,21 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func updateBackdrop() {
-        let opaque = UIAccessibility.isReduceTransparencyEnabled
+        // iOS 26 draws its own opaque, rounded backdrop with Reduce Transparency;
+        // a rectangular fill here would square off its corners.
+        let opaque = UIAccessibility.isReduceTransparencyEnabled && Self.needsOwnOpaqueBackdrop
         view.backgroundColor = opaque ? KeyboardPalette.backgroundUI : .clear
         view.isOpaque = opaque
     }
 
-    private func updateKeyboardHeight() {
+    nonisolated static var needsOwnOpaqueBackdrop: Bool {
+        if #available(iOS 26.0, *) { return false }
+        return true
+    }
+
+    /// `animated` eases a panel's height change in 0.2 seconds, never with
+    /// Reduce Motion.
+    private func updateKeyboardHeight(animated: Bool = false) {
         let pad = traitCollection.userInterfaceIdiom == .pad
         let scene = view.window?.windowScene
         let sceneSize: CGSize?
@@ -357,27 +491,38 @@ final class KeyboardViewController: UIInputViewController {
             orientationIsLandscape: landscape)
             && KeyboardTypingLayoutPolicy.usesANSI(availableWidth: view.bounds.width - 16, isPad: pad, isLandscape: true)
         if model.isLandscapePadLayout != landscapePad { model.isLandscapePadLayout = landscapePad }
+        // The arrangement's rows, the same on every page; the typing area is
+        // 8 points in from each side. A full ANSI row of digits is a fourth.
+        let rows = model.typingArrangement.keyRows(widePad: pad && view.bounds.width - 16 >= 650)
+        let keyRows = landscapePad && model.padLayout == .ansiNumbers ? max(MainKeyboardArrangement.maximumRows, rows) : rows
         let metrics = KeyboardLayoutPolicy.metrics(
             viewWidth: view.bounds.width, displaySize: scene?.screen.bounds.size,
             sceneHeight: sceneSize?.height, isPad: pad,
             compactVertical: traitCollection.verticalSizeClass == .compact,
-            showsSymbolBar: model.showsSymbolBar,
-            showsNumberRow: model.showsNumberRow || (landscapePad && model.padLayout == .ansiNumbers),
+            keyRows: keyRows,
             searching: model.isSearching, browsing: model.showsUnicode && !model.isSearching,
-            showsTextPreview: model.showsTextPreview)
+            showsTextPreview: model.showsTextPreview,
+            previewImagePanel: model.hasKeyboardPanel)
         if model.isCompactLayout != metrics.isCompactLayout { model.isCompactLayout = metrics.isCompactLayout }
         if model.isPadLayout != pad { model.isPadLayout = pad }
         let typingHeight = metrics.typingKeyHeight
         if model.typingKeyHeight != typingHeight { model.typingKeyHeight = typingHeight }
-        applyKeyboardHeight(metrics.height)
+        applyKeyboardHeight(metrics.height, animated: animated && !UIAccessibility.isReduceMotionEnabled)
     }
 
 
 
-    private func applyKeyboardHeight(_ height: CGFloat) {
+    private func applyKeyboardHeight(_ height: CGFloat, animated: Bool = false) {
         guard height.isFinite, height > 0 else { return }
         guard let input = view as? KeyboardSelfSizingInputView else { return }
         var changed = false
+        if animated {
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction]) {
+                changed = input.requestHeight(height)
+                if changed { self.view.superview?.layoutIfNeeded() }
+            }
+            return
+        }
         UIView.performWithoutAnimation {
             changed = input.requestHeight(height)
             if changed {
@@ -423,8 +568,10 @@ final class KeyboardViewController: UIInputViewController {
               let keyID = KeyboardKeySettings.identifier(forCharacter: key) else { return nil }
         let captured = model.typingState
         let padLayout = model.padLayout
+        // A digit the app arranged among the letters types without a fourth row.
         let original = isAuxiliaryKey
-            ? (hasAuxiliaryRow ? KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: key, layout: captured.layout, ansiPad: ansiPad) : nil)
+            ? (hasAuxiliaryRow || captured.layout == .letters && MainKeyboardArrangement.isDigit(key)
+                ? KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: key, layout: captured.layout, ansiPad: ansiPad) : nil)
             : KeyboardTypingLayoutPolicy.output(for: key, state: captured, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout)
         guard let original else { return nil }
         let settings = model.keySettings
@@ -538,7 +685,7 @@ final class KeyboardViewController: UIInputViewController {
             return current() && !self.model.isSearching && !self.model.hasSymbolBoardOverlay
                 && self.model.inspection == nil && self.model.symbolBoardInspectionText == nil
                 && SymbolBoardStore.shared.activeBoardID == activeBoardID
-                && (self.model.showsUnicode ? activeBoardID == boardID : SymbolBoardStore.shared.typingBoard.id == boardID)
+                && self.model.showsUnicode && activeBoardID == boardID
                 && SymbolBoardStore.shared.key(boardID: boardID, keyID: key.id) == key
         }
         guard accepts() else { return nil }
@@ -631,6 +778,7 @@ final class KeyboardViewController: UIInputViewController {
             if isQuery { self?.model.deleteQueryCharacter() }
             else {
                 self?.expectedHostEdit = nil
+                self?.previewCursorDriver.keyboardWillEdit()
                 self?.textDocumentProxy.deleteBackward()
                 self?.didEditHostText()
             }
@@ -655,6 +803,14 @@ final class KeyboardViewController: UIInputViewController {
                 guard self.model.isSearching else { return false }
                 self.doubleSpaceState.reset()
                 self.model.appendQuery(key)
+            case .queryHold(let key):
+                // A held search key types its literal title into the host,
+                // like a search result: a plain insert, no case or spacing
+                // assistance, and the query stays as it is.
+                guard self.model.isSearching, let text = KeyboardQueryHoldPolicy.hostText(forKey: key) else { return false }
+                self.doubleSpaceState.reset()
+                guard self.insertHostText(text) else { return false }
+                self.didEditHostText()
             case .collapse:
                 self.dismissKeyboard()
             case .toolbar:
@@ -713,6 +869,7 @@ final class KeyboardViewController: UIInputViewController {
            Self.contextSuffix(current) == Self.contextSuffix(before) {
             // Delete only the ASCII space whose exact context was authorized.
             expectedHostEdit = nil
+            previewCursorDriver.keyboardWillEdit()
             proxy.deleteBackward()
             // A proxy mutation can synchronously change focus or input mode.
             // Never send the second write into a replacement document, and
@@ -818,7 +975,7 @@ private enum KeyboardItem {
 }
 
 private enum KeyboardInputCommand {
-    case query(String), space, returnKey, shift, capsLock, tab, layout(KeyboardTypingLayout), toolbar, collapse
+    case query(String), queryHold(String), space, returnKey, shift, capsLock, tab, layout(KeyboardTypingLayout), toolbar, collapse
 }
 
 private enum KeyboardPanel { case typing, unicode }
@@ -888,18 +1045,22 @@ private final class KeyboardModel: ObservableObject {
     @Published private(set) var useUnicodeFonts: Bool {
         didSet {
             if oldValue && !useUnicodeFonts { UnicodeFontSupport.clearCache() }
+            // The master switch: off pauses font rules without deleting them.
+            UnicodeFontSupport.rulesEnabled = useUnicodeFonts
         }
     }
+    /// The app's saved font rules, as compiled JSON. Re-read on appear and
+    /// refresh only (never per keystroke), and decoded only when the file
+    /// changed. The keyboard never parses TOML.
+    private let fontRules = FontRuleSnapshotReader()
     @Published private(set) var showsCollapseKey: Bool
-    @Published private(set) var showsSymbolBar: Bool
-    @Published private(set) var searchBarInsteadOfSymbols: Bool
-    @Published private(set) var showsNumberRow: Bool
     @Published private(set) var showsTextPreview: Bool
     @Published private(set) var showsUCSUR: Bool
     @Published private(set) var prefersUCSUR: Bool
-    /// The host's text either side of the caret, for the text preview row.
-    @Published var hostTextBefore = ""
-    @Published var hostTextAfter = ""
+    /// The cursor's line, the drawn caret and whether the preview may move
+    /// it, for the text preview row.
+    @Published var previewCursor = KeyboardPreviewCursorDriver.State(
+        line: KeyboardPreviewCursorLine(before: nil, after: nil), caret: 0, interactive: false, placementGeneration: 0)
     /// The open Copy Image panel: a frozen excerpt of the visible preview and
     /// its rendered picture. Nil when closed; never persisted or logged.
     @Published var previewImageExport: KeyboardPreviewImageExport?
@@ -907,11 +1068,23 @@ private final class KeyboardModel: ObservableObject {
     /// The Copy Image colors; loaded from and saved to the keyboard's own
     /// defaults as a preset id and two colors.
     @Published var previewImageColors = KeyboardImageColorChoice.default
+    /// The open Inspect Text panel: a frozen excerpt and its analysis.
+    /// Nil when closed; never persisted or logged.
+    @Published var textInspection: KeyboardTextInspection?
+    /// Either full-keyboard panel is open.
+    var hasKeyboardPanel: Bool { previewImageExport != nil || textInspection != nil }
+    /// The app's Auto-Capitalization choice, read on appear and refresh only.
+    private(set) var autoCapitalization: AutoCapitalizationMode = .followApp
     @Published private(set) var symbolPagesToolbarVisible: Bool?
-    var showsUnicodeToolbar: Bool { symbolPagesToolbarVisible ?? (showsUnicode || (showsSymbolBar && searchBarInsteadOfSymbols)) }
+    var showsUnicodeToolbar: Bool { symbolPagesToolbarVisible ?? showsUnicode }
     @Published private(set) var results: [UnicodeCharacter] = []
     @Published private(set) var emojiResults: [UnicodeEmojiEntry] = []
     @Published private(set) var searchInProgress = false
+#if DEBUG
+    /// The last search's timing, for the search benchmark UI test only.
+    @Published private(set) var searchTiming = ""
+    private var searchSerial = 0
+#endif
     @Published private(set) var discoveryCharacters: [UnicodeCharacter] = []
     @Published private(set) var discoveryEmojis: [UnicodeEmojiEntry] = []
     @Published private(set) var discoveryLoading = false
@@ -943,6 +1116,8 @@ private final class KeyboardModel: ObservableObject {
     @Published var needsInputModeSwitchKey = true
     @Published var returnTitle = "Return"
     @Published var isCompactLayout = false
+    /// iPhone landscape search: compact rows, with the results in the search row.
+    var usesCompactSearchLayout: Bool { isCompactLayout && !isPadLayout && isSearching }
     @Published var isPadLayout = false
     @Published var isLandscapePadLayout = false
     var presentationChanged: (() -> Void)?
@@ -1101,6 +1276,11 @@ private final class KeyboardModel: ObservableObject {
     }
 
     /// Whether the app placed `key`, such as Tab, on this layout's keyboard.
+    /// The current layout's main keyboard as it types: the saved
+    /// arrangement, or the number row and the layout's own rows.
+    var typingArrangement: MainKeyboardArrangement {
+        keySettings.effectiveArrangement(for: KeyboardAlphabet.alphabet(id: typingState.alphabet.id) ?? typingState.alphabet)
+    }
     func arrangementHas(_ key: String) -> Bool {
         keySettings.arrangement(for: typingState.alphabet.id)?.keys.contains(key) == true
     }
@@ -1128,9 +1308,6 @@ private final class KeyboardModel: ObservableObject {
         keySettings = KeyboardKeySettings.shared.loadSnapshot()
         edition = appSettings.edition
         useUnicodeFonts = appSettings.useUnicodeFonts
-        showsSymbolBar = appSettings.showsSymbolBar
-        searchBarInsteadOfSymbols = appSettings.searchBarInsteadOfSymbols
-        showsNumberRow = appSettings.showsNumberRow
         showsTextPreview = appSettings.showsTextPreview
         showsUCSUR = appSettings.showsUCSUR
         prefersUCSUR = appSettings.prefersUCSUR
@@ -1138,6 +1315,10 @@ private final class KeyboardModel: ObservableObject {
         showsCollapseKey = appSettings.showsCollapseKey
         selectedPadLayout = appSettings.padLayout
         adoptLayouts(appSettings.layouts, keepingCurrent: false)
+        UnicodeFontSupport.rulesEnabled = appSettings.useUnicodeFonts
+        fontRules.refresh()
+        UnicodeFontSupport.ruleSet = FontRuleSet(rules: fontRules.rules)
+        autoCapitalization = AutoCapitalizationSetting.shared.load()
     }
 
     /// Keeps the current layout while it stays enabled, otherwise the one
@@ -1174,18 +1355,13 @@ private final class KeyboardModel: ObservableObject {
         let selected = UnicodeEditionSettings.shared.loadSnapshot()
         if edition != selected.edition { edition = selected.edition }
         if useUnicodeFonts != selected.useUnicodeFonts { useUnicodeFonts = selected.useUnicodeFonts }
+        refreshFontRules()
+        // Applies to upcoming letters only; the caller re-synchronizes Shift.
+        autoCapitalization = AutoCapitalizationSetting.shared.load()
         if showsCollapseKey != selected.showsCollapseKey { showsCollapseKey = selected.showsCollapseKey }
         if selectedPadLayout != selected.padLayout { selectedPadLayout = selected.padLayout; invalidateInputMode(); presentationChanged?() }
         if layouts.map(\.id) != selected.layouts {
             adoptLayouts(selected.layouts, keepingCurrent: true)
-            invalidateInputMode(); presentationChanged?()
-        }
-        if showsSymbolBar != selected.showsSymbolBar || searchBarInsteadOfSymbols != selected.searchBarInsteadOfSymbols {
-            showsSymbolBar = selected.showsSymbolBar; searchBarInsteadOfSymbols = selected.searchBarInsteadOfSymbols
-            invalidateInputMode(); presentationChanged?()
-        }
-        if showsNumberRow != selected.showsNumberRow {
-            showsNumberRow = selected.showsNumberRow
             invalidateInputMode(); presentationChanged?()
         }
         if showsTextPreview != selected.showsTextPreview {
@@ -1205,6 +1381,14 @@ private final class KeyboardModel: ObservableObject {
             if arranged { adoptLayouts(layouts.map(\.id), keepingCurrent: true) }
             invalidateInputMode()
         }
+    }
+
+    /// Adopts rules the app saved since the last appear; decodes only when
+    /// the rules file changed, and redraws only when the rules did.
+    func refreshFontRules() {
+        guard fontRules.refresh() else { return }
+        UnicodeFontSupport.ruleSet = FontRuleSet(rules: fontRules.rules)
+        invalidateInputMode()
     }
 
     deinit {
@@ -1368,16 +1552,30 @@ private final class KeyboardModel: ObservableObject {
             do { try await Task.sleep(for: .milliseconds(100)) }
             catch { return }
             guard !Task.isCancelled else { return }
+#if DEBUG
+            let started = DispatchTime.now().uptimeNanoseconds
+#endif
             let matches: ([UnicodeCharacter], [UnicodeEmojiEntry]) = await CatalogWorker.run {
                 if searchEmojis { return ([], activeEmojis.search(searchQuery, limit: 120, order: activeOrder)) }
                 return (activeCatalog.search(searchQuery, limit: 120, order: activeOrder), [])
             }
+#if DEBUG
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+            let indexed = await CatalogWorker.run {
+                !searchEmojis && UnicodeSearchIndexStore.shared.installedIndex(for: activeCatalog) != nil
+            }
+#endif
             guard !Task.isCancelled, let self, self.revision == activeRevision,
                   self.query.trimmingCharacters(in: .whitespacesAndNewlines) == searchQuery,
                   (self.section == .emojis) == searchEmojis else { return }
             self.results = matches.0
             self.emojiResults = matches.1
             self.searchInProgress = false
+#if DEBUG
+            self.searchSerial += 1
+            self.searchTiming = KeyboardSearchTiming.describe(serial: self.searchSerial, milliseconds: elapsed, indexed: indexed,
+                                                              results: matches.0.count + matches.1.count)
+#endif
         }
     }
 }
@@ -1475,7 +1673,7 @@ private struct KeyboardControlSurface: ViewModifier {
 private struct KeyboardTray: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
-        if reduceTransparency {
+        if reduceTransparency && KeyboardViewController.needsOwnOpaqueBackdrop {
             KeyboardPalette.background
         } else {
             Color.clear
@@ -1528,8 +1726,9 @@ private struct PreviewImageThumbnailPicture: View {
     }
 }
 
-/// Copy Image colors: the caption, five preset chips and, for Custom, the
-/// Text and Background swatch lines plus any readability caution.
+/// Copy Image colors: the caption (or, in its place, any readability
+/// caution), five preset chips and, for Custom, the Text and Background
+/// swatch lines.
 private struct PreviewImageColorsSection: View {
     let choice: KeyboardImageColorChoice
     let enabled: Bool
@@ -1538,15 +1737,31 @@ private struct PreviewImageColorsSection: View {
 
     private var hairline: CGFloat { 1 / max(1, displayScale) }
     private var separator: Color { Color(uiColor: .separator) }
+    static let customLinesID = "customLines"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(verbatim: KeyboardImageColorCopy.caption(choice))
+                // A readability note takes the caption's place, so the footer
+                // separator never clips it.
+                if let note = KeyboardImageColorCopy.readabilityNote(choice.colors.readability) {
+                    Label {
+                        Text(verbatim: note)
+                    } icon: {
+                        Image(systemName: "exclamationmark.circle")
+                    }
                     .font(.footnote).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.tail)
+                    .lineLimit(2)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("keyboard.previewImage.readability")
+                } else {
+                    Text(verbatim: KeyboardImageColorCopy.caption(choice))
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+                // Five chips need 268 points, so this scrolls only for very large text.
                 ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 12) {
                         ForEach(KeyboardImageColorPreset.allCases) { chip($0) }
                     }
                     // 4pt clearance on every side inside the scroll content, so the
@@ -1559,7 +1774,7 @@ private struct PreviewImageColorsSection: View {
             .accessibilityLabel(Text(verbatim: KeyboardImageColorCopy.groupLabel))
             .accessibilityIdentifier("keyboard.previewImage.colors")
             if choice.preset == .custom {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
                     swatchLine(KeyboardImageColorCopy.textLine,
                                items: KeyboardImagePalette.colors.map { KeyboardImageBackground.color($0.rgb) },
                                selected: .color(choice.customText), identifier: "text") { background in
@@ -1575,16 +1790,8 @@ private struct PreviewImageColorsSection: View {
                         select(next)
                     }
                 }
-            }
-            if let note = KeyboardImageColorCopy.readabilityNote(choice.colors.readability) {
-                Label {
-                    Text(verbatim: note).fixedSize(horizontal: false, vertical: true)
-                } icon: {
-                    Image(systemName: "exclamationmark.circle")
-                }
-                .font(.footnote).foregroundStyle(.secondary)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("keyboard.previewImage.readability")
+                // Picking Custom scrolls the panel so both lines show.
+                .id(Self.customLinesID)
             }
         }
         .disabled(!enabled)
@@ -1633,21 +1840,21 @@ private struct PreviewImageColorsSection: View {
 
     private func swatchLine(_ title: String, items: [KeyboardImageBackground], selected: KeyboardImageBackground,
                             identifier: String, pick: @escaping (KeyboardImageBackground) -> Void) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
+            // A fixed leading column, so both lines' swatches start together.
             Text(verbatim: title).font(.footnote).foregroundStyle(.secondary)
-                .fixedSize()
-                .frame(minWidth: 76, alignment: .leading)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(width: 84, alignment: .leading)
                 .accessibilityHidden(true)
-            ScrollView(.horizontal) {
+            PreviewImageSwatchScroller {
                 HStack(spacing: 0) {
                     ForEach(items, id: \.storedValue) { item in
                         swatch(item, isSelected: item == selected, line: title, identifier: identifier) { pick(item) }
                     }
                 }
-                // Same 4pt ring clearance as the chip row.
+                // Same 4pt ring clearance as the chip row: 52 points a line.
                 .padding(4)
             }
-            .scrollIndicators(.hidden)
         }
         .accessibilityElement(children: .contain)
     }
@@ -1662,12 +1869,12 @@ private struct PreviewImageColorsSection: View {
                 case .color(let rgb): Color(cgColor: rgb.cgColor)
                 }
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 30, height: 30)
             .clipShape(Circle())
             .overlay(Circle().strokeBorder(separator, lineWidth: hairline))
             .overlay {
                 if isSelected {
-                    Circle().strokeBorder(KeyboardPalette.accent, lineWidth: 2).frame(width: 36, height: 36)
+                    Circle().strokeBorder(KeyboardPalette.accent, lineWidth: 2).frame(width: 38, height: 38)
                 }
             }
             .frame(width: 44, height: 44)
@@ -1677,6 +1884,748 @@ private struct PreviewImageColorsSection: View {
         .accessibilityLabel(Text(verbatim: String(localized: "\(line), \(name)")))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("keyboard.previewImage.\(identifier).\(item.storedValue)")
+    }
+}
+
+/// Copy Image size: the size actually copied as a caption, then 1×, 2× and
+/// 3× chips. The scale changes only the picture's pixels, never its layout.
+private struct PreviewImageSizeSection: View {
+    let choice: KeyboardImageColorChoice
+    /// Nil when there is nothing to size; the caption then reads "Size".
+    let size: KeyboardImagePixelSize?
+    let enabled: Bool
+    let select: (KeyboardImageColorChoice) -> Void
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var hairline: CGFloat { 1 / max(1, displayScale) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // One line at default sizes; wraps at large text sizes.
+            Text(verbatim: KeyboardImageColorCopy.sizeCaption(size))
+                .font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+                .lineLimit(dynamicTypeSize > .large ? nil : 1).truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: dynamicTypeSize > .large)
+                .accessibilityLabel(Text(verbatim: KeyboardImageColorCopy.sizeCaptionAccessibilityLabel(size)))
+                .accessibilityIdentifier("keyboard.previewImage.size.caption")
+            HStack(spacing: 12) {
+                ForEach(KeyboardImageScale.allCases, id: \.self) { chip($0) }
+            }
+            // The same 4pt ring clearance as the color chips: a 52-point row.
+            .padding(4)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text(verbatim: KeyboardImageColorCopy.sizeGroupLabel))
+            .accessibilityIdentifier("keyboard.previewImage.size")
+        }
+        .disabled(!enabled)
+    }
+
+    private func chip(_ scale: KeyboardImageScale) -> some View {
+        let selected = choice.scale == scale
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return Button {
+            var next = choice
+            next.scale = scale
+            select(next)
+        } label: {
+            // Fixed size, like the color chips' "Aa".
+            Text(verbatim: scale.label)
+                .font(.system(size: 17, weight: .semibold).monospacedDigit())
+                .foregroundStyle(Color(uiColor: .label))
+                .frame(width: 44, height: 44)
+                .background(Color(uiColor: .tertiarySystemFill), in: shape)
+                .overlay(shape.strokeBorder(Color(uiColor: .separator), lineWidth: hairline))
+                .overlay {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(KeyboardPalette.accent, lineWidth: 2)
+                            .padding(-4)
+                    }
+                }
+                .contentShape(shape)
+        }
+        .buttonStyle(KeyboardPressStyle())
+        .accessibilityLabel(Text(verbatim: KeyboardImageColorCopy.scaleLabel(scale)))
+        .accessibilityValue(Text(verbatim: selected ? size.map { KeyboardImageColorCopy.pixelsValue($0) } ?? "" : ""))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("keyboard.previewImage.size.\(scale.rawValue)")
+    }
+}
+
+/// A panel that covers the whole keyboard while it is open: a card inset
+/// 4 points from every edge (on iPad at most 640 points wide, centred), a
+/// pinned 44-point header with its title and Close, a body that always
+/// scrolls, and a pinned footer for its action. Copy Image uses it, and an
+/// Inspect panel can too. VoiceOver's escape gesture closes it.
+private struct KeyboardPanelContainer<Content: View, Footer: View>: View {
+    let title: LocalizedStringKey
+    let identifier: String
+    let closeIdentifier: String
+    let isPad: Bool
+    let close: () -> Void
+    /// False hides the footer and its separator, for a panel's centered states.
+    var showsFooter = true
+    /// The body, given its scroll view so it can bring a part into view.
+    @ViewBuilder let content: (ScrollViewProxy) -> Content
+    /// The footer, given the keyboard's height to cap any notice.
+    @ViewBuilder let footer: (CGFloat) -> Footer
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = max(0, isPad ? min(geometry.size.width - 8, 640) : geometry.size.width - 8)
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Text(title).font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button(action: close) {
+                        Image(systemName: "xmark").font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(KeyboardPressStyle())
+                    .accessibilityLabel("Close")
+                    .accessibilityIdentifier(closeIdentifier)
+                }
+                .padding(.leading, 16).padding(.trailing, 4)
+                .frame(height: 44)
+                .layoutPriority(2)
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical) {
+                        content(proxy)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                    }
+                    .scrollIndicators(.automatic)
+                    .scrollIndicatorsFlash(onAppear: true)
+                    // No iOS 26 edge blur over the top of the body.
+                    .keyboardUnmaskedScrollEdges()
+                }
+                .frame(maxHeight: .infinity)
+                // The action is laid out before the body, so it never falls off.
+                if showsFooter {
+                    VStack(spacing: 0) {
+                        Rectangle().fill(Color(uiColor: .separator)).frame(height: 0.5).accessibilityHidden(true)
+                        footer(geometry.size.height)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                            .padding(.bottom, 12)
+                    }
+                    .layoutPriority(1)
+                }
+            }
+            .frame(width: width, height: max(0, geometry.size.height - 8))
+            .background(Color(uiColor: .secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(identifier)
+            .accessibilityAction(.escape, close)
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+}
+
+/// A panel's one action: full width, exactly 44 points tall, radius 12.
+private struct KeyboardPanelActionStyle: ButtonStyle {
+    let prominent: Bool
+    var radius: CGFloat = 12
+    var font: Font = .system(size: 17, weight: .semibold)
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let fill: Color = !isEnabled ? Color(uiColor: .tertiarySystemFill)
+            : prominent ? KeyboardPalette.action : KeyboardPalette.accent.opacity(0.15)
+        let text: Color = !isEnabled ? .secondary : prominent ? KeyboardPalette.actionText : KeyboardPalette.accent
+        return configuration.label
+            .font(font)
+            .lineLimit(1).minimumScaleFactor(0.6)
+            .foregroundStyle(text)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background(fill, in: shape)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .contentShape(shape)
+    }
+}
+
+/// The preview row's trailing glyphs: plain light grey outlines with no
+/// fill, border or accent. Pressed reads lighter, disabled lighter still;
+/// Increase Contrast uses the label color at 75 %.
+private struct PreviewRowIconStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func makeBody(configuration: Configuration) -> some View {
+        let color: Color
+        if !isEnabled { color = Color(uiColor: .quaternaryLabel) }
+        else if configuration.isPressed { color = Color(uiColor: .tertiaryLabel) }
+        else if contrast == .increased { color = Color(uiColor: .label).opacity(0.75) }
+        else { color = Color(uiColor: .secondaryLabel) }
+        return configuration.label.foregroundStyle(color)
+    }
+}
+
+/// One open Inspect Text panel: the excerpt frozen as drawn, its analysis
+/// and where copying is. Lives only while the panel is open.
+struct KeyboardTextInspection: Equatable {
+    let id = UUID()
+    let excerpt: KeyboardPreviewExcerpt
+    let state: TextInspectionState
+    var copy: TextInspectionCopyState
+}
+
+/// Inspect Text (design/inspect/design.md §2–5) in the same full-keyboard
+/// container as Copy Image: the frozen sample, the three counts, neutral
+/// normalization chips, one card per grapheme cluster with its code points
+/// in original order, then the normalization rows, the UTF-8/UTF-16 hex
+/// and footnotes (copy-forms addendum: each form and encoding copies on its
+/// own). Copy Text
+/// and Copy Code Points are pinned below. Read-only: nothing here edits,
+/// normalizes or keeps the inspected text.
+private struct TextInspectionPanel: View {
+    let panel: KeyboardTextInspection
+    let isPad: Bool
+    let close: () -> Void
+    let copy: (TextInspectionCopyTarget) -> Void
+    /// The one expanded code point row, by scalar offset.
+    @State private var expanded: Int?
+    @State private var showsTotalsHelp = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private static let normalizationID = "keyboard.inspect.normalization"
+
+    var body: some View {
+        KeyboardPanelContainer(title: "Inspect Text", identifier: "keyboard.inspect.panel",
+                               closeIdentifier: "keyboard.inspect.close", isPad: isPad, close: close,
+                               showsFooter: panel.state.inspection != nil) { proxy in
+            if let inspection = panel.state.inspection {
+                content(inspection, proxy: proxy)
+            } else if let message = panel.state.message {
+                stateMessage(message)
+            }
+        } footer: { height in
+            footer(availableHeight: height)
+        }
+    }
+
+    // MARK: States
+
+    private func stateMessage(_ message: (symbol: String, title: String, text: String)) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: message.symbol).font(.system(size: 34)).foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(message.title).font(.headline).multilineTextAlignment(.center)
+                .accessibilityIdentifier("keyboard.inspect.stateTitle")
+            Text(message.text).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Close", action: close)
+                .buttonStyle(KeyboardPanelActionStyle(prominent: false, radius: 10, font: .body.weight(.semibold)))
+                .frame(width: 120)
+                .accessibilityIdentifier("keyboard.inspect.stateClose")
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 20)
+    }
+
+    // MARK: Body
+
+    private func content(_ inspection: TextInspection, proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sample(inspection)
+            totals(inspection)
+            chips(inspection, proxy: proxy)
+            Text("Code Points").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            VStack(spacing: 8) {
+                ForEach(inspection.clusters) { cluster in clusterCard(cluster) }
+            }
+            normalizationSection(inspection).id(Self.normalizationID)
+            encodingsSection(inspection)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(inspection.footnotes, id: \.self) { note in
+                    Text(note).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityIdentifier("keyboard.inspect.footnotes")
+        }
+    }
+
+    /// Drawn like the preview row: per-character preview fonts, before,
+    /// a 2-point accent caret, then after, in that order from the left.
+    /// The preview's "…" marks show in secondary color; they aren't text.
+    private func sample(_ inspection: TextInspection) -> some View {
+        let excerpt = panel.excerpt
+        // Isolates keep before|caret|after in that order while RTL runs
+        // inside each part shape naturally.
+        let text = Text("\(Text(verbatim: "\u{2066}"))\(sampleRun(excerpt.before, leadingMark: excerpt.beforeTruncated))\(Text(verbatim: "\u{2069}"))\(Text(verbatim: "\u{258F}").font(.system(size: 22, weight: .regular)).foregroundStyle(KeyboardPalette.accent))\(Text(verbatim: "\u{2066}"))\(sampleRun(excerpt.after, trailingMark: excerpt.afterTruncated))\(Text(verbatim: "\u{2069}"))")
+        return text
+            .lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+            .padding(10)
+            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .environment(\.layoutDirection, .leftToRight)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Text preview")
+            .accessibilityValue(Text(verbatim: inspection.text))
+            .accessibilityIdentifier("keyboard.inspect.sample")
+    }
+
+    private func sampleRun(_ text: String, leadingMark: Bool = false, trailingMark: Bool = false) -> Text {
+        var result = AttributedString()
+        var characters = Array(text)
+        var lead = false, trail = false
+        if leadingMark, characters.first == "…" { characters.removeFirst(); lead = true }
+        if trailingMark, characters.last == "…" { characters.removeLast(); trail = true }
+        func mark() -> AttributedString {
+            var run = AttributedString(KeyboardTextPreviewLayout.ellipsis)
+            run.font = .system(size: KeyboardTextPreviewLayout.fontSize)
+            run.foregroundColor = Color(uiColor: .secondaryLabel)
+            return run
+        }
+        if lead { result += mark() }
+        for character in characters {
+            var run = AttributedString(String(character))
+            run.font = Font(KeyboardTextPreviewLayout.font(for: String(character)))
+            result += run
+        }
+        if trail { result += mark() }
+        return Text(result)
+    }
+
+    private func totals(_ inspection: TextInspection) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 4) {
+                Text(inspection.totals).font(.footnote.monospacedDigit())
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("keyboard.inspect.totals")
+                Button {
+                    showsTotalsHelp.toggle()
+                } label: {
+                    Image(systemName: "info.circle").font(.system(size: 15)).foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(KeyboardPressStyle())
+                .accessibilityLabel("About these counts")
+                .accessibilityValue(showsTotalsHelp ? "expanded" : "collapsed")
+                .accessibilityIdentifier("keyboard.inspect.totalsInfo")
+            }
+            .padding(.vertical, -8)
+            if showsTotalsHelp {
+                Text(TextInspectionWording.totalsHelp).font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("keyboard.inspect.totalsHelp")
+            }
+        }
+    }
+
+    @ViewBuilder private func chips(_ inspection: TextInspection, proxy: ScrollViewProxy) -> some View {
+        let chips = ForEach(inspection.normalization) { result in
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(Self.normalizationID, anchor: .top)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(verbatim: result.form.rawValue).font(.footnote.weight(.semibold)).foregroundStyle(.primary)
+                    Image(systemName: result.status.symbol).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                }
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity, minHeight: 32)
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                // A 44-point target around the 32-point chip.
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(KeyboardPressStyle())
+            .accessibilityLabel(Text(verbatim: result.accessibilityLabel))
+            .accessibilityIdentifier("keyboard.inspect.chip.\(result.form.rawValue)")
+        }
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 0) { chips }
+            } else {
+                HStack(spacing: 8) { chips }
+            }
+        }
+        .padding(.vertical, -6)
+    }
+
+    private func clusterCard(_ cluster: TextInspectionCluster) -> some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+        return layout {
+            Text(verbatim: cluster.tileText)
+                .font(Font(UnicodeFontSupport.font(for: cluster.tileText, size: 26, enabled: true)))
+                .lineLimit(1).minimumScaleFactor(0.4)
+                .frame(width: 44, height: 44)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .environment(\.layoutDirection, .leftToRight)
+                .accessibilityHidden(true)
+            VStack(spacing: 0) {
+                ForEach(Array(cluster.scalars.enumerated()), id: \.element.id) { index, scalar in
+                    if index > 0 {
+                        Rectangle().fill(Color(uiColor: .separator)).frame(height: 0.5).accessibilityHidden(true)
+                    }
+                    scalarRow(scalar)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(8)
+        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(verbatim: cluster.accessibilityLabel))
+        .accessibilityIdentifier("keyboard.inspect.cluster.\(cluster.id)")
+    }
+
+    private func scalarRow(_ scalar: TextInspectionScalar) -> some View {
+        let isOpen = expanded == scalar.id
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                    expanded = isOpen ? nil : scalar.id
+                }
+            } label: {
+                HStack(alignment: .top, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(Text(verbatim: scalar.label).font(.system(.footnote, design: .monospaced).weight(.semibold)).foregroundStyle(.primary)) \(Text(verbatim: scalar.name).font(.footnote).foregroundStyle(scalar.nameIsNote ? Color.secondary : Color.primary))")
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !scalar.detail.isEmpty {
+                            Text(verbatim: scalar.detail).font(.caption2).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isOpen ? 180 : 0))
+                        .padding(.top, 3)
+                }
+                .padding(.vertical, 5)
+                .frame(minHeight: 44, alignment: .center)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(KeyboardPressStyle())
+            .accessibilityLabel(Text(verbatim: scalar.accessibilityLabel))
+            .accessibilityValue(Text(verbatim: scalar.accessibilityCategoryBlock + ", " + (isOpen ? "expanded" : "collapsed")))
+            .accessibilityIdentifier("keyboard.inspect.codePoint.\(scalar.id)")
+            if isOpen {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(scalar.properties, id: \.identifier) { property in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(property.title.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                            Text(verbatim: property.value)
+                                .font(property.monospaced ? .system(.footnote, design: .monospaced) : .footnote)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("keyboard.inspect.property.\(property.identifier)")
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6).padding(.bottom, 8)
+                .accessibilityIdentifier("keyboard.inspect.details.\(scalar.id)")
+            }
+        }
+    }
+
+    /// Each form: name and status, its description, then only the clusters
+    /// it changes (design/inspect/copy-forms/design.md §1), with its own
+    /// copy button on the trailing edge.
+    private func normalizationSection(_ inspection: TextInspection) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Normalization").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            Text(TextInspectionWording.normalizationHelper).font(.footnote).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 0) {
+                ForEach(Array(inspection.normalization.enumerated()), id: \.element.id) { index, result in
+                    if index > 0 {
+                        Rectangle().fill(Color(uiColor: .separator)).frame(height: 0.5).accessibilityHidden(true)
+                    }
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            titleLine(Text(verbatim: result.form.rawValue),
+                                      detail: Text("\(Image(systemName: result.status.symbol)) \(result.status.title)"))
+                            Text(result.form.summary).font(.footnote).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if !result.changes.isEmpty {
+                                changeLines(result).padding(.top, 2)
+                            }
+                        }
+                        .padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(Text(verbatim: result.accessibilityRowLabel))
+                        .accessibilityValue(Text(verbatim: result.accessibilityRowValue))
+                        .accessibilityIdentifier("keyboard.inspect.normalization.\(result.form.rawValue)")
+                        rowCopyButton(.form(result.form), enabled: result.canCopy,
+                                      identifier: "keyboard.inspect.copy.\(result.form.rawValue)")
+                    }
+                    .frame(minHeight: 44)
+                }
+            }
+        }
+    }
+
+    /// "NFD  = Already in this form" on one line; the status wraps under
+    /// the name when they don't fit, and always at accessibility sizes.
+    @ViewBuilder private func titleLine(_ name: Text, detail: Text) -> some View {
+        let title = name.font(.body.weight(.semibold)).foregroundStyle(.primary)
+        let secondary = detail.font(.footnote).foregroundStyle(.secondary)
+        let stacked = VStack(alignment: .leading, spacing: 2) {
+            title.fixedSize(horizontal: false, vertical: true)
+            secondary.fixedSize(horizontal: false, vertical: true)
+        }
+        if dynamicTypeSize.isAccessibilitySize {
+            stacked
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) { title.fixedSize(); secondary.fixedSize() }
+                stacked
+            }
+        }
+    }
+
+    /// "é  U+0065 U+0301 → U+00E9 ×3", at most four, then "+n more".
+    private func changeLines(_ result: TextNormalizationResult) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(result.shownChanges) { change in
+                Text("\(Text(verbatim: change.display).font(.caption2).foregroundStyle(.primary))  \(Text(verbatim: change.codePoints).font(.caption2.monospaced()))\(Text(verbatim: change.occurrences.map { " " + $0 } ?? ""))")
+                    .font(.caption2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let more = result.moreChanges {
+                Text(more).font(.caption2)
+            }
+        }
+        .foregroundStyle(.secondary)
+        .environment(\.layoutDirection, .leftToRight)
+        .accessibilityIdentifier("keyboard.inspect.changes.\(result.form.rawValue)")
+    }
+
+    /// UTF-8 bytes and UTF-16 code units of the same excerpt as hex
+    /// (copy-forms §2), each collapsed to three lines with its own copy.
+    private func encodingsSection(_ inspection: TextInspection) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(TextInspectionWording.encodingsSection).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            VStack(spacing: 0) {
+                ForEach(Array(inspection.encodings.enumerated()), id: \.element.id) { index, encoding in
+                    if index > 0 {
+                        Rectangle().fill(Color(uiColor: .separator)).frame(height: 0.5).accessibilityHidden(true)
+                    }
+                    HStack(alignment: .top, spacing: 8) {
+                        TextInspectionEncodingValue(encoding: encoding) {
+                            titleLine(Text(verbatim: encoding.form.rawValue), detail: Text(encoding.countLabel))
+                        }
+                        .padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        rowCopyButton(encoding.target, enabled: true,
+                                      identifier: "keyboard.inspect.copy.\(encoding.form.rawValue)")
+                            .accessibilityHint(Text(TextInspectionWording.copyHexHint))
+                    }
+                    .frame(minHeight: 44)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("keyboard.inspect.encodings")
+    }
+
+    /// A row's 44-point `doc.on.doc`, a checkmark for 1.5 s after a copy.
+    private func rowCopyButton(_ target: TextInspectionCopyTarget, enabled: Bool, identifier: String) -> some View {
+        let confirmed = panel.copy.confirmed == target
+        return Button { copy(target) } label: {
+            Image(systemName: confirmed ? "checkmark" : "doc.on.doc").font(.system(size: 17, weight: .regular))
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(TextInspectionRowCopyStyle())
+        .disabled(!enabled || !panel.copy.canCopy)
+        .accessibilityLabel(confirmed ? TextInspectionWording.copied(target) : TextInspectionWording.copyLabel(target))
+        .accessibilityIdentifier(identifier)
+    }
+
+    // MARK: Footer
+
+    @ViewBuilder private func footer(availableHeight: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let notice = panel.copy.noticeText {
+                // A long notice at large sizes scrolls on its own, as in Copy Image.
+                ViewThatFits(in: .vertical) {
+                    noticeLabel(notice)
+                    ScrollView(.vertical) { noticeLabel(notice) }
+                }
+                .modifier(PreviewImageHeightCap(cap: max(44, availableHeight * 0.3)))
+            }
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(spacing: 8) { copyButton(.text); copyButton(.codePoints) }
+                } else {
+                    HStack(spacing: 8) { copyButton(.text); copyButton(.codePoints) }
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func noticeLabel(_ notice: (title: String?, body: String)) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle").font(.footnote).foregroundStyle(Color(uiColor: .systemOrange))
+            VStack(alignment: .leading, spacing: 2) {
+                if let title = notice.title { Text(title).font(.footnote.weight(.semibold)) }
+                Text(notice.body).font(.footnote)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("keyboard.inspect.copyNotice")
+    }
+
+    private func copyButton(_ target: TextInspectionCopyTarget) -> some View {
+        let confirmed = panel.copy.confirmed == target
+        let title = confirmed ? TextInspectionWording.copied(target)
+            : target == .text ? TextInspectionWording.copyText : TextInspectionWording.copyCodePoints
+        let symbol = confirmed ? "checkmark" : target == .text ? "doc.on.doc" : "number"
+        return Button { copy(target) } label: {
+            Label(title, systemImage: symbol)
+        }
+        .buttonStyle(KeyboardPanelActionStyle(prominent: false, radius: 10, font: .subheadline.weight(.semibold)))
+        .disabled(!panel.copy.canCopy)
+        .accessibilityHint(target == .codePoints ? Text(TextInspectionWording.copyCodePointsHint) : Text(""))
+        .accessibilityIdentifier(target == .text ? "keyboard.inspect.copyText" : "keyboard.inspect.copyCodePoints")
+    }
+}
+
+/// One encoding's name, count and hex value (copy-forms §2): collapsed to
+/// three lines of whole values ending " …", with Show All only when values
+/// are left out. Each row expands on its own; nothing is remembered.
+/// VoiceOver always reads the full value.
+private struct TextInspectionEncodingValue<Title: View>: View {
+    let encoding: TextEncodingResult
+    @ViewBuilder let title: Title
+    @State private var expanded = false
+    /// The value's width and, in its font at the current text size, one
+    /// monospaced column and the ellipsis, measured live.
+    @State private var width: CGFloat = 0
+    @State private var columnWidth: CGFloat = 0
+    @State private var ellipsisWidth: CGFloat = 0
+
+    private static var collapsedLines: Int { 3 }
+    private static var probe: String { "0000000000" }
+
+    /// Whole values that fit three lines at this width and text size; nil
+    /// until measured. The cut is computed, never left to text truncation.
+    private var collapsed: (hex: String, truncated: Bool)? {
+        guard width > 0, columnWidth > 0 else { return nil }
+        let columns = Int((width / columnWidth + 0.001).rounded(.down))
+        let ellipsisColumns = max(1, Int((ellipsisWidth / columnWidth - 0.001).rounded(.up)))
+        return encoding.collapsed(columns: columns, maxLines: Self.collapsedLines, trailerColumns: 1 + ellipsisColumns)
+    }
+
+    private var truncated: Bool { collapsed?.truncated ?? false }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                title
+                value
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: encoding.accessibilityLabel))
+            .accessibilityValue(Text(verbatim: encoding.hex))
+            .accessibilityIdentifier("keyboard.inspect.encoding.\(encoding.form.rawValue)")
+            if expanded || truncated {
+                Button { expanded.toggle() } label: {
+                    Text(expanded ? TextInspectionWording.showLess : TextInspectionWording.showAll)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(KeyboardPalette.accent)
+                        .frame(minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(KeyboardPressStyle())
+                // 32 points tall visually inside a 44-point target.
+                .padding(.vertical, -6)
+                .accessibilityLabel(expanded ? TextInspectionWording.showFewer(encoding.form) : TextInspectionWording.showAll(encoding.form))
+                .accessibilityIdentifier("keyboard.inspect.showAll.\(encoding.form.rawValue)")
+            }
+        }
+    }
+
+    /// Uppercase hex, single spaces, wrapping only between values. Collapsed,
+    /// it shows only whole values (`collapsed`); the line limit just holds
+    /// the first layout before anything is measured.
+    private var value: some View {
+        let font = Font.system(.footnote, design: .monospaced)
+        let shown = expanded ? encoding.hex : (collapsed?.hex ?? encoding.hex)
+        return Text(verbatim: shown).font(font).foregroundStyle(.primary)
+            .lineLimit(expanded ? nil : Self.collapsedLines)
+            .truncationMode(.tail)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            // One column and the ellipsis in the same font and text size.
+            .background(alignment: .topLeading) {
+                ZStack(alignment: .topLeading) {
+                    Text(verbatim: Self.probe).font(font).fixedSize()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
+                            columnWidth = $0 / CGFloat(Self.probe.count)
+                        }
+                    Text(verbatim: "…").font(font).fixedSize()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { ellipsisWidth = $0 }
+                }
+                .hidden()
+                .accessibilityHidden(true)
+            }
+            .environment(\.layoutDirection, .leftToRight)
+    }
+}
+
+/// A form or encoding row's copy glyph: accent, `.tertiaryLabel` when disabled.
+private struct TextInspectionRowCopyStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? KeyboardPalette.accent : Color(uiColor: .tertiaryLabel))
+            .opacity(configuration.isPressed ? 0.65 : 1)
+    }
+}
+
+/// A line of swatches that scrolls sideways. While it overflows, its trailing
+/// 20 points fade to clear so the cut-off swatch reads as more this way.
+private struct PreviewImageSwatchScroller<Content: View>: View {
+    @ViewBuilder let content: Content
+    @State private var contentWidth: CGFloat = 0
+    @State private var visibleWidth: CGFloat = 0
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            content.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+        }
+        .scrollIndicators(.hidden)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { visibleWidth = $0 }
+        .mask {
+            if contentWidth > visibleWidth + 0.5 {
+                HStack(spacing: 0) {
+                    Color.black
+                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 20)
+                }
+            } else {
+                Color.black
+            }
+        }
     }
 }
 
@@ -1737,6 +2686,7 @@ private struct UnicodeKeyboardView: View {
     @ObservedObject var model: KeyboardModel
     @ObservedObject var store: CharacterStore
     @ObservedObject var symbolBoards = SymbolBoardStore.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     weak var controller: KeyboardViewController?
     let delete: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
     let action: (UUID, KeyboardInputCommand) -> () -> Bool
@@ -1754,7 +2704,9 @@ private struct UnicodeKeyboardView: View {
     }
     /// Named keys fit the glyph, the code point and three lines of name.
     private var keyHeight: CGFloat { model.isCompactLayout ? 72 : model.isPadLayout ? 84 : 80 }
-    private var headerHeight: CGFloat { model.typingKeyHeight }
+    private var headerHeight: CGFloat { model.usesCompactSearchLayout ? KeyboardLayoutPolicy.compactSearchBarHeight : model.typingKeyHeight }
+    /// The gap above the content and above the footer.
+    private var contentGap: CGFloat { model.usesCompactSearchLayout ? KeyboardLayoutPolicy.compactSearchRowSpacing : 4 }
     private var controlHeight: CGFloat { model.typingKeyHeight }
 
     var body: some View {
@@ -1768,12 +2720,10 @@ private struct UnicodeKeyboardView: View {
                 // The model restores the exact query and caret when shown.
                 if model.showsUnicodeToolbar {
                     toolbar.frame(height: headerHeight)
-                } else if model.showsSymbolBar && !model.showsUnicode {
-                    symbolBar.frame(height: headerHeight)
                 }
                 // Preserve the same row budget with the toolbar unmounted:
                 // four points before the content and before the footer.
-                Color.clear.frame(height: 4).accessibilityHidden(true)
+                Color.clear.frame(height: contentGap).accessibilityHidden(true)
                 ZStack {
                     if model.showsUnicode {
                         unicodeContent
@@ -1783,25 +2733,38 @@ private struct UnicodeKeyboardView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .layoutPriority(1)
-                Color.clear.frame(height: 4).accessibilityHidden(true)
+                Color.clear.frame(height: contentGap).accessibilityHidden(true)
                 controls
             }
             .padding(.horizontal, 8)
             .padding(.top, 4)
             .padding(.bottom, 6)
-            .allowsHitTesting(!model.hasSymbolBoardOverlay && model.previewImageExport == nil)
-            .accessibilityHidden(model.hasSymbolBoardOverlay || model.previewImageExport != nil)
+            // Hidden, not dimmed, under a panel that covers them.
+            .opacity(model.hasKeyboardPanel ? 0 : 1)
+            .allowsHitTesting(!model.hasSymbolBoardOverlay && !model.hasKeyboardPanel)
+            .accessibilityHidden(model.hasSymbolBoardOverlay || model.hasKeyboardPanel)
 
         }
         .accessibilityElement(children: .contain)
         .background(KeyboardTray().ignoresSafeArea())
         .overlay {
-            // Copy Image stays inside the keyboard's own bounds, over its keys.
+            // Copy Image covers the keyboard's own bounds, inset 4 points.
             if let export = model.previewImageExport {
                 previewImagePanel(export).transition(.opacity)
             }
         }
         .animation(.easeOut(duration: 0.12), value: model.previewImageExport?.id)
+        .overlay {
+            // Inspect Text shares the Copy Image container, height and scrolling.
+            if let inspection = model.textInspection {
+                TextInspectionPanel(panel: inspection, isPad: model.isPadLayout,
+                                    close: { controller?.closeTextInspection() },
+                                    copy: { controller?.copyTextInspection($0) })
+                    .id(inspection.id)
+                    .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: model.textInspection?.id)
         .overlay(alignment: .top) {
             if let message = model.symbolBoardActionError {
                 HStack(spacing: 8) {
@@ -1858,11 +2821,20 @@ private struct UnicodeKeyboardView: View {
                 }
             }
             .frame(height: headerHeight)
+            // In iPhone landscape search the field shrinks for the results.
+            .frame(width: model.usesCompactSearchLayout ? 200 : nil)
             // Native query text must stay outside the glass compositor. A
             // quiet key surface keeps the label and caret fully legible.
             .keyboardKeySurface(radius: 12)
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(model.isSearching ? KeyboardPalette.accent.opacity(0.55) : Color.clear, lineWidth: 1))
 
+            if model.usesCompactSearchLayout {
+                compactResultChips
+                    .frame(maxWidth: .infinity).frame(height: headerHeight)
+#if DEBUG
+                    .overlay(alignment: .topLeading) { KeyboardSearchTimingProbe(timing: model.searchTiming) }
+#endif
+            }
             panelButton
             if model.showsUnicode { sectionMenu }
             // A single fixed trailing key in search, browsing and inspection.
@@ -1906,21 +2878,10 @@ private struct UnicodeKeyboardView: View {
         }
     }
 
-    private var symbolBar: some View {
-        GeometryReader { geometry in
-            let board = symbolBoards.typingBoard
-            KeyboardTypingFavoriteRow(board: board, route: model.inputModeID,
-                keyHeight: model.typingKeyHeight,
-                keyWidth: max(1, (geometry.size.width - 9 * (model.isPadLayout ? 7 : 5)) / 10),
-                columnSpacing: model.isPadLayout ? 7 : 5, useUnicodeFonts: model.useUnicodeFonts,
-                showsUCSUR: model.showsUCSUR, enabled: !model.showsUnicode, actionFactory: boardKeyActions)
-        }
-    }
-
     private var typingContent: some View {
         return KeyboardTypingView(typing: model.typing, mode: model.inputModeID,
             isPad: model.isPadLayout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout, compact: model.isCompactLayout,
-            showsNumberRow: model.showsNumberRow, enabled: !model.showsUnicode, useUnicodeFonts: model.useUnicodeFonts,
+            enabled: !model.showsUnicode, useUnicodeFonts: model.useUnicodeFonts,
             delete: delete, variants: typingVariantActions,
             keySettings: model.keySettings, returnTitle: model.returnTitle, action: action, shiftSlide: shiftSlide)
     }
@@ -1975,10 +2936,19 @@ private struct UnicodeKeyboardView: View {
             let height = geometry.size.height.isFinite ? max(0, geometry.size.height) : 0
             let queryHeight = model.typingKeyHeight * 4 + 12
             VStack(spacing: 4) {
+                if model.usesCompactSearchLayout {
+                    // The results sit in the search row; the keys get the space.
+                    queryKeys(rowHeight: model.typingKeyHeight, spacing: KeyboardLayoutPolicy.compactSearchRowSpacing)
+                        .frame(width: width, height: height)
+                } else {
                 searchResultStrip
                     .frame(width: width, height: max(0, height - queryHeight - 4))
+#if DEBUG
+                    .overlay(alignment: .topLeading) { KeyboardSearchTimingProbe(timing: model.searchTiming) }
+#endif
                 queryKeys(rowHeight: model.typingKeyHeight)
                     .frame(width: width, height: queryHeight)
+                }
             }
             .frame(width: width, height: height)
         }
@@ -1992,33 +2962,32 @@ private struct UnicodeKeyboardView: View {
     private var textPreviewRow: some View {
         GeometryReader { geometry in
             let textWidth = max(0, geometry.size.width - KeyboardTextPreviewLayout.actionsButtonWidth)
-            let excerpt = KeyboardTextPreviewLayout.excerpt(before: model.hostTextBefore, after: model.hostTextAfter,
-                                                            availableWidth: textWidth)
             HStack(spacing: 0) {
-                HStack(spacing: 0) {
-                    Text(previewText(excerpt.before)).lineLimit(1).fixedSize()
-                    Rectangle().fill(KeyboardPalette.accent).frame(width: KeyboardTextPreviewLayout.caretWidth, height: 22)
-                    Text(previewText(excerpt.after)).lineLimit(1).fixedSize()
-                    Spacer(minLength: 0)
-                }
-                .frame(width: textWidth, height: geometry.size.height, alignment: .leading)
-                .clipped()
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Text preview")
-                .accessibilityValue(model.hostTextBefore + model.hostTextAfter)
-                .accessibilityIdentifier("keyboard.textPreview")
+                // One shaped line with an overlaid caret; taps and drags move
+                // the app's cursor (design/preview-cursor).
+                KeyboardPreviewCursorField(state: model.previewCursor, controller: controller)
+                    .frame(width: textWidth, height: geometry.size.height)
+                // Two plain grey outline glyphs inside the field (design §1a):
+                // centres 30 points apart, each in its own full 44-point target.
                 Button {
-                    controller?.openPreviewImagePanel(excerpt: excerpt, availableWidth: textWidth,
-                                                      visibleHeight: geometry.size.height)
+                    if let controller { controller.openTextInspection(excerpt: controller.currentPreviewExcerpt()) }
                 } label: {
-                    Image(systemName: "ellipsis.circle").font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(KeyboardPalette.accent)
-                        .frame(width: KeyboardTextPreviewLayout.actionsButtonWidth, height: max(44, geometry.size.height))
-                        .frame(height: geometry.size.height)
-                        .contentShape(Rectangle())
+                    previewRowIcon("text.magnifyingglass", alignment: .trailing, height: geometry.size.height)
                 }
-                .buttonStyle(KeyboardPressStyle())
+                .buttonStyle(PreviewRowIconStyle())
                 .disabled(model.previewImageExport != nil)
+                .accessibilityLabel("Inspect preview text")
+                .accessibilityIdentifier("keyboard.textPreview.inspect")
+                Button {
+                    if let controller {
+                        controller.openPreviewImagePanel(excerpt: controller.currentPreviewExcerpt(), availableWidth: textWidth,
+                                                         visibleHeight: geometry.size.height)
+                    }
+                } label: {
+                    previewRowIcon("ellipsis.circle", alignment: .leading, height: geometry.size.height)
+                }
+                .buttonStyle(PreviewRowIconStyle())
+                .disabled(model.textInspection != nil)
                 .accessibilityLabel("Preview actions")
                 .accessibilityIdentifier("keyboard.textPreview.actions")
             }
@@ -2029,63 +2998,38 @@ private struct UnicodeKeyboardView: View {
         // Always before, caret, after from the left, the order Copy Image renders.
         .environment(\.layoutDirection, .leftToRight)
     }
-    private func previewText(_ text: String) -> AttributedString {
-        var result = AttributedString()
-        for character in text {
-            var run = AttributedString(String(character))
-            run.font = Font(KeyboardTextPreviewLayout.font(for: String(character)))
-            result += run
-        }
-        return result
+    /// A 22-point glyph in a 44 × row-height target; the left glyph sits at
+    /// the trailing edge of its target, the right one 8 points in from its
+    /// leading edge.
+    private func previewRowIcon(_ symbol: String, alignment: Alignment, height: CGFloat) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 19, weight: .regular))
+            .symbolRenderingMode(.monochrome)
+            .frame(width: 22, height: 22)
+            .padding(.leading, alignment == .leading ? 8 : 0)
+            .frame(width: KeyboardTextPreviewLayout.actionButtonWidth, height: max(44, height), alignment: alignment)
+            .contentShape(Rectangle())
+            .frame(height: height)
     }
 
-    /// A compact panel over the keys: the frozen picture, what it contains,
-    /// and one explicit Copy Image action. Outside taps and Close dismiss it.
+    /// The Copy Image panel over the whole keyboard: the frozen picture, its
+    /// colors and one explicit Copy Image action. Close is the way out.
     private func previewImagePanel(_ export: KeyboardPreviewImageExport) -> some View {
-        GeometryReader { geometry in
-            ZStack {
-                Color.black.opacity(0.18)
-                    .contentShape(Rectangle())
-                    .onTapGesture { controller?.closePreviewImagePanel() }
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 8) {
-                        Text("Text preview").font(.headline)
-                            .accessibilityAddTraits(.isHeader)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Button { controller?.closePreviewImagePanel() } label: {
-                            Image(systemName: "xmark").font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
+        KeyboardPanelContainer(title: "Text preview", identifier: "keyboard.previewImage.panel",
+                               closeIdentifier: "keyboard.previewImage.close", isPad: model.isPadLayout,
+                               close: { controller?.closePreviewImagePanel() }) { proxy in
+            previewImagePanelBody(export)
+                .onChange(of: model.previewImageColors.preset) { old, new in
+                    // Only the change to Custom scrolls; later swatch taps never do.
+                    guard new == .custom, old != .custom else { return }
+                    DispatchQueue.main.async {
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+                            proxy.scrollTo(PreviewImageColorsSection.customLinesID, anchor: .bottom)
                         }
-                        .buttonStyle(KeyboardPressStyle())
-                        .accessibilityLabel("Close")
-                        .accessibilityIdentifier("keyboard.previewImage.close")
                     }
-                    .frame(height: 44)
-                    .layoutPriority(2)
-                    // Larger text scrolls inside the keyboard; the header with Close
-                    // stays pinned above and the action stays pinned below.
-                    ViewThatFits(in: .vertical) {
-                        previewImagePanelBody(export)
-                        ScrollView(.vertical) { previewImagePanelBody(export) }
-                    }
-                    // The action is laid out first, so it never falls off the keyboard.
-                    previewImagePanelFooter(export, availableHeight: geometry.size.height)
-                        .layoutPriority(1)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 16)
-                .padding(.top, 4)
-                .frame(width: max(0, min(geometry.size.width - 16, 360)))
-                .background(Color(uiColor: .secondarySystemGroupedBackground),
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("keyboard.previewImage.panel")
-                .padding(.vertical, 4)
-            }
-            .frame(width: geometry.size.width, height: geometry.size.height)
+        } footer: { height in
+            previewImagePanelFooter(export, availableHeight: height)
         }
     }
 
@@ -2098,6 +3042,13 @@ private struct UnicodeKeyboardView: View {
                     controller?.selectPreviewImageColors($0)
                 }
                 .accessibilitySortPriority(5)
+                // After Colors (and Custom's lines), before the explanation.
+                PreviewImageSizeSection(choice: model.previewImageColors,
+                                        size: export.pixelSize(for: model.previewImageColors.scale),
+                                        enabled: export.phase != .copying) {
+                    controller?.selectPreviewImageColors($0)
+                }
+                .accessibilitySortPriority(4)
             }
             Text(verbatim: previewImageExplanation(export))
                 .font(.footnote).foregroundStyle(.secondary)
@@ -2156,7 +3107,10 @@ private struct UnicodeKeyboardView: View {
     @ViewBuilder private func previewImageThumbnail(_ export: KeyboardPreviewImageExport) -> some View {
         let neutral = Color(uiColor: .tertiarySystemFill)
         if let image = model.previewImageThumbnail, let rendered = export.image {
-            let size = rendered.pointSize
+            // The thumbnail's own size (always the canvas drawn at 3×), not
+            // the copy's pixels ÷ scale, which rounds differently at each
+            // scale and would resample the same picture (size-choice §3).
+            let size = image.size
             ScrollView(size.height > 96 ? [.horizontal, .vertical] : .horizontal) {
                 PreviewImageThumbnailPicture(image: image, colors: rendered.colors, size: size)
                     .frame(minHeight: 48)
@@ -2164,8 +3118,8 @@ private struct UnicodeKeyboardView: View {
             .scrollIndicators(.automatic)
             .frame(maxWidth: .infinity)
             .frame(height: min(96, max(48, size.height)))
-            .background(neutral, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(neutral, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Image preview of visible text")
             .accessibilityValue(rendered.accessibilityValue)
@@ -2178,7 +3132,7 @@ private struct UnicodeKeyboardView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 12)
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(neutral, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(neutral, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .accessibilityIdentifier("keyboard.previewImage.empty")
         }
     }
@@ -2202,10 +3156,9 @@ private struct UnicodeKeyboardView: View {
         switch export.phase {
         case .fullAccessRequired, .renderFailed:
             Button { controller?.closePreviewImagePanel() } label: {
-                Text("OK").font(.system(size: 17, weight: .semibold))
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                Text("OK")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(KeyboardPanelActionStyle(prominent: false))
             .accessibilityIdentifier("keyboard.previewImage.ok")
         default:
             Button { controller?.copyPreviewImage() } label: {
@@ -2221,10 +3174,8 @@ private struct UnicodeKeyboardView: View {
                         Label("Copy Image", systemImage: "photo.on.rectangle")
                     }
                 }
-                .font(.system(size: 17, weight: .semibold))
-                .frame(maxWidth: .infinity, minHeight: 44)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(KeyboardPanelActionStyle(prominent: true))
             .disabled(!export.canCopy)
             .accessibilityLabel(export.phase == .ready || export.phase == .empty
                 ? Text("Copy preview as image") : Text(previewImageActionTitle(export.phase)))
@@ -2267,6 +3218,36 @@ private struct UnicodeKeyboardView: View {
             }
             .scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
         }
+    }
+
+    /// iPhone landscape search: the results beside the field as 34-point
+    /// chips, a 20-point glyph with its 11-point code point, scrolling sideways.
+    @ViewBuilder private var compactResultChips: some View {
+        let emoji = model.section == .emojis
+        if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            compactSearchNote(emoji ? "Search emoji names or sequences" : "Search names, blocks or U+code points")
+        } else if model.searchInProgress {
+            ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+        } else if emoji ? model.emojiResults.isEmpty : model.results.isEmpty {
+            compactSearchNote("No results")
+        } else {
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 5) {
+                    ForEach(emoji ? model.emojiResults.map(KeyboardItem.emoji) : searchItems(model.results), id: \.keyIdentifier) { item in
+                        InspectableCharacterKey(item: item, favorite: isFavorite(item), compact: true,
+                            useUnicodeFonts: model.useUnicodeFonts, showsUCSUR: model.showsUCSUR, route: model.inputModeID, enabled: model.isSearching,
+                            chip: true, actionFactory: { [mode = model.inputModeID] in keyActions(mode, item) })
+                            .frame(width: min(124, 40 + 6.7 * CGFloat(item.footer.count)), height: headerHeight)
+                            .keyboardKeySurface(radius: 7)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden).keyboardUnmaskedScrollEdges()
+        }
+    }
+    private func compactSearchNote(_ text: String) -> some View {
+        Text(text).font(.system(size: 11)).foregroundStyle(KeyboardPalette.secondary)
+            .lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var emptySearchSuggestions: some View {
@@ -2659,7 +3640,7 @@ private struct UnicodeKeyboardView: View {
     @ViewBuilder private func inspectionProperties(_ item: KeyboardItem) -> some View {
         switch item {
         case .character(let character):
-            if let source = UnicodeFontSupport.sourceName(for: character.displayText, size: 36, enabled: model.useUnicodeFonts) {
+            if let source = UnicodeFontSupport.sourceName(for: character.displayText, size: 36, enabled: model.useUnicodeFonts, anchor: character.fontRuleAnchor) {
                 property("Preview font", value: source, identifier: "fontSource")
             }
             property("Code point", value: character.codePointLabel, identifier: "codepoints", monospaced: true)
@@ -2742,7 +3723,7 @@ private struct UnicodeKeyboardView: View {
     private func previewFont(_ item: KeyboardItem, size: CGFloat) -> Font {
         switch item {
         case .character(let character):
-            return Font(UnicodeFontSupport.font(for: character.displayText, size: size, enabled: model.useUnicodeFonts))
+            return Font(UnicodeFontSupport.font(for: character.displayText, size: size, enabled: model.useUnicodeFonts, anchor: character.fontRuleAnchor))
         case .emoji(let emoji):
             return Font(UnicodeFontSupport.font(for: emoji.text, size: size, enabled: model.useUnicodeFonts))
         }
@@ -2770,12 +3751,13 @@ private struct UnicodeKeyboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func queryKeys(rowHeight: CGFloat) -> some View {
-        VStack(spacing: 4) {
-            searchKeyRow(Array("1234567890").map(String.init), rowHeight: rowHeight)
-            searchKeyRow(Array("qwertyuiop").map(String.init), rowHeight: rowHeight)
-            searchKeyRow(Array("asdfghjkl").map(String.init), rowHeight: rowHeight, inset: 10)
-            searchKeyRow(KeyboardQueryPolicy.bottomRow, rowHeight: rowHeight, includeDelete: true)
+    private func queryKeys(rowHeight: CGFloat, spacing: CGFloat = 4) -> some View {
+        VStack(spacing: spacing) {
+            let rows = KeyboardQueryHoldPolicy.rows
+            searchKeyRow(rows[0], rowHeight: rowHeight)
+            searchKeyRow(rows[1], rowHeight: rowHeight)
+            searchKeyRow(rows[2], rowHeight: rowHeight, inset: 10)
+            searchKeyRow(rows[3], rowHeight: rowHeight, includeDelete: true)
         }
     }
     private func searchKeyRow(_ keys: [String], rowHeight: CGFloat, inset: CGFloat = 0, includeDelete: Bool = false) -> some View {
@@ -2785,6 +3767,11 @@ private struct UnicodeKeyboardView: View {
                     label: key == "+" ? "Plus" : key == ":" ? "Colon" : key == "-" ? "Hyphen" : key,
                     fontSize: 22,
                     route: model.inputModeID,
+                    holdKey: key,
+                    holdFactory: { [mode = model.inputModeID] in action(mode, .queryHold(key)) },
+                    holdSpokenName: { [model] text in
+                        text.unicodeScalars.count == 1 ? text.unicodeScalars.first.flatMap { model.catalog.character(at: $0.value)?.name } : nil
+                    },
                     factory: { [mode = model.inputModeID] in action(mode, .query(key)) })
                     .frame(maxWidth: .infinity).frame(height: rowHeight)
                     .keyboardKeySurface(radius: 7)
@@ -2801,12 +3788,17 @@ private struct UnicodeKeyboardView: View {
     private var usesPadFooter: Bool { usesPadKeyPositions }
     private var usesPadKeyPositions: Bool { model.isPadLayout && !model.showsUnicode && model.typingKeyHeight >= 44 }
     private var displaysCollapseKey: Bool { model.showsCollapseKey || usesPadFooter }
+    /// Browsing Unicode (any section) shows its own Delete in the footer, so the
+    /// footer plan must reserve that slot too, or Return is pushed off screen.
+    private var showsPagesDelete: Bool {
+        model.showsUnicode && !model.isSearching && model.inspection == nil && model.symbolBoardInspectionText == nil
+    }
 
     private var controls: some View {
         GeometryReader { geometry in
             if let plan = KeyboardFooterLayoutPolicy.plan(availableWidth: geometry.size.width,
                 hasGlobe: model.needsInputModeSwitchKey, showsCollapse: displaysCollapseKey,
-                showsPage: !model.showsUnicode || model.isShowingSymbolPages, isPad: model.isPadLayout,
+                showsPage: !model.showsUnicode || showsPagesDelete, isPad: model.isPadLayout,
                 showsReturn: !usesPadFooter && (model.showsUnicode || KeyboardTypingLayoutPolicy.padPlan(availableWidth: geometry.size.width,
                     isPad: model.isPadLayout, layout: model.typingState.layout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout,
                     alphabet: model.typingState.alphabet) == nil),
@@ -2821,16 +3813,13 @@ private struct UnicodeKeyboardView: View {
         HStack(spacing: plan.spacing) {
             KeyboardTouchKey(title: "U", identifier: "keyboard.toggleUnicodeToolbar",
                 label: model.showsUnicodeToolbar ? "Hide Unicode toolbar" : "Show Unicode toolbar",
-                value: model.showsUnicodeToolbar ? "on" : "off", fontSize: 18, tinted: true,
+                value: model.showsUnicodeToolbar ? "on" : "off", fontSize: 18,
                 contentPosition: usesPadKeyPositions ? .bottomLeft : .center,
                 route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .toolbar) })
                 .frame(width: plan.keyWidth, height: controlHeight)
-                .background(KeyboardPalette.accent.opacity(model.showsUnicodeToolbar ? 0.08 : 0.03),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .keyboardKeySurface()
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(model.showsUnicodeToolbar ? KeyboardPalette.accent.opacity(0.65) : Color.clear, lineWidth: 1)
-                    .allowsHitTesting(false))
+                // Like Shift: the darker modifier grey while the toolbar is
+                // hidden, and an ordinary key while it shows. Never tinted.
+                .keyboardKeySurface(modifier: !model.showsUnicodeToolbar)
             if model.needsInputModeSwitchKey {
                 InputModeSwitchKey(controller: controller, isModifier: model.isPadLayout && !model.showsUnicode,
                     contentPosition: usesPadKeyPositions ? .bottomLeft : .center)
@@ -2838,7 +3827,7 @@ private struct UnicodeKeyboardView: View {
             }
             if displaysCollapseKey && !usesPadFooter { footerCollapseKey(plan) }
             if !model.showsUnicode && !usesPadFooter { footerPageKey(plan) }
-            if model.showsUnicode && !model.isSearching && model.inspection == nil && model.symbolBoardInspectionText == nil {
+            if showsPagesDelete {
                 RepeatingDeleteKey(action: delete, isQuery: false, route: model.inputModeID, identifier: "keyboard.pages.delete")
                     .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: true)
             }
@@ -2890,8 +3879,8 @@ private struct UnicodeKeyboardView: View {
     }
     private func footerPageKey(_ plan: KeyboardFooterLayoutPolicy.Plan) -> some View {
         let letters = model.typingState.layout != .letters
-        // The number page swaps its digits for symbols only while the number row shows them.
-        let symbols = model.showsNumberRow
+        // The number page swaps its digits for symbols only while a fourth row shows them.
+        let symbols = model.typingAuxiliaryRowVisible ?? (model.typingArrangement.typingRowCount > MainKeyboardArrangement.letterRowCount)
         return KeyboardTouchKey(title: letters ? "ABC" : symbols ? "#+=" : "123",
             identifier: letters ? "keyboard.typing.letters" : "keyboard.typing.numbers",
             label: letters ? "Letters" : symbols ? "Symbols" : "Numbers", value: model.typingLayoutValue, fontSize: 13,
@@ -2911,7 +3900,6 @@ private struct KeyboardTypingView: View {
     let isLandscape: Bool
     let padLayout: KeyboardPadLayout
     let compact: Bool
-    let showsNumberRow: Bool
     let enabled: Bool
     let useUnicodeFonts: Bool
     let delete: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
@@ -2928,18 +3916,22 @@ private struct KeyboardTypingView: View {
     }
     var body: some View {
         GeometryReader { geometry in
+            let arrangement = arrangement
             if let plan = KeyboardTypingLayoutPolicy.plan(availableHeight: geometry.size.height,
                 availableWidth: geometry.size.width, compact: compact, layout: typing.state.layout,
-                isPad: isPad, isLandscape: isLandscape, padLayout: padLayout, showsNumberRow: showsNumberRow) {
+                isPad: isPad, isLandscape: isLandscape, padLayout: padLayout,
+                keyRows: arrangement.keyRows(widePad: isPad && geometry.size.width >= 650)) {
                 let ansiStyle = KeyboardTypingLayoutPolicy.usesANSI(availableWidth: geometry.size.width, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout)
                 let pad = KeyboardTypingLayoutPolicy.padPlan(availableWidth: geometry.size.width, isPad: isPad, layout: typing.state.layout, isLandscape: isLandscape, padLayout: padLayout,
                     alphabet: typing.state.alphabet)
+                // The app's own arrangement draws its digits where it put them.
+                let arranged = pad == nil && typing.state.layout == .letters && !isStandard(arrangement)
                 VStack(spacing: plan.rowSpacing) {
-                    if plan.numberRowCount > 0 { numberRow(height: plan.keyHeight, ansiPad: ansiStyle) }
+                    if plan.numberRowCount > 0 && !arranged { numberRow(height: plan.keyHeight, ansiPad: ansiStyle) }
                     if let pad {
                         if pad.isANSI { ansiRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0) }
                         else { padRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0) }
-                    } else if typing.state.layout == .letters, let arrangement = customArrangement {
+                    } else if arranged {
                         arrangedRows(arrangement, width: geometry.size.width, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0)
                     } else {
                         ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: typing.state.layout, hasAuxiliaryRow: plan.numberRowCount > 0, ansiPad: ansiStyle, padLayout: padLayout,
@@ -2972,15 +3964,18 @@ private struct KeyboardTypingView: View {
         }
     }
 
-    /// The app's arrangement of this layout, when it has a valid one.
-    private var customArrangement: MainKeyboardArrangement? {
-        guard let arrangement = keySettings.arrangement(for: typing.state.alphabet.id),
-              let alphabet = KeyboardAlphabet.alphabet(id: typing.state.alphabet.id), arrangement.isValid(for: alphabet) else { return nil }
-        return arrangement
+    private var catalogAlphabet: KeyboardAlphabet { KeyboardAlphabet.alphabet(id: typing.state.alphabet.id) ?? typing.state.alphabet }
+    /// The layout's main keyboard as the app arranged it, or the standard one.
+    private var arrangement: MainKeyboardArrangement { keySettings.effectiveArrangement(for: catalogAlphabet) }
+    /// The layout's own rows, with or without the number row above them,
+    /// draw as the system keyboard does.
+    private func isStandard(_ arrangement: MainKeyboardArrangement) -> Bool {
+        arrangement == .standard(for: catalogAlphabet) || arrangement == .letters(for: catalogAlphabet)
     }
 
-    /// Rows as the app arranged them: letters, Shift, Delete and optional Tab
-    /// and Caps Lock, with gaps, every key one width and each row centred.
+    /// Rows as the app arranged them: digits, letters, Shift, Delete and
+    /// optional Tab and Caps Lock, with gaps, every key one width and each
+    /// row centred.
     private func arrangedRows(_ arrangement: MainKeyboardArrangement, width: CGFloat, height: CGFloat, hasAuxiliaryRow: Bool) -> some View {
         let spacing: CGFloat = isPad ? 7 : 5
         let rows = arrangement.rows
@@ -3014,6 +4009,11 @@ private struct KeyboardTypingView: View {
                 identifier: "keyboard.typing.capsLock", label: "Caps Lock", value: typing.state.shift == .capsLock ? "on" : "off", fontSize: 16,
                 route: mode, factory: { [mode = mode] in action(mode, .capsLock) })
                 .frame(width: width, height: height).keyboardKeySurface(radius: 7, modifier: true)
+        case .key(let key) where MainKeyboardArrangement.isDigit(key):
+            // Digits type themselves, whatever Shift says, like the number row.
+            typingCharacterKey(key, hasAuxiliaryRow: hasAuxiliaryRow, isAuxiliaryKey: true, ansiPad: false,
+                identifier: "keyboard.typing.number.\(key)", fontSize: compact ? 18 : 20)
+                .frame(width: width, height: height).keyboardKeySurface(radius: 7)
         case .key(let key):
             typingCharacterKey(key, hasAuxiliaryRow: hasAuxiliaryRow, isAuxiliaryKey: false, ansiPad: false,
                 identifier: "keyboard.typing.key.\(key)", fontSize: compact ? 20 : 23)
@@ -3157,50 +4157,64 @@ private struct KeyboardTypingView: View {
 
 }
 
-/// Shift only redraws letter labels. The saved previews keep their native
-/// controls, scroll position and resolved preview fonts while their inputs match.
-private struct KeyboardTypingFavoriteRow: View, Equatable {
-    let board: SymbolBoard
-    let route: UUID
-    let keyHeight: CGFloat
-    let keyWidth: CGFloat
-    let columnSpacing: CGFloat
-    let useUnicodeFonts: Bool
-    let showsUCSUR: Bool
-    let enabled: Bool
-    let actionFactory: (UUID, String, SymbolBoardKey) -> KeyboardVariantActions?
+/// Single host actions bind their route when the finger goes down. SwiftUI
+/// can update labels while a finger is held; that must not retarget the press.
+/// The preview row's text area as the movable-cursor control.
+private struct KeyboardPreviewCursorField: UIViewRepresentable {
+    let state: KeyboardPreviewCursorDriver.State
+    weak var controller: KeyboardViewController?
 
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.route == rhs.route && lhs.keyHeight == rhs.keyHeight
-            && lhs.keyWidth == rhs.keyWidth && lhs.columnSpacing == rhs.columnSpacing
-            && lhs.useUnicodeFonts == rhs.useUnicodeFonts && lhs.showsUCSUR == rhs.showsUCSUR && lhs.enabled == rhs.enabled
-            && lhs.board == rhs.board
+    func makeUIView(context: Context) -> KeyboardPreviewCursorControl {
+        let control = KeyboardPreviewCursorControl()
+        control.caretColor = KeyboardPalette.accentUI
+        return control
     }
 
-    var body: some View {
-        ScrollView(.horizontal) {
-            LazyHStack(spacing: columnSpacing) {
-                ForEach(board.keys) { key in
-                    KeyboardVariantKey(text: key.text, variants: key.variants,
-                        identifier: "keyboard.typing.favorite.\(board.id).\(key.id)",
-                        label: symbolBoardKeyLabel(key.text), route: route, enabled: enabled,
-                        fontSize: 23, useUnicodeFonts: useUnicodeFonts, swipeUp: key.up, swipeDown: key.down,
-                        showsInspection: true, showsEditing: true,
-                        factory: { [route = route] in actionFactory(route, board.id, key) })
-                        .frame(width: keyWidth, height: keyHeight)
-                        .keyboardKeySurface(radius: 7, fill: KeyboardPalette.conscriptFill(key.text, shows: showsUCSUR))
-                }
-            }
-        }
-        .scrollIndicators(.hidden)
-        .keyboardUnmaskedScrollEdges()
-        .frame(height: keyHeight)
-        .accessibilityIdentifier("keyboard.typing.favorites")
+    func updateUIView(_ control: KeyboardPreviewCursorControl, context: Context) {
+        controller?.attachPreviewCursor(control)
+        control.configure(line: state.line, caret: state.caret, interactive: state.interactive,
+                          placementGeneration: state.placementGeneration)
     }
 }
 
-/// Single host actions bind their route when the finger goes down. SwiftUI
-/// can update labels while a finger is held; that must not retarget the press.
+extension KeyboardViewController: KeyboardPreviewCursorHost, KeyboardPreviewCursorControlDelegate {
+    var previewContextBefore: String? { textDocumentProxy.documentContextBeforeInput }
+    var previewContextAfter: String? { textDocumentProxy.documentContextAfterInput }
+    var previewDocumentIdentifier: UUID? { currentDocumentIdentifier }
+    var previewHasSelection: Bool { textDocumentProxy.selectedText?.isEmpty == false }
+    var previewIsSecure: Bool { KeyboardHostInputTraits(reading: textDocumentProxy).isSecureTextEntry }
+    var previewPanelOpen: Bool { model.hasKeyboardPanel }
+
+    func previewAdjust(by offset: Int) {
+        textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
+    }
+
+    func previewAnnounce(_ message: String) {
+        UIAccessibility.post(notification: .announcement, argument: message)
+    }
+
+    func previewCursorShouldBeginTouch(_ control: KeyboardPreviewCursorControl, at time: TimeInterval) -> Bool {
+        KeyboardPreviewCursorPolicy.acceptsTouch(at: time, lastKeyRelease: keyTouchObserver.lastRelease,
+                                                 keysDown: keyTouchObserver.keysDown)
+    }
+
+    func previewCursor(_ control: KeyboardPreviewCursorControl, request offset: Int) {
+        previewCursorDriver.request(offset)
+    }
+
+    func previewCursor(_ control: KeyboardPreviewCursorControl, step forward: Bool, announce: Bool) -> Bool {
+        previewCursorDriver.step(forward: forward, announce: announce)
+    }
+
+    func previewCursor(_ control: KeyboardPreviewCursorControl, lineEdge: KeyboardPreviewCursorSession.Goal) -> Bool {
+        previewCursorDriver.lineEdge(lineEdge)
+    }
+
+    func previewCursorDidEndTouch(_ control: KeyboardPreviewCursorControl) {
+        previewCursorDriver.endTouch()
+    }
+}
+
 private struct KeyboardTouchKey: UIViewRepresentable {
     let title: String?
     var symbol: String? = nil
@@ -3214,15 +4228,26 @@ private struct KeyboardTouchKey: UIViewRepresentable {
     var contentPosition: KeyboardKeyContentPosition = .center
     let route: UUID
     var shiftSlideFactory: (() -> ((String) -> Bool)?)? = nil
+    /// A Unicode search character key: holding it types `holdKey` into the host.
+    var holdKey: String? = nil
+    var holdFactory: (() -> (() -> Bool))? = nil
+    /// Names an invisible held character for its VoiceOver announcement.
+    var holdSpokenName: ((String) -> String?)? = nil
     let factory: () -> (() -> Bool)
 
     func makeUIView(context: Context) -> KeyboardTouchActionButton {
-        shiftSlideFactory == nil ? KeyboardTouchActionButton() : KeyboardShiftTouchButton()
+        if holdFactory != nil { return KeyboardQueryHoldButton() }
+        return shiftSlideFactory == nil ? KeyboardTouchActionButton() : KeyboardShiftTouchButton()
     }
     func updateUIView(_ view: KeyboardTouchActionButton, context: Context) {
         view.configure(contextIdentifier: route, actionFactory: factory)
         if let shift = view as? KeyboardShiftTouchButton, let shiftSlideFactory {
             shift.configureSlide(context: route, factory: shiftSlideFactory)
+        }
+        if let held = view as? KeyboardQueryHoldButton, let holdKey, let holdFactory {
+            held.heldAccent = KeyboardPalette.accentUI
+            held.spokenName = holdSpokenName ?? { _ in nil }
+            held.configureHold(key: holdKey, factory: holdFactory)
         }
         view.setTitle(title, for: .normal)
         view.setImage(symbol.flatMap { UIImage(systemName: $0) }, for: .normal)
@@ -3254,13 +4279,15 @@ private struct InspectableCharacterKey: UIViewRepresentable {
     var glyphOnly = false
     /// A result key: the page keys' rounded surface, with the name in small text below the glyph.
     var showsName = false
+    /// A landscape search chip: a small glyph with its code point beside it.
+    var chip = false
     var identifier: String? = nil
     let actionFactory: KeyboardInspectableInteraction.ActionFactory
 
     func makeUIView(context: Context) -> InspectableKeyButton { InspectableKeyButton() }
     func updateUIView(_ uiView: InspectableKeyButton, context: Context) {
-        uiView.configure(item: item, favorite: favorite, compact: compact, useUnicodeFonts: useUnicodeFonts, showsUCSUR: showsUCSUR, glyphOnly: glyphOnly || showsName,
-            showsName: showsName, route: route, enabled: enabled, actionFactory: actionFactory)
+        uiView.configure(item: item, favorite: favorite, compact: compact, useUnicodeFonts: useUnicodeFonts, showsUCSUR: showsUCSUR, glyphOnly: glyphOnly || showsName || chip,
+            showsName: showsName, chip: chip, route: route, enabled: enabled, actionFactory: actionFactory)
         uiView.accessibilityIdentifier = identifier ?? item.keyIdentifier
     }
 }
@@ -3270,6 +4297,8 @@ private final class InspectableKeyButton: UIControl {
     private let code = UILabel()
     private let name = UILabel()
     private var stackCenter: NSLayoutConstraint!
+    private var labelStack: UIStackView!
+    private var chipGlyphWidth: NSLayoutConstraint!
     private let star = UIImageView(image: UIImage(systemName: "star.fill"))
     private var glyphHeight: NSLayoutConstraint!
     private var codeHeight: NSLayoutConstraint!
@@ -3305,6 +4334,8 @@ private final class InspectableKeyButton: UIControl {
         name.lineBreakMode = .byCharWrapping
         name.isUserInteractionEnabled = false
         let stack = UIStackView(arrangedSubviews: [glyph, code, name])
+        labelStack = stack
+        chipGlyphWidth = glyph.widthAnchor.constraint(equalToConstant: 24)
         // Touches must reach this control rather than the decorative label stack.
         stack.isUserInteractionEnabled = false
         glyph.isUserInteractionEnabled = false
@@ -3352,7 +4383,14 @@ private final class InspectableKeyButton: UIControl {
         didSet { pressFeedback.setPressed(isHighlighted) }
     }
     func configure(item: KeyboardItem, favorite: Bool, compact: Bool, useUnicodeFonts: Bool, showsUCSUR: Bool, glyphOnly: Bool, showsName: Bool = false,
-                   route: UUID, enabled: Bool, actionFactory: @escaping KeyboardInspectableInteraction.ActionFactory) {
+                   chip: Bool = false, route: UUID, enabled: Bool, actionFactory: @escaping KeyboardInspectableInteraction.ActionFactory) {
+        // A chip lays the glyph and its code point side by side.
+        labelStack.axis = chip ? .horizontal : .vertical
+        labelStack.alignment = chip ? .center : .fill
+        labelStack.spacing = chip ? 4 : 2
+        chipGlyphWidth.isActive = chip
+        code.font = .monospacedSystemFont(ofSize: chip ? 11 : 9, weight: .medium)
+        code.textAlignment = chip ? .left : .center
         if usesExternalKeySurface != glyphOnly {
             usesExternalKeySurface = glyphOnly
             invalidateIntrinsicContentSize()
@@ -3364,19 +4402,21 @@ private final class InspectableKeyButton: UIControl {
         isAccessibilityElement = enabled
         accessibilityElementsHidden = !enabled
         glyph.text = item.displayText
-        glyphHeight.constant = compact ? 26 : 34
+        glyphHeight.constant = chip ? 24 : compact ? 26 : 34
         let missing: Bool
         var ucsur = false
         if case .character(let character) = item {
             ucsur = showsUCSUR && UCSUR.block(containing: character.codePoint) != nil
-            let size: CGFloat = character.isInvisible ? 17 : compact ? 24 : 32
-            glyph.font = UnicodeFontSupport.font(for: character.displayText, size: size, enabled: useUnicodeFonts)
-            accessibilityValue = UnicodeFontSupport.sourceName(for: character.displayText, size: size, enabled: useUnicodeFonts).map { "Preview font: \($0)" }
+            let size: CGFloat = chip ? 20 : character.isInvisible ? 17 : compact ? 24 : 32
+            let resolution = UnicodeFontSupport.resolution(for: character.displayText, size: size, enabled: useUnicodeFonts, anchor: character.fontRuleAnchor)
+            glyph.font = resolution.font
+            accessibilityValue = resolution.faceName.map { "Preview font: \($0)" }
             missing = UnicodeFontSupport.stockFontsMiss(character.displayText)
         } else {
-            let size: CGFloat = compact ? 24 : 32
-            glyph.font = UnicodeFontSupport.font(for: item.displayText, size: size, enabled: useUnicodeFonts)
-            accessibilityValue = UnicodeFontSupport.sourceName(for: item.displayText, size: size, enabled: useUnicodeFonts).map { "Preview font: \($0)" }
+            let size: CGFloat = chip ? 20 : compact ? 24 : 32
+            let resolution = UnicodeFontSupport.resolution(for: item.displayText, size: size, enabled: useUnicodeFonts)
+            glyph.font = resolution.font
+            accessibilityValue = resolution.faceName.map { "Preview font: \($0)" }
             missing = UnicodeFontSupport.stockFontsMiss(item.displayText, emoji: true)
         }
         backgroundColor = glyphOnly
@@ -3386,7 +4426,7 @@ private final class InspectableKeyButton: UIControl {
         name.text = showsName ? item.name : nil
         name.isHidden = !showsName
         // A named key shows its code point too.
-        let showsCode = !glyphOnly || showsName
+        let showsCode = !glyphOnly || showsName || chip
         codeHeight.isActive = showsCode
         code.isHidden = !showsCode
         star.isHidden = glyphOnly || !favorite
@@ -3498,3 +4538,426 @@ private extension View {
         else { self }
     }
 }
+
+#if DEBUG
+import CoreText
+
+// MARK: - DEBUG-only cursor probe (docs/preview-cursor-findings.md)
+//
+// Measurement scaffolding, never compiled into Release. It answers how
+// textDocumentProxy.adjustTextPosition(byCharacterOffset:) maps onto host
+// text before the text preview becomes interactive. It stays inert unless
+// the host document contains the sentinel "cursorprobe" ("cursorprobeline"
+// for single-line hosts); then a small yellow button appears at the top of
+// the keyboard. Each tap runs one scripted step (seed, move, insert a "|"
+// marker, delete it, …) and publishes a report in the button's
+// accessibility value. UniboardUITests.testCursorProbeMapsAdjustTextPositionInHosts
+// pairs every report with the host's own value, the ground truth.
+extension KeyboardViewController {
+    func cursorProbeHostEvent(_ event: KeyboardCursorProbe.Event) {
+        KeyboardCursorProbe.hostEvent(event, controller: self)
+    }
+}
+
+@MainActor
+final class KeyboardCursorProbe: NSObject {
+    enum Event { case appear, text, selection }
+
+    enum Op {
+        case seed(String)
+        case move(Int)
+        case moveRapid(count: Int, by: Int)
+        case movePaced(count: Int, by: Int)
+        case moveBeyondContext(extra: Int)
+        case moveBurst([Int])
+        case moveBurstThenInsert([Int], String)
+        case mark
+        case unmark
+        case insert(String)
+        case deleteBackward
+        case report
+        case bidi(String)
+    }
+
+    struct Step {
+        let name: String
+        let ops: [Op]
+        var awaitSelection = false
+    }
+
+    private static var current: KeyboardCursorProbe?
+
+    static func hostEvent(_ event: Event, controller: UIInputViewController) {
+        if let probe = current, probe.controller === controller {
+            probe.record(event)
+            if probe.finished, probe.sentinelPresent() { probe.restart() }
+            return
+        }
+        let candidate = KeyboardCursorProbe(controller: controller)
+        guard candidate.sentinelPresent() else { return }
+        current?.button.removeFromSuperview()
+        current = candidate
+        candidate.restart()
+    }
+
+    private weak var controller: UIInputViewController?
+    private let button = UIButton(type: .system)
+    private var steps: [Step] = []
+    private var index = 0
+    private var running = false
+    private var selectionEvents = 0
+    private var textEvents = 0
+    private var lastCall: TimeInterval = 0
+    private var firstSelectionDelay: Double?
+    private var firstTextDelay: Double?
+
+    private init(controller: UIInputViewController) {
+        self.controller = controller
+        super.init()
+    }
+
+    private var proxy: UITextDocumentProxy? { controller?.textDocumentProxy }
+    private var finished: Bool { index >= steps.count && !running }
+
+    private func sentinelPresent() -> Bool {
+        guard let proxy else { return false }
+        let text = ((proxy.documentContextBeforeInput ?? "") + (proxy.documentContextAfterInput ?? "")).lowercased()
+        return text.contains("cursorprobe") || Self.previewFixture(in: text) != nil
+    }
+
+    /// "previewfixtureN" seeds one text for the preview cursor UI tests
+    /// (UniboardUITests "PreviewCursor"), text a test can't type itself.
+    static let previewFixtures = [
+        "previewfixture1": "Cafe\u{301} \u{5D1}\u{5BC}\u{5E8}\u{5D0} \u{1F469}\u{200D}\u{1F4BB}",
+        "previewfixture2": "\u{5E9}\u{5DC}\u{5D5}\u{5DD} abc"
+    ]
+
+    private static func previewFixture(in text: String) -> String? {
+        previewFixtures.first { text.contains($0.key) }?.value
+    }
+
+    private func restart() {
+        guard let proxy, let view = controller?.view else { return }
+        let text = ((proxy.documentContextBeforeInput ?? "") + (proxy.documentContextAfterInput ?? "")).lowercased()
+        // "cursorprobe2…" selects the follow-up script (forward walks from
+        // the exact start, overshoot and coalescing checks); "cursorprobe3"
+        // runs the follow-up and then the first script.
+        if let fixture = Self.previewFixture(in: text) {
+            steps = [Step(name: "fixture", ops: [.seed(fixture)])]
+        } else if text.contains("cursorprobe3") {
+            steps = Self.followUpScript() + Self.script(singleLine: false)
+        } else if text.contains("cursorprobe2") || text.contains("cursorprobeline2") {
+            steps = Self.followUpScript()
+        } else {
+            steps = Self.script(singleLine: text.contains("cursorprobeline"))
+        }
+        index = 0
+        if button.superview !== view {
+            button.removeFromSuperview()
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.setTitle("probe", for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 11, weight: .semibold)
+            button.backgroundColor = .systemYellow
+            button.setTitleColor(.black, for: .normal)
+            button.accessibilityIdentifier = "keyboard.debug.cursorProbe"
+            button.accessibilityLabel = "Cursor probe"
+            button.removeTarget(nil, action: nil, for: .allEvents)
+            button.addTarget(self, action: #selector(tapped), for: .touchUpInside)
+            view.addSubview(button)
+            NSLayoutConstraint.activate([
+                button.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                button.topAnchor.constraint(equalTo: view.topAnchor),
+                button.widthAnchor.constraint(equalToConstant: 64),
+                button.heightAnchor.constraint(equalToConstant: 26)
+            ])
+        }
+        view.bringSubviewToFront(button)
+        button.accessibilityValue = "#0/\(steps.count) READY"
+    }
+
+    private func record(_ event: Event) {
+        let delay = (ProcessInfo.processInfo.systemUptime - lastCall) * 1000
+        switch event {
+        case .selection:
+            selectionEvents += 1
+            if firstSelectionDelay == nil { firstSelectionDelay = delay }
+        case .text:
+            textEvents += 1
+            if firstTextDelay == nil { firstTextDelay = delay }
+        case .appear:
+            break
+        }
+    }
+
+    @objc private func tapped() {
+        guard !running, index < steps.count else { return }
+        running = true
+        let step = steps[index]
+        index += 1
+        let number = index
+        let total = steps.count
+        Task { @MainActor in
+            var log: [String] = []
+            for op in step.ops { log.append(await self.perform(op)) }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            log.append("end=" + self.snapshot())
+            self.button.accessibilityValue = "#\(number)/\(total) \(step.name) :: " + log.joined(separator: " ; ")
+                + (step.awaitSelection ? " AWAIT:select" : "")
+            self.running = false
+            // A seeded fixture leaves the keyboard as it ships.
+            if step.name == "fixture" { self.button.removeFromSuperview() }
+        }
+    }
+
+    // MARK: Script
+
+    private static func followUpScript() -> [Step] {
+        var steps: [Step] = []
+        let cases: [(String, String)] = [
+            ("astral", "x\u{1F600}y"),
+            ("zwj", "x\u{1F469}\u{200D}\u{1F4BB}y"),
+            ("flag", "x\u{1F1EF}\u{1F1F5}y"),
+            ("skin", "x\u{1F44D}\u{1F3FD}y"),
+            ("combining", "xe\u{301}y"),
+            ("niqqud", "x\u{5D1}\u{5BC}\u{5E8}\u{5D0}y"),
+            ("mixed", "abc \u{5D0}\u{5D1}\u{5D2} def")
+        ]
+        for (id, text) in cases {
+            let units = text.utf16.count
+            // Exactly to the start, then +1 at a time past the end.
+            steps.append(Step(name: "\(id) toStart", ops: (steps.isEmpty ? [] : [.unmark]) + [.seed(text), .move(-units), .mark]))
+            for i in 1...(units + 1) {
+                steps.append(Step(name: "\(id) fwd\(i)", ops: [.unmark, .move(1), .mark]))
+            }
+            // A move one unit past either edge, in one call.
+            steps.append(Step(name: "\(id) overshootEnd", ops: [.unmark, .seed(text), .move(-1), .move(2), .mark]))
+            steps.append(Step(name: "\(id) overshootStart", ops: [.unmark, .seed(text), .move(-(units + 1)), .mark]))
+        }
+        // Coalescing: rapid calls whose sum overshoots, versus paced ones.
+        let ascii = "0123456789abcdefghij"
+        steps.append(Step(name: "coalesce seed at 15", ops: [.unmark, .seed(ascii), .move(-5), .mark]))
+        steps.append(Step(name: "coalesce rapid 8x-1 in range", ops: [.unmark, .moveRapid(count: 8, by: -1), .mark]))
+        steps.append(Step(name: "coalesce rapid 12x-1 sum overshoots by 5", ops: [.unmark, .moveRapid(count: 12, by: -1), .mark]))
+        steps.append(Step(name: "coalesce paced 12x-1 overshoots by 5", ops: [.unmark, .movePaced(count: 12, by: -1), .mark]))
+        steps.append(Step(name: "coalesce burst +3,-1,+3", ops: [.unmark, .moveBurst([3, -1, 3]), .mark]))
+        steps.append(Step(name: "coalesce burst +3 then insert at once", ops: [.unmark, .moveBurstThenInsert([1, 1, 1], "Q"), .report]))
+        return steps
+    }
+
+    private static func script(singleLine: Bool) -> [Step] {
+        var steps: [Step] = []
+        let cases: [(String, String)] = [
+            ("astral", "x\u{1F600}y"),
+            ("zwj", "x\u{1F469}\u{200D}\u{1F4BB}y"),
+            ("flag", "x\u{1F1EF}\u{1F1F5}y"),
+            ("skin", "x\u{1F44D}\u{1F3FD}y"),
+            ("combining", "xe\u{301}y"),
+            ("niqqud", "x\u{5D1}\u{5BC}\u{5E8}\u{5D0}y"),
+            ("mixed", "abc \u{5D0}\u{5D1}\u{5D2} def")
+        ]
+        for (id, text) in cases {
+            let units = text.utf16.count
+            steps.append(Step(name: "\(id) seed", ops: [.seed(text)]))
+            for i in 1...(units + 1) {
+                steps.append(Step(name: "\(id) back\(i)", ops: (i > 1 ? [.unmark] : []) + [.move(-1), .mark]))
+            }
+            steps.append(Step(name: "\(id) jump-50", ops: [.unmark, .seed(text), .move(-50), .mark]))
+            for i in 1...(units + 1) {
+                steps.append(Step(name: "\(id) fwd\(i)", ops: [.unmark, .move(1), .mark]))
+            }
+            steps.append(Step(name: "\(id) end-2 insertZ", ops: [.unmark, .seed(text), .move(-2), .insert("Z")]))
+            steps.append(Step(name: "\(id) end-2 delete", ops: [.seed(text), .move(-2), .deleteBackward]))
+            steps.append(Step(name: "\(id) end-\(units - 1) mark", ops: [.seed(text), .move(-(units - 1)), .mark]))
+            steps.append(Step(name: "\(id) end-\(units - 1) delete", ops: [.unmark, .deleteBackward]))
+        }
+        steps.append(Step(name: "bidi layout", ops: [
+            .bidi("abc \u{5D0}\u{5D1}\u{5D2} def"),
+            .bidi("\u{5E9}\u{5DC}\u{5D5}\u{5DD} abc")
+        ]))
+        // Selection: the UI test double-taps the first word after each AWAIT.
+        let selection = "wwwwwwww world"
+        steps.append(Step(name: "sel seed", ops: [.seed(selection)], awaitSelection: true))
+        steps.append(Step(name: "sel report", ops: [.report]))
+        steps.append(Step(name: "sel +3", ops: [.move(3), .mark]))
+        steps.append(Step(name: "sel unmark", ops: [.unmark], awaitSelection: true))
+        steps.append(Step(name: "sel -3", ops: [.move(-3), .mark]))
+        steps.append(Step(name: "sel unmark", ops: [.unmark], awaitSelection: true))
+        steps.append(Step(name: "sel 0", ops: [.move(0), .mark]))
+        steps.append(Step(name: "sel reseed", ops: [.seed(selection)], awaitSelection: true))
+        steps.append(Step(name: "sel insert", ops: [.insert("|")]))
+        steps.append(Step(name: "sel reseed", ops: [.seed(selection)], awaitSelection: true))
+        steps.append(Step(name: "sel delete", ops: [.deleteBackward]))
+        // Long document: exposed context, large jumps, edges and chunking.
+        let lines = (1...(singleLine ? 40 : 80)).map { String(format: "L%02ld the quick brown fox jumps over.", $0) }
+        let long = lines.joined(separator: singleLine ? " " : "\n")
+        steps.append(Step(name: "long seed", ops: [.seed(long), .report]))
+        steps.append(Step(name: "long -300", ops: [.move(-300), .mark]))
+        steps.append(Step(name: "long +300", ops: [.unmark, .move(300), .mark]))
+        steps.append(Step(name: "long -1200", ops: [.unmark, .move(-1200), .mark]))
+        steps.append(Step(name: "long mid report", ops: [.unmark, .report]))
+        steps.append(Step(name: "long +1200", ops: [.move(1200), .mark]))
+        steps.append(Step(name: "long beyond-context", ops: [.unmark, .moveBeyondContext(extra: 40), .mark]))
+        steps.append(Step(name: "long -100000", ops: [.unmark, .move(-100000), .mark]))
+        steps.append(Step(name: "long start report", ops: [.unmark, .report]))
+        steps.append(Step(name: "long +100000", ops: [.move(100000), .mark]))
+        steps.append(Step(name: "long rapid 12x-100", ops: [.unmark, .moveRapid(count: 12, by: -100), .mark]))
+        steps.append(Step(name: "long to end", ops: [.unmark, .move(100000), .mark]))
+        steps.append(Step(name: "long paced 12x-100", ops: [.unmark, .movePaced(count: 12, by: -100), .mark]))
+        steps.append(Step(name: "long rapid 40x-1", ops: [.unmark, .moveRapid(count: 40, by: -1), .mark]))
+        return steps
+    }
+
+    // MARK: Operations
+
+    private func perform(_ op: Op) async -> String {
+        guard let proxy else { return "no-proxy" }
+        switch op {
+        case .seed(let text):
+            let rounds = await clear()
+            call { proxy.insertText(text) }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            return "seed(\(Self.escape(String(text.prefix(24))))…u16=\(text.utf16.count)) clearRounds=\(rounds) -> " + snapshot()
+        case .move(let offset):
+            return await measured("move(\(offset))") { proxy.adjustTextPosition(byCharacterOffset: offset) }
+        case .moveRapid(let count, let offset):
+            return await measured("rapid(\(count)x\(offset))") {
+                for _ in 0..<count { proxy.adjustTextPosition(byCharacterOffset: offset) }
+            }
+        case .movePaced(let count, let offset):
+            var trail: [String] = []
+            for _ in 0..<count {
+                call { proxy.adjustTextPosition(byCharacterOffset: offset) }
+                try? await Task.sleep(nanoseconds: 80_000_000)
+                trail.append("b\(proxy.documentContextBeforeInput?.utf16.count ?? -1)")
+            }
+            return "paced(\(count)x\(offset)) " + trail.joined(separator: ",") + " -> " + snapshot()
+        case .moveBurst(let offsets):
+            return await measured("burst(\(offsets))") {
+                for offset in offsets { proxy.adjustTextPosition(byCharacterOffset: offset) }
+            }
+        case .moveBurstThenInsert(let offsets, let text):
+            return await measured("burst(\(offsets))+insert(\(Self.escape(text)))") {
+                for offset in offsets { proxy.adjustTextPosition(byCharacterOffset: offset) }
+                proxy.insertText(text)
+            }
+        case .moveBeyondContext(let extra):
+            let exposed = proxy.documentContextBeforeInput?.utf16.count ?? 0
+            let offset = -(exposed + extra)
+            return await measured("beyond(exposed=\(exposed) move \(offset))") { proxy.adjustTextPosition(byCharacterOffset: offset) }
+        case .mark:
+            return await measured("mark") { proxy.insertText("|") }
+        case .unmark:
+            return await measured("unmark") { proxy.deleteBackward() }
+        case .insert(let text):
+            return await measured("insert(\(Self.escape(text)))") { proxy.insertText(text) }
+        case .deleteBackward:
+            return await measured("deleteBackward") { proxy.deleteBackward() }
+        case .report:
+            let before = proxy.documentContextBeforeInput
+            let after = proxy.documentContextAfterInput
+            return "report hasText=\(proxy.hasText) selected=\(proxy.selectedText.map { "\"\(Self.escape($0))\"" } ?? "nil")"
+                + " beforeLen=\(before.map { "\($0.utf16.count)u16/\($0.count)ch" } ?? "nil")"
+                + " afterLen=\(after.map { "\($0.utf16.count)u16/\($0.count)ch" } ?? "nil")"
+                + " beforeHead=\"\(Self.escape(String((before ?? "").prefix(20))))\""
+                + " afterTail=\"\(Self.escape(String((after ?? "").suffix(20))))\" " + snapshot()
+        case .bidi(let text):
+            return Self.bidiLayout(text)
+        }
+    }
+
+    private func call(_ body: () -> Void) {
+        lastCall = ProcessInfo.processInfo.systemUptime
+        firstSelectionDelay = nil
+        firstTextDelay = nil
+        body()
+    }
+
+    /// Runs one proxy call and samples the context synchronously, after one
+    /// main-queue turn, after 60 ms and after 300 ms, with callback counts.
+    private func measured(_ name: String, _ body: () -> Void) async -> String {
+        let pre = snapshot()
+        let selection0 = selectionEvents
+        let text0 = textEvents
+        call(body)
+        let sync = snapshot()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        let turn = snapshot()
+        try? await Task.sleep(nanoseconds: 60_000_000)
+        let ms60 = snapshot()
+        try? await Task.sleep(nanoseconds: 240_000_000)
+        let ms300 = snapshot()
+        func delta(_ value: String, _ previous: String) -> String { value == previous ? "=" : value }
+        let selectionDelay = firstSelectionDelay.map { String(format: "%.0fms", $0) } ?? "-"
+        let textDelay = firstTextDelay.map { String(format: "%.0fms", $0) } ?? "-"
+        return "\(name) pre=\(pre) sync=\(delta(sync, pre)) turn=\(delta(turn, sync)) 60ms=\(delta(ms60, turn))"
+            + " 300ms=\(delta(ms300, ms60)) cb[sel+\(selectionEvents - selection0)@\(selectionDelay)"
+            + " txt+\(textEvents - text0)@\(textDelay)]"
+    }
+
+    /// Moves to the end of the exposed text and deletes until the host has none.
+    private func clear() async -> Int {
+        guard let proxy else { return -1 }
+        for round in 0..<60 {
+            if let after = proxy.documentContextAfterInput, !after.isEmpty {
+                call { proxy.adjustTextPosition(byCharacterOffset: after.utf16.count) }
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                continue
+            }
+            let before = proxy.documentContextBeforeInput ?? ""
+            if before.isEmpty && !proxy.hasText { return round }
+            let count = before.isEmpty ? 50 : before.utf16.count
+            call { for _ in 0..<count { proxy.deleteBackward() } }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        return 60
+    }
+
+    private func snapshot() -> String {
+        guard let proxy else { return "[no-proxy]" }
+        let before = proxy.documentContextBeforeInput
+        let after = proxy.documentContextAfterInput
+        let b = before.map { "\"\(Self.escape(String($0.suffix(12))))\"(\($0.utf16.count)u16,\($0.count)ch)" } ?? "nil"
+        let a = after.map { "\"\(Self.escape(String($0.prefix(12))))\"(\($0.utf16.count)u16,\($0.count)ch)" } ?? "nil"
+        var result = "[\(b)^\(a)"
+        if let selected = proxy.selectedText, !selected.isEmpty { result += " sel=\"\(Self.escape(selected))\"" }
+        return result + "]"
+    }
+
+    static func escape(_ text: String) -> String {
+        text.unicodeScalars.map { scalar -> String in
+            if scalar.value >= 0x20 && scalar.value < 0x7F && scalar != "\\" { return String(scalar) }
+            if scalar == "\n" { return "\\n" }
+            return "\\u{\(String(scalar.value, radix: 16, uppercase: true))}"
+        }.joined()
+    }
+
+    /// How Core Text lays out a bidi string in a left-to-right line, the
+    /// geometry a tap-to-offset mapping in the preview row would rely on.
+    private static func bidiLayout(_ text: String) -> String {
+        let attributed = NSAttributedString(string: text, attributes: [.font: UIFont.systemFont(ofSize: 17)])
+        let line = CTLineCreateWithAttributedString(attributed)
+        let width = CTLineGetTypographicBounds(line, nil, nil, nil)
+        var offsets: [String] = []
+        let units = Array(text.utf16)
+        for i in 0...units.count {
+            var secondary: CGFloat = 0
+            let primary = CTLineGetOffsetForStringIndex(line, i, &secondary)
+            offsets.append("\(i):" + String(format: "%.1f/%.1f", primary, secondary))
+        }
+        var carets: [String] = []
+        CTLineEnumerateCaretOffsets(line) { offset, index, leading, _ in
+            carets.append(String(format: "%.1f", offset) + "→\(index)" + (leading ? "L" : "T"))
+        }
+        var hits: [String] = []
+        var x: CGFloat = 0
+        while x <= CGFloat(width) + 4 {
+            hits.append(String(format: "x%.0f", x) + "→\(CTLineGetStringIndexForPosition(line, CGPoint(x: x, y: 0)))")
+            x += 6
+        }
+        return "bidi(\(escape(text)) width=\(String(format: "%.1f", width))) offsets{\(offsets.joined(separator: " "))}"
+            + " carets{\(carets.joined(separator: " "))} hits{\(hits.joined(separator: " "))}"
+    }
+}
+#endif

@@ -162,9 +162,10 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
         numbers.selectLayout(.numbers)
         XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "1", state: numbers, hasAuxiliaryRow: false), "1")
         XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: "1", state: numbers, hasAuxiliaryRow: true))
-        XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: "_", state: numbers, hasAuxiliaryRow: false))
-        XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "_", state: numbers, hasAuxiliaryRow: true), "_")
-        XCTAssertNil(numbers.output(for: "_"), "The base three-row state remains unchanged")
+        // With the digits above it, the page's own digit row becomes symbols.
+        XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: "[", state: numbers, hasAuxiliaryRow: false))
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "[", state: numbers, hasAuxiliaryRow: true), "[")
+        XCTAssertNil(numbers.output(for: "["), "The base three-row state remains unchanged")
     }
 
     func testExpandedCoreOutputRejectsAuxiliaryStaleAndNonliteralKeysWithoutConsumingShift() {
@@ -177,7 +178,7 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
         for key in KeyboardTypingLayoutPolicy.rows(for: .numbers, hasAuxiliaryRow: true).flatMap({ $0 }) {
             XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: key, state: state, hasAuxiliaryRow: true), key)
         }
-        for key in ["", "1", "0", "[", "]", "01", "a", "A", "€ ", "€\u{FE0F}", "１", "١", "\\\\", "\n"] {
+        for key in ["", "1", "0", "_", "~", "01", "a", "A", "€ ", "€\u{FE0F}", "１", "١", "\\\\", "\n"] {
             XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: key, state: state, hasAuxiliaryRow: true), key)
         }
     }
@@ -191,7 +192,12 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
                 XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: invalid, layout: page), invalid)
             }
         }
-        XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "1", layout: .numbers))
+        // The digits stay above every page, so they never move.
+        for page in KeyboardTypingLayout.allCases {
+            XCTAssertEqual(KeyboardTypingLayoutPolicy.auxiliaryRow(for: page), Array("1234567890").map(String.init))
+        }
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "1", layout: .numbers), "1")
+        XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "[", layout: .numbers))
         XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "[", layout: .letters))
         XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "[", layout: .symbols))
     }
@@ -241,8 +247,9 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
                                 widePad: wide, ansiPad: ansi, padLayout: preset)
                             XCTAssertEqual(core.count, plan.mainRowsCount)
                             let all = core.flatMap { $0 } + (plan.numberRowCount > 0 ? KeyboardTypingLayoutPolicy.auxiliaryRow(for: layout, ansiPad: ansi) : [])
-                            if layout == .letters {
-                                for digit in "0123456789" { XCTAssertEqual(all.filter { $0 == String(digit) }.count, 1) }
+                            // The digits are on the letters and 123 pages exactly once.
+                            if layout != .symbols {
+                                for digit in "0123456789" { XCTAssertEqual(all.filter { $0 == String(digit) }.count, 1, "\(layout)") }
                             }
                         }
                     }
@@ -250,21 +257,31 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
             }
         }
     }
-    func testHiddenNumberRowLeavesThreeRowsWithStockDigitPagesButKeepsFullANSIDigits() throws {
+    func testAThreeRowArrangementLeavesThreeRowsWithStockDigitPagesButKeepsFullANSIDigits() throws {
         let plan = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 500, availableWidth: 402,
-            compact: false, layout: .letters, showsNumberRow: false))
+            compact: false, layout: .letters, keyRows: 3))
         XCTAssertEqual(plan.numberRowCount, 0)
         XCTAssertEqual(plan.rowCount, 3)
         XCTAssertEqual(plan.keyHeight, 36 * 1.15)
         let tight = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 98, availableWidth: 402,
-            compact: false, layout: .letters, showsNumberRow: false))
+            compact: false, layout: .letters, keyRows: 3))
         XCTAssertEqual(tight.contentHeight, 98, accuracy: 0.000001, "Three rows share the whole height")
         // The 123 page falls back to its stock rows, which start with the digits.
         XCTAssertEqual(KeyboardTypingLayoutPolicy.rows(for: .numbers, hasAuxiliaryRow: false)[0],
                        Array("1234567890").map(String.init))
         let ansi = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 500, availableWidth: 1194,
-            compact: false, layout: .letters, isPad: true, isLandscape: true, padLayout: .ansiNumbers, showsNumberRow: false))
+            compact: false, layout: .letters, isPad: true, isLandscape: true, padLayout: .ansiNumbers, keyRows: 3))
         XCTAssertEqual(ansi.rowCount, 4, "Full ANSI keeps its own digit row")
+        // A fourth row of the arrangement adds one row; more never adds another.
+        for rows in [4, 5] {
+            let four = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 500, availableWidth: 402,
+                compact: false, layout: .numbers, keyRows: rows))
+            XCTAssertEqual(four.numberRowCount, 1); XCTAssertEqual(four.rowCount, 4)
+        }
+        for rows in [0, 1, 3] {
+            XCTAssertEqual(try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 500, availableWidth: 402,
+                compact: false, layout: .symbols, keyRows: rows)).rowCount, 3)
+        }
     }
     func testFixedTemplateRejectsInvalidDimensionsAndShrinksAllRowsOnlyIfConstrained() throws {
         for pad in [false, true] {

@@ -205,9 +205,31 @@ final class EditorReorderTests: XCTestCase {
         arrangement.rows.map { $0.compactMap { if case .key(let key) = $0 { return key }; return nil } }
     }
 
-    func testMainKeyboardMovesKeysAndKeepsAValidKeyboard() throws {
+    func testMainKeyboardMovesDigitsLikeAnyOtherKeyWithinFourRows() throws {
         let english = KeyboardAlphabet.english
         let standard = Arrangement.standard(for: english)
+        // A digit drags down among the letters, and the number row keeps the rest.
+        let down = try XCTUnwrap(EditorReorder.mainKeyboard(standard, from: p(0, 0), to: p(1, 0), alphabet: english))
+        XCTAssertEqual(keyRows(down.value)[0].first, "2")
+        XCTAssertEqual(keyRows(down.value)[1].prefix(2), ["1", "q"])
+        XCTAssertTrue(down.value.isValid(for: english))
+        // A letter can join the number row.
+        let up = try XCTUnwrap(EditorReorder.mainKeyboard(standard, from: p(1, 0), to: p(0, 10), alphabet: english))
+        XCTAssertEqual(keyRows(up.value)[0].last, "q")
+        // Every move keeps four rows at most and each digit once.
+        let places = try XCTUnwrap(standard.places)
+        for target in places.rows.indices {
+            for place in 0...places.rows[target].count {
+                guard let move = EditorReorder.mainKeyboard(standard, from: p(0, 3), to: p(target, place), alphabet: english) else { continue }
+                XCTAssertLessThanOrEqual(move.value.places?.rows.count ?? 9, Arrangement.maximumRows)
+                XCTAssertEqual(move.value.keys.filter(Arrangement.isDigit).sorted(), Arrangement.digits.sorted())
+            }
+        }
+    }
+
+    func testMainKeyboardMovesKeysAndKeepsAValidKeyboard() throws {
+        let english = KeyboardAlphabet.english
+        let standard = Arrangement.letters(for: english)
         let move = try XCTUnwrap(EditorReorder.mainKeyboard(standard, from: p(0, 0), to: p(0, 2), alphabet: english))
         XCTAssertEqual(keyRows(move.value)[0].prefix(3), ["w", "q", "e"])
         XCTAssertEqual(move.landing, p(0, 1))
@@ -224,22 +246,22 @@ final class EditorReorderTests: XCTestCase {
 
     func testMainKeyboardDragsOnlyKeysAndRefusesBrokenArrangements() throws {
         let english = KeyboardAlphabet.english
-        var gapped = Arrangement.standard(for: english)
+        var gapped = Arrangement.letters(for: english)
         gapped.layout = "g" + gapped.layout
         XCTAssertTrue(gapped.isValid(for: english))
         XCTAssertFalse(EditorReorder.canDragMainKeyboardItem(at: p(0, 0), in: gapped))
         XCTAssertTrue(EditorReorder.canDragMainKeyboardItem(at: p(0, 1), in: gapped))
         XCTAssertFalse(EditorReorder.canDragMainKeyboardItem(at: p(5, 0), in: gapped))
 
-        var broken = Arrangement.standard(for: english)
+        var broken = Arrangement.letters(for: english)
         broken.keys.removeLast()
         XCTAssertNil(EditorReorder.mainKeyboard(broken, from: p(0, 0), to: p(0, 2), alphabet: english), "A keyboard missing a key is not moved")
-        XCTAssertNil(EditorReorder.mainKeyboard(Arrangement.standard(for: english), from: p(0, 10), to: p(0, 0), alphabet: english))
+        XCTAssertNil(EditorReorder.mainKeyboard(Arrangement.letters(for: english), from: p(0, 10), to: p(0, 0), alphabet: english))
     }
 
     func testEveryMainKeyboardMoveKeepsEveryKeyOnce() throws {
         let english = KeyboardAlphabet.english
-        var standard = Arrangement.standard(for: english)
+        var standard = Arrangement.letters(for: english)
         standard.keys.insert(Arrangement.tab, at: 0)
         standard.layout = "kh" + standard.layout
         XCTAssertTrue(standard.isValid(for: english))

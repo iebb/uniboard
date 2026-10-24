@@ -348,8 +348,13 @@ final class UnicodeEditionSettingsTests: XCTestCase {
         // Exercise the real platform container lookup, without reading or
         // modifying any actual shared setting. Unsigned core tests may have
         // no group container; an entitled native test host may have one.
-        let container = FileManager.default.containerURL(
+        // The group root before migration; the current configuration generation in it after.
+        let group = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: UnicodeEditionSettings.groupIdentifier)
+        let container = SharedConfigurationLocation.shared.currentDirectory()
+        if let group, let container {
+            XCTAssertTrue(container.standardizedFileURL.path.hasPrefix(group.standardizedFileURL.path))
+        } else { XCTAssertNil(container) }
         let bytes = try payload(UnicodeEdition.previous.selectionIdentifier)
         var readURL: URL?
         let settings = UnicodeEditionSettings(readPrefix: { url, maximum in

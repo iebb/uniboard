@@ -8,6 +8,8 @@ struct KeyboardHostInputTraits: Equatable {
     let capitalization: UITextAutocapitalizationType
     let returnKey: UIReturnKeyType
     let textContentType: UITextContentType?
+    /// A secure field never shares its text and never gets automatic capitals.
+    let isSecureTextEntry: Bool
 
     @MainActor
     init(reading source: any UITextInputTraits) {
@@ -16,12 +18,14 @@ struct KeyboardHostInputTraits: Equatable {
         returnKey = source.returnKeyType ?? .default
         let contentType: UITextContentType? = source.textContentType ?? nil
         textContentType = contentType
+        isSecureTextEntry = source.isSecureTextEntry ?? false
     }
 
     /// These identifier/address/code fields must remain literal even when a
     /// host leaves keyboardType at default. Unknown future content types keep
     /// ordinary English behavior; manual Shift and Caps are a separate policy.
     var permitsEnglishAssistance: Bool {
+        if isSecureTextEntry { return false }
         if let textContentType,
            [.URL, .emailAddress, .username, .password, .newPassword, .oneTimeCode].contains(textContentType) {
             return false

@@ -104,8 +104,10 @@ Sections, in priority order:
 
 Rule row, min 60 pt:
 - Leading 44×44 tile, radius 8, previewSurface: code point → its glyph at
-  28 pt; range/block → its first assigned character; drawn in the chosen face
-  when available, else the system rendering at 40 % opacity.
+  28 pt; range/block → the first assigned character the chosen face can
+  draw, in that face (review msg356: Greek's first character Ͱ isn't in
+  Roboto). If the face draws none of them, or its file is missing: the first
+  assigned character, system rendering at 40 % opacity.
 - Title (body): code point → character name; range → "U+2190–U+21FF"
   monospaced; block → block name.
 - Subtitle (caption secondary): code point → "U+16A0"; range →
@@ -131,17 +133,28 @@ a code point, range or Unicode block.", button "Add Rule" (same menu).
 ## 4. Font Picker (from character detail, and "Preferred font" in the editor)
 Pushed screen, inline title "Preferred Font". `.searchable` prompt "Search
 fonts".
+- "Representative characters" (used by the rule-row tile, font-row tiles
+  and sample strip for a range/block; review msg364): the assigned
+  characters the face can draw, ordered by General Category group — Letters
+  (L* except Lm) first, then Numbers (N*), Symbols (S* except Sk),
+  Punctuation (P*), anything else, and last the marks and modifiers — M*
+  (on the dotted circle), Lm and Sk (e.g. ʹ U+0374, ͺ U+037A; Pluso msg371)
+  — keeping code point order inside each group. Tile = the first one; strip = the first 12. Greek and
+  Coptic in Roboto → tile Ά, strip Ά Έ Ή Ί Ό Ύ Ώ ΐ Α Β Γ Δ.
 - Sample header (not a row): single code point → glyph 64 pt centered in a
   96 pt previewSurface box, radius 12, drawn in the highlighted choice. Range
-  or block → first 12 assigned characters at 28 pt, one line, horizontal
-  scroll.
+  or block → the first 12 assigned characters the highlighted face can draw,
+  in that face, 28 pt, one line, horizontal scroll (no face chosen yet, or it
+  draws none: the first 12 assigned characters, system rendering).
 - Notice row when Extra Unicode Fonts is off (same as §3.1).
 - Font sections in this order, each only if non-empty:
   "Your Fonts" (imported + installed), "Google Fonts" (downloaded faces),
   "Preview Fonts" (packs). Within each: faces that can draw it first, then
   alphabetical.
-- Font row, min 56: leading 44×44 tile with the first character in that face
-  at 28 pt; title = face name (body); subtitle = style · source (caption,
+- Font row, min 56: leading 44×44 tile at 28 pt: single code point → that
+  character in the face; range/block → the first assigned character THAT
+  face can draw (so each row shows its own face), or, if it draws none, the
+  first assigned character in system rendering at 40 %; title = face name (body); subtitle = style · source (caption,
   e.g. "Bold Italic · Google Fonts"); trailing checkmark (accent) when chosen.
   Range/block mode adds a caption with coverage of the NAMED face (never a
   fallback): "Supports {n} of {m} code points" when the whole range/block was
@@ -213,13 +226,18 @@ Configuration page, Form, inline title "Configuration":
   "Undo Last Import" `arrow.uturn.backward` — only when a recoverable
   previous configuration exists; subtitle caption "Imported {date, time}"
   (time of the successful local import, not the file's date).
-  Header text: "Save your settings, layouts, favorites, font rules and image
-  colors in a TOML file, or import a configuration from Files."
+  Header text (final, Camo msg434): "Save your settings, layouts,
+  favorites, font rules and Copy Image options in a TOML file, or import a
+  configuration from Files."
   Footer, two paragraphs, always visible before tapping Export:
   "Favorites and custom key text are included and may be personal. Typing
   history, scratchpad text and font files aren’t included."
   "Fonts aren’t included or downloaded automatically. Some font choices may
   need fonts added on the other device."
+  Third paragraph, same style, always shown (Camo msg409, Ato msg408; the
+  app can't know which colors the keyboard kept without Full Access):
+  "Copy Image colors and scale chosen in the keyboard without Full Access
+  aren’t included in this file." (updated Camo msg432)
 - Export: tap → row trailing ProgressView + caption "Preparing
   configuration…" → system share sheet with the file (Save to Files, AirDrop,
   …), suggested file name "Uniboard-Configuration-{YYYY-MM-DD}.toml" (local
@@ -249,8 +267,9 @@ Configuration page, Form, inline title "Configuration":
      secondary; title (body) with the status as a second line (footnote) so
      long names never collide; trailing chevron/disclosure when changed:
        "Settings" `gearshape`; "Layouts and Keys" `keyboard`; "Favorites"
-       `star`; "Font Choices and Rules" `textformat.alt`; "Image Colors"
-       `paintpalette`.
+       `star`; "Font Choices and Rules" `textformat.alt`; "Copy Image"
+       `paintpalette` (renamed from "Image Colors", Camo msg432; includes
+       "Image scale: 3× → 2×" lines — see copy-image/size-choice).
      Status words: "Will change" (accent), "Will reset to defaults" (orange
      triangle + secondary words), "Unchanged" (secondary). Every changed row
      is a DisclosureGroup listing ALL actual changes as plain lines
@@ -261,6 +280,16 @@ Configuration page, Form, inline title "Configuration":
      Fonts: Off → On" or "Extra Unicode Fonts: On → Off". This is the only
      way an import can change the switch, and only after Replace
      Configuration is tapped.
+   - Ignored settings (retired keys such as the old Top Row / Number Row
+     switches; Ato msg408, Camo msg409): only when the file has them, its
+     own section right after "Changes", header "Ignored settings" (same
+     style as "Changes"). One non-tappable row per key, min 44 pt: title
+     (body) = the setting's former name, caption beneath = the key exactly
+     as in the file, monospaced footnote secondary (e.g. `settings.top_row`).
+     No symbol, no chevron. Section footer: "These older settings won’t be
+     applied. Your editable keyboard layout takes precedence." Not counted as
+     a change: a file otherwise identical still shows "No changes to
+     import", with this section. VoiceOver: "Ignored setting, {name}".
    - If any section is missing, footer under Changes: orange triangle +
      "Sections missing from this file will reset to defaults."
    - Overwrite card (when favorites or layouts/keys change or reset):
@@ -268,11 +297,14 @@ Configuration page, Form, inline title "Configuration":
    - Fonts card (when referenced fonts are missing): orange triangle + "{n}
      fonts unavailable" / "1 font unavailable", text "Their rules will be
      kept. Other fonts will be used until these fonts are available. Nothing
-     will be downloaded." + list of font names.
+     will be downloaded." (2+ fonts) / for 1 font "Rules using this font
+     will be kept. Other fonts will be used until it’s available. Nothing
+     will be downloaded." (Camo msg419) + list of font names.
    - Backup note (caption, only once undo storage exists): "Your previous
      configuration will be kept so you can undo this import."
    - Bottom bar pinned in safe area (bar material, 16 pt padding): full-width
-     borderedProminent "Replace Configuration", 50 pt. Toolbar leading
+     borderedProminent "Replace Configuration", 50 pt tall (build of msg406
+     measured 64 pt — fix). Toolbar leading
      "Cancel".
    - Identical file: all rows "Unchanged", no overwrite or fonts cards; the
      intro is replaced by "No changes to import" (headline) and the primary
@@ -292,7 +324,8 @@ Configuration page, Form, inline title "Configuration":
    and Camo the copy — never claim it.
 
 ### 6b. Undo Last Import
-confirmationDialog: title "Undo last import?", message "Restore the
+confirmationDialog anchored to the Undo row (iOS 26 places it there;
+accepted msg406): title "Undo last import?", message "Restore the
 configuration you had before the last import." + (if newer edits) " Changes
 made since that import will also be replaced."; buttons "Restore Previous
 Configuration" (destructive) and "Cancel". Success: row disappears, inline

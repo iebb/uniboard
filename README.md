@@ -1,129 +1,185 @@
 # Uniboard
 
-A native, offline international keyboard with full Unicode search and browsing for iPhone and iPad. The containing app is `ad.neko.uniboard`; the system keyboard extension is `ad.neko.uniboard.keyboard`. Requires iOS 17 or later.
+Uniboard is an iPhone and iPad app with a custom keyboard extension for browsing, searching and typing every Unicode character and emoji, offline. The app (`ad.neko.uniboard`) explores the Unicode catalog and configures the keyboard; the keyboard (`ad.neko.uniboard.keyboard`) types literally into any app that allows custom keyboards and adds Unicode search, symbol pages and favorites. There are no accounts, ads or analytics, and typing and searches are never sent to a server.
 
-Search by character name, descriptive annotation, alias, block name, hexadecimal code point (`U+1F680`, `0x1F680`, `1F680`), explicit decimal code point (`decimal:128640`), or a literal character in the app. Browse every block or all assigned characters, always from the lowest code point. Explore shows tiles, 2 to 7 per row (pinch to change; the same count applies to block and search tiles), or 8 or 16 per row as a code chart of every block, low to high or high to low, with each block’s name and hex column digits pinned while its rows scroll, hex row labels, and gaps for unassigned code points. Tapping a block's name in the chart opens that block, with a block navigator at its top. Jump to Block opens any block by name or range, and the chart scrolls freely in both directions from there. The View menu can limit Explore to one plane. Private Use (its rows of placeholders, and planes 15 and 16) is hidden unless Settings → Private Use Area is on; with ConScript on, Explore shows only the registry's ranges, in planes 0 and 15. Search results always show as tiles. Block pages step to the previous or next block with the up and down arrows. Holding a block's name shows its range, plane, size, how much is assigned and since which version, or its registry for a ConScript block. What’s New lists the emoji and characters the selected edition adds over the previous one. Character names are shown exactly as Unicode publishes them. Characters that Unicode gives both a text and an emoji presentation sequence, such as ☃ or ⌚, show in charts in their text form (with VS15); their details show the text and emoji forms side by side, with a Copy button for each, while Copy Character and keyboard insertion keep the original scalar. When adding keys to a page or choices to a key, the Unicode picker lists each form on its own, so a page can hold both; in the keyboard, holding such a page key also offers its other form. Each tile carries a corner ribbon colored by the Unicode or Emoji version that added it, through the rainbow from red for the oldest to blue for the newest; draft additions are purple, and ConScript characters read CSUR while ConScript is on. Complete-word matches precede mid-word matches, each in code point order. Bare hexadecimal searches need a numeric digit; use `U+FACE` for a letters-only code point so the word “face” can find names.
+The App Store currently has version 1.1. The next release is **1.3** (`MARKETING_VERSION` in `project.yml`).
 
-Choose the Unicode edition in the app’s Settings tab, or from the version menu under the search field in Explore, Blocks and Emoji: **Unicode 18.0.0**, the latest release and default; previous releases **17.0.0** and **16.0.0**; or **Unicode 19.0.0 DRAFT**, available by explicit choice. Only the draft's character, property and fully qualified emoji catalogs are bundled offline; each final edition shows the draft limited to the characters and emoji of its version or earlier. Edition, optional preview fonts and the optional collapse key are set only in app Settings; reopen the keyboard to read them. These settings work with Full Access off. Pages are set up in the app and reach the keyboard the same way; Recently Used stays local. The app's Favorites and the keyboard's Favorites page share explicit favorites on-device; keyboard-to-app writes require optional Full Access.
+## Features (1.3)
 
-The **Emoji** tab searches and browses complete official fully qualified entries, by code point or by version (newest or oldest first), including ZWJ sequences, variation selectors, flags, keycaps and skin tones. Copying or keyboard insertion preserves the entire sequence. Emoji version ordering uses Emoji introduction version; component Unicode ages are shown separately. Favorite scalar and emoji text shares the same exact Favorites collection; recents remain local to each sandbox.
+- **Explore and search.** Explore every block or every assigned character as tiles or as a code chart, browse Blocks and Emoji, and see what each edition adds in What's New. Search by name, alias, annotation, block name, NamesList heading, code point (`U+1F680`, `0x1F680`, `1F680`, `decimal:128640`) or the character itself. Character details show the official name, properties, encodings, and the text and emoji forms where both exist.
+- **Keyboard search.** The U key opens Unicode search inside the keyboard. Tapping a key edits the local query; holding a key types that character into the document without changing the query. A search index cached in the App Group speeds up searches and contains only catalog data, never typed text.
+- **Layouts and keys.** English QWERTY plus 14 other Latin layouts, Greek, and Russian, Ukrainian, Bulgarian and Serbian Cyrillic (Settings → Layouts). Hold the space bar to switch layouts. Customize Keys gives each letter, number and symbol key its own swipe-up, swipe-down and hold choices. Pages → Keyboard edits and drags the main keyboard's keys, number row included.
+- **Pages and Favorites.** Create, order and edit symbol pages in the Pages tab. Each page opens on a canvas drawn as the keyboard draws it, with rows, gaps and drag-and-drop. Pages can be exported to a file and imported again. Favorites are shared between the app and the keyboard's Favorites page.
+- **Auto-capitalization.** Follow App, Off, Sentences, Words or All Characters (Settings → Auto-Capitalization).
+- **Text Preview.** An optional row above the keys shows the text around the caret, drawn with Uniboard's preview fonts. Tapping or dragging in the preview moves the real cursor within the text the receiving app exposes.
+- **Inspect Text.** A read-only panel for the visible preview text: code points with names and metadata, grapheme clusters, the NFC, NFD, NFKC and NFKD forms, and UTF-8 and UTF-16 hex. It never changes the document.
+- **Copy Image.** Copies the visible preview text as a PNG at 1×, 2× or 3×, in black or white on a solid or transparent background, or in custom colors. It pastes as a picture, not as editable text.
+- **Preview fonts.** Extra Unicode Fonts is off by default. Optional font packs download on demand. You can add your own TrueType or OpenType file, or use a font installed on the device. **Font Rules** choose a preferred font for a code point, range or Unicode block. **View Fonts** in a character's details compares every available face. A bundled **Google Fonts** catalog lists families by name, and its **styles grid** downloads single styles or files. Preview fonts affect only Uniboard's own rendering, never the receiving app.
+- **ConScript (UCSUR).** An optional setting shows the ConScript Unicode Registry's names and blocks for Private Use characters.
+- **Configuration file.** Export and import one TOML file containing settings, layouts and keys, favorites, font choices and rules, and Copy Image options. Before an import replaces anything you can review the changes, and Undo Last Import restores the previous state.
 
-Hold a Unicode browse character or emoji key, or keep a pointer over it, to open a scrollable properties panel without inserting text. Read the official name, descriptions, typed aliases, NamesList section and notes, related characters, historical Unicode 1.0 name, numeric value/type and simple case mappings when present, alongside Unicode age, block, category, script, bidirectional class, combining class, decomposition and encoding bytes. Formal name corrections remain distinct from informative aliases and annotations. Emoji details show each component's name and code point. Names and properties remain readable when an iOS font shows a missing glyph or renders a sequence as separate symbols. Tap, hold or hover a tile in the containing app to inspect it, then copy or add its original text to the scratchpad.
+### Full Access
 
-NamesList section titles and notes are searchable. For example, `suzhou numerals` finds the characters whose stable official names contain `HANGZHOU NUMERAL`; their details retain the Suzhou heading and Unicode's explanation of the misnomer. Additional Suzhou numerals are included as well. Official Unicode names are never silently renamed.
+The keyboard declares `RequestsOpenAccess`, but Full Access is optional. These work **without** it: typing, Unicode search and insertion, pages, favorites added in the app, all app settings (editions, layouts, keys, fonts, font rules, capitalization), Text Preview with cursor movement, and viewing Inspect Text. The keyboard only reads the shared App Group files. These **need** Full Access:
 
-The keyboard starts with literal English QWERTY typing into the receiving app, without autocorrect or word suggestions. App Settings → Layouts adds and orders more base keyboards: German, French, Spanish, Italian, Portuguese, Swedish, Finnish, Norwegian, Danish, Polish, Czech, Hungarian, Romanian and Turkish Latin layouts, Greek, and Russian, Ukrainian, Bulgarian and Serbian Cyrillic, each in Apple's stock arrangement. With two or more enabled, the space bar names the current layout; hold it, slide to another and lift to switch, while a tap still types a space. The keyboard remembers the last layout without Full Access, and the host's spell checking and dictation follow it. Casing follows the layout, including Turkish dotted and dotless i. Unicode search keys stay English, and iPad's ANSI presets apply to English only; other layouts use the iPad arrangement with keys narrowed to fit 11- and 12-key rows. Right-to-left and input-method scripts are not included. Shift capitalizes one letter; double-tapping locks capitals, and another tap unlocks them. Number and symbol pages provide everyday punctuation. A number row sits above the letters; App Settings can turn it off for a shorter keyboard, and the 123 page and Unicode search keep their digits. Digits, letters and footer share fixed keycaps, 15% taller than the earlier template. App Settings chooses one optional symbol bar or its search-bar replacement; there is no resizing gesture. Automatic capitalization follows the receiving field, and two deliberate Space taps after a word can insert a period and space. URL/email fields keep literal input. The star immediately left of the smaller Space key opens Favorites by default; its back arrow returns to QWERTY. A stock Symbols page is included. Swipe horizontally to move one page at a time through every symbol page and Recent, or use the scrolling page tabs. Pages are created, ordered and edited in the app's Pages tab, which also picks the page ★ opens; the list button in the keyboard's page strip drops down a menu of pages to open. Each page, Favorites and Symbols included, has an Arrange Keys editor that draws it as the keyboard does: select a key or gap to move it left, right, up or down, start a new row before it, or add a half-width or full-width gap before it, or drag a key onto another place. A selected key also shows its three layers, swipe up, hold and swipe down, each with its own choices, which the keyboard uses as on the main keys. Every page opens on this canvas, which also adds and removes keys, renames the page and marks the ★ page; a selected key shows its three layers as rows of their choices. Favorites are added by saving characters, and the list button opens Favorites and Recently Used. Holding a choice in those rows drags it to another place, in its row or another one. Pages → Keyboard draws the main keyboard the same way: select a letter or digit to edit its three layers or, with Key, change what it types (Shift types a changed letter's capital). Letters, Shift and Delete, and Tab and Caps Lock added from its menu, move with the same controls and dragging, with gaps, in up to three rows; the number row keeps its order. The keyboard draws that arrangement on iPhone, and wide iPad layouts use its letter rows. Standard Layout restores it. Shift, Delete and the footer's function keys use iOS's darker grey. Keys fill the rows' places in page order, one key width throughout; a row longer than ten narrows every key. New keys take a place at the end, Favorites saved in the keyboard continue in rows of ten, and Rows of Ten restores the automatic arrangement. Opening pages preserves the U/search-bar state. Opening another page does not change the ★ page; deleting that page in the app falls back to Favorites. Pages made inside earlier keyboards are not carried over. Add Text adds each typed character as its own key. The Pages menu exports custom pages (names, keys, variants and rows) to a file and imports such a file as new pages. Save in the keyboard's details adds to Favorites, or removes from it. Hold a letter for its layout's accented letters first, then on Latin layouts the familiar English accents, or a symbol-page key for its variants and Inspect. On Greek, Up gives the Greek modifier letters and Down the mathematical bold, italic, bold italic, sans-serif bold and sans-serif bold italic Greek, then double-struck and small capitals where Unicode has them; on Cyrillic, Up gives Cyrillic modifier letters and Down related letters from other Cyrillic languages, such as є and э for е, leaving the layout's own hold letters on Hold. Customize Keys has a layout menu that lists that layout's letters in keyboard order; a letter's choices apply in every layout that has it. App Settings → Customize Keys gives every letter, number and symbol key three layers: swipe up, swipe down and long press, each with its own ordered candidate list. A tap always types the key itself; tap remappings saved by earlier versions are ignored. Space, Shift, Backspace, Return and other function keys keep their standard behavior. Earlier beta function-key overrides are ignored without losing character-key settings. Letter keys show no symbol hints. By default Up offers the modifier forms of the same character (superscript, then subscript) and Down its styled forms: mathematical bold, italic, script, fraktur, double-struck, sans-serif and monospace, then circled, parenthesized, fullwidth and small-capital letters, or the matching digit forms. Letters follow the current case and Shift is unchanged; slide horizontally before lifting to choose. An open chooser keeps its group until you lift. Each layer’s editor is one ordered list that starts with the default choices: add up to 16 literal choices, remove or reorder them, remove all to turn the layer off, or reset to the defaults. Custom choices retain exact case, combining sequences and whole emoji. The iOS globe and query keys retain their normal behavior. The variant editor can select complete text from Unicode search without typing it into the receiving document. Backspace is available beside the typing/query keys and at the top right for browsing. On wide iPad QWERTY layouts, Tab and Delete flank the first letter row, Caps Lock and Return flank the second, and both Shift keys flank a third row with comma and period. Narrow or floating layouts retain the compact arrangement. Return appears once, inline on wide iPad. The native globe and return action remain available.
+- writing favorites saved in the keyboard back to the app
+- light key haptics on supported iPhones
+- copying from the keyboard: Copy Image and the Inspect Text copy buttons
+- publishing Copy Image color and scale choices made in the keyboard to the app, which also puts them in configuration exports
+- recording which fonts the keyboard can open, used by the app's font picker
 
-The bottom-left U key opens Unicode search with its keys; tap it again to return to typing. Browsing a block without keys makes the keyboard two rows taller. App Settings → Text Preview adds a row above the keys, while typing and searching, that shows the receiving app's text around the caret, each character drawn as Uniboard previews it. Result and browse keys use the page keycaps, with the code point and the character's name, wrapping anywhere over up to three lines, under the glyph; a searched character with both a text and an emoji form appears twice, once per form. Hiding it returns literal typing to the host while retaining the local query and caret. Tap Unicode in that toolbar to browse Symbols, Emojis, Blocks or Pages. Results are always listed from the lowest code point. Edition and font selection live in the app; the keyboard follows them. Tapping a tile inserts its original scalar or complete emoji at the host app’s cursor. Glyph tiles show the character and code point; full names, ages and properties remain available by holding a key. Focusing Unicode search opens four rows of local query keys at the normal typing-key height. Results scroll horizontally in a row above them in every orientation. Both backspace keys edit before the local query caret. These keys and space edit only the query, with literal spaces; Done returns English typing while preserving the Unicode query and results. Properties use a 76×44pt Save key with a full native touch target. Host typing never changes that query. Held delete stops when released, when resizing or search mode changes, or when the receiving document changes. Typing, search and app-to-keyboard favorites work without network or Full Access. Optional Full Access permits favorites saved in the keyboard to reach the app and light haptics on supported iPhones; it does not enable any network requests.
+The keyboard has no downloader and makes no network requests, with or without Full Access. iOS uses its own keyboard in secure and phone-number fields, and some apps don't allow custom keyboards.
 
-The keyboard uses a fixed template: a number row, three character rows and a matching footer. Phone/narrow keys are 41.4 points and wide iPad keys 59.8 points, 15% taller than their previous sizes. App Settings → Top Row chooses Off, Symbols or Search. The optional top row is one horizontal strip with normal keycaps, or a search toolbar of the same height. U opens Unicode search and returns to English. There is no drag handle, height picker, triangle feedback or saved height preference. The app and keyboard keep the exact query/caret when changing panels. Saved/Recent use rounded keycaps without code-point captions. Board editing stays in an opaque, bounded scrollable panel. iOS owns the separate bottom system controls and host editor.
+## Requirements
 
-**Extra Unicode fonts** is optional and **off by default**. Enable it only in the app's Settings tab; the keyboard reads the same choice locally without Full Access. The Preview basics pack (Noto Sans Symbols 2, GNU Unifont and Unifont Upper, and the combining-mark face) downloads on demand from Settings → Font Downloads and improves some missing character previews while keeping supported system glyphs and emoji unchanged. Previews are checked at runtime: anything the stock fonts draw as tofu, or an emoji sequence they draw as separate pieces, uses a fallback font when one draws it, including Noto Color Emoji from the optional emoji pack. A preview that is still missing gets a red-tinted background. Add Font File in Font Downloads adds your own TrueType or OpenType font, and Use Installed Font picks one already installed on the device, such as from a font app; either is tried before every other preview font, in the app and the keyboard without Full Access, so Private Use characters can show. Settings → ConScript (UCSUR) tints Private Use characters that the [ConScript Unicode Registry](https://www.kreativekorp.com/ucsur/) assigns blue in the app and keyboard, and their details add the registry's block, name, section, aliases and properties while keeping Unicode's own name. Prefer ConScript over PUA then names those characters as the registry does everywhere, lists its blocks apart from the remaining Private Use Area, finds them by ConScript name in search, and draws Private Use with Fairfax HD before any other font; a ConScript character Fairfax HD lacks shows as a missing glyph rather than one of iOS's own Private Use emoji. The optional ConScript (UCSUR) pack, offered while ConScript is on, downloads Fairfax HD. With ConScript off, none of this shows. `Scripts/build_ucsur.py` builds the bundled registry data from its UNIDATA files and current block table. They cannot change fonts in receiving apps or display every new Unicode 18/19 character. Full font licenses are available in Settings → Font Licenses. See [font sources, verified coverage and update policy](docs/font-pack.md).
+- Xcode 26 or later. The Liquid Glass APIs need the iOS 26 SDK, and CI uses Xcode 26.3 on `macos-15` runners.
+- Deployment target: iOS 17.0, for iPhone and iPad.
+- Python 3 and Ruby for the scripts and their tests. `Scripts/requirements-fonts.txt` pins fontTools, which only the font build scripts need.
+- Optional: [XcodeGen](https://github.com/yonaskolb/XcodeGen), only when you change `project.yml`.
 
-iPad portrait keeps three letter rows. App Settings → iPad Keyboard offers three wide-landscape presets: stock three-row iPad, compact three-row ANSI punctuation, and four-row ANSI with dedicated digits (default). Landscape requires at least 980 points of content width; narrower or floating panes retain the compact/stock arrangement. ANSI uses staggered 15-unit rows, punctuation, manual Shift symbol pairs and wider gray modifiers; automatic sentence capitals and Caps Lock never shift digits. In portrait and landscape, Numbers/Symbols and Hide Keyboard sit to the right of a smaller Space; U, globe (when requested by iOS) and Star sit left. Symbol pages complement the dedicated digit row instead of repeating digits. iPad letters use the same Up and Down forms as iPhone, with no symbol hints; symbols come from the 123 and #+= pages. Per-key overrides take precedence, and taps always type the key. All layout settings are app-only and reach the keyboard without Full Access.
+## Build and run
 
-## Run locally
+1. Open `Uniboard.xcodeproj` and run the **Uniboard** scheme. The scheme builds the app and embeds the keyboard. The committed project builds without XcodeGen; after editing `project.yml`, run `xcodegen generate`.
+2. Signing is automatic, with the Kitta Ltd team set in `project.yml`. To use another account, select your team for both the `Uniboard` and `UniboardKeyboard` targets. Both targets share the App Group `group.ad.neko.uniboard`, so another team also needs its own bundle IDs and App Group.
+3. Enable the keyboard: **Settings → General → Keyboard → Keyboards → Add New Keyboard → Uniboard**. Then use **Settings → Try Your Keyboard** in the app, or any text field, and hold 🌐 to switch to Uniboard.
 
-Build with Xcode 26 or later for the Liquid Glass APIs; the deployment target remains iOS 17. The monthly GitHub workflow explicitly selects Xcode 26.3 on its macOS 15 runner.
-
-Open `Uniboard.xcodeproj` and run the **Uniboard** scheme. Both targets use automatic signing with the Kitta Ltd team. For a different account, select the same team for the application and keyboard extension. The committed Xcode project can build without XcodeGen. After changes to `project.yml`, run `xcodegen generate`.
-
-Both bundle IDs are registered to Kitta Ltd, team **7P8CLHDH5G**. A Release device archive has been built and its app and embedded keyboard signatures independently verified against that team. To create a signed local archive with the configured Xcode account:
+To build for the simulator without signing:
 
 ```sh
-xcodebuild -project Uniboard.xcodeproj -scheme Uniboard \
-  -configuration Release -destination 'generic/platform=iOS' \
-  -archivePath build/QA/Uniboard-Kitta.xcarchive \
-  -allowProvisioningUpdates archive
-```
-
-Enable the system keyboard in **Settings → General → Keyboard → Keyboards → Add New Keyboard → Uniboard**. In the app’s Settings tab, open **Try Your Keyboard**, tap the editor, hold the globe key, and select Uniboard. iOS uses the system keyboard in secure and phone-number fields; host apps may disallow custom keyboards.
-
-```sh
-swift test
 xcodebuild -project Uniboard.xcodeproj -scheme Uniboard \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
-xcodebuild -project Uniboard.xcodeproj -scheme Uniboard \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' CODE_SIGNING_ALLOWED=NO test
 ```
 
-Quality checks run the core and native iOS unit suites on every push and pull request to `master`, enforce per-file coverage floors, and preserve result bundles. See the [boundary matrix and validation commands](docs/quality.md). Searches accept at most 4 KiB of UTF-8 input; repeated name-search terms are deduplicated without changing their AND semantics.
+## Project layout
 
-The ordinary UI tests cover name, code point, literal-character and block searches, block browsing, favorites, edition persistence, numeric age ordering, complete emoji details and unsupported-glyph properties. The system-keyboard integration test is opt-in because it changes the simulator’s enabled keyboards. Use a dedicated QA simulator with its software keyboard visible. In Xcode 27’s Device Hub, **Controls → Toggle Software Keyboard** shows or hides the software keyboard; disable **Device → Simulate Hardware Keyboard** when necessary.
+| Path | Contents |
+| --- | --- |
+| `App/` | SwiftUI containing app: Explore, Emoji, Blocks, Pages, Settings, font and configuration screens; bundled Google Fonts catalog in `App/Resources/GoogleFonts` |
+| `Keyboard/` | Keyboard extension (`KeyboardViewController`, query field, symbol-board panel) |
+| `Shared/` | Code and resources compiled into both targets. Most of it is also the `UniboardCore` Swift package (`Package.swift`); Unicode data is in `Shared/Resources` |
+| `Fonts/` | Optional font manifests (`manifest.json`, `DownloadableFonts.json`) and license texts. No font binaries |
+| `Tests/` | Unit tests, run by both `swift test` (`UniboardCoreTests`) and the native `UniboardTests` target |
+| `UITests/` | XCUITest suites, one class per feature area |
+| `Scripts/` | Unicode, UCSUR, font and Google Fonts generators, validators, coverage gate, App Store helper, and their tests in `Scripts/tests` |
+| `ci_scripts/` | Xcode Cloud hooks |
+| `docs/` | Format specs, quality notes, test runs, font notes, store copy |
+| `website/` | Static public website (Cloudflare Pages) |
+| `fastlane/`, `marketing/`, `AppStore/`, `TestFlight/` | Store listing copy, icon and screenshots, review notes, tester notes |
+| `design/` | Design specifications for app and keyboard features |
+
+## Testing
+
+### Core package and script checks
+
+The quality gate, run on every push and pull request to `master` by `.github/workflows/quality.yml`:
+
+```sh
+python3 -m unittest discover -s Scripts/tests
+ruby Scripts/tests/test_app_store_release.rb
+python3 Scripts/validate_fonts.py
+swift test --enable-code-coverage
+python3 Scripts/check_swift_coverage.py "$(swift test --show-codecov-path)"
+```
+
+`Scripts/check_swift_coverage.py` reads the llvm-cov JSON and requires 100% executable-line coverage for each core `Shared/` file it lists. A missing, duplicate or malformed coverage record fails the check. See [docs/quality.md](docs/quality.md) for the boundary matrix.
+
+### Native unit tests
 
 ```sh
 xcodebuild -project Uniboard.xcodeproj -scheme Uniboard \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO \
-  UNIBOARD_KEYBOARD_INTEGRATION=1 \
-  -only-testing:UniboardUITests/UniboardUITests/testSystemKeyboardSearchAndInsertion test
+  -only-testing:UniboardTests -enableCodeCoverage YES \
+  CODE_SIGNING_ALLOWED=NO test
 ```
 
-This test enables Uniboard through Settings and selects the installed extension from the system globe menu. It verifies that searching `U+1F680` keeps the query out of the host document, inserts 🚀, and handles space and deletion. It saves screenshots in the test results around search and after character insertion. Local QA targets iOS 27. Earlier iOS 18.5 fixtures have been retired.
+Use any available iPhone simulator. CI picks one with `Scripts/select_ios_test_destination.py`.
 
-## Offline Unicode editions
+### UI tests
 
-The generator refreshes the latest official development draft, including its fully qualified emoji set, Unicode properties and emoji variation sequences, and records the latest final release and the two before it. Provenance is in `Shared/Resources/UnicodeSources.json`; its `editions` field names the final editions. All draft sources share one pinned official repository commit, and each has a recorded SHA-256. Transient download failures, including truncated responses, retry up to three times with bounded delays; an exhausted or invalid fetch fails without replacing the existing catalog. Each final edition is the draft limited by Unicode Age (and emoji by Emoji version), so its characters, blocks, search results and What's New show only what that version had; a later character reads as unassigned there.
+The UI tests are grouped by feature area; [docs/ui-test-shards.md](docs/ui-test-shards.md) maps source files to areas. Tests that drive the installed system keyboard skip unless `UNIBOARD_KEYBOARD_INTEGRATION=1`. The scheme passes this build setting through to the test runner, so set it on the `xcodebuild` command line. These tests add Uniboard through the simulator's Settings and switch to it with the globe key. Run them on a dedicated simulator with the software keyboard visible (turn off **Simulate Hardware Keyboard**).
+
+App-to-keyboard checks need the App Group, so build with ad hoc simulator signing:
+
+```sh
+xcodebuild -project Uniboard.xcodeproj -scheme Uniboard \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -parallel-testing-enabled NO \
+  CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+  UNIBOARD_KEYBOARD_INTEGRATION=1 \
+  -only-testing:UniboardUITests/SmokeUITests \
+  -only-testing:UniboardUITests/AppBrowsingUITests/testBrowseUnicodeBlockAndOpenCharacter \
+  -only-testing:UniboardUITests/AppBrowsingUITests/testSearchByCharacterNameAndLiteral \
+  -only-testing:UniboardUITests/FontSettingsUITests/testOptionalFontDownloadCatalogIsOnlyInAppSettings \
+  test
+```
+
+- **Default: smoke.** The command above checks that the app launches and browses, search works and Settings opens, and that the keyboard switches in, types English and inserts a search result and a page key.
+- **Per change: the area classes.** Replace the `-only-testing` lines with the classes for the area you changed. Add the smoke run if the change is wide.
+
+  | Area | Classes |
+  | --- | --- |
+  | Browsing | `AppBrowsingUITests` |
+  | Fonts | `FontSettingsUITests` `FontRulesUITests` `FontExplorationUITests` `StyleGridUITests` |
+  | Layouts | `KeyboardLayoutUITests` |
+  | Pages | `PagesUITests` |
+  | Typing | `KeyboardTypingUITests` |
+  | Search | `KeyboardSearchUITests` |
+  | Inspect | `KeyboardInspectUITests` `TextPreviewUITests` |
+  | Preview and Copy Image | `TextPreviewUITests` |
+  | Configuration | `ConfigurationUITests` |
+
+- **Full run: GitHub only.** Start the manual **UI full** workflow (`.github/workflows/ui-full.yml`, `workflow_dispatch`) from the Actions tab. It runs the areas as parallel jobs and uploads one `.xcresult` per area.
+- `KeyboardSearchBenchmarkUITests` measures search timing. It isn't part of any run; select it by name when you need numbers.
+
+## Configuration file
+
+The app's **Settings → Configuration** screen exports and imports a single TOML 1.0 file. Before anything is written, import validates the whole file and shows what will be replaced or reset. A missing section means factory defaults. Configuration files never contain font binaries, file paths, URLs or typing history. Only the app parses TOML; the keyboard reads JSON snapshots derived from the same configuration. The full schema and limits are in [docs/configuration-format.md](docs/configuration-format.md).
+
+## Unicode data and editions
+
+Choose the edition in the app's Settings, or from the version menu in Explore, Blocks and Emoji. The keyboard follows the app's choice.
+
+- **Unicode 18.0.0**: latest release and the default
+- **17.0.0** and **16.0.0**: the two previous releases
+- **Unicode 19.0.0 draft**: only when chosen explicitly
+
+Only the development draft's catalogs are bundled: characters, properties, blocks and fully qualified emoji, in `Shared/Resources`. Each final edition is the draft filtered by Unicode Age, and its emoji by Emoji version, so a character added later reads as unassigned in that edition. `Shared/Resources/UnicodeSources.json` records provenance: the pinned `unicode-org/unicodetools` commit, a SHA-256 for each source, the final-edition labels and `refreshedAt`. A transient download failure is retried; an invalid or exhausted fetch fails without replacing the existing catalog.
 
 ```sh
 python3 Scripts/generate_unicode.py --source all --refresh
 swift test
 ```
 
-Historical selections store their actual version (for example `17.0.0`), while latest/draft follow their tracks. Monthly updates advance the two historical labels. A retired selection or unavailable/malformed shared setting falls back to the latest release. The app writes one bounded settings file for the edition, appearance and top-bar preferences, iPad layout and symbol mapping, and a separate bounded file for explicitly configured key gestures, in its App Group. The keyboard opens both read-only. Document typing, searches, favorites and scratchpad never enter these settings files.
+`Scripts/build_ucsur.py` builds `Shared/Resources/UCSUR.txt` from the ConScript registry's UNIDATA files.
 
-Draft assignments and names can change. A character’s ability to display depends on the fonts included in the user’s iOS version. Dotted circles and invisible-character markers are preview aids; only the original scalar or complete emoji sequence is copied or inserted. A missing glyph does not hide the official name, description or properties. Surrogates are not valid Unicode scalars and are not insertable. Unicode data is distributed under the bundled Unicode License v3.
+**Monthly refresh.** `.github/workflows/unicode-monthly.yml` runs at 03:17 UTC (12:17 Japan time) on the first of each month, and can also be started manually. It validates the scripts and fonts, regenerates the catalogs, runs the core tests with the coverage gate and builds the app and keyboard for the simulator. If the data changed, it commits the catalogs and provenance to `master`. The default branch must be `master`.
 
-## Monthly refresh and Xcode Cloud
+## Fonts and licenses
 
-`.github/workflows/unicode-monthly.yml` runs on the first of every month at **03:17 UTC / 12:17 Japan time**, and supports manual dispatch. It fetches the latest release, previous two final releases and draft data, runs catalog tests, builds the app and embedded keyboard for the iOS simulator, and commits validated data and provenance to `master`. The repository’s default branch must be `master`.
+No font is compiled into the app or keyboard. Settings → Font Downloads offers seven optional packs: Preview basics (Noto Sans Symbols 2, GNU Unifont and Unifont Upper, and a combining-mark face), historic scripts and symbols, two rare-Han packs, Seal script, emoji previews (Noto Color Emoji) and ConScript (Fairfax HD). Packs download only when you ask. They are fetched from pinned GitHub sources, checked against their size and SHA-256, never installed system-wide, and read by the keyboard from the App Group. Apart from font rules and fonts you add yourself, pack fonts are used only for previews iOS can't draw. Supported system glyphs and emoji stay unchanged, and characters still missing are tinted red. Settings → Font Licenses shows the full license texts. Details are in [docs/font-pack.md](docs/font-pack.md) and [docs/google-font-catalog.md](docs/google-font-catalog.md).
 
-Each refresh records `refreshedAt` in the provenance manifest, creating a validated monthly commit even when upstream Unicode data is unchanged. This also triggers an Xcode Cloud workflow configured to build on pushes to `master`.
+- Noto, Unifont, Fairfax HD, Cuneiform, NewGardiner, UniHieroglyphica and UFS Tangut fonts: SIL Open Font License 1.1. Jigmo: CC0. The texts are in `Fonts/`.
+- **Seal Sans** is distributed unchanged as a separate download under the **GNU AGPL v3**. `Fonts/SealSans-AGPL.txt` gives the license and links to the corresponding source. It is not part of the app or keyboard binary.
+- Google Fonts are downloaded one style at a time from the pinned `google/fonts` catalog, each under its own upstream license.
+- `python3 Scripts/validate_fonts.py` checks the manifests, hashes, outlines, licenses and size budgets. It runs in CI, in the monthly refresh and before every Xcode Cloud build.
 
-Xcode Cloud uses the committed **Uniboard.xcodeproj** and shared **Uniboard** scheme, with `master` as its source branch. Executable hooks in `ci_scripts` check prerequisites after cloning and regenerate all four offline editions and their emoji catalogs immediately before building. A failed download or catalog test fails the build. XcodeGen, Homebrew, and third-party package managers are not needed in Xcode Cloud.
+## Release
 
-The repository is connected to the active [**Uniboard iOS** Xcode Cloud workflow](https://appstoreconnect.apple.com/teams/cbaca10a-f696-4d2b-959e-0d3fa1b23452/xcode-cloud/products/001084ae-fa0b-491c-b14a-2f03ad794f84/workflows). It uses the latest release environment and archives iOS for **TestFlight and App Store** on pushes to `master`. Each monthly validated data commit therefore triggers a signed archive with fresh data for all four Unicode editions. The pre-build hook runs download recovery and catalog/emoji regression tests. Automatic Cloud build **1.0.0 (7)** refreshed the draft, recovered a real interrupted download, passed those checks, uploaded successfully and became **Ready to Test**.
+- **Version:** `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `project.yml`, applied to both targets.
+- **Xcode Cloud** builds the committed `Uniboard.xcodeproj` and shared **Uniboard** scheme on pushes to `master`, archiving for TestFlight and the App Store. `ci_scripts/ci_post_clone.sh` checks prerequisites. `ci_scripts/ci_pre_xcodebuild.sh` validates the fonts, runs the script tests, regenerates all editions with `--refresh` and runs the core tests with the coverage gate. Any failure fails the build. Each monthly data commit therefore produces an archive with fresh data. Xcode Cloud needs no XcodeGen or third-party package managers.
+- **Store material:** listing copy in `fastlane/metadata/{en-US,ja}`, drafted 1.3.0 copy in [docs/store-copy-1.3.0.md](docs/store-copy-1.3.0.md), tester notes in `TestFlight/WhatToTest.en-US.txt`, reviewer instructions in `AppStore/ReviewNotes.en-US.txt`, and icon and screenshots in `marketing/`. `Scripts/app_store_release.rb` makes only GET requests unless given explicit flags; see `Scripts/APP_STORE_RELEASE.md`.
+- **Website:** the static site in `website/` is served by Cloudflare Pages at <https://uniboard-dxm.pages.dev/>, with support at `/support/`. The privacy policy is at <https://docs.kitta.co/uniboard/>, and `/privacy` redirects there. `.github/workflows/website.yml` validates changes on `master`. Deployment is manual, from a local Cloudflare login, so no account credentials are stored in GitHub:
 
-The [App Store Connect record](https://appstoreconnect.apple.com/apps/6818750518/distribution/info) is registered under **Kitta Ltd** as **Uniboard: Unicode Keyboard**, Apple ID **6818750518**, bundle ID and SKU **ad.neko.uniboard**, with English (U.S.) as its primary language. The device display name remains Uniboard. Public review, external beta review and public App Store availability are separate Apple states; check App Store Connect for the current status.
-
-The primary workflow starts automatically from `master` branch changes and has no manual start condition. Editing is restricted to admins and app managers, and builds use a clean environment. Its internal and external TestFlight post-actions deliver to **Internal Testers** and **External Testers**, respectively. The redundant setup workflow remains disabled and has no manual start condition.
-
-Both tester groups are created, and Cloud build **1.0.0 (8)** was delivered to **Internal Testers**. Tester membership and public invitation links are managed in App Store Connect. The approved Kitta review contact and feedback email from Mithka are configured, along with Uniboard-specific keyboard review instructions. External distribution remains subject to Apple's beta review. `TestFlight/WhatToTest.en-US.txt` supplies tester instructions automatically with each Cloud upload.
-
-Apple documentation: [custom build scripts](https://developer.apple.com/documentation/xcode/writing-custom-build-scripts), [first workflow setup](https://developer.apple.com/documentation/xcode/configuring-your-first-xcode-cloud-workflow/), [automatic tester notes](https://developer.apple.com/documentation/xcode/including-notes-for-testers-with-a-beta-release-of-your-app), [external beta review](https://developer.apple.com/help/app-store-connect/test-a-beta-version/invite-external-testers/).
-
-## Branding and public release
-
-The approved icon master and generation prompt are in `marketing/icon`; run `swift Scripts/generate_icon.swift` to produce the opaque 1024-pixel iOS asset. Real simulator screenshots, provenance and reproducible artwork exports are in `marketing/screenshots`. `upload-manifest.json` defines the English and Japanese iPhone/iPad screenshot order. Storefront copy lives in `fastlane/metadata/{en-US,ja}`; the Japanese listing explicitly discloses the English interface and catalog names. See `docs/aso-strategy.md` for metadata limits and search positioning.
-
-The [public website](https://uniboard-dxm.pages.dev/) and [support page](https://uniboard-dxm.pages.dev/support/) are served from the curated `website` directory through Cloudflare Pages. The [privacy policy](https://docs.kitta.co/uniboard/) is published on Kitta's shared docs site. The [application source](https://github.com/iebb/uniboard) is public. The static site has no analytics scripts or external fonts and explains website hosting separately from the offline app. The support address is Kitta's existing customer-feedback address.
-
-`Scripts/app_store_release.rb` prepares or submits only this app's exact verified Xcode Cloud archive. It is GET-only by default, with separate flags for factual readiness settings, listing preparation and review submission. See `Scripts/APP_STORE_RELEASE.md` for credentials, guards and usage. `AppStore/ReviewNotes.en-US.txt` supplies the reviewer's keyboard test instructions. App Privacy publication must be verified separately before submitting.
-
-### Publish website updates
-
-The website workflow validates changes on `master`; deployment uses the existing Cloudflare login locally so broad account credentials are not stored in GitHub. The Pages project is `uniboard` in Kitta Labs, with production branch `master`.
-
-```sh
-python3 Scripts/validate_website.py
-CLOUDFLARE_ACCOUNT_ID=58c982b69079141dd49d99076dd845b1 \
+  ```sh
+  python3 Scripts/validate_website.py
   wrangler pages deploy website --project-name uniboard --branch master
-```
+  ```
 
-Deploy only `website`, then verify the public pages and assets before updating App Store URLs.
+  Deploy only `website/`, then check the public pages before updating App Store URLs.
 
-Letter flicks never type digits or symbols by default, with or without a number row; custom choices can add them.
+## License
 
-iPad modifiers use stock-style bottom corner content: left-side Tab/Caps/Shift and footer controls align lower left, while Delete, Return, right Shift and right footer controls align lower right. Modifier text uses normal weight; character glyphs stay centered. Phone alignment is unchanged.
-
-### Favorites synchronization and touch feedback (1.1 beta)
-
-Saved adapts the built-in Favorites page instead of maintaining an unrelated collection. First use merges both existing collections without discarding custom boards, exact variants or the preferred Star target. Only explicit favorite text enters `favorites-v1.json` in the local App Group; typed documents, query text, scratchpad and recents never enter it. App writes and keyboard writes with Full Access use a nonblocking file lock, re-read the current snapshot, apply a three-way merge and atomically replace one bounded document. Pending additions/removals and the acknowledged baseline stay in local board storage across relaunches. Unrelated concurrent saves survive; removals are not resurrected by a stale cache. Malformed, unavailable, oversized or unwritable data retains local/original bytes and surfaces a sync notice. The app refreshes on foreground/Saved presentation; the keyboard refreshes when presented.
-
-Without Full Access the keyboard reads app favorites and keeps its own edits pending locally. iOS requires Full Access for shared-container writes back to the app. Reopening with access flushes pending edits. This permission is optional; there are no network APIs, servers or accounts. Recent remains separate. Non-emoji multi-scalar favorites appear in Saved text with Copy and Remove actions.
-
-Native letter, digit, symbol, Space, modifier, Delete and configuration keys highlight on touch-down and clear on release, scroll cancellation, context change or detachment without changing key geometry or hit targets. On supported iPhones with Full Access, key-down also provides a light haptic; Delete repeats do not generate a haptic stream. Physical-device haptic behavior still needs device acceptance.
-
-Hold letters for accents in the current case. Up offers modifier forms and Down styled forms of the same character. The default groups are disjoint for each physical key. Explicit choices take priority without rewriting stored settings or normalizing Unicode. Currency-key holds retain full currency families. Once a hold or swipe shows its choices, the press keeps that group: further vertical movement never switches to another. Sideways movement selects within the group; release inserts once. Shift uses one-shot tap, double-tap Caps Lock and touch-then-slide for one shifted character.
-
-The keyboard's page list only opens pages; naming and editing happen in the app. The companion app’s live search uses the keyboard’s Done key without an extra accessory toolbar. Accent and gesture choosers arrange choices around the primary character, alternating right and left; logical Unicode outputs remain exact.
+- Unicode data: Unicode License v3, `Shared/Resources/Unicode-LICENSE.txt`, also shown in the app under Settings → Data & License.
+- Fonts: their own licenses in `Fonts/`, as listed above. The Roboto test fixture is under OFL 1.1, `Tests/Fixtures/Roboto/OFL.txt`.
+- Uniboard's own source code: MIT License, see [`LICENSE`](LICENSE). Uniboard is developed by Kitta Ltd.
+- The MIT License does not cover the third-party data and fonts above; they keep their own licenses.

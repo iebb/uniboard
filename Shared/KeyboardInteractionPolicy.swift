@@ -2,15 +2,31 @@ import Foundation
 
 /// Fixed templates have no persisted height or interactive resize state.
 enum KeyboardLayoutPolicy {
-    static let defaultHeight = KeyboardTypingLayoutPolicy.regularKeyHeight * 6 + 30
+    /// The standard keyboard: the number row, three rows and the footer.
+    static let defaultHeight = KeyboardTypingLayoutPolicy.regularKeyHeight * 5 + 30
+    /// How much taller an iPhone keyboard in portrait is while a panel, such
+    /// as Copy Image, covers it.
+    static let panelExtraHeight: CGFloat = 96
+    /// iPhone landscape (compact height) search: Apple's landscape key rows,
+    /// 32 points with 6 between rows, under a 34-point search row that also
+    /// carries the results as chips. With the system's bottom inset the
+    /// keyboard stays within 255 points, leaving the app at least 147 of 402.
+    static let compactSearchKeyHeight: CGFloat = 32
+    static let compactSearchRowSpacing: CGFloat = 6
+    static let compactSearchBarHeight: CGFloat = 34
     struct Metrics {
         let isCompactLayout: Bool
         let height: CGFloat
         let typingKeyHeight: CGFloat
     }
+    /// `keyRows` is the typing rows above the footer: the main keyboard
+    /// arrangement's, at least three. `previewImagePanel` asks for the extra panel
+    /// height, which an iPhone in portrait gets within the same scene cap;
+    /// keys keep the height they type with.
     static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
-                        compactVertical: Bool, showsSymbolBar: Bool, showsNumberRow: Bool = true,
-                        searching: Bool = false, browsing: Bool = false, showsTextPreview: Bool = false) -> Metrics {
+                        compactVertical: Bool, keyRows: Int = MainKeyboardArrangement.maximumRows,
+                        searching: Bool = false, browsing: Bool = false, showsTextPreview: Bool = false,
+                        previewImagePanel: Bool = false) -> Metrics {
         let size = displaySize.flatMap { value -> CGSize? in
             guard value.width.isFinite, value.height.isFinite, value.width > 0, value.height > 0 else { return nil }
             return value
@@ -27,22 +43,39 @@ enum KeyboardLayoutPolicy {
         // while typing and searching but not while browsing.
         let preview = showsTextPreview && !browsing
         let chrome: CGFloat = preview ? 22 : 18
+        if searching && compact && !isPad { return compactSearchMetrics(sceneHeight: sceneHeight, preview: preview) }
         // Search owns four full-height input rows, a result row above them
         // tall enough for a glyph, its code point and a three-line name, its
         // toolbar and footer, instead of shrinking keys.
-        // Without the number row, typing is one row and one gap shorter.
-        let typingRows: CGFloat = showsNumberRow ? 5 : 4
+        // Each typing row above the footer adds a row and a gap.
+        let keys = CGFloat(max(1, keyRows))
         // Browsing Unicode without keys shows two more rows of characters.
-        let rows: CGFloat = (searching ? 7.75 : (showsSymbolBar ? typingRows + 1 : typingRows) + (browsing ? 2 : 0)) + (preview ? 1 : 0)
-        let gaps: CGFloat = searching ? 4 : showsNumberRow ? 3 : 2
+        let rows: CGFloat = (searching ? 7.75 : keys + 1 + (browsing ? 2 : 0)) + (preview ? 1 : 0)
+        let gaps: CGFloat = searching ? 4 : keys - 1
         let rowSpacing: CGFloat = searching ? 4 : spacing
         let target = key * rows + rowSpacing * gaps + chrome
         // Keep all rows and the footer equal if a host supplies a short scene.
         let sceneCap = sceneHeight.flatMap { $0.isFinite && $0 > chrome + rowSpacing * gaps + rows
             ? max(chrome + rowSpacing * gaps + rows, $0 * 0.85) : nil }
-        let height = min(target, sceneCap ?? target)
-        let actualKey = max(1, (height - chrome - rowSpacing * gaps) / rows)
+        let typing = min(target, sceneCap ?? target)
+        // The extra height belongs to the panel alone; it never shrinks keys.
+        let grown = target + (previewImagePanel && !isPad && !compact ? panelExtraHeight : 0)
+        let height = min(grown, sceneCap ?? grown)
+        let actualKey = max(1, (typing - chrome - rowSpacing * gaps) / rows)
         return Metrics(isCompactLayout: compact, height: height, typingKeyHeight: min(key, actualKey))
+    }
+
+    /// Four query rows and the footer at `compactSearchKeyHeight`, 6 points
+    /// apart and from the search row; 4 points above it and 6 below the
+    /// footer, as in every layout. The optional text preview is one more
+    /// search-row height and a 4-point gap. A short scene shrinks only the keys.
+    private static func compactSearchMetrics(sceneHeight: CGFloat?, preview: Bool) -> Metrics {
+        let keyRows: CGFloat = 5
+        let fixed = 4 + compactSearchBarHeight + (preview ? compactSearchBarHeight + 4 : 0) + compactSearchRowSpacing * keyRows + 6
+        let target = fixed + compactSearchKeyHeight * keyRows
+        let sceneCap = sceneHeight.flatMap { $0.isFinite && $0 > fixed + keyRows ? max(fixed + keyRows, $0 * 0.85) : nil }
+        let height = min(target, sceneCap ?? target)
+        return Metrics(isCompactLayout: true, height: height, typingKeyHeight: (height - fixed) / keyRows)
     }
 }
 

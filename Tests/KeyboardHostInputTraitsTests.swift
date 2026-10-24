@@ -13,7 +13,18 @@ final class KeyboardHostInputTraitsTests: XCTestCase {
         XCTAssertEqual(traits.capitalization, .sentences)
         XCTAssertEqual(traits.returnKey, .default)
         XCTAssertNil(traits.textContentType)
+        XCTAssertFalse(traits.isSecureTextEntry)
         XCTAssertTrue(traits.permitsEnglishAssistance)
+    }
+
+    func testSecureEntryKeepsLiteralInputOnAnOrdinaryKeyboard() {
+        let field = UITextField()
+        field.keyboardType = .default
+        field.textContentType = nil
+        field.isSecureTextEntry = true
+        let traits = KeyboardHostInputTraits(reading: field)
+        XCTAssertTrue(traits.isSecureTextEntry)
+        XCTAssertFalse(traits.permitsEnglishAssistance)
     }
 
     func testImplementedContentGetterReturningNilRemainsOptional() {

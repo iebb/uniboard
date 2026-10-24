@@ -16,6 +16,9 @@ struct KeyboardPreviewExcerpt: Equatable {
     var after: String
     var beforeTruncated: Bool
     var afterTruncated: Bool
+    /// Drawn as one shaped line with an overlaid caret (the movable preview
+    /// cursor), not as two texts with a caret-wide gap.
+    var isSingleLine = false
 
     static let empty = KeyboardPreviewExcerpt(before: "", after: "", beforeTruncated: false, afterTruncated: false)
 
@@ -43,8 +46,10 @@ struct KeyboardPreviewExcerpt: Equatable {
 enum KeyboardTextPreviewLayout {
     static let fontSize: CGFloat = 18
     static let caretWidth: CGFloat = 2
-    /// The trailing Preview actions button inside the row.
-    static let actionsButtonWidth: CGFloat = 44
+    /// The trailing Inspect and Preview actions buttons inside the row,
+    /// 44 points each, so a frozen excerpt equals the visible text.
+    static let actionsButtonWidth: CGFloat = 2 * actionButtonWidth
+    static let actionButtonWidth: CGFloat = 44
     /// Measurement slack, so SwiftUI's own rounding never truncates again.
     static let fittingSlack: CGFloat = 2
     nonisolated static let ellipsis = "…"
@@ -470,11 +475,14 @@ enum KeyboardImageColorPreset: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// The remembered color choice: a preset id and the two Custom colors.
+/// The remembered Copy Image choice: a preset id, the two Custom colors
+/// and the scale. They travel together, so the scale is stored, shared and
+/// imported exactly like the colors.
 struct KeyboardImageColorChoice: Equatable, Sendable {
     var preset: KeyboardImageColorPreset = .blackOnWhite
     var customText: KeyboardImageRGB = .black
     var customBackground: KeyboardImageBackground = .color(.white)
+    var scale: KeyboardImageScale = .default
 
     static let `default` = KeyboardImageColorChoice()
 
@@ -483,14 +491,15 @@ struct KeyboardImageColorChoice: Equatable, Sendable {
     }
 }
 
-/// Remembers the color choice in the keyboard's own defaults. Only the
-/// preset id and two colors are ever written; never any text. Needs neither
+/// Remembers the choice in the keyboard's own defaults. Only the preset id,
+/// two colors and the scale are ever written; never any text. Needs neither
 /// Full Access nor an App Group.
 enum KeyboardImageColorStore {
     static let presetKey = "copyImage.colors.preset"
     static let customTextKey = "copyImage.colors.customText"
     static let customBackgroundKey = "copyImage.colors.customBackground"
-    static let keys = [presetKey, customTextKey, customBackgroundKey]
+    static let scaleKey = "copyImage.scale"
+    static let keys = [presetKey, customTextKey, customBackgroundKey, scaleKey]
 
     static func load(from defaults: UserDefaults = .standard) -> KeyboardImageColorChoice {
         var choice = KeyboardImageColorChoice.default
@@ -503,6 +512,9 @@ enum KeyboardImageColorStore {
         if let raw = defaults.string(forKey: customBackgroundKey), let background = KeyboardImageBackground(storedValue: raw) {
             choice.customBackground = background
         }
+        if let raw = defaults.object(forKey: scaleKey) as? Int, let scale = KeyboardImageScale(rawValue: raw) {
+            choice.scale = scale
+        }
         return choice
     }
 
@@ -510,6 +522,52 @@ enum KeyboardImageColorStore {
         defaults.set(choice.preset.rawValue, forKey: presetKey)
         defaults.set(choice.customText.hexString, forKey: customTextKey)
         defaults.set(choice.customBackground.storedValue, forKey: customBackgroundKey)
+        defaults.set(choice.scale.rawValue, forKey: scaleKey)
+    }
+
+    /// The revision of the shared choice this keyboard last adopted or published.
+    static let sharedRevisionKey = "copyImage.colors.sharedRevision"
+
+    /// On panel open. A shared choice with a revision this keyboard hasn't
+    /// seen (the app's import or undo) replaces the local one; this works
+    /// without Full Access. With Full Access and nothing shared yet, the local
+    /// choice is published once. Never per keystroke.
+    static func load(from defaults: UserDefaults = .standard, shared: ImageColorSettings, hasFullAccess: Bool) -> KeyboardImageColorChoice {
+        if let stored = shared.load() {
+            if stored.revision != defaults.string(forKey: sharedRevisionKey), let choice = KeyboardImageColorChoice(stored.value) {
+                save(choice, to: defaults)
+                defaults.set(stored.revision, forKey: sharedRevisionKey)
+            }
+        } else if hasFullAccess, shared.isUnpublished() {
+            publish(load(from: defaults), to: defaults, shared: shared)
+        }
+        return load(from: defaults)
+    }
+
+    /// Always saved locally; shared too when the keyboard has Full Access.
+    /// A busy or failed shared write keeps the choice local.
+    static func save(_ choice: KeyboardImageColorChoice, to defaults: UserDefaults = .standard, shared: ImageColorSettings, hasFullAccess: Bool) {
+        save(choice, to: defaults)
+        if hasFullAccess { publish(choice, to: defaults, shared: shared) }
+    }
+
+    private static func publish(_ choice: KeyboardImageColorChoice, to defaults: UserDefaults, shared: ImageColorSettings) {
+        if let stored = try? shared.save(choice.sharedValue) { defaults.set(stored.revision, forKey: sharedRevisionKey) }
+    }
+}
+
+extension KeyboardImageColorChoice {
+    /// nil when the shared preset, colors or scale aren't ones this build knows.
+    init?(_ value: ImageColorSettings.Value) {
+        guard let preset = KeyboardImageColorPreset(rawValue: value.preset), let text = KeyboardImageRGB(hexString: value.customText),
+              let background = KeyboardImageBackground(storedValue: value.customBackground),
+              let scale = KeyboardImageScale(rawValue: value.scale) else { return nil }
+        self.init(preset: preset, customText: text, customBackground: background, scale: scale)
+    }
+
+    var sharedValue: ImageColorSettings.Value {
+        ImageColorSettings.Value(preset: preset.rawValue, customText: customText.hexString, customBackground: customBackground.storedValue,
+                                 scale: scale.rawValue)
     }
 }
 
@@ -529,7 +587,39 @@ enum KeyboardImageColorCopy {
         String(localized: "Colors · \(choice.preset.label)")
     }
 
-    /// The inline caution under the colors, if any.
+    static var sizeGroupLabel: String { String(localized: "Image size") }
+
+    /// The size caption when there is no size to show.
+    static var sizeTitle: String { String(localized: "Size") }
+    /// Appended when the chosen scale had to be lowered to fit the canvas limits.
+    static var reducedNote: String { String(localized: " · reduced to fit") }
+
+    /// "Size · 1,260 × 132 pixels": the size actually copied, grouped for the
+    /// locale; "Size" alone when there is none.
+    static func sizeCaption(_ size: KeyboardImagePixelSize?, locale: Locale = .current) -> String {
+        guard let size else { return sizeTitle }
+        let width = size.width.formatted(.number.locale(locale)), height = size.height.formatted(.number.locale(locale))
+        return String(localized: "Size · \(width) × \(height) pixels") + (size.isReduced ? reducedNote : "")
+    }
+
+    /// The caption's VoiceOver label, "Size, 1,260 by 132 pixels".
+    static func sizeCaptionAccessibilityLabel(_ size: KeyboardImagePixelSize?, locale: Locale = .current) -> String {
+        guard let size else { return sizeTitle }
+        return String(localized: "Size, \(pixelsValue(size, locale: locale))") + (size.isReduced ? reducedNote : "")
+    }
+
+    /// The selected chip's VoiceOver value, "318 by 114 pixels".
+    static func pixelsValue(_ size: KeyboardImagePixelSize, locale: Locale = .current) -> String {
+        let width = size.width.formatted(.number.locale(locale)), height = size.height.formatted(.number.locale(locale))
+        return String(localized: "\(width) by \(height) pixels")
+    }
+
+    /// The chip's VoiceOver label, "2 times scale".
+    static func scaleLabel(_ scale: KeyboardImageScale) -> String {
+        String(localized: "\(scale.rawValue) times scale")
+    }
+
+    /// The caution shown in place of the colors caption, if any.
     static func readabilityNote(_ readability: KeyboardImageColors.Readability) -> String? {
         switch readability {
         case .readable: return nil
@@ -554,7 +644,12 @@ struct KeyboardPreviewImage: Equatable {
     let pixelHeight: Int
     /// Logical size in points; pixels are `scale` times this.
     let pointSize: CGSize
+    /// The pixels per point drawn at, and the PNG's DPI over 72.
     let scale: CGFloat
+    /// The scale chosen; `scale` is lower only when this one exceeds the canvas limits.
+    let requestedScale: KeyboardImageScale
+    /// The logical canvas in points, the same at every scale.
+    let canvasSize: CGSize
     /// Plain-text equivalent of exactly the rendered text.
     let visibleText: String
     /// The colors it was drawn in. Transparent pictures carry alpha.
@@ -581,28 +676,30 @@ enum KeyboardPreviewImageRenderer {
         case encodingFailed
     }
 
-    static let scale: CGFloat = 3
+    /// Today's scale when none is chosen.
+    static let scale: CGFloat = KeyboardImageScale.default.factor
     static let padding: CGFloat = 8
-    /// Generous for a 13-inch iPad's landscape row, small for extension memory.
-    static let maximumPixelWidth = 4800
-    static let maximumPixelHeight = 1200
-    static let maximumPixelCount = 2_400_000
+    static let maximumPixelWidth = KeyboardImageCanvas.maximumPixelWidth
+    static let maximumPixelHeight = KeyboardImageCanvas.maximumPixelHeight
+    static let maximumPixelCount = KeyboardImageCanvas.maximumPixelCount
 
     /// - Parameters:
     ///   - availableWidth: the text area the excerpt was laid out in; ink
     ///     outside it is clipped exactly as the row clips it.
     ///   - visibleHeight: the row's height; each text is centered in it.
     static func render(_ excerpt: KeyboardPreviewExcerpt, availableWidth: CGFloat, visibleHeight: CGFloat,
-                       foreground: UIColor, background: UIColor,
+                       foreground: UIColor, background: UIColor, scale: KeyboardImageScale = .default,
                        font: (String) -> UIFont = KeyboardTextPreviewLayout.font(for:)) -> Result<KeyboardPreviewImage, Failure> {
         render(excerpt, availableWidth: availableWidth, visibleHeight: visibleHeight,
                colors: KeyboardImageColors(text: KeyboardImageRGB(resolving: foreground),
                                            background: .color(KeyboardImageRGB(resolving: background))),
-               font: font)
+               scale: scale, font: font)
     }
 
+    /// `scale` changes only the pixel count and DPI: the canvas, text runs
+    /// and clipping are laid out in points, identically at every scale.
     static func render(_ excerpt: KeyboardPreviewExcerpt, availableWidth: CGFloat, visibleHeight: CGFloat,
-                       colors: KeyboardImageColors,
+                       colors: KeyboardImageColors, scale requested: KeyboardImageScale = .default,
                        font: (String) -> UIFont = KeyboardTextPreviewLayout.font(for:)) -> Result<KeyboardPreviewImage, Failure> {
         guard excerpt.hasVisibleCharacters else { return .failure(.empty) }
         let foreground = colors.text.uiColor
@@ -612,7 +709,8 @@ enum KeyboardPreviewImageRenderer {
         }
         var runs: [Run] = []
         var x: CGFloat = 0
-        for (index, text) in [excerpt.before, excerpt.after].enumerated() {
+        let texts = excerpt.isSingleLine ? [excerpt.before + excerpt.after] : [excerpt.before, excerpt.after]
+        for (index, text) in texts.enumerated() {
             if index == 1 { x += KeyboardTextPreviewLayout.caretWidth }
             guard !text.isEmpty else { continue }
             let line = CTLineCreateWithAttributedString(
@@ -644,10 +742,9 @@ enum KeyboardPreviewImageRenderer {
         guard !visibleInk.isNull, visibleInk.width > 0, visibleInk.height > 0 else { return .failure(.empty) }
         content = content.union(ink).intersection(window)
         let canvas = content.insetBy(dx: -padding, dy: -padding)
-        let pixelWidth = Int((canvas.width * scale).rounded(.up))
-        let pixelHeight = Int((canvas.height * scale).rounded(.up))
-        guard pixelWidth > 0, pixelHeight > 0, pixelWidth <= maximumPixelWidth, pixelHeight <= maximumPixelHeight,
-              pixelWidth * pixelHeight <= maximumPixelCount else { return .failure(.tooLarge) }
+        // The same sizes a picker shows: a scale over the limits steps down.
+        guard let size = KeyboardImageCanvas.pixelSize(canvas: canvas.size, scale: requested) else { return .failure(.tooLarge) }
+        let pixelWidth = size.width, pixelHeight = size.height, scale = size.scale.factor
         let alphaInfo: CGImageAlphaInfo = colors.isTransparent ? .premultipliedLast : .noneSkipLast
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(data: nil, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8,
@@ -673,12 +770,12 @@ enum KeyboardPreviewImageRenderer {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)
         else { return .failure(.encodingFailed) }
-        let dpi = 72 * scale
+        let dpi = size.scale.dpi
         CGImageDestinationAddImage(destination, image, [kCGImagePropertyDPIWidth as String: dpi, kCGImagePropertyDPIHeight as String: dpi] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { return .failure(.encodingFailed) }
         return .success(KeyboardPreviewImage(png: data as Data, pixelWidth: pixelWidth, pixelHeight: pixelHeight,
             pointSize: CGSize(width: CGFloat(pixelWidth) / scale, height: CGFloat(pixelHeight) / scale),
-            scale: scale, visibleText: excerpt.visibleText, colors: colors,
+            scale: scale, requestedScale: requested, canvasSize: canvas.size, visibleText: excerpt.visibleText, colors: colors,
             containsColorGlyphs: runs.contains { usesColorGlyphs($0.line) }))
     }
 
@@ -717,6 +814,8 @@ struct KeyboardPreviewImageExport: Equatable {
     let availableWidth: CGFloat
     let visibleHeight: CGFloat
     let colors: KeyboardImageColors
+    /// The chosen scale; the picture may use a lower one (see `KeyboardImageCanvas`).
+    let scale: KeyboardImageScale
     let image: KeyboardPreviewImage?
     var phase: Phase
 
@@ -732,29 +831,53 @@ struct KeyboardPreviewImageExport: Equatable {
 
     @MainActor
     static func prepare(excerpt: KeyboardPreviewExcerpt, availableWidth: CGFloat, visibleHeight: CGFloat,
-                        colors: KeyboardImageColors, hasFullAccess: Bool, id: UUID = UUID(),
+                        colors: KeyboardImageColors, scale: KeyboardImageScale = .default, hasFullAccess: Bool, id: UUID = UUID(),
                         font: (String) -> UIFont = KeyboardTextPreviewLayout.font(for:)) -> KeyboardPreviewImageExport {
         let image: KeyboardPreviewImage?
         let phase: Phase
         switch KeyboardPreviewImageRenderer.render(excerpt, availableWidth: availableWidth, visibleHeight: visibleHeight,
-                                                   colors: colors, font: font) {
+                                                   colors: colors, scale: scale, font: font) {
         case .success(let rendered): image = rendered; phase = hasFullAccess ? .ready : .fullAccessRequired
         case .failure(.empty): image = nil; phase = .empty
         case .failure: image = nil; phase = .renderFailed
         }
         return KeyboardPreviewImageExport(id: id, excerpt: excerpt, availableWidth: availableWidth,
-                                          visibleHeight: visibleHeight, colors: colors, image: image, phase: phase)
+                                          visibleHeight: visibleHeight, colors: colors, scale: scale, image: image, phase: phase)
     }
 
-    /// The same frozen excerpt and panel drawn in other colors. The host is
-    /// never read again; a Success state returns to Ready because the copied
-    /// picture no longer matches the thumbnail. Nil while copying.
+    /// The same frozen excerpt and panel drawn in other colors or at another
+    /// scale (nil keeps this one). The host is never read again; a Success
+    /// state returns to Ready because the copied picture no longer matches
+    /// the thumbnail. Nil while copying.
     @MainActor
-    func recolored(_ colors: KeyboardImageColors, hasFullAccess: Bool,
+    func recolored(_ colors: KeyboardImageColors, scale: KeyboardImageScale? = nil, hasFullAccess: Bool,
                    font: (String) -> UIFont = KeyboardTextPreviewLayout.font(for:)) -> KeyboardPreviewImageExport? {
         guard phase != .copying else { return nil }
         return Self.prepare(excerpt: excerpt, availableWidth: availableWidth, visibleHeight: visibleHeight,
-                            colors: colors, hasFullAccess: hasFullAccess, id: id, font: font)
+                            colors: colors, scale: scale ?? self.scale, hasFullAccess: hasFullAccess, id: id, font: font)
+    }
+
+    /// The pixel size the picture would be copied at for `scale`, without
+    /// rendering ("1260 × 132 px"); exactly the rendered size for the
+    /// current scale. Nil when there is no picture.
+    func pixelSize(for scale: KeyboardImageScale) -> KeyboardImagePixelSize? {
+        image.flatMap { KeyboardImageCanvas.pixelSize(canvas: $0.canvasSize, scale: scale) }
+    }
+
+    /// The panel's thumbnail: the picture itself at 3× or more, otherwise the
+    /// same canvas drawn again at 3× so a lower copy scale never blurs it
+    /// (the layout is identical at every scale). Nil when there is no picture.
+    @MainActor
+    func thumbnail(font: (String) -> UIFont = KeyboardTextPreviewLayout.font(for:)) -> UIImage? {
+        guard let image else { return nil }
+        var source = image
+        if image.scale < KeyboardImageScale.default.factor,
+           case .success(let sharper) = KeyboardPreviewImageRenderer.render(excerpt, availableWidth: availableWidth,
+                                                                            visibleHeight: visibleHeight, colors: colors,
+                                                                            scale: .default, font: font) {
+            source = sharper
+        }
+        return UIImage(data: source.png, scale: source.scale)
     }
 
     /// Custom colors that match exactly leave nothing to see.

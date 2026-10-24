@@ -76,7 +76,9 @@ private struct CatalogFontFaceDetail: View {
     @ObservedObject var coordinator: GoogleFontDownloadCoordinator
     let text: String?
     @StateObject private var licenses = FontReceiptViewModel()
-    @State private var selectedStyleID: String
+    /// nil until the user picks a cell: the grid's default cell is selected.
+    @State private var selectedStyleID: String?
+    @StateObject private var samples = StyleSampleLoader()
     @State private var confirmingRemoval = false
     @State private var operationError: String?
     @State private var verifiedFace: FontFaceRecord?
@@ -84,15 +86,28 @@ private struct CatalogFontFaceDetail: View {
     @State private var previewMessage = "Exact font support could not be verified."
     @State private var previewRevision = UUID()
     @State private var operationRunning = false
-    /// 17pt at the default size; scales with the body text style at larger (accessibility) sizes.
-    @ScaledMetric(relativeTo: .body) private var styleIconSize: CGFloat = 17
 
     init(family: GoogleFontFamily, catalog: GoogleFontCatalog, coordinator: GoogleFontDownloadCoordinator,
          text: String?, initialStyleID: String? = nil) {
         self.family = family; self.catalog = catalog; self.coordinator = coordinator; self.text = text
-        _selectedStyleID = State(initialValue: initialStyleID ?? FontDetailSelection.defaultStyleID(in: family))
+        _selectedStyleID = State(initialValue: initialStyleID)
     }
-    private var style: GoogleFontStyle? { family.styles.first { $0.id == selectedStyleID } }
+    /// Built from the coordinator's file states, so the downloaded copy of a
+    /// duplicated face is the one shown and selected.
+    private var grid: StyleGrid {
+        let downloaded = coordinator.states.compactMap { id, state -> String? in
+            if case .downloaded = state { return id }; return nil
+        }
+        return StyleGrid.make(family: family, catalog: catalog, downloadedFileIDs: Set(downloaded))
+    }
+    /// The selected cell and its set; a style hidden as a duplicate selects the cell showing its face.
+    private func selection(in grid: StyleGrid) -> (set: StyleGrid.StyleSet, cell: StyleGrid.Cell)? {
+        selectedStyleID.flatMap { grid.location(of: $0) } ?? grid.defaultCell
+    }
+    private var style: GoogleFontStyle? {
+        let id = selection(in: grid)?.cell.style.id ?? selectedStyleID
+        return family.styles.first { $0.id == id }
+    }
     private var file: GoogleFontFile? { style.flatMap { catalog.file(id: $0.fileID) } }
     private var state: GoogleFontDownloadState { file.flatMap { coordinator.states[$0.id] } ?? .ready }
     private var inspection: FontInspection { FontInspection(originalText: text ?? "Aa", characterName: text == nil ? "Sample" : "Selected character") }
@@ -105,48 +120,7 @@ private struct CatalogFontFaceDetail: View {
                 Text("Downloaded fonts are for use in Uniboard. They aren’t installed for other apps.").font(.footnote)
                 Text("Catalog snapshot: \(catalog.snapshot.snapshotDate)").font(.caption)
             }
-            Section("Styles") {
-                ForEach(family.styles) { option in
-                    let target = catalog.file(id: option.fileID)
-                    let status = target.map { StyleFileStatus(file: $0, state: coordinator.states[$0.id]) }
-                    Button {
-                        selectedStyleID = option.id
-                        operationError = nil
-                        verifiedFace = nil
-                        previewRevision = UUID()
-                    } label: {
-                        HStack(alignment: .center, spacing: 12) {
-                            // Label colors, not the button tint: only the icons carry the accent.
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(option.name).font(.body).foregroundStyle(Color(uiColor: .label))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                if let target {
-                                    Text(ByteCountFormatter.string(fromByteCount: target.bytes, countStyle: .file))
-                                        .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                            .multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                            if selectedStyleID == option.id {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: styleIconSize)).foregroundStyle(.tint)
-                                    .accessibilityHidden(true)
-                            }
-                            if let status { styleStatusIcon(status) }
-                        }.frame(minHeight: 44)
-                    }.accessibilityIdentifier("fontDetail.style.\(option.id)")
-                        .accessibilityValue(status?.accessibilityValue ?? Text(verbatim: ""))
-                        .accessibilityAddTraits(selectedStyleID == option.id ? .isSelected : [])
-                        .disabled(operationRunning)
-                }
-                if let file {
-                    Text("File: \(file.repositoryPath)").font(.caption).textSelection(.enabled)
-                    if family.styles.filter({ $0.fileID == file.id }).count > 1 {
-                        Text("These styles share one font file. Downloading or removing it affects all styles in that file.").font(.footnote)
-                    }
-                }
-            }
+            stylesSection
             Section("Preview") {
                 if let verifiedFace {
                     VerifiedFontPreview(face: verifiedFace, inspection: inspection, pointSize: 144)
@@ -162,17 +136,6 @@ private struct CatalogFontFaceDetail: View {
                 }
                 Text(codepoints(inspection.previewText)).font(.footnote.monospaced()).textSelection(.enabled)
                 Text(fontPreviewDisclaimer).font(.footnote).foregroundStyle(.secondary)
-            }
-            Section {
-                if let failure = coordinator.libraryFailure { Text(FontDownloadCopy.message(for: failure)) }
-                downloadControls
-                if let operationError { Text(operationError).foregroundStyle(.red) }
-                Text("Up to 16 imported, installed or downloaded font files; 40 MiB maximum per file. Remove a downloaded font or manage Your Fonts in Font Downloads to make room.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                if let file, let reason = file.unavailableReason {
-                    Text(reason).font(.footnote)
-                    Text("Choose another style or file.").font(.footnote)
-                }
             }
             Section("License") {
                 if let failure = licenses.failure { Text(FontDownloadCopy.message(for: failure)) }
@@ -194,16 +157,18 @@ private struct CatalogFontFaceDetail: View {
                 Section {
                     Button("Remove Download", role: .destructive) { confirmingRemoval = true }.accessibilityIdentifier("fontDetail.remove")
                         .disabled(operationRunning)
+                        // On the button, so the popover's arrow points at what was tapped.
+                        .confirmationDialog("Remove \(family.name) \(selectedName)?", isPresented: $confirmingRemoval, titleVisibility: .visible) {
+                            Button("Remove Download", role: .destructive) { perform(.remove) }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            let count = file.map { grid.styleCount(fileID: $0.id) } ?? 0
+                            Text(count > 1 ? StyleGridCopy.removeShared(count) : "This removes the downloaded font from Uniboard. You can download it again later.")
+                        }
                 }
             }
         }
         .navigationTitle(family.name).navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog("Remove \(family.name) \(style?.name ?? "")?", isPresented: $confirmingRemoval, titleVisibility: .visible) {
-            Button("Remove Download", role: .destructive) { perform(.remove) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes the downloaded font from Uniboard. You can download it again later.")
-        }
         .task(id: previewRevision) {
             if let file, isDownloaded, licenses.receipt?.fileID != file.id { await licenses.load(fileID: file.id) }
             await checkPreview()
@@ -211,30 +176,90 @@ private struct CatalogFontFaceDetail: View {
         .onChange(of: state) { _, _ in previewRevision = UUID() }
     }
 
-    /// Decorative: the row's accessibilityValue carries the same state for VoiceOver.
-    @ViewBuilder private func styleStatusIcon(_ status: StyleFileStatus) -> some View {
-        Group {
-            switch status {
-            case .notDownloaded:
-                Image(systemName: "arrow.down.circle").font(.system(size: styleIconSize)).foregroundStyle(.tint)
-            case .downloading:
-                ProgressView().controlSize(.small).tint(.accentColor)
-                    .frame(minWidth: styleIconSize, minHeight: styleIconSize)
-            case .downloaded:
-                Image(systemName: "checkmark.circle.fill").font(.system(size: styleIconSize)).foregroundStyle(.tint)
-            case .unavailable:
-                Image(systemName: "exclamationmark.circle").font(.system(size: styleIconSize))
-                    .foregroundStyle(Color(uiColor: .secondaryLabel))
+    /// §6's derived name ("Bold Italic", "Condensed Medium"), not the catalog's.
+    private var selectedName: String {
+        let grid = grid
+        return selection(in: grid).map { grid.displayName(of: $0.cell, in: $0.set) } ?? style?.name ?? ""
+    }
+
+    /// Exactly like today's row button: selecting resets the error and the preview.
+    private func select(_ cell: StyleGrid.Cell) {
+        selectedStyleID = cell.style.id
+        operationError = nil
+        verifiedFace = nil
+        previewRevision = UUID()
+    }
+
+    /// design/styles-grid: the Width / Variant menu, the grid, the selected
+    /// style and its download controls, with the limits as the footer.
+    private var stylesSection: some View {
+        let grid = grid
+        let current = selection(in: grid)
+        return Section {
+            if let current {
+                if let title = grid.menuTitle {
+                    Picker(title, selection: Binding(get: { current.set.id }, set: { id in
+                        guard let set = grid.sets.first(where: { $0.id == id }) else { return }
+                        select(grid.cell(switchingFrom: current.cell, to: set))
+                    })) {
+                        ForEach(grid.sets) { Text($0.option).tag($0.id) }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(operationRunning)
+                    .accessibilityIdentifier("fontDetail.styleSet")
+                }
+                StyleGridView(grid: grid, set: current.set, selectedStyleID: current.cell.style.id,
+                              files: gridFiles, states: coordinator.states, sampleText: text,
+                              disabled: operationRunning, samples: samples, select: select)
+                    .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+                selectedStyleRow(grid: grid, current: current)
+            } else {
+                Text(StyleGridCopy.noStyles).font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
+            }
+            if let failure = coordinator.libraryFailure { Text(FontDownloadCopy.message(for: failure)) }
+            downloadControls
+            if let operationError { Text(operationError).foregroundStyle(.red) }
+            if let file, let reason = file.unavailableReason {
+                Text(reason).font(.footnote)
+                Text("Choose another style or file.").font(.footnote)
+            }
+        } header: {
+            Text("Styles")
+        } footer: {
+            Text("Up to 16 imported, installed or downloaded font files; 40 MiB maximum per file. Remove a downloaded font or manage Your Fonts in Font Downloads to make room.")
+        }
+    }
+
+    private var gridFiles: [String: GoogleFontFile] {
+        Dictionary(family.styles.compactMap { catalog.file(id: $0.fileID) }.map { ($0.id, $0) }) { first, _ in first }
+    }
+
+    /// §6 row 1: the derived name, "{file name} · {size}" and, for a shared
+    /// file, which styles and sets it covers.
+    private func selectedStyleRow(grid: StyleGrid, current: (set: StyleGrid.StyleSet, cell: StyleGrid.Cell)) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(grid.displayName(of: current.cell, in: current.set)).font(.body).foregroundStyle(Color(uiColor: .label))
+            if let file {
+                let name = (file.repositoryPath as NSString).lastPathComponent
+                Text(verbatim: name + " · " + ByteCountFormatter.string(fromByteCount: file.bytes, countStyle: .file))
+                    .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel)).textSelection(.enabled)
+                let count = grid.styleCount(fileID: file.id)
+                if count > 1 {
+                    Text(StyleGridCopy.sharedFile(count, across: grid.options(coveredBy: file.id)))
+                        .font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
+                }
             }
         }
-        .accessibilityHidden(true)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private var downloadControls: some View {
         switch state {
         case .ready, .cancelled:
             if state == .cancelled { Text("Download cancelled") }
-            downloadButton("Download Style")
+            downloadButton(downloadLabel)
         case .queued:
             ProgressView("Waiting to download…")
             Button("Cancel") { perform(.cancel) }
@@ -252,6 +277,11 @@ private struct CatalogFontFaceDetail: View {
             Text(FontDownloadCopy.message(for: failure))
             downloadButton("Try Again")
         }
+    }
+    /// "Download Style" for a single-style file, "Download File ({n} Styles)" for a shared one.
+    private var downloadLabel: String {
+        let count = file.map { grid.styleCount(fileID: $0.id) } ?? 0
+        return count > 1 ? StyleGridCopy.downloadFile(count) : StyleGridCopy.downloadStyle
     }
     private func downloadButton(_ label: String) -> some View {
         Button(label) { perform(.download) }.accessibilityIdentifier("fontDetail.download")
@@ -307,8 +337,8 @@ private struct CatalogFontFaceDetail: View {
     }
 }
 
-/// Per-file status shown on every style row; styles sharing a file share this state.
-private enum StyleFileStatus: Equatable {
+/// Per-file status behind the styles grid's badges and VoiceOver values; styles sharing a file share this state.
+enum StyleFileStatus: Equatable {
     case notDownloaded, downloading, downloaded
     case unavailable(reason: String)
 
@@ -327,12 +357,13 @@ private enum StyleFileStatus: Equatable {
         }
     }
 
-    var accessibilityValue: Text {
+    /// VoiceOver's value for a style cell or file header.
+    var label: String {
         switch self {
-        case .notDownloaded: return Text("Not downloaded")
-        case .downloading: return Text("Downloading")
-        case .downloaded: return Text("Downloaded")
-        case .unavailable(let reason): return Text(verbatim: reason)
+        case .notDownloaded: return "Not downloaded"
+        case .downloading: return "Downloading"
+        case .downloaded: return "Downloaded"
+        case .unavailable(let reason): return reason
         }
     }
 }

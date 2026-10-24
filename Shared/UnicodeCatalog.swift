@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum UnicodeEdition: String, CaseIterable, Identifiable, Sendable {
     case latest, previous, older, draft
@@ -334,6 +335,8 @@ final class UnicodeCatalog: @unchecked Sendable {
     private let properties: UnicodePropertyData
     private let formatVersion: Int
     private let recordSize: Int
+    /// The file's SHA-256 for the search index, shared by every view of this data.
+    private let digest: UnicodeCatalogDigest
     private static let rangeSize = 16
     private static let categories = "Lu Ll Lt Lm Lo Mn Mc Me Nd Nl No Pc Pd Ps Pe Pi Pf Po Sm Sc Sk So Zs Zl Zp Cc Cf Cs Co Cn".split(separator: " ").map(String.init)
     private static let bidiClasses = "L R AL EN ES ET AN CS NSM BN B S WS ON LRE LRO RLE RLO PDF LRI RLI FSI PDI".split(separator: " ").map(String.init)
@@ -410,6 +413,7 @@ final class UnicodeCatalog: @unchecked Sendable {
             poolOffset = Self.uint32(loaded, 24)
             formatVersion = Self.uint32(loaded, 44)
             recordSize = formatVersion >= 3 ? 44 : 28
+            digest = UnicodeCatalogDigest()
             version = versionLabel
             let matchingProperties = decodedProperties.flatMap {
                 $0.unicodeVersion == versionLabel && Self.validCoverage($0, data: loaded) ? $0 : nil
@@ -427,6 +431,7 @@ final class UnicodeCatalog: @unchecked Sendable {
             poolOffset = 0
             formatVersion = 0
             recordSize = 28
+            digest = UnicodeCatalogDigest()
             version = "Unavailable"
             resourceError = "The offline Unicode catalog could not be loaded."
         }
@@ -461,6 +466,7 @@ final class UnicodeCatalog: @unchecked Sendable {
         poolOffset = base.poolOffset
         formatVersion = base.formatVersion
         recordSize = base.recordSize
+        digest = base.digest
     }
 
     var usesConScript: Bool { conscript != nil }
@@ -507,6 +513,7 @@ final class UnicodeCatalog: @unchecked Sendable {
         poolOffset = base.poolOffset
         formatVersion = base.formatVersion
         recordSize = base.recordSize
+        digest = base.digest
     }
 
     /// In a final edition, a character from a later version reads as unassigned.
@@ -734,8 +741,10 @@ final class UnicodeCatalog: @unchecked Sendable {
     /// Supports names, informative descriptions, formal aliases, literal glyphs,
     /// U+1F680 / 0x1F680 / 1F680 and decimal:128640. Bare hexadecimal values
     /// need a numeric digit, so names such as "face" remain text searches.
-    func search(_ query: String, limit: Int = 240,
-                order: UnicodeSortOrder = .codePoint) -> [UnicodeCharacter] {
+    /// A valid search index in `indexStore` only narrows the records examined;
+    /// without one, every record is scanned. Results are the same either way.
+    func search(_ query: String, limit: Int = 240, order: UnicodeSortOrder = .codePoint,
+                indexStore: UnicodeSearchIndexStore = .shared) -> [UnicodeCharacter] {
         guard limit > 0, !Task.isCancelled, CatalogSearchQueryPolicy.accepts(query) else { return [] }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return orderedCharacters(limit: limit, order: order) }
@@ -756,8 +765,10 @@ final class UnicodeCatalog: @unchecked Sendable {
         guard !tokens.isEmpty else { return [] }
         return data.withUnsafeBytes { bytes in
             var candidates: [(point: UInt32, key: Int, rank: Int)] = []
-            for index in 0..<recordCount {
-                if index & 255 == 0 && Task.isCancelled { return [] }
+            let indexed = indexStore.installedIndex(for: self)?.candidates(for: tokens)
+            for position in 0..<(indexed?.count ?? recordCount) {
+                if position & 255 == 0 && Task.isCancelled { return [] }
+                let index = indexed?[position] ?? position
                 let record = recordOffset + index * recordSize
                 let start = poolOffset + Int(Self.u32(bytes, record + 16))
                 let length = Int(Self.u32(bytes, record + 20))
@@ -808,6 +819,13 @@ final class UnicodeCatalog: @unchecked Sendable {
                                 if cp & 255 == 0 && Task.isCancelled { return [] }
                                 candidates.append((cp, sortKey(at: cp), whole ? 0 : 1))
                             }
+                        } else if indexed != nil, let names = AlgorithmicNameMatcher(prefix: prefix, blockName: Self.normalized(block.name),
+                                                                                     hangul: kind == 1, terms: tokens) {
+                            // Indexed: the same test from each name's suffix bytes, without building every name.
+                            for cp in blockStart...blockEnd where !isLimited || isAssigned(cp) {
+                                if cp & 255 == 0 && Task.isCancelled { return [] }
+                                if let whole = names.match(cp) { candidates.append((cp, sortKey(at: cp), whole ? 0 : 1)) }
+                            }
                         } else {
                             let blockName = Self.normalized(block.name)
                             for cp in blockStart...blockEnd where !isLimited || isAssigned(cp) {
@@ -847,6 +865,31 @@ final class UnicodeCatalog: @unchecked Sendable {
             // A ConScript character can match both its block and its name.
             var seen = Set<UInt32>()
             return sorted.filter { seen.insert($0.point).inserted }.prefix(limit).compactMap { character(at: $0.point) }
+        }
+    }
+
+    /// What a search index of this data must have been built from: the same
+    /// for every edition and ConScript view, since they share the mapped file.
+    /// Nil without explicit records. The digest is computed once, on first use.
+    var searchIndexIdentity: UnicodeSearchIndexIdentity? {
+        guard recordCount > 0 else { return nil }
+        let start = Self.uint32(data, 24) + Self.uint32(data, 32)
+        return UnicodeSearchIndexIdentity(catalogDigest: digest.value(of: data), catalogBytes: data.count,
+                                          recordCount: recordCount,
+                                          version: String(decoding: data[start..<(start + Self.uint32(data, 36))], as: UTF8.self))
+    }
+
+    /// A new search index of every explicit record's search and context text.
+    func makeSearchIndex() -> Data? {
+        guard let identity = searchIndexIdentity else { return nil }
+        return data.withUnsafeBytes { bytes in
+            UnicodeSearchIndex.build(identity: identity, bytes: bytes) { index in
+                let record = recordOffset + index * recordSize
+                let start = poolOffset + Int(Self.u32(bytes, record + 16))
+                let contextStart = formatVersion >= 3 ? poolOffset + Int(Self.u32(bytes, record + 36)) : start
+                let contextLength = formatVersion >= 3 ? Int(Self.u32(bytes, record + 40)) : 0
+                return (start..<(start + Int(Self.u32(bytes, record + 20))), contextStart..<(contextStart + contextLength))
+            }
         }
     }
 
@@ -1119,6 +1162,78 @@ final class UnicodeCatalog: @unchecked Sendable {
     private static func detailData(_ text: String) -> UnicodeDetailData? {
         guard !text.isEmpty, let detail = try? JSONDecoder().decode(UnicodeDetailData.self, from: Data(text.utf8)), detail.isValid else { return nil }
         return detail
+    }
+}
+
+/// Matches one algorithmic range's names inside one block exactly as the scan
+/// does, from each code point's name suffix instead of a String per name.
+/// The scan's text is "<prefix words> <suffix> <block words>" (the prefix ends
+/// with a space or hyphen), so a term, which never holds a space, is in it
+/// when it is inside one of those words, and whole when it equals one.
+private struct AlgorithmicNameMatcher {
+    private static let leading = ["g", "gg", "n", "d", "dd", "r", "m", "b", "bb", "s", "ss", "", "j", "jj", "c", "k", "t", "p", "h"].map { Array($0.utf8) }
+    private static let vowel = ["a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae", "oe", "yo", "u", "weo", "we", "wi", "yu", "eu", "yi", "i"].map { Array($0.utf8) }
+    private static let trailing = ["", "g", "gg", "gs", "n", "nj", "nh", "d", "l", "lg", "lm", "lb", "ls", "lt", "lp", "lh", "m", "b", "bs", "s", "ss", "ng", "j", "c", "k", "t", "p", "h"].map { Array($0.utf8) }
+    private let terms: [[UInt8]]
+    /// Per term: inside a prefix or block word, or equal to one.
+    private let fixed: [Bool]
+    private let fixedWhole: [Bool]
+    private let hangul: Bool
+
+    /// `prefix` and `blockName` are the scan's folded forms. Nil (use the scan)
+    /// unless both are ASCII and the prefix ends at a word boundary.
+    init?(prefix: String, blockName: String, hangul: Bool, terms: [[UInt8]]) {
+        guard (prefix + blockName).allSatisfy(\.isASCII), prefix.hasSuffix(" ") else { return nil }
+        let words = (prefix + " " + blockName).split(separator: " ").map { Array($0.utf8) }
+        self.terms = terms
+        fixed = terms.map { term in words.contains { Self.contains(term, in: $0) } }
+        fixedWhole = terms.map { words.contains($0) }
+        self.hangul = hangul
+    }
+
+    /// Nil when a term is absent; otherwise whether every term is a whole word.
+    func match(_ cp: UInt32) -> Bool? {
+        var suffix: [UInt8] = []
+        suffix.reserveCapacity(8)
+        if hangul {
+            let index = Int(cp - 0xAC00)
+            suffix += Self.leading[index / 588]
+            suffix += Self.vowel[(index % 588) / 28]
+            suffix += Self.trailing[index % 28]
+        } else {
+            var digits = 4
+            while cp >> (4 * UInt32(digits)) != 0 { digits += 1 }
+            for position in (0..<digits).reversed() {
+                let nibble = UInt8(cp >> (4 * UInt32(position)) & 0xF)
+                suffix.append(nibble < 10 ? 0x30 + nibble : 0x57 + nibble)
+            }
+        }
+        var whole = true
+        for (index, term) in terms.enumerated() {
+            let equal = suffix == term
+            guard fixed[index] || equal || Self.contains(term, in: suffix) else { return nil }
+            whole = whole && (fixedWhole[index] || equal)
+        }
+        return whole
+    }
+
+    private static func contains(_ term: [UInt8], in word: [UInt8]) -> Bool {
+        guard term.count <= word.count else { return false }
+        return (0...(word.count - term.count)).contains { start in word[start..<(start + term.count)].elementsEqual(term) }
+    }
+}
+
+/// A catalog file's SHA-256, computed once and shared by its editions.
+private final class UnicodeCatalogDigest: @unchecked Sendable {
+    private let lock = NSLock()
+    private var digest: Data?
+    func value(of data: Data) -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        if let digest { return digest }
+        let value = Data(SHA256.hash(data: data))
+        digest = value
+        return value
     }
 }
 

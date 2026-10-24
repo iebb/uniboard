@@ -42,8 +42,10 @@ struct UnicodeEditionSettings {
     private let readPrefix: PrefixReader
     private let writeAtomically: AtomicWriter
 
+    /// The default reads the current shared configuration generation, or
+    /// the group root before migration.
     init(containerURL: @escaping ContainerProvider = {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: UnicodeEditionSettings.groupIdentifier)
+        SharedConfigurationLocation.shared.currentDirectory()
     }, readPrefix: @escaping PrefixReader = UnicodeEditionSettings.readFilePrefix,
          writeAtomically: @escaping AtomicWriter = UnicodeEditionSettings.writeFileAtomically) {
         self.containerURL = containerURL
@@ -58,18 +60,25 @@ struct UnicodeEditionSettings {
     func loadSnapshot() -> Snapshot {
         guard let container = containerURL(), container.isFileURL,
               let data = try? readPrefix(container.appendingPathComponent(Self.filename), Self.maximumPayloadBytes + 1),
-              !data.isEmpty, data.count <= Self.maximumPayloadBytes,
+              let snapshot = Self.decode(data) else { return Snapshot(edition: .latest) }
+        return snapshot
+    }
+
+    /// The settings a payload holds; nil when it is empty, oversized,
+    /// malformed or of an unknown schema.
+    static func decode(_ data: Data) -> Snapshot? {
+        guard !data.isEmpty, data.count <= Self.maximumPayloadBytes,
               let object = try? JSONSerialization.jsonObject(with: data),
               let dictionary = object as? [String: Any],
               let schema = dictionary["schemaVersion"] as? NSNumber,
               CFGetTypeID(schema) != CFBooleanGetTypeID(),
-              let identifier = dictionary["selectionIdentifier"] as? String else { return Snapshot(edition: .latest) }
+              let identifier = dictionary["selectionIdentifier"] as? String else { return nil }
         let edition = UnicodeEdition.resolve(selectionIdentifier: identifier)
         if schema == NSNumber(value: 1), Set(dictionary.keys) == ["schemaVersion", "selectionIdentifier"] {
             return Snapshot(edition: edition)
         }
         guard let fonts = Self.strictBoolean(dictionary["useUnicodeFonts"]),
-              let collapse = Self.strictBoolean(dictionary["showsCollapseKey"]) else { return Snapshot(edition: .latest) }
+              let collapse = Self.strictBoolean(dictionary["showsCollapseKey"]) else { return nil }
         if schema == NSNumber(value: 2),
            Set(dictionary.keys) == ["schemaVersion", "selectionIdentifier", "useUnicodeFonts", "showsCollapseKey"] {
             return Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse)
@@ -89,32 +98,32 @@ struct UnicodeEditionSettings {
                 || (schema == NSNumber(value: 8) && Set(dictionary.keys) == ucsurKeys)
                 || (schema == NSNumber(value: 9) && Set(dictionary.keys) == modernKeys),
               let layout = dictionary["padLayout"] as? String, let pad = KeyboardPadLayout(rawValue: layout),
-              let mapping = dictionary["padSymbolMapping"] as? String, let symbols = KeyboardPadSymbolMapping(rawValue: mapping) else { return Snapshot(edition: .latest) }
+              let mapping = dictionary["padSymbolMapping"] as? String, let symbols = KeyboardPadSymbolMapping(rawValue: mapping) else { return nil }
         var value = Snapshot(edition: edition, useUnicodeFonts: fonts, showsCollapseKey: collapse,
             padLayout: pad, padSymbolMapping: symbols)
         if schema.intValue >= 4 {
             guard let bar = Self.strictBoolean(dictionary["showsSymbolBar"]),
-                  let search = Self.strictBoolean(dictionary["searchBarInsteadOfSymbols"]) else { return Snapshot(edition: .latest) }
+                  let search = Self.strictBoolean(dictionary["searchBarInsteadOfSymbols"]) else { return nil }
             value.showsSymbolBar = bar; value.searchBarInsteadOfSymbols = search
         }
         if schema.intValue >= 5 {
-            guard let numbers = Self.strictBoolean(dictionary["showsNumberRow"]) else { return Snapshot(edition: .latest) }
+            guard let numbers = Self.strictBoolean(dictionary["showsNumberRow"]) else { return nil }
             value.showsNumberRow = numbers
         }
         if schema.intValue >= 6 {
-            guard let ids = dictionary["layouts"] as? [String], let layouts = Self.layouts(ids) else { return Snapshot(edition: .latest) }
+            guard let ids = dictionary["layouts"] as? [String], let layouts = Self.layouts(ids) else { return nil }
             value.layouts = layouts
         }
         if schema.intValue >= 7 {
-            guard let preview = Self.strictBoolean(dictionary["showsTextPreview"]) else { return Snapshot(edition: .latest) }
+            guard let preview = Self.strictBoolean(dictionary["showsTextPreview"]) else { return nil }
             value.showsTextPreview = preview
         }
         if schema.intValue >= 8 {
-            guard let ucsur = Self.strictBoolean(dictionary["showsUCSUR"]) else { return Snapshot(edition: .latest) }
+            guard let ucsur = Self.strictBoolean(dictionary["showsUCSUR"]) else { return nil }
             value.showsUCSUR = ucsur
         }
         if schema.intValue >= 9 {
-            guard let prefers = Self.strictBoolean(dictionary["prefersUCSUR"]) else { return Snapshot(edition: .latest) }
+            guard let prefers = Self.strictBoolean(dictionary["prefersUCSUR"]) else { return nil }
             value.prefersUCSUR = prefers
         }
         return value
@@ -138,10 +147,19 @@ struct UnicodeEditionSettings {
     }
     @discardableResult
     func save(_ snapshot: Snapshot) -> Bool {
+        guard let data = Self.encode(snapshot), let container = containerURL(), container.isFileURL else { return false }
+        do {
+            try writeAtomically(data, container.appendingPathComponent(Self.filename))
+            return true
+        } catch { return false }
+    }
+
+    /// The store's own deterministic encoding (sorted keys, schema 9); nil
+    /// for an unknown edition or layout list, or over the size cap.
+    static func encode(_ snapshot: Snapshot) -> Data? {
         let identifier = snapshot.edition.selectionIdentifier
         guard UnicodeEdition.resolve(selectionIdentifier: identifier) == snapshot.edition,
               Self.layouts(snapshot.layouts) == snapshot.layouts,
-              let container = containerURL(), container.isFileURL,
               let data = try? JSONSerialization.data(withJSONObject: [
                 "schemaVersion": 9, "selectionIdentifier": identifier, "layouts": snapshot.layouts,
                 "showsTextPreview": snapshot.showsTextPreview, "showsUCSUR": snapshot.showsUCSUR,
@@ -150,11 +168,8 @@ struct UnicodeEditionSettings {
                 "showsSymbolBar": snapshot.showsSymbolBar, "searchBarInsteadOfSymbols": snapshot.searchBarInsteadOfSymbols,
                 "showsNumberRow": snapshot.showsNumberRow,
                 "padLayout": snapshot.padLayout.rawValue, "padSymbolMapping": snapshot.padSymbolMapping.rawValue
-              ], options: [.sortedKeys]), data.count <= Self.maximumPayloadBytes else { return false }
-        do {
-            try writeAtomically(data, container.appendingPathComponent(Self.filename))
-            return true
-        } catch { return false }
+              ], options: [.sortedKeys]), data.count <= Self.maximumPayloadBytes else { return nil }
+        return data
     }
 
     private static func strictBoolean(_ value: Any?) -> Bool? {

@@ -62,6 +62,34 @@ class CoverageCheckTests(unittest.TestCase):
                 coverage.evaluate(value, root=self.root)
 
 
+    def testUncoveredLinesNameNeverRunLines(self):
+        # `if x {` runs 3 times, its body (line 2) never; line 4 is a gap
+        # after counted code, line 5 is skipped and line 6 is unmapped.
+        six = [[1, 1, 3, True, True, False], [1, 7, 0, True, True, False], [3, 1, 3, True, True, False],
+               [4, 1, 0, True, True, True], [5, 1, 0, False, True, False], [6, 1, 0, False, False, False]]
+        self.assertEqual(coverage.uncovered_lines(six), [2])
+        five = [segment[:5] for segment in six if not segment[5]]
+        self.assertEqual(coverage.uncovered_lines(five), [2])
+        self.assertEqual(coverage.uncovered_lines(None), [])
+        self.assertEqual(coverage.uncovered_lines([[1, 2]]), [])
+
+
+    def testFunctionRegionsNameLinesOfClosuresThatNeverRan(self):
+        # Lines 1, 2 and 4 run; line 2's `?? id` autoclosure is a function of
+        # its own that never ran; line 3 is the body of `if` on line 2.
+        outer = [[1, 1, 5, 2, 5, 0, 0, 0], [2, 10, 4, 1, 0, 0, 0, 0], [4, 1, 4, 2, 5, 0, 0, 3]]
+        closure = [[2, 30, 2, 34, 0, 0, 0, 0]]
+        self.assertEqual(coverage.function_uncovered_lines(outer), {3})
+        self.assertEqual(coverage.function_uncovered_lines(closure), {2})
+        self.assertEqual(coverage.function_uncovered_lines(None), set())
+        diff = next(item for item in self.files if pathlib.Path(item["filename"]).name == "ConfigurationDiff.swift")
+        diff["summary"]["lines"]["covered"] = 98
+        functions = [{"filenames": [diff["filename"]], "regions": regions} for regions in (outer, closure)]
+        output, failures = coverage.evaluate({"data": [{"files": self.files, "functions": functions}]}, root=self.root)
+        self.assertEqual(failures, ["ConfigurationDiff.swift"])
+        self.assertIn("  never run: lines 2, 3", output)
+
+
 class SimulatorDestinationTests(unittest.TestCase):
     first = "11111111-1111-4111-8111-111111111111"
     second = "22222222-2222-4222-8222-222222222222"

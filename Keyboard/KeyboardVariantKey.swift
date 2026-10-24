@@ -32,13 +32,13 @@ struct KeyboardVariantKey: UIViewRepresentable {
 
     func makeUIView(context: Context) -> KeyboardVariantButton { KeyboardVariantButton() }
     func updateUIView(_ view: KeyboardVariantButton, context: Context) {
-        let font = UnicodeFontSupport.font(for: symbolBoardPreview(text), size: fontSize, enabled: useUnicodeFonts)
+        let font = UnicodeFontSupport.font(for: symbolBoardPreview(text), size: fontSize, enabled: useUnicodeFonts, anchor: symbolBoardFontAnchor(text))
         view.configure(context: route, key: identifier, text: text, variants: variants,
             enabled: enabled, font: font, symbol: symbol, foreground: foreground,
             preservesPressAcrossTextChanges: preservesPressAcrossTextChanges,
             longPressOptions: longPressOptions, swipeUp: swipeUp, swipeDown: swipeDown, secondaryText: secondaryText, contentPosition: contentPosition,
             showsInspection: showsInspection, showsEditing: showsEditing, holdLabel: holdLabel,
-            popupFont: { UnicodeFontSupport.font(for: symbolBoardPreview($0), size: fontSize, enabled: useUnicodeFonts) },
+            popupFont: { UnicodeFontSupport.font(for: symbolBoardPreview($0), size: fontSize, enabled: useUnicodeFonts, anchor: symbolBoardFontAnchor($0)) },
             displayText: displayText ?? symbolBoardPreview, actionName: actionName, factory: factory)
         view.tintColor = KeyboardPalette.accentUI
         view.accessibilityIdentifier = identifier

@@ -18,9 +18,14 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
         for pad in [false, true] {
             for width: CGFloat in [320, 402, 535, 536, 665, 666, 1032, 1376] {
                 for compact in [false, true] {
-                    for bar in [false, true] {
+                    for rows in [3, 4] {
                         let metrics = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1400,
-                            isPad: pad, compactVertical: compact, showsSymbolBar: bar, searching: true)
+                            isPad: pad, compactVertical: compact, keyRows: rows, searching: true)
+                        if compact && !pad {
+                            // iPhone landscape search has its own compact rows.
+                            XCTAssertEqual(metrics.height, 234, accuracy: 0.000001)
+                            continue
+                        }
                         let key = KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: width - 16, isPad: pad)
                         XCTAssertEqual(metrics.typingKeyHeight, key, accuracy: 0.000001)
                         XCTAssertEqual(metrics.height, key * 7.75 + 34, accuracy: 0.000001, "Results stay in a tall row above the keys")
@@ -31,64 +36,127 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
         for width: CGFloat in [.nan, .infinity, -.infinity, -1, 0, 519, 520] {
             for scene: CGFloat in [.nan, .infinity, -.infinity, -1, 0, 10, 200] {
                 let result = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: scene,
-                    isPad: true, compactVertical: false, showsSymbolBar: false, searching: true)
+                    isPad: true, compactVertical: false, searching: true)
                 XCTAssertTrue(result.height.isFinite); XCTAssertGreaterThan(result.height, 0)
                 XCTAssertTrue(result.typingKeyHeight.isFinite); XCTAssertGreaterThan(result.typingKeyHeight, 0)
             }
         }
         let capped = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: nil, sceneHeight: 200,
-            isPad: false, compactVertical: false, showsSymbolBar: false, searching: true)
+            isPad: false, compactVertical: false, searching: true)
         XCTAssertEqual(capped.height, 170)
         XCTAssertEqual(capped.typingKeyHeight * 7.75 + 34, capped.height, accuracy: 0.000001)
     }
 
-    func testFixedTemplateHasFiveRowsAndAtMostOneOptionalBar() {
-        XCTAssertEqual(KeyboardLayoutPolicy.defaultHeight, 278.4, accuracy: 0.000001)
+    func testFixedTemplateHasTheArrangementsRowsAndTheFooterWithNoTopRow() {
+        // The standard arrangement: the number row, three rows of letters and the footer.
+        XCTAssertEqual(KeyboardLayoutPolicy.defaultHeight, 237, accuracy: 0.000001)
         for pad in [false, true] {
             for width: CGFloat in [320, 402, 665, 666, 834, 1194] {
-                for bar in [false, true] {
-                    let result = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
-                        isPad: pad, compactVertical: false, showsSymbolBar: bar)
-                    let key: CGFloat = pad && width >= 666 ? 52 * 1.15 : 36 * 1.15
-                    let gap: CGFloat = pad && width >= 666 ? 6 : 4
-                    XCTAssertEqual(result.typingKeyHeight, key, accuracy: 0.000001)
-                    XCTAssertEqual(result.height, key * (bar ? 6 : 5) + gap * 3 + 18, accuracy: 0.000001)
-                    let browsing = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
-                        isPad: pad, compactVertical: false, showsSymbolBar: bar, browsing: true)
-                    XCTAssertEqual(browsing.height - result.height, key * 2, accuracy: 0.000001, "Browsing shows two more rows")
-                    XCTAssertEqual(browsing.typingKeyHeight, key, accuracy: 0.000001)
-                    let preview = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
-                        isPad: pad, compactVertical: false, showsSymbolBar: bar, showsTextPreview: true)
-                    XCTAssertEqual(preview.height - result.height, key + 4, accuracy: 0.000001, "The text preview is one row and a gap")
-                    let previewSearch = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
-                        isPad: pad, compactVertical: false, showsSymbolBar: bar, searching: true, showsTextPreview: true)
-                    let search = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
-                        isPad: pad, compactVertical: false, showsSymbolBar: bar, searching: true)
-                    XCTAssertEqual(previewSearch.height - search.height, key + 4, accuracy: 0.000001, "Search keeps the preview")
-                    let previewBrowsing = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
-                        isPad: pad, compactVertical: false, showsSymbolBar: bar, browsing: true, showsTextPreview: true)
-                    XCTAssertEqual(previewBrowsing.height, browsing.height, accuracy: 0.000001, "Browsing hides the preview")
-                }
+                let result = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                    isPad: pad, compactVertical: false)
+                let key: CGFloat = pad && width >= 666 ? 52 * 1.15 : 36 * 1.15
+                let gap: CGFloat = pad && width >= 666 ? 6 : 4
+                XCTAssertEqual(result.typingKeyHeight, key, accuracy: 0.000001)
+                XCTAssertEqual(result.height, key * 5 + gap * 3 + 18, accuracy: 0.000001)
+                let browsing = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                    isPad: pad, compactVertical: false, browsing: true)
+                XCTAssertEqual(browsing.height - result.height, key * 2, accuracy: 0.000001, "Browsing shows two more rows")
+                XCTAssertEqual(browsing.typingKeyHeight, key, accuracy: 0.000001)
+                let preview = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                    isPad: pad, compactVertical: false, showsTextPreview: true)
+                XCTAssertEqual(preview.height - result.height, key + 4, accuracy: 0.000001, "The text preview is one row and a gap")
+                let previewSearch = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                    isPad: pad, compactVertical: false, searching: true, showsTextPreview: true)
+                let search = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                    isPad: pad, compactVertical: false, searching: true)
+                XCTAssertEqual(previewSearch.height - search.height, key + 4, accuracy: 0.000001, "Search keeps the preview")
+                let previewBrowsing = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                    isPad: pad, compactVertical: false, browsing: true, showsTextPreview: true)
+                XCTAssertEqual(previewBrowsing.height, browsing.height, accuracy: 0.000001, "Browsing hides the preview")
             }
         }
     }
-    func testHidingTheNumberRowRemovesOneRowAndOneGapButNotFromSearch() {
+
+    func testIPhoneLandscapeSearchUsesCompactRowsAndLeavesTheAppAtLeast147Points() {
+        // iPhone 18 Pro in landscape: 874 × 402, about 20 points of system inset below.
+        let landscape = KeyboardLayoutPolicy.metrics(viewWidth: 874, displaySize: CGSize(width: 402, height: 874),
+            sceneHeight: 402, isPad: false, compactVertical: true, searching: true)
+        XCTAssertTrue(landscape.isCompactLayout)
+        XCTAssertEqual(KeyboardLayoutPolicy.compactSearchKeyHeight, 32)
+        XCTAssertEqual(KeyboardLayoutPolicy.compactSearchRowSpacing, 6)
+        XCTAssertEqual(KeyboardLayoutPolicy.compactSearchBarHeight, 34)
+        XCTAssertEqual(landscape.typingKeyHeight, 32, accuracy: 0.000001)
+        // 4 + 34 + 6 + four rows of 32 with 6 between + 6 + a 32-point footer + 6.
+        XCTAssertEqual(landscape.height, 234, accuracy: 0.000001)
+        XCTAssertLessThanOrEqual(landscape.height + 21, 255)
+        let preview = KeyboardLayoutPolicy.metrics(viewWidth: 874, displaySize: CGSize(width: 402, height: 874),
+            sceneHeight: 402, isPad: false, compactVertical: true, searching: true, showsTextPreview: true)
+        XCTAssertEqual(preview.height - landscape.height, 38, accuracy: 0.000001, "The preview is one search row and a gap")
+        XCTAssertEqual(preview.typingKeyHeight, 32, accuracy: 0.000001)
+        // A short scene shrinks only the keys, never below a point.
+        let short = KeyboardLayoutPolicy.metrics(viewWidth: 874, displaySize: CGSize(width: 402, height: 874),
+            sceneHeight: 200, isPad: false, compactVertical: true, searching: true)
+        XCTAssertEqual(short.height, 170, accuracy: 0.000001)
+        XCTAssertEqual(short.typingKeyHeight, (170 - 74) / 5, accuracy: 0.000001)
+        for scene: CGFloat in [.nan, .infinity, -1, 0, 10] {
+            let odd = KeyboardLayoutPolicy.metrics(viewWidth: 874, displaySize: nil, sceneHeight: scene,
+                isPad: false, compactVertical: true, searching: true)
+            XCTAssertTrue(odd.height.isFinite); XCTAssertGreaterThan(odd.typingKeyHeight, 0)
+        }
+        // Portrait, landscape typing and iPad search keep their layouts.
+        let portrait = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: CGSize(width: 402, height: 874),
+            sceneHeight: 874, isPad: false, compactVertical: false, searching: true)
+        XCTAssertFalse(portrait.isCompactLayout)
+        XCTAssertEqual(portrait.height, KeyboardTypingLayoutPolicy.regularKeyHeight * 7.75 + 34, accuracy: 0.000001)
+        let typing = KeyboardLayoutPolicy.metrics(viewWidth: 874, displaySize: CGSize(width: 402, height: 874),
+            sceneHeight: 402, isPad: false, compactVertical: true)
+        XCTAssertEqual(typing.typingKeyHeight, KeyboardTypingLayoutPolicy.regularKeyHeight, accuracy: 0.000001)
+    }
+    func testAThreeRowArrangementRemovesOneRowAndOneGapButNotFromSearch() {
         for pad in [false, true] {
             for width: CGFloat in [320, 402, 834] {
-                for bar in [false, true] {
-                    let shown = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
-                        isPad: pad, compactVertical: false, showsSymbolBar: bar)
-                    let hidden = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
-                        isPad: pad, compactVertical: false, showsSymbolBar: bar, showsNumberRow: false)
-                    let gap: CGFloat = pad && width >= 666 ? 6 : 4
-                    XCTAssertEqual(hidden.typingKeyHeight, shown.typingKeyHeight, accuracy: 0.000001)
-                    XCTAssertEqual(shown.height - hidden.height, shown.typingKeyHeight + gap, accuracy: 0.000001)
-                    let searching = { (numbers: Bool) in KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil,
-                        sceneHeight: 1200, isPad: pad, compactVertical: false, showsSymbolBar: bar,
-                        showsNumberRow: numbers, searching: true).height }
-                    XCTAssertEqual(searching(false), searching(true), accuracy: 0.000001)
-                }
+                let shown = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                    isPad: pad, compactVertical: false, keyRows: 4)
+                let hidden = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                    isPad: pad, compactVertical: false, keyRows: 3)
+                let gap: CGFloat = pad && width >= 666 ? 6 : 4
+                XCTAssertEqual(hidden.typingKeyHeight, shown.typingKeyHeight, accuracy: 0.000001)
+                XCTAssertEqual(shown.height - hidden.height, shown.typingKeyHeight + gap, accuracy: 0.000001)
+                let searching = { (rows: Int) in KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil,
+                    sceneHeight: 1200, isPad: pad, compactVertical: false, keyRows: rows, searching: true).height }
+                XCTAssertEqual(searching(3), searching(4), accuracy: 0.000001)
             }
+        }
+    }
+    func testCopyImagePanelGrowsAPortraitIPhoneBy96WithinTheSceneCapWithoutChangingKeys() {
+        let phone = CGSize(width: 402, height: 874)
+        for rows in [3, 4] {
+            for preview in [false, true] {
+                let typing = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: phone, sceneHeight: 874,
+                    isPad: false, compactVertical: false, keyRows: rows, showsTextPreview: preview)
+                let panel = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: phone, sceneHeight: 874,
+                    isPad: false, compactVertical: false, keyRows: rows, showsTextPreview: preview, previewImagePanel: true)
+                XCTAssertEqual(panel.height - typing.height, KeyboardLayoutPolicy.panelExtraHeight, accuracy: 0.000001)
+                XCTAssertEqual(KeyboardLayoutPolicy.panelExtraHeight, 96)
+                XCTAssertEqual(panel.typingKeyHeight, typing.typingKeyHeight, accuracy: 0.000001, "Keys keep their height")
+            }
+        }
+        // A short scene caps the panel at 85 %, and the keys still don't shrink for it.
+        let typing = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: phone, sceneHeight: 300,
+            isPad: false, compactVertical: false, showsTextPreview: true)
+        let capped = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: phone, sceneHeight: 300,
+            isPad: false, compactVertical: false, showsTextPreview: true, previewImagePanel: true)
+        XCTAssertEqual(capped.height, 255, accuracy: 0.000001)
+        XCTAssertEqual(capped.typingKeyHeight, typing.typingKeyHeight, accuracy: 0.000001)
+        // Landscape and iPad keep the typing height; the panel scrolls instead.
+        let landscape = { (panel: Bool) in KeyboardLayoutPolicy.metrics(viewWidth: 874, displaySize: phone, sceneHeight: 402,
+            isPad: false, compactVertical: true, showsTextPreview: true, previewImagePanel: panel) }
+        XCTAssertTrue(landscape(true).isCompactLayout)
+        XCTAssertEqual(landscape(true).height, landscape(false).height, accuracy: 0.000001)
+        for width: CGFloat in [744, 1032] {
+            let pad = { (panel: Bool) in KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: nil, sceneHeight: 1200,
+                isPad: true, compactVertical: false, previewImagePanel: panel) }
+            XCTAssertEqual(pad(true).height, pad(false).height, accuracy: 0.000001)
         }
     }
     func testFixedTemplateRotationWidthAndInvalidSceneValuesFailSafely() {
@@ -96,18 +164,18 @@ final class KeyboardInteractionPolicyTests: XCTestCase {
         for width: CGFloat in [402, 430, 874, .nan, .infinity] {
             for compact in [false, true] {
                 let result = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: phone, sceneHeight: nil,
-                    isPad: false, compactVertical: compact, showsSymbolBar: true)
+                    isPad: false, compactVertical: compact)
                 XCTAssertEqual(result.isCompactLayout, width.isFinite ? width == 874 : compact)
                 XCTAssertTrue(result.height.isFinite); XCTAssertGreaterThan(result.height, 0)
             }
         }
         for size in [CGSize(width: CGFloat.nan, height: 874), CGSize(width: 0, height: 874), CGSize(width: 402, height: CGFloat.infinity)] {
             XCTAssertTrue(KeyboardLayoutPolicy.metrics(viewWidth: 874, displaySize: size, sceneHeight: nil,
-                isPad: false, compactVertical: true, showsSymbolBar: false).isCompactLayout)
+                isPad: false, compactVertical: true).isCompactLayout)
         }
         for scene: CGFloat in [.nan, .infinity, -.infinity, 0, -1, 10, 200] {
             let result = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: nil, sceneHeight: scene,
-                isPad: false, compactVertical: true, showsSymbolBar: true)
+                isPad: false, compactVertical: true)
             XCTAssertTrue(result.height.isFinite); XCTAssertGreaterThan(result.typingKeyHeight, 0)
             XCTAssertLessThanOrEqual(result.typingKeyHeight, 36 * 1.15)
         }

@@ -2,8 +2,66 @@
 import UIKit
 import CoreText
 
+/// Which scalar's font rules apply to a preview.
+enum FontRuleAnchor: Hashable, Sendable {
+    /// The cluster's own anchor (`FontRuleSet.anchor(of:)`), after a leading
+    /// dotted-circle scaffold that carries a combining mark.
+    case automatic
+    /// A known code point, for previews whose text adds a scaffold or
+    /// presentation selector around it.
+    case scalar(UInt32)
+    /// A placeholder (an invisible, unassigned or control picture): no rules.
+    case none
+}
+
+/// What draws a preview and why.
+struct FontResolution {
+    enum Source: Equatable {
+        case rule(FontRuleMatch)
+        /// An added or downloaded preview font, by its display name.
+        case fallback(String)
+        /// iOS's own fonts (or the ConScript placeholder).
+        case system
+    }
+    enum SkipReason: Hashable, Sendable {
+        /// "Font unavailable"
+        case unavailable
+        /// "Font can’t display this text"
+        case cannotDisplay
+    }
+    struct Skip: Hashable, Sendable {
+        let match: FontRuleMatch
+        let reason: SkipReason
+    }
+    let font: UIFont
+    /// The face's name for "Preview font"; nil for iOS's own fonts.
+    let faceName: String?
+    let source: Source
+    /// Rules tried first and passed over, best first.
+    let skipped: [Skip]
+}
+
+extension UnicodeCharacter {
+    /// Tiles add a scaffold ("◌" before a mark), a text presentation
+    /// selector or a placeholder picture; rules follow the code point itself,
+    /// and placeholders take none.
+    var fontRuleAnchor: FontRuleAnchor {
+        switch codePoint {
+        case 0x09, 0x0A, 0x0D, 0x20, 0x2028, 0x2029: return .none
+        default: return isInvisible || category == "Cn" ? .none : .scalar(codePoint)
+        }
+    }
+}
+
 /// Preview-only fallback. Font files are opened directly, never registered with
 /// the process or installed systemwide, so turning this off restores iOS fonts.
+///
+/// Font rules (`FontRuleSet`) come first when `rulesEnabled` (the Extra
+/// Unicode Fonts switch) is on: each preview is one grapheme cluster, drawn
+/// in the first rule face that draws the whole cluster. Text drawn one
+/// cluster at a time in different fonts (the keyboard's preview row and Copy
+/// Image) doesn't join across a font boundary, for example in cursive
+/// scripts with mixed rules.
 @MainActor
 enum UnicodeFontSupport {
     typealias Asset = UnicodeFontAsset
@@ -90,8 +148,56 @@ enum UnicodeFontSupport {
         }
     }
 
+    /// The Extra Unicode Fonts switch for rules: off pauses them without
+    /// changing `ruleSet`.
+    static var rulesEnabled = false {
+        didSet {
+            guard rulesEnabled != oldValue else { return }
+            ruleDecisions.removeAllObjects()
+            fontGeneration &+= 1
+        }
+    }
+    /// The saved rules, compiled once.
+    static var ruleSet = FontRuleSet.empty {
+        didSet {
+            guard ruleSet.rules != oldValue.rules else { return }
+            ruleDecisions.removeAllObjects()
+            fontGeneration &+= 1
+        }
+    }
+    /// Finds rule faces; replaceable in tests.
+    static var ruleFaceLoader = FontRuleFaceLoader(bundledAssets: bundledAssets) {
+        didSet { clearCache() }
+    }
+    /// Rule faces stay loaded in their own small cache, so they never evict
+    /// the fallback fonts; least recently used first.
+    static let maximumLoadedRuleFaces = 4
+    private static var ruleFaces: [String: LoadedRuleFont] = [:]
+    private static var ruleFaceRecency: [String] = []
+    /// Faces that didn't load, until the next cache reset or library change.
+    private static var unavailableRuleFaces: [String: FontRuleFaceLoader.Unavailable] = [:]
+    private final class RuleDecision {
+        let rule: FontRuleMatch?
+        let skipped: [FontResolution.Skip]
+        init(rule: FontRuleMatch?, skipped: [FontResolution.Skip]) { self.rule = rule; self.skipped = skipped }
+    }
+    private static let ruleDecisions: NSCache<NSString, RuleDecision> = {
+        let cache = NSCache<NSString, RuleDecision>()
+        cache.countLimit = 4_096
+        return cache
+    }()
+    private static let ruleFonts: NSCache<NSString, UIFont> = {
+        let cache = NSCache<NSString, UIFont>()
+        cache.countLimit = 64
+        return cache
+    }()
+    static var loadedRuleFaceCount: Int { ruleFaces.count }
+    /// How many times a rule face was opened; a diagnostic for tests.
+    private(set) static var ruleFaceLoadCount = 0
+
     /// Changes whenever the font chosen for some text may change: a cache
-    /// reset, a downloaded or added font refresh, or the ConScript preference.
+    /// reset, a downloaded or added font refresh, the ConScript preference,
+    /// the rules or their switch.
     /// Anything measured with these fonts is stale once it changes.
     private(set) static var fontGeneration = 0
 
@@ -102,7 +208,7 @@ enum UnicodeFontSupport {
         let now = ProcessInfo.processInfo.systemUptime
         guard force || now - lastRevisionCheck >= 0.5 else { return false }
         lastRevisionCheck = now
-        let revision = UnicodeFontDownloadStore.shared.revision + "|" + CustomFontStore.shared.revision
+        let revision = UnicodeFontDownloadStore.shared.revision + "|" + CustomFontStore.shared.revision + "|" + ruleFaceLoader.revision
         guard revision != downloadRevision else { return false }
         downloadRevision = revision
         customAssets = loadCustomAssets()
@@ -129,16 +235,45 @@ enum UnicodeFontSupport {
         referenceFonts.removeAll()
         unavailableFonts.removeAll()
         fontRecency.removeAll()
+        ruleDecisions.removeAllObjects()
+        ruleFonts.removeAllObjects()
+        ruleFaces.removeAll()
+        ruleFaceRecency.removeAll()
+        unavailableRuleFaces.removeAll()
         fontGeneration &+= 1
     }
 
-    static func font(for text: String, size: CGFloat, enabled: Bool) -> UIFont {
+    static func font(for text: String, size: CGFloat, enabled: Bool, anchor: FontRuleAnchor = .automatic) -> UIFont {
+        resolution(for: text, size: size, enabled: enabled, anchor: anchor).font
+    }
+
+    /// The font for one preview and where it comes from. Rules apply only
+    /// when `enabled`, `rulesEnabled` and a rule matches; otherwise this is
+    /// exactly the fallback choice.
+    static func resolution(for text: String, size: CGFloat, enabled: Bool, anchor: FontRuleAnchor = .automatic) -> FontResolution {
         let size = normalizedPointSize(size)
         let system = UIFont.systemFont(ofSize: size)
-        guard enabled, !text.isEmpty else { return system }
+        guard enabled, !text.isEmpty else { return FontResolution(font: system, faceName: nil, source: .system, skipped: []) }
         refreshDownloadedFonts()
+        var skipped: [FontResolution.Skip] = []
+        if rulesEnabled, !ruleSet.isEmpty, let scalar = ruleAnchor(of: text, anchor) {
+            // A leading "◌" only carries a mark, unless the rule is for "◌" itself.
+            let decision = ruleDecision(for: text, anchor: scalar, skipsScaffold: scalar != 0x25CC && text.unicodeScalars.first?.value == 0x25CC)
+            skipped = decision.skipped
+            if let match = decision.rule, let font = ruleFont(ruleSet.rules[match.ruleIndex].face, size: size) {
+                return FontResolution(font: font, faceName: ruleSet.rules[match.ruleIndex].face.displayName, source: .rule(match), skipped: skipped)
+            }
+        }
         let index = choice(for: text, system: system)
-        guard index != systemChoice else { return system }
+        guard index != systemChoice else { return FontResolution(font: system, faceName: nil, source: .system, skipped: skipped) }
+        let font = fallbackFont(index, size: size, system: system)
+        guard assets.indices.contains(index) else {
+            return FontResolution(font: font, faceName: nil, source: .system, skipped: skipped)
+        }
+        return FontResolution(font: font, faceName: assets[index].displayName, source: .fallback(assets[index].displayName), skipped: skipped)
+    }
+
+    private static func fallbackFont(_ index: Int, size: CGFloat, system: UIFont) -> UIFont {
         let key = "\(index)@\(size)" as NSString
         if let cached = resolvedFonts.object(forKey: key) { return cached }
         let font: UIFont
@@ -153,6 +288,125 @@ enum UnicodeFontSupport {
         font = CTFontCreateWithGraphicsFont(graphics, size, nil, nil) as UIFont
         resolvedFonts.setObject(font, forKey: key)
         return font
+    }
+
+    /// The scalar whose rules apply, or nil for none.
+    static func ruleAnchor(of text: String, _ anchor: FontRuleAnchor) -> UInt32? {
+        switch anchor {
+        case .none: return nil
+        case let .scalar(value): return value
+        case .automatic:
+            // "◌" + mark is a scaffold for the mark, not a dotted circle.
+            let scalars = text.unicodeScalars
+            if scalars.first?.value == 0x25CC, scalars.count > 1 {
+                return FontRuleSet.anchor(of: String(scalars.dropFirst()))
+            }
+            return FontRuleSet.anchor(of: text)
+        }
+    }
+
+    /// The first candidate rule whose face loads and draws the whole cluster.
+    private static func ruleDecision(for text: String, anchor: UInt32, skipsScaffold: Bool) -> RuleDecision {
+        let key = "\(anchor)|\(skipsScaffold ? 1 : 0)|\(text)" as NSString
+        if let cached = ruleDecisions.object(forKey: key) { return cached }
+        var skipped: [FontResolution.Skip] = []
+        var chosen: FontRuleMatch?
+        for match in ruleSet.candidates(for: anchor) {
+            guard let face = ruleFace(ruleSet.rules[match.ruleIndex].face) else {
+                skipped.append(.init(match: match, reason: .unavailable))
+                continue
+            }
+            if faceDraws(text, face: face, skipsScaffold: skipsScaffold) {
+                chosen = match
+                break
+            }
+            skipped.append(.init(match: match, reason: .cannotDisplay))
+        }
+        let decision = RuleDecision(rule: chosen, skipped: skipped)
+        ruleDecisions.setObject(decision, forKey: key)
+        return decision
+    }
+
+    /// A loaded rule face, opened lazily and kept in a cache of at most
+    /// `maximumLoadedRuleFaces`.
+    /// The identity plus the PostScript name it is checked against.
+    private static func ruleFaceKey(_ reference: FontFaceReference) -> String {
+        reference.identityKey + "|" + reference.postScriptName
+    }
+
+    private static func ruleFace(_ reference: FontFaceReference) -> LoadedRuleFont? {
+        let key = ruleFaceKey(reference)
+        if let loaded = ruleFaces[key] {
+            ruleFaceRecency.removeAll { $0 == key }
+            ruleFaceRecency.append(key)
+            return loaded
+        }
+        guard unavailableRuleFaces[key] == nil else { return nil }
+        ruleFaceLoadCount += 1
+        switch ruleFaceLoader.load(reference) {
+        case let .failure(reason):
+            unavailableRuleFaces[key] = reason
+            return nil
+        case let .success(loaded):
+            ruleFaces[key] = loaded
+            ruleFaceRecency.append(key)
+            while ruleFaceRecency.count > maximumLoadedRuleFaces {
+                // Fonts already handed out keep their own chain alive.
+                ruleFaces.removeValue(forKey: ruleFaceRecency.removeFirst())
+            }
+            return loaded
+        }
+    }
+
+    /// Why a rule face isn't used, if it failed to load.
+    static func unavailability(of reference: FontFaceReference) -> FontRuleFaceLoader.Unavailable? {
+        unavailableRuleFaces[ruleFaceKey(reference)]
+    }
+
+    private static func ruleFont(_ reference: FontFaceReference, size: CGFloat) -> UIFont? {
+        let key = "\(ruleFaceKey(reference))@\(size)" as NSString
+        if let cached = ruleFonts.object(forKey: key) { return cached }
+        guard let face = ruleFace(reference) else { return nil }
+        let font = face.font(size: size)
+        ruleFonts.setObject(font, forKey: key)
+        return font
+    }
+
+    /// Every visible scalar of `text` is shaped by `face` itself, with a real
+    /// glyph: no iOS fallback, no LastResort, and no emoji sequence falling
+    /// apart. Ignorable scalars and a leading "◌" scaffold don't count, but
+    /// CoreText draws a cluster whose base the face lacks wholly in a
+    /// fallback font, so a scaffolded mark takes its rule only from a face
+    /// that also has "◌".
+    private static func faceDraws(_ text: String, face: LoadedRuleFont, skipsScaffold: Bool) -> Bool {
+        var relevant = IndexSet()
+        var offset = 0
+        for (position, scalar) in text.unicodeScalars.enumerated() {
+            let length = scalar.utf16.count
+            defer { offset += length }
+            let category = scalar.properties.generalCategory
+            if category == .control || category == .format || scalar.properties.isDefaultIgnorableCodePoint
+                || (skipsScaffold && position == 0 && scalar.value == 0x25CC) { continue }
+            relevant.insert(integersIn: offset..<(offset + length))
+        }
+        guard !relevant.isEmpty else { return false }
+        let font = face.reference as UIFont
+        let name = face.postScriptName
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        for run in CTLineGetGlyphRuns(line) as! [CTRun] {
+            let count = CTRunGetGlyphCount(run)
+            var glyphs = [CGGlyph](repeating: 0, count: count)
+            var indices = [CFIndex](repeating: 0, count: count)
+            CTRunGetGlyphs(run, CFRange(location: 0, length: 0), &glyphs)
+            CTRunGetStringIndices(run, CFRange(location: 0, length: 0), &indices)
+            let range = CTRunGetStringRange(run)
+            guard relevant.intersects(integersIn: range.location..<(range.location + max(range.length, 1))) else { continue }
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            let runFont = attributes[kCTFontAttributeName] as! CTFont
+            guard CTFontCopyPostScriptName(runFont) as String == name else { return false }
+            for (glyph, index) in zip(glyphs, indices) where relevant.contains(index) && glyph == 0 { return false }
+        }
+        return !isEmojiText(text) || visibleGlyphCount(in: text, font: font) <= text.count
     }
 
     private static let systemReference = UIFont.systemFont(ofSize: 32) as CTFont
@@ -175,11 +429,9 @@ enum UnicodeFontSupport {
         return missing
     }
 
-    static func sourceName(for text: String, size: CGFloat, enabled: Bool) -> String? {
-        guard enabled, !text.isEmpty else { return nil }
-        refreshDownloadedFonts()
-        let index = choice(for: text, system: .systemFont(ofSize: normalizedPointSize(size)))
-        return assets.indices.contains(index) ? assets[index].displayName : nil
+    /// The "Preview font" name: a rule's face or a fallback font; nil for iOS's own fonts.
+    static func sourceName(for text: String, size: CGFloat, enabled: Bool, anchor: FontRuleAnchor = .automatic) -> String? {
+        resolution(for: text, size: size, enabled: enabled, anchor: anchor).faceName
     }
 
     static func normalizedPointSize(_ size: CGFloat) -> CGFloat {

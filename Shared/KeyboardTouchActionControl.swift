@@ -61,7 +61,24 @@ class KeyboardTouchActionButton: UIButton {
         pressAction = action
         pressFeedback.setPressed(true)
         pressedStateChanged?(true)
-        return token
+        guard pressToken == token else { return nil }
+        pressDidBegin()
+        return pressToken == token ? token : nil
+    }
+
+    /// Subclass hooks: a press began with its captured action, or any press
+    /// (or nothing) was cleared. `pressDidEnd` must be idempotent.
+    func pressDidBegin() {}
+    func pressDidEnd() {}
+
+    /// Drops the pending touch-up action while the press and its visible
+    /// feedback stay until the finger lifts. Returns whether one was pending.
+    @discardableResult
+    func withdrawPendingAction() -> Bool {
+        guard pressToken != nil else { return false }
+        pressToken = nil
+        pressAction = nil
+        return true
     }
 
     @objc private func finishPress() {
@@ -84,6 +101,7 @@ class KeyboardTouchActionButton: UIButton {
         pressAction = nil
         pressFeedback.setPressed(false)
         pressedStateChanged?(false)
+        pressDidEnd()
     }
     override func willMove(toWindow newWindow: UIWindow?) {
         if newWindow !== window { endPress() }

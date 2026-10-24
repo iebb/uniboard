@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// The main keyboard drawn as it types. Its letters, Shift, Delete and the
-/// optional Tab and Caps Lock keys move like a page's keys, with gaps and up
-/// to three rows; the number row keeps its order. Selecting a letter or digit
-/// shows what it types and its swipe-up, hold and swipe-down choices.
+/// The main keyboard drawn as it types. Its digits, letters, Shift, Delete
+/// and the optional Tab and Caps Lock keys move like a page's keys, with gaps
+/// and up to four rows. Digits can be removed and added back. Selecting a
+/// letter or digit shows what it types and its swipe-up, hold and swipe-down
+/// choices.
 struct MainKeyboardEditorView: View {
     typealias Layout = SymbolPageLayout
     typealias Arrangement = MainKeyboardArrangement
-    private enum Selection: Equatable { case digit(String), place(Layout.Position) }
+    private enum Selection: Equatable { case place(Layout.Position) }
 
     @EnvironmentObject private var preferences: CatalogPreferences
     @ObservedObject private var keys = KeyboardKeyPreferences.shared
@@ -22,15 +23,12 @@ struct MainKeyboardEditorView: View {
     /// What a drag lifted from; any other arrangement refuses its drop.
     private var dragFingerprint: String { alphabet.id + "|" + arrangement.layout + "|" + arrangement.keys.joined(separator: "\u{1F}") }
     private let spacing: CGFloat = 5
-    private let digits = Array("1234567890").map(String.init)
 
     private var alphabet: KeyboardAlphabet {
         preferences.alphabets.first { $0.id == alphabetID } ?? preferences.alphabets.first ?? .english
     }
-    /// The saved arrangement, or the layout's own rows.
-    private var arrangement: Arrangement {
-        keys.snapshot.arrangement(for: alphabet.id).flatMap { $0.isValid(for: alphabet) ? $0 : nil } ?? .standard(for: alphabet)
-    }
+    /// The saved arrangement, or the number row and the layout's own rows.
+    private var arrangement: Arrangement { keys.snapshot.effectiveArrangement(for: alphabet) }
     private var places: Layout { arrangement.places ?? Layout(rows: []) }
     private var keyWidth: CGFloat { Arrangement.keyWidth(for: arrangement.rows, available: width, spacing: spacing) }
     /// The selected place while it is on an item of the keyboard as it is now.
@@ -45,7 +43,6 @@ struct MainKeyboardEditorView: View {
     /// The selected letter or digit, whose layers can be edited.
     private var descriptor: KeyboardKeySettings.Descriptor? {
         switch selection {
-        case .digit(let digit): return KeyboardKeySettings.identifier(forCharacter: digit).flatMap(KeyboardKeySettings.descriptor(for:))
         case .place(let position):
             return key(at: position).flatMap { Arrangement.isFunction($0) ? nil : $0 }
                 .flatMap(KeyboardKeySettings.identifier(forCharacter:)).flatMap(KeyboardKeySettings.descriptor(for:))
@@ -86,6 +83,7 @@ struct MainKeyboardEditorView: View {
                 Menu {
                     optionalKey(Arrangement.tab, title: "Tab", row: 0)
                     optionalKey(Arrangement.caps, title: "Caps Lock", row: 1)
+                    addDigits
                     Button { selection = nil; failed = !keys.saveArrangement(nil, alphabetID: alphabet.id) } label: {
                         Label("Standard Layout", systemImage: "arrow.counterclockwise")
                     }
@@ -104,12 +102,6 @@ struct MainKeyboardEditorView: View {
 
     private var canvas: some View {
         VStack(spacing: 6) {
-            HStack(spacing: spacing) {
-                ForEach(digits, id: \.self) { digit in
-                    tile(digit, selected: selection == .digit(digit)) { selection = selection == .digit(digit) ? nil : .digit(digit) }
-                        .accessibilityIdentifier("mainKeyboard.key.\(KeyboardKeySettings.identifier(forCharacter: digit) ?? digit)")
-                }
-            }
             ForEach(places.rows.indices, id: \.self) { row in
                 HStack(spacing: spacing) {
                     ForEach(places.rows[row].indices.map { index in
@@ -251,7 +243,8 @@ struct MainKeyboardEditorView: View {
         let position = position
         let item = position.flatMap(places.item(at:))
         let rows = places.rows
-        let removable = position.flatMap(key(at:)).map { $0 == Arrangement.tab || $0 == Arrangement.caps } ?? (item != nil)
+        // Shift, Delete and the letters always stay; digits, Tab and Caps Lock may go.
+        let removable = position.flatMap(key(at:)).map { $0 == Arrangement.tab || $0 == Arrangement.caps || Arrangement.isDigit($0) } ?? (item != nil)
         return VStack(spacing: 8) {
             HStack(spacing: 8) {
                 control("Move Left", "arrow.left", id: "mainKeyboard.left", enabled: (position?.index ?? 0) > 0) {
@@ -319,8 +312,10 @@ struct MainKeyboardEditorView: View {
         .accessibilityIdentifier(id)
     }
 
-    /// Adds Tab or Caps Lock at the start of a row, or removes it.
-    @ViewBuilder private func optionalKey(_ key: String, title: String, row: Int) -> some View {
+    /// Adds Tab or Caps Lock at the start of a row of letters, counted
+    /// from the first one so a number row above them is skipped, or removes it.
+    @ViewBuilder private func optionalKey(_ key: String, title: String, row letterRow: Int) -> some View {
+        let row = (arrangement.firstLetterRow ?? 0) + letterRow
         if let index = arrangement.keys.firstIndex(of: key) {
             Button { edit(select: nil) { places, keys in places.removeKeySlot(index); keys.remove(at: index); return true } } label: {
                 Label("Remove \(title)", systemImage: "minus.circle")
@@ -335,6 +330,21 @@ struct MainKeyboardEditorView: View {
                 }
             } label: { Label("Add \(title)", systemImage: "plus.circle") }
             .accessibilityIdentifier("mainKeyboard.add.\(title)")
+        }
+    }
+
+    /// Puts removed digits back: the whole number row as the first row, or
+    /// the missing ones after the last digit. Hidden while every digit is there.
+    @ViewBuilder private var addDigits: some View {
+        let missing = arrangement.missingDigits
+        if !missing.isEmpty {
+            let all = missing.count == Arrangement.digits.count
+            Button {
+                guard let next = arrangement.addingDigits() else { failed = true; return }
+                save(next, select: nil)
+            } label: { Label(all ? "Add Number Row" : "Add Missing Digits", systemImage: "plus.circle") }
+            .disabled(arrangement.addingDigits() == nil)
+            .accessibilityIdentifier("mainKeyboard.add.digits")
         }
     }
 

@@ -273,7 +273,7 @@ struct CharacterTile: View {
 
     private var glyph: some View {
         Text(character.displayText)
-            .font(Font(UnicodeFontSupport.font(for: character.displayText, size: glyphSize, enabled: preferences.useUnicodeFonts)))
+            .font(Font(UnicodeFontSupport.font(for: character.displayText, size: glyphSize, enabled: preferences.useUnicodeFonts, anchor: character.fontRuleAnchor)))
             .foregroundStyle(.primary)
             .lineLimit(1)
             .minimumScaleFactor(0.5)

@@ -6,22 +6,47 @@ import XCTest
 
 @MainActor
 final class CatalogPreferencesTests: XCTestCase {
-    func testTopBarSettingsPersistIndependentlyAndFailedWritesKeepPreviousValues() throws {
-        try withDefaults { defaults in
+    func testRetiredTopRowAndNumberRowChoicesAreKeptAsStoredWhenOtherSettingsSave() throws {
+        try withDefaults { _ in
             let storage = try SharedFile(.previous)
+            var stored = storage.settings.loadSnapshot()
+            stored.showsSymbolBar = false; stored.searchBarInsteadOfSymbols = true; stored.showsNumberRow = false
+            XCTAssertTrue(storage.settings.save(stored))
             let value = CatalogPreferences(editionSettings: storage.settings)
-            XCTAssertTrue(value.showsSymbolBar); XCTAssertFalse(value.searchBarInsteadOfSymbols)
-            value.selectSearchBarInsteadOfSymbols(true); value.selectSymbolBar(false)
             value.selectEdition(.draft)
-            XCTAssertFalse(storage.settings.loadSnapshot().showsSymbolBar)
-            XCTAssertTrue(storage.settings.loadSnapshot().searchBarInsteadOfSymbols)
+            value.selectTextPreview(true)
+            let saved = storage.settings.loadSnapshot()
+            XCTAssertEqual(saved.edition, .draft); XCTAssertTrue(saved.showsTextPreview)
+            // Nothing offers them any more, and an earlier version still reads its own choices.
+            XCTAssertFalse(saved.showsSymbolBar); XCTAssertTrue(saved.searchBarInsteadOfSymbols); XCTAssertFalse(saved.showsNumberRow)
             storage.failWrites = true
-            value.selectSymbolBar(true); value.selectSearchBarInsteadOfSymbols(false)
-            XCTAssertFalse(value.showsSymbolBar); XCTAssertTrue(value.searchBarInsteadOfSymbols)
+            value.selectTextPreview(false)
+            XCTAssertTrue(value.showsTextPreview, "A failed write keeps the previous value")
             XCTAssertNotNil(value.editionSaveError)
-            storage.failWrites = false
-            let restored = CatalogPreferences(editionSettings: storage.settings)
-            XCTAssertFalse(restored.showsSymbolBar); XCTAssertTrue(restored.searchBarInsteadOfSymbols)
+        }
+    }
+
+    func testAutoCapitalizationDefaultsToFollowAppSavesAtOnceAndRefreshes() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("autocap-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try withDefaults { _ in
+            let storage = try SharedFile(.previous)
+            let setting = AutoCapitalizationSetting(directory: { directory })
+            let preferences = CatalogPreferences(editionSettings: storage.settings, autoCapitalization: setting)
+            XCTAssertEqual(preferences.autoCapitalization, .followApp)
+            preferences.selectAutoCapitalization(.words)
+            XCTAssertEqual(preferences.autoCapitalization, .words)
+            XCTAssertEqual(setting.load(), .words)
+            XCTAssertTrue(setting.save(.off))
+            preferences.refreshEdition()
+            XCTAssertEqual(preferences.autoCapitalization, .off)
+            let unwritable = CatalogPreferences(editionSettings: storage.settings, autoCapitalization: AutoCapitalizationSetting(directory: { nil }))
+            unwritable.selectAutoCapitalization(.sentences)
+            XCTAssertEqual(unwritable.autoCapitalization, .followApp, "A failed save keeps the previous mode")
+            XCTAssertNotNil(unwritable.autoCapitalizationSaveError)
+            unwritable.selectAutoCapitalization(.followApp)
+            XCTAssertEqual(unwritable.autoCapitalization, .followApp)
         }
     }
 

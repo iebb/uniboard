@@ -57,6 +57,13 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         ITSAppUsesNonExemptEncryption: false
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: ad.neko.uniboard.toml
+            UTTypeDescription: TOML Configuration
+            UTTypeConformsTo: [public.plain-text]
+            UTTypeTagSpecification:
+              public.filename-extension: [toml]
+              public.mime-type: [application/toml]
     dependencies:
       - target: UniboardKeyboard
         embed: true
@@ -66,6 +73,12 @@ targets:
     sources:
       - path: Keyboard
       - path: Shared
+        excludes:
+          - TOMLDocument.swift
+          - FontRuleEditing.swift
+          - ConfigurationModel.swift
+          - ConfigurationCodec.swift
+          - ConfigurationDiff.swift
       - path: Fonts
         type: folder
         buildPhase: resources

@@ -1,0 +1,39 @@
+Uniboard Korean Two-Set Hangul Mapping, version 1
+Copyright (c) 2026 Kitta Ltd.
+
+Original Uniboard JSON encoding of factual modern Korean two-set key
+assignments. The encoding and accompanying original notices are released under
+the MIT License in LICENSE.txt. No third-party code, dictionary, font, vendor
+text, or vendor-specific input extensions are included.
+
+The lowercase ASCII key IDs represent the QWERTY positions in these rows:
+qwertyuiop -> ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ
+asdfghjkl  -> ㅁㄴㅇㄹㅎㅗㅓㅏㅣ
+zxcvbnm   -> ㅋㅌㅊㅍㅠㅜㅡ
+Uppercase IDs represent Shift. Q W E R T O P produce ㅃ ㅉ ㄸ ㄲ ㅆ ㅒ ㅖ;
+the other uppercase IDs produce the same jamo as their lowercase positions.
+
+Reference links supplied and reviewed for this release on 2026-10-31:
+- Typing Derby, Korean Keyboard Layout:
+  https://typingderby.com/en/korean-keyboard-layout
+  Reference for the complete key-position rows and shifted forms.
+- Hancom Office help, Korean keyboard:
+  https://help.hancom.com/hoffice/multi/ko_kr/show/insert/keyboard/keyboard(korea).htm
+  Reference identifying the KS X 5002 two-set keyboard standard.
+
+These references identify the factual keyboard positions; no vendor content is
+redistributed and no endorsement, certification, or broader standards-compliance
+claim is made. Vendor-specific extensions such as double-tap behavior are not
+part of this mapping.
+
+Schema: mapping.json contains schemaVersion 1 and exactly 52 key/jamo entries.
+It is declarative key data only, not executable rules or a downloaded engine.
+Modern L/V/T composition and compound handling are implemented by the separately
+shipped native Uniboard engine with ABI uniboard-hangul-1. This resource contains
+no romaja spelling grammar, Hanja, prediction, correction, or word corpus.
+
+Reproduce offline with Scripts/generate_hangul_resources.py in the Uniboard
+repository. Payload filenames and UTF-8/LF text encoding are fixed. The archive
+is gzip-compressed USTAR with root hangul-2set-1 and exactly three regular files,
+0644 permissions, uid/gid/mtime zero, empty owner/group names, and no extensions.
+The gzip header has mtime zero and no original filename; compression level is 9.

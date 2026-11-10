@@ -3,4 +3,7 @@
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'sha256-3gJwwOkk8ZtdLEmV7Y7CfzqNMnKR+iwzVSMijcVF16o='; connect-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'
+  Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'sha256-QHjeJ7Bh6MEodoMm2NU9hpQd1e064kRpLT35QsiK5lM='; connect-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'none'
+/data/*
+  Cache-Control: public, max-age=31536000, immutable
+  X-Robots-Tag: noindex

@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://uniboard-dxm.pages.dev/sitemap.xml
+Sitemap: https://uniboard.ieb.app/sitemap.xml

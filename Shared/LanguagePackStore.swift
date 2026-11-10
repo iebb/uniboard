@@ -904,3 +904,17 @@ final class PayloadVerificationCache: @unchecked Sendable {
         recency.append(pack)
     }
 }
+
+/// What a memory warning may drop: only lookup state that is rebuilt lazily on
+/// next use. Never an active language engine or its lease, a composition, or
+/// catalog entries the keyboard is showing (those stay with their owners).
+/// `PayloadVerificationCache` is deliberately KEPT: it is small (~1-2 MB) and
+/// dropping it forces a full re-hash of a pack (~3.4k Japanese files, or the
+/// 155 MB Mandarin database) on the next activation, exactly as the keyboard
+/// comes back.
+enum KeyboardMemoryRelief {
+    static func releaseRebuildableCaches() {
+        // Rebuilt on the next emoji lookup by id/text.
+        EmojiCatalog.releaseAllLookupIndexes()
+    }
+}

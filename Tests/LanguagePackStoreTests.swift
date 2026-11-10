@@ -988,6 +988,29 @@ final class LanguagePackStoreTests: XCTestCase {
         XCTAssertEqual(cache.count, 0)
     }
 
+    func testMemoryReliefKeepsTheVerificationCacheAndReleasesEmojiLookupIndexes() throws {
+        let cache = PayloadVerificationCache.shared
+        let stamp = Identity(device: 1, inode: 2, size: 1, mode: 0o100600, modificationSeconds: 1,
+                             modificationNanoseconds: 0, changeSeconds: 1, changeNanoseconds: 0)
+        let file = PayloadVerificationCache.FileKey(relativePath: "f", byteCount: 1, sha256: String(repeating: "b", count: 64))
+        let pack = PayloadVerificationCache.PackKey(payloadPath: "/memory-relief/versions/1/payload", packID: "p", version: "1",
+                                                    archiveSHA256: String(repeating: "a", count: 64))
+        defer { cache.forget(payloadPath: pack.payloadPath) }
+        cache.recordVerified(file, in: pack, identity: stamp, startedAt: cache.now())
+        XCTAssertTrue(cache.isVerified(file, in: pack, identity: stamp))
+        let emoji = EmojiCatalog.shared.limited(to: .latest)
+        let rocket = try XCTUnwrap(emoji.entry(text: "\u{1F680}"))
+        XCTAssertTrue(emoji.hasLookupIndexes)
+
+        KeyboardMemoryRelief.releaseRebuildableCaches()
+
+        XCTAssertTrue(cache.isVerified(file, in: pack, identity: stamp),
+                      "the next activation must not re-hash a whole pack after a memory warning")
+        XCTAssertFalse(emoji.hasLookupIndexes)
+        XCTAssertEqual(emoji.entries.count, EmojiCatalog.shared.limited(to: .latest).entries.count, "shown entries are kept")
+        XCTAssertEqual(emoji.entry(text: "\u{1F680}"), rocket, "the next lookup rebuilds the same answer")
+    }
+
     func testVerificationCacheIsBounded() {
         let cache = settledCache()
         let stamp = Identity(device: 1, inode: 2, size: 1, mode: 0o100600, modificationSeconds: 1,

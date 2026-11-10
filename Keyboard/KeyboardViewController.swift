@@ -116,6 +116,7 @@ final class KeyboardViewController: UIInputViewController {
             }
         }, "ad.neko.uniboard.language-input.changed" as CFString, nil, .deliverImmediately)
         updateBackdrop()
+        refreshFullAccess()
         let root = UnicodeKeyboardView(
             model: model, language: language, store: CharacterStore.shared, controller: self,
             delete: { [weak self] mode, isQuery in self?.makeDeleteAction(renderedMode: mode, isQuery: isQuery) ?? { false } },
@@ -213,6 +214,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        refreshFullAccess()
         model.refreshEditionFromAppSettings()
         invalidateEnglish()
         announcesUnreadablePanel = true
@@ -242,6 +244,9 @@ final class KeyboardViewController: UIInputViewController {
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
         UnicodeFontSupport.clearCache()
+        // Only lazily rebuilt lookup state; never the active language engine,
+        // its lease, a composition, or any catalog the keyboard is showing.
+        KeyboardMemoryRelief.releaseRebuildableCaches()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -462,7 +467,13 @@ final class KeyboardViewController: UIInputViewController {
         previewCursorControl?.isCaretLive = isKeyboardShown && !model.hasKeyboardPanel
     }
 
+    /// Publishes Full Access for rendering, only when it actually changed.
+    private func refreshFullAccess() {
+        if model.hasFullAccess != hasFullAccess { model.hasFullAccess = hasFullAccess }
+    }
+
     private func synchronizeHostTraits() {
+        refreshFullAccess()
         refreshTextPreview()
         // UIKit can ask again during a remote resize. Do not invalidate every
         // character key when neither input trait has changed.
@@ -586,7 +597,14 @@ final class KeyboardViewController: UIInputViewController {
 
     private func invalidateEnglish() {
         englishInteraction = UUID()
-        model.englishRevision = UUID()
+        // Called on every key, Shift, layout, language and query change: only
+        // republish the model when a revision can matter (see the policy).
+        if KeyboardEnglishRevisionPolicy.invalidationIssuesRevision(
+            assistanceAvailable: LanguageInputSettings.englishAssistanceAvailable,
+            showsSuggestions: !model.englishSuggestions.isEmpty, showsOriginal: model.englishOriginal != nil,
+            canReplace: model.englishCanReplace, hasUndo: model.englishHasUndo) {
+            model.englishRevision = UUID()
+        }
         manualEnglishExpected = nil
         manualEnglishResult = nil
         english.invalidate()
@@ -1550,8 +1568,11 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     /// Why an offered language can't be read, by what this keyboard knows.
+    /// Read while rendering, so it uses the published copy of Full Access:
+    /// keys no longer re-render the whole keyboard, so a flip must publish.
     fileprivate func unreadableNotice(for mode: LanguageInputMode) -> LanguageUnreadableNotice? {
-        LanguageUnreadableNotice.state(for: mode, unavailable: language.unavailableModes[mode], hasFullAccess: hasFullAccess)
+        let hasFullAccess = model.hasFullAccess
+        return LanguageUnreadableNotice.state(for: mode, unavailable: language.unavailableModes[mode], hasFullAccess: hasFullAccess)
     }
 
     /// Non-nil while the recovery panel explains an unreadable selected language.
@@ -2206,6 +2227,8 @@ private final class KeyboardModel: ObservableObject {
     }
     @Published var needsInputModeSwitchKey = true
     @Published var returnTitle = "Return"
+    /// The controller's Full Access, copied for rendering (unreadable notices).
+    @Published var hasFullAccess = false
     @Published var isCompactLayout = false
     /// iPhone landscape search: compact rows, with the results in the search row.
     var usesCompactSearchLayout: Bool { isCompactLayout && !isPadLayout && isSearching }

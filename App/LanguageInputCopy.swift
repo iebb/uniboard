@@ -52,7 +52,7 @@ enum LanguageInputCopy {
         case .japaneseRomaji: return "Enter kana or supported romaji."
         case .mandarinPinyin: return "Enter full pinyin using the spellings in the Typing Guide."
         case .koreanRomaja: return koreanPending
-        case .koreanTwoSetHangul: return "My Words is available for Korean — Romaja, not Two-Set Hangul."
+        case .koreanTwoSetHangul: return "My Words isn’t available for Two-Set Hangul."
         }
     }
 

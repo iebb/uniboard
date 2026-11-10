@@ -42,9 +42,15 @@ final class EmojiCatalog: @unchecked Sendable {
     private let firstInGroup: [String: String]
     private let searchStrings: [String]
     private let texts: [String]
-    /// Entries by id and by exact UTF-16 text, built on first lookup.
+    /// Entries by id and by exact UTF-16 text, built on first lookup and
+    /// released under memory pressure (rebuilt by the next lookup).
     private let lookupLock = NSLock()
     private var lookup: (byID: [String: UnicodeEmojiEntry], byText: [[UInt16]: UnicodeEmojiEntry])?
+    /// Catalogs that have built lookup indexes, so memory pressure can release
+    /// them without initializing an edition's catalog that was never used.
+    private static let indexedLock = NSLock()
+    private static var indexed: [WeakCatalog] = []
+    private struct WeakCatalog { weak var catalog: EmojiCatalog? }
 
     private struct Document: Decodable {
         let version: String
@@ -162,7 +168,40 @@ final class EmojiCatalog: @unchecked Sendable {
             if byText[key] == nil { byText[key] = entry }
         }
         lookup = (byID, byText)
+        Self.noteIndexed(self)
         return (byID, byText)
+    }
+
+    /// Whether the lookup indexes are currently built (for tests).
+    var hasLookupIndexes: Bool {
+        lookupLock.lock()
+        defer { lookupLock.unlock() }
+        return lookup != nil
+    }
+
+    /// Drops the lookup indexes; the next `entry(id:)`/`entry(text:)` rebuilds
+    /// them. The entries themselves (what the keyboard shows) are kept.
+    func releaseLookupIndexes() {
+        lookupLock.lock()
+        defer { lookupLock.unlock() }
+        lookup = nil
+    }
+
+    /// Releases the lookup indexes of every catalog that has built them.
+    static func releaseAllLookupIndexes() {
+        indexedLock.lock()
+        let catalogs = indexed.compactMap(\.catalog)
+        indexed.removeAll()
+        indexedLock.unlock()
+        // Not under indexedLock: a concurrent build holds lookupLock first.
+        for catalog in catalogs { catalog.releaseLookupIndexes() }
+    }
+
+    private static func noteIndexed(_ catalog: EmojiCatalog) {
+        indexedLock.lock()
+        defer { indexedLock.unlock() }
+        indexed.removeAll { $0.catalog == nil }
+        if !indexed.contains(where: { $0.catalog === catalog }) { indexed.append(WeakCatalog(catalog: catalog)) }
     }
 
     /// Emoji (sequences, not code points) this edition lists in `group`.

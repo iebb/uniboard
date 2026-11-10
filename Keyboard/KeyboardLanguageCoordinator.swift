@@ -10,15 +10,44 @@ import Combine
 @MainActor
 final class KeyboardLanguageCoordinator: ObservableObject {
     @Published private(set) var state = LanguageCompositionState(documentID: UUID())
-    @Published private(set) var enabledModes: [LanguageInputMode] = [.direct]
-    @Published private(set) var preferences = LanguageInputSettings.Value.defaults
-    @Published private(set) var resourceStatus: LanguageConversionStatus = .ready
-    @Published private(set) var isLoading = false
-    @Published private(set) var isConverting = false
+    // Refresh/revalidation re-derives these on every append and conversion
+    // result. Each is published ONLY when its value actually changes, so an
+    // unchanged re-derivation doesn't re-render the whole keyboard. (Nothing
+    // observes them for side effects: no didSet, sink or onChange.)
+    @Published private var publishedEnabledModes: [LanguageInputMode] = [.direct]
+    @Published private var publishedPreferences = LanguageInputSettings.Value.defaults
+    @Published private var publishedResourceStatus: LanguageConversionStatus = .ready
+    @Published private var publishedIsLoading = false
+    @Published private var publishedIsConverting = false
+    @Published private var publishedUnavailableModes: [LanguageInputMode: LanguageModeUnavailability] = [:]
+
+    private(set) var enabledModes: [LanguageInputMode] {
+        get { publishedEnabledModes }
+        set { if newValue != publishedEnabledModes { publishedEnabledModes = newValue } }
+    }
+    private(set) var preferences: LanguageInputSettings.Value {
+        get { publishedPreferences }
+        set { if newValue != publishedPreferences { publishedPreferences = newValue } }
+    }
+    private(set) var resourceStatus: LanguageConversionStatus {
+        get { publishedResourceStatus }
+        set { if newValue != publishedResourceStatus { publishedResourceStatus = newValue } }
+    }
+    private(set) var isLoading: Bool {
+        get { publishedIsLoading }
+        set { if newValue != publishedIsLoading { publishedIsLoading = newValue } }
+    }
+    private(set) var isConverting: Bool {
+        get { publishedIsConverting }
+        set { if newValue != publishedIsConverting { publishedIsConverting = newValue } }
+    }
     /// Why each enabled-but-not-ready mode isn't ready, from the latest refresh
     /// or activation. `.unreadable` modes stay in `enabledModes` (the space-bar
     /// list) so choosing one can explain itself instead of silently vanishing.
-    @Published private(set) var unavailableModes: [LanguageInputMode: LanguageModeUnavailability] = [:]
+    private(set) var unavailableModes: [LanguageInputMode: LanguageModeUnavailability] {
+        get { publishedUnavailableModes }
+        set { if newValue != publishedUnavailableModes { publishedUnavailableModes = newValue } }
+    }
 
     /// Called AFTER publication; the controller can invalidate intrinsic height.
     var onChange: (() -> Void)?

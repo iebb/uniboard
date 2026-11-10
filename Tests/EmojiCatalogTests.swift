@@ -477,4 +477,30 @@ final class EmojiCatalogTests: XCTestCase {
             previous = glyph
         }
     }
+
+    func testReleasedLookupIndexesRebuildWithIdenticalAnswers() throws {
+        let catalog = EmojiCatalog(resourceURL: try fixture([
+            entry([0x1F680], name: "fixture rocket"),
+            entry([0x2764, 0xFE0F], name: "fixture heart"),
+        ]))
+        XCTAssertFalse(catalog.hasLookupIndexes, "built on first lookup only")
+        let rocket = try XCTUnwrap(catalog.entry(id: "1F680"))
+        XCTAssertTrue(catalog.hasLookupIndexes)
+        catalog.releaseLookupIndexes()
+        XCTAssertFalse(catalog.hasLookupIndexes)
+        XCTAssertEqual(catalog.entries.count, 2, "entries are never released")
+        XCTAssertEqual(catalog.entry(id: "1F680"), rocket)
+        XCTAssertEqual(catalog.entry(text: "\u{2764}\u{FE0F}")?.id, "2764-FE0F")
+        XCTAssertNil(catalog.entry(text: "\u{2764}"), "still exact UTF-16, not a looser match")
+        XCTAssertTrue(catalog.hasLookupIndexes)
+
+        EmojiCatalog.releaseAllLookupIndexes()
+        XCTAssertFalse(catalog.hasLookupIndexes)
+        XCTAssertEqual(catalog.entry(text: "\u{1F680}"), rocket)
+        // A catalog that never looked anything up stays unindexed.
+        let untouched = EmojiCatalog(resourceURL: try fixture([entry()]))
+        EmojiCatalog.releaseAllLookupIndexes()
+        XCTAssertFalse(untouched.hasLookupIndexes)
+        XCTAssertFalse(catalog.hasLookupIndexes)
+    }
 }

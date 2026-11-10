@@ -14,7 +14,7 @@ struct LanguagesView: View {
             switch suggestion.language {
             case .japanese: return !model.isEnabled(.japaneseRomaji)
             case .mandarin: return !model.isEnabled(.mandarinPinyin)
-            case .korean: return !model.isEnabled(.koreanRomaja) || !model.isEnabled(.koreanTwoSetHangul)
+            case .korean: return !model.isEnabled(.koreanTwoSetHangul)
             }
         }
     }
@@ -28,22 +28,20 @@ struct LanguagesView: View {
                             switch suggestion.language {
                             case .japanese: detail(.japaneseRomaji)
                             case .mandarin: detail(.mandarinPinyin)
-                            case .korean: koreanMethods
+                            case .korean: detail(.koreanTwoSetHangul)
                             }
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 switch suggestion.language {
                                 case .japanese: Text(LanguageInputMode.japaneseRomaji.title)
                                 case .mandarin: Text(LanguageInputMode.mandarinPinyin.title)
-                                case .korean:
-                                    Text("Korean")
-                                    Text("Choose Romaja or Two-Set Hangul.").font(.subheadline).foregroundStyle(.secondary)
+                                case .korean: Text(LanguageInputMode.koreanTwoSetHangul.title)
                                 }
                                 Text(suggestion.provenance == .activeKeyboard ? "Matches an active keyboard language." : "Matches a preferred language on this device.")
                                     .font(.footnote).foregroundStyle(.secondary)
                                 if suggestion.language == .japanese { Text(model.status(.japaneseRomaji)).font(.footnote).foregroundStyle(.secondary) }
                                 if suggestion.language == .mandarin { Text(model.status(.mandarinPinyin)).font(.footnote).foregroundStyle(.secondary) }
-                                if suggestion.language == .korean { Text("Two-Set Hangul: \(model.status(.koreanTwoSetHangul))").font(.footnote).foregroundStyle(.secondary) }
+                                if suggestion.language == .korean { Text(model.status(.koreanTwoSetHangul)).font(.footnote).foregroundStyle(.secondary) }
                             }
                         }
                     }
@@ -52,7 +50,8 @@ struct LanguagesView: View {
                 }
             }
             Section("Input Mode") {
-                ForEach(LanguageInputSettings.modeOrder, id: \.self) { mode in
+                // Romaja stays hidden until its spelling is decided (design 1.5.1).
+                ForEach(LanguageInputSettings.visibleModeOrder, id: \.self) { mode in
                     if model.canSelect(mode) {
                         Button { model.select(mode) } label: { modeRow(mode) }
                             .buttonStyle(.plain)
@@ -113,7 +112,6 @@ struct LanguagesView: View {
     private var koreanMethods: some View {
         List {
             Section {
-                NavigationLink { detail(.koreanRomaja) } label: { modeRow(.koreanRomaja) }
                 NavigationLink { detail(.koreanTwoSetHangul) } label: { modeRow(.koreanTwoSetHangul) }
             } footer: { Text("Each input method is turned on separately.") }
             Section("Language Download") {

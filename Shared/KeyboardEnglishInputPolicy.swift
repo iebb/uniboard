@@ -118,6 +118,19 @@ enum KeyboardEnglishInputPolicy {
     }
 }
 
+/// Rendered English suggestion/undo actions capture the model's English
+/// revision; issuing a new one revokes them, and also republishes the whole
+/// keyboard model. Invalidation must issue one whenever English assistance
+/// exists in this build or any English choice/undo state is showing. Without
+/// either, nothing renders or accepts a revision (every English action also
+/// requires the assistance surface), so a new one would only re-render.
+enum KeyboardEnglishRevisionPolicy {
+    static func invalidationIssuesRevision(assistanceAvailable: Bool, showsSuggestions: Bool,
+                                           showsOriginal: Bool, canReplace: Bool, hasUndo: Bool) -> Bool {
+        assistanceAvailable || showsSuggestions || showsOriginal || canReplace || hasUndo
+    }
+}
+
 struct KeyboardEnglishInputScope: Equatable, Sendable {
     let documentIdentifier: UUID
     /// The caller changes this token for query, layout, trait or input-mode

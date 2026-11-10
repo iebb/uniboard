@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import XCTest
 @testable import UniboardCore
@@ -31,7 +32,8 @@ final class HangulCoordinatorNativeTests: XCTestCase {
             // Closures capture a separate counter so initialization needn't
             // capture self before all let properties are initialized.
             let spy = Spy()
-            coordinator = KeyboardLanguageCoordinator(root: store.root, settings: settings, indexDirectory: {
+            let packRoot = store.root
+            coordinator = KeyboardLanguageCoordinator(root: { packRoot }, settings: settings, indexDirectory: {
                 spy.indexCalls += 1
                 return spy.words
             })
@@ -207,6 +209,73 @@ final class HangulCoordinatorNativeTests: XCTestCase {
         XCTAssertEqual(f.coordinator.rawInput, "gksrnr")
         f.coordinator.cancel()
         XCTAssertEqual(f.coordinator.mode, .direct)
+        XCTAssertEqual(f.spy.indexCalls, 0)
+    }
+
+    func testUnchangedRefreshAndRevalidationPublishNothing() async throws {
+        let f = try Fixture(); defer { f.close() }
+        try await activate(f)
+        var publications = 0
+        let subscription = f.coordinator.objectWillChange.sink { publications += 1 }
+        defer { subscription.cancel() }
+        // Refresh re-derives preferences, choices and reasons and revalidates
+        // the active pack; with nothing changed it must not re-render anything.
+        await f.coordinator.refreshResources()
+        await f.coordinator.refreshResources()
+        XCTAssertEqual(publications, 0, "An unchanged refresh/revalidation must not publish")
+        XCTAssertEqual(f.coordinator.choices, [.direct, .koreanTwoSetHangul])
+        XCTAssertEqual(f.coordinator.status, .ready)
+        XCTAssertEqual(f.coordinator.mode, .koreanTwoSetHangul)
+        // A real change still publishes, exactly as before.
+        XCTAssertTrue(f.settings.save(.defaults))
+        await f.coordinator.refreshResources()
+        XCTAssertGreaterThan(publications, 0)
+        XCTAssertEqual(f.coordinator.choices, [.direct])
+        XCTAssertEqual(f.coordinator.mode, .direct)
+        XCTAssertEqual(f.spy.indexCalls, 0)
+    }
+
+    func testInPlaceUnavailableReasonStillPublishes() async throws {
+        let f = try Fixture(); defer { f.close() }
+        await f.coordinator.refreshResources()
+        XCTAssertTrue(f.coordinator.choices.contains(.koreanTwoSetHangul))
+        // The publication disappears after the chooser listed it, so the
+        // activation fails and records the reason with an in-place subscript.
+        let installed = try XCTUnwrap(f.installed)
+        try f.store.remove(modeID: "koreanTwoSetHangul", expectedRevision: installed.revision)
+        XCTAssertTrue(f.coordinator.select(.koreanTwoSetHangul))
+        XCTAssertTrue(f.coordinator.isLoading)
+        XCTAssertNil(f.coordinator.unavailableModes[.koreanTwoSetHangul])
+        var publications = 0
+        let subscription = f.coordinator.objectWillChange.sink { publications += 1 }
+        defer { subscription.cancel() }
+        try await eventually { !f.coordinator.isLoading }
+        XCTAssertEqual(f.coordinator.unavailableModes[.koreanTwoSetHangul], .missing)
+        XCTAssertEqual(f.coordinator.status, .missingResources)
+        // isLoading true -> false, then unavailableModes[selected] = .missing.
+        // resourceStatus was already .missingResources, so it doesn't publish.
+        XCTAssertEqual(publications, 2, "The in-place unavailableModes[selected] write must publish")
+        XCTAssertEqual(f.spy.indexCalls, 0)
+    }
+
+    func testInPlaceRemovalFromChoicesStillPublishes() async throws {
+        let f = try Fixture(); defer { f.close() }
+        try await activate(f)
+        XCTAssertEqual(f.coordinator.choices, [.direct, .koreanTwoSetHangul])
+        let installed = try XCTUnwrap(f.installed)
+        try f.store.remove(modeID: "koreanTwoSetHangul", expectedRevision: installed.revision)
+        var publications = 0
+        let subscription = f.coordinator.objectWillChange.sink { publications += 1 }
+        defer { subscription.cancel() }
+        // The next key revalidates, finds the publication gone and revokes the
+        // active resource, which drops the mode with enabledModes.removeAll {}.
+        XCTAssertTrue(f.coordinator.append("r"), "A broken converter still consumes the key")
+        XCTAssertFalse(f.coordinator.hasComposition)
+        XCTAssertEqual(f.coordinator.choices, [.direct])
+        XCTAssertEqual(f.coordinator.status, .missingResources)
+        // state.changeResources, resourceStatus .ready -> .missingResources, and
+        // the in-place enabledModes.removeAll {}: one publication each.
+        XCTAssertEqual(publications, 3, "The in-place enabledModes.removeAll {} must publish")
         XCTAssertEqual(f.spy.indexCalls, 0)
     }
 

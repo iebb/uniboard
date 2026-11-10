@@ -181,4 +181,22 @@ final class KeyboardEnglishInputPolicyTests: XCTestCase {
         _ = state.spaceTap(before: context, at: 2, scope: scope)
         XCTAssertEqual(state.spaceTap(before: context+"x ", at: 2.1, scope: scope), .insertSpace)
     }
+
+    func testInvalidationIssuesARevisionWheneverEnglishAssistanceOrItsStateExists() {
+        func issues(_ available: Bool, suggestions: Bool = false, original: Bool = false,
+                    replace: Bool = false, undo: Bool = false) -> Bool {
+            KeyboardEnglishRevisionPolicy.invalidationIssuesRevision(assistanceAvailable: available,
+                showsSuggestions: suggestions, showsOriginal: original, canReplace: replace, hasUndo: undo)
+        }
+        // Available assistance: always, exactly as before (stale actions revoked).
+        XCTAssertTrue(issues(true))
+        XCTAssertTrue(issues(true, suggestions: true, original: true, replace: true, undo: true))
+        // Unavailable with nothing showing: no revision, no model republish.
+        XCTAssertFalse(issues(false))
+        // Any visible English state still gets revoked.
+        XCTAssertTrue(issues(false, suggestions: true))
+        XCTAssertTrue(issues(false, original: true))
+        XCTAssertTrue(issues(false, replace: true))
+        XCTAssertTrue(issues(false, undo: true))
+    }
 }

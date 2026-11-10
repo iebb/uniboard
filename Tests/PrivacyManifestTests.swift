@@ -6,6 +6,7 @@ final class PrivacyManifestTests: XCTestCase {
     func testApplicationPackagesItsNoCollectionAndElapsedTimingDeclarations() throws {
         XCTAssertEqual(Bundle.main.bundleIdentifier, "ad.neko.uniboard")
         try verifyManifest(in: Bundle.main)
+        try verifyAppOnlyReasons(in: Bundle.main, expected: true)
     }
 
     func testEmbeddedKeyboardPackagesTheSamePrivacyContract() throws {
@@ -15,7 +16,22 @@ final class PrivacyManifestTests: XCTestCase {
         let extensionURL = try XCTUnwrap(contents.first { url in
             Bundle(url: url)?.bundleIdentifier == "ad.neko.uniboard.keyboard"
         })
-        try verifyManifest(in: XCTUnwrap(Bundle(url: extensionURL)))
+        let keyboard = try XCTUnwrap(Bundle(url: extensionURL))
+        try verifyManifest(in: keyboard)
+        try verifyAppOnlyReasons(in: keyboard, expected: false)
+    }
+
+    private func verifyAppOnlyReasons(in bundle: Bundle, expected: Bool) throws {
+        let url = try XCTUnwrap(bundle.url(forResource: "PrivacyInfo", withExtension: "xcprivacy"))
+        let manifest = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any])
+        let entries = try XCTUnwrap(manifest["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
+        for (category, reason) in [("ActiveKeyboards", "3EC4.1"), ("DiskSpace", "E174.1")] {
+            let matching = entries.filter { $0["NSPrivacyAccessedAPIType"] as? String == "NSPrivacyAccessedAPICategory" + category }
+            XCTAssertEqual(matching.count, expected ? 1 : 0, "Only the containing app queries language hints and install capacity")
+            if expected {
+                XCTAssertEqual(matching.first?["NSPrivacyAccessedAPITypeReasons"] as? [String], [reason])
+            }
+        }
     }
 
     private func verifyManifest(in bundle: Bundle, file: StaticString = #filePath, line: UInt = #line) throws {

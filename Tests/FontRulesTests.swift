@@ -140,6 +140,135 @@ final class FontRulesTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode([FontRuleSelector].self, from: data), selectors)
     }
 
+    // MARK: Legacy catalog equivalence
+
+    private func equivalenceFixture(pin: String = "e7db6ca603fd4862010383ff17ffd6cc4ffac1c0",
+                                    axes: [String: Double] = ["wght": 700, "wdth": 75]) throws -> FontCatalogEquivalenceIndex {
+        let json: [String: Any] = [
+            "schemaVersion": 2, "repositoryCommit": pin,
+            "files": [["id": "variable", "sha256": Self.hash]],
+            "families": [["styles": [["fileID": "variable", "variationInstance": axes,
+                "instance": ["path": "s/fixture/v1/AbC.ttf", "sha256": String(repeating: "cd", count: 32)]]]]]
+        ]
+        return try XCTUnwrap(FontCatalogEquivalenceIndex.decode(JSONSerialization.data(withJSONObject: json)))
+    }
+
+    func testCatalogEquivalenceUsesExactHashIndexAndAllCoordinatesNotDisplayNames() throws {
+        let index = try equivalenceFixture()
+        let shared = FontLocator.file(relativePath: "old.ttf", sha256: Self.hash, faceIndex: 0, variations: ["wght": 700, "wdth": 75])
+        let own = FontLocator.file(relativePath: "", sha256: String(repeating: "cd", count: 32), faceIndex: 0, variations: [:])
+        XCTAssertEqual(index.equivalents(for: shared), [own])
+        XCTAssertEqual(index.equivalents(for: own), [.file(relativePath: "", sha256: Self.hash, faceIndex: 0, variations: ["wght": 700, "wdth": 75])])
+        for wrong in [FontLocator.file(relativePath: "old.ttf", sha256: Self.hash, faceIndex: 1, variations: ["wght": 700, "wdth": 75]),
+                      .file(relativePath: "old.ttf", sha256: Self.hash, faceIndex: 0, variations: ["wght": 700]),
+                      .file(relativePath: "old.ttf", sha256: Self.hash, faceIndex: 0, variations: ["wght": 700, "wdth": 100]),
+                      .file(relativePath: "old.ttf", sha256: String(repeating: "ef", count: 32), faceIndex: 0, variations: ["wght": 700, "wdth": 75]),
+                      .process(postScriptName: "Fixture-Bold", variations: ["wght": 700, "wdth": 75])] {
+            XCTAssertTrue(index.equivalents(for: wrong).isEmpty)
+        }
+        let untrusted = "{\"schemaVersion\":2,\"repositoryCommit\":\"untrusted\",\"files\":[],\"families\":[]}"
+        XCTAssertNil(FontCatalogEquivalenceIndex.decode(Data(untrusted.utf8)))
+        XCTAssertNil(FontCatalogEquivalenceIndex.decode(Data("{}".utf8)))
+    }
+
+    func testLegacyRecordDecodesWithoutEquivalentsAndEnrichmentNeverChangesItsIdentity() throws {
+        let original = FontFaceRecord(id: .init(rawValue: "google:variable:bold"), family: "Fixture", style: "Bold",
+                                      postScriptName: "Fixture-Bold", source: .downloaded,
+                                      locator: .file(relativePath: "old.ttf", sha256: Self.hash, faceIndex: 0,
+                                                     variations: ["wght": 700, "wdth": 75]), assetID: "old.ttf")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        json.removeValue(forKey: "equivalents")
+        let old = try JSONDecoder().decode(FontFaceRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(old.equivalents)
+        let enriched = old.catalogEnriched(using: try equivalenceFixture())
+        XCTAssertEqual(enriched.id, old.id)
+        XCTAssertEqual(enriched.locator, old.locator)
+        XCTAssertEqual(FontFaceReference(record: enriched), FontFaceReference(record: old))
+        XCTAssertEqual(enriched.assetID, old.assetID)
+        XCTAssertEqual(enriched.equivalents?.count, 1)
+        XCTAssertNil(old.equivalents, "Enrichment only affects the returned value")
+    }
+
+    func testOverlapCollapsesWhenOnlyTheOwnRecordDeclaresTheEquivalent() throws {
+        let variable = FontFaceRecord(id: .init(rawValue: "old"), family: "Fixture", style: "Bold", postScriptName: "Fixture-Bold",
+                                      source: .downloaded, locator: .file(relativePath: "old.ttf", sha256: Self.hash, faceIndex: 0,
+                                                                        variations: ["wght": 700]), assetID: "old.ttf")
+        let own = FontFaceRecord(id: .init(rawValue: "own"), family: "Fixture", style: "Bold", postScriptName: "FixtureStatic-Bold",
+                                 source: .downloaded, locator: .file(relativePath: "own.ttf", sha256: String(repeating: "cd", count: 32),
+                                                                    faceIndex: 0, variations: [:]), assetID: "own.ttf", equivalents: [variable.locator])
+        for records in [[variable, own], [own, variable]] {
+            XCTAssertEqual(FontFaceRecord.collapsingEquivalents(records), [own])
+            XCTAssertEqual(try XCTUnwrap(FontFaceReference(record: variable)).candidates(in: records).first?.identityKey,
+                           FontFaceReference(record: own)?.identityKey)
+        }
+        XCTAssertEqual(FontFaceRecord.collapsingEquivalents([variable]), [variable])
+        XCTAssertEqual(FontFaceRecord.collapsingEquivalents([own]), [own])
+    }
+
+    func testCatalogProjectionHandlesRepeatedInstancesAndRejectsMalformedRelationships() throws {
+        let ownHash = String(repeating: "cd", count: 32)
+        let otherHash = String(repeating: "ef", count: 32)
+        let shared = FontLocator.file(relativePath: "old.ttf", sha256: Self.hash, faceIndex: 0, variations: ["wght": 700])
+        let row: [String: Any] = ["fileID": "variable", "variationInstance": ["wght": 700],
+                                  "instance": ["path": "s/fixture/v1/AbC.ttf", "sha256": ownHash]]
+        var other = row
+        other["instance"] = ["path": "s/fixture/v1/Other.ttf", "sha256": otherHash]
+        var json: [String: Any] = [
+            "schemaVersion": 2, "repositoryCommit": "e7db6ca603fd4862010383ff17ffd6cc4ffac1c0",
+            "files": [["id": "variable", "sha256": Self.hash]],
+            "families": [["styles": [row, row, other, ["fileID": "variable"]]]]
+        ]
+        func decode(_ value: [String: Any]) throws -> FontCatalogEquivalenceIndex? {
+            FontCatalogEquivalenceIndex.decode(try JSONSerialization.data(withJSONObject: value))
+        }
+        let index = try XCTUnwrap(decode(json))
+        XCTAssertEqual(index.equivalents(for: shared).count, 2, "Repeated named instances don't duplicate aliases")
+        XCTAssertTrue(index.equivalents(for: .process(postScriptName: "Fixture", variations: [:])).isEmpty)
+        XCTAssertTrue(FontCatalogEquivalenceIndex.empty.equivalents(for: shared).isEmpty)
+        let record = FontFaceRecord(id: .init(rawValue: "old"), family: "Fixture", style: "Bold", postScriptName: "Fixture-Bold",
+                                    source: .imported, locator: shared, assetID: nil,
+                                    equivalents: [.file(relativePath: "", sha256: ownHash, faceIndex: 0, variations: [:]),
+                                                  .process(postScriptName: "UnportableAlias", variations: ["1": 1])])
+        let enriched = record.catalogEnriched(using: index)
+        XCTAssertEqual(enriched.equivalents?.count, 2, "Unportable aliases are discarded, not given a fallback identity")
+        XCTAssertEqual(enriched.catalogEnriched(using: index), enriched, "Idempotent, including stable ordering")
+        XCTAssertEqual(record.catalogEnriched(using: .empty), record)
+        for badInstance in [["path": "s/fixture/v1/AbC.ttf", "sha256": "bad"],
+                            ["path": "s/fixture/v1/AbC.ttf", "sha256": Self.hash],
+                            ["path": "https://example.com/AbC.ttf", "sha256": ownHash]] {
+            var badRow = row; badRow["instance"] = badInstance
+            var bad = json; bad["families"] = [["styles": [badRow]]]
+            XCTAssertNil(try decode(bad))
+        }
+        json["files"] = [["id": "variable", "sha256": Self.hash], ["id": "variable", "sha256": Self.hash]]
+        XCTAssertNil(try decode(json), "Duplicate file IDs fail closed rather than trapping")
+    }
+
+    func testEquivalenceCandidatesPreferStaticAndDeduplicateWithoutChangingSavedReference() throws {
+        let variable = FontFaceRecord(id: .init(rawValue: "variable"), family: "Fixture", style: "Bold", postScriptName: "Fixture-Bold",
+                                      source: .downloaded, locator: .file(relativePath: "old.ttf", sha256: Self.hash, faceIndex: 0,
+                                                                        variations: ["wght": 700]), assetID: "old.ttf")
+        let own = FontFaceRecord(id: .init(rawValue: "own"), family: "Fixture", style: "Bold", postScriptName: "FixtureStatic-Bold",
+                                 source: .downloaded, locator: .file(relativePath: "own.ttf", sha256: String(repeating: "cd", count: 32),
+                                                                    faceIndex: 0, variations: [:]), assetID: "own.ttf", equivalents: [variable.locator])
+        let process = FontFaceRecord(id: .init(rawValue: "process"), family: "Fixture", style: "Bold", postScriptName: "Fixture-Bold",
+                                     source: .installed, locator: .process(postScriptName: "Fixture-Bold", variations: [:]), assetID: nil)
+        let saved = try XCTUnwrap(FontFaceReference(record: variable))
+        let original = saved
+        XCTAssertEqual(saved.candidates(in: [variable, own, own, process]).map(\.postScriptName), ["FixtureStatic-Bold", "Fixture-Bold"])
+        XCTAssertEqual(saved.candidates(in: [variable]), [saved])
+        XCTAssertTrue(saved.candidates(in: [process]).isEmpty, "Names alone never create equivalence")
+        XCTAssertTrue(saved.isSameFace(as: own))
+        XCTAssertFalse(saved.isSameFace(as: process))
+        XCTAssertFalse(process.isStaticFile)
+        let invalid = FontFaceRecord(id: .init(rawValue: "invalid"), family: "", style: "Bold", postScriptName: "FixtureStatic-Bold",
+                                     source: .imported, locator: own.locator, assetID: nil, equivalents: [variable.locator])
+        XCTAssertEqual(saved.candidates(in: [invalid, variable]), [saved], "Unportable records are skipped")
+        XCTAssertNil(FontFaceReference.identityKey(of: .file(relativePath: "a", sha256: Self.hash, faceIndex: 0, variations: ["1": 1])))
+        XCTAssertNil(FontFaceReference.identityKey(of: .process(postScriptName: "Fixture", variations: ["1": 1])))
+        XCTAssertEqual(saved, original)
+    }
+
     // MARK: Face references
 
     func testFaceReferencesFromLibraryRecordsDropPaths() throws {
@@ -544,5 +673,62 @@ final class FontRulesTests: XCTestCase {
         XCTAssertEqual(FontRuleLimits.maximumRules, 1024)
         XCTAssertEqual(FontRuleLimits.maximumRangeRules, 256)
         XCTAssertEqual(FontRuleLimits.maximumFaces, 256)
+    }
+}
+
+extension FontRulesTests {
+    func testFontManagementEquivalenceReferencesAndUnaffectedOtherFile() throws {
+        let variableHash = String(repeating: "a", count: 64)
+        let staticHash = String(repeating: "b", count: 64)
+        let variable = FontLocator.file(relativePath: "variable.ttf", sha256: variableHash, faceIndex: 0, variations: ["wght": 700])
+        let own = FontLocator.file(relativePath: "bold.ttf", sha256: staticHash, faceIndex: 0, variations: [:])
+        let sharedFace = FontFaceRecord(id: .init(rawValue: "shared"), family: "Same Family", style: "Condensed Bold Italic",
+                                       postScriptName: "Fixture", source: .downloaded, locator: variable, assetID: nil,
+                                       equivalents: [.file(relativePath: "", sha256: staticHash, faceIndex: 0, variations: [:])])
+        let ownFace = FontFaceRecord(id: .init(rawValue: "own"), family: "Same Family", style: "Condensed Bold Italic",
+                                    postScriptName: "Fixture", source: .downloaded, locator: own, assetID: nil,
+                                    equivalents: [.file(relativePath: "", sha256: variableHash, faceIndex: 0, variations: ["wght": 700])])
+        let shared = FontManagedEntry(filename: "variable.ttf", sha256: variableHash, displayName: "Same Family", installed: false,
+                                      faces: [sharedFace], verifiedBytes: 200)
+        let separate = FontManagedEntry(filename: "bold.ttf", sha256: staticHash, displayName: "Same Family", installed: false,
+                                        faces: [ownFace], verifiedBytes: 100)
+        let reference = try XCTUnwrap(FontFaceReference(record: sharedFace))
+        let rule = FontRule(id: "rule", selector: .codePoint(65), face: reference)
+        let snapshot = FontManagementSnapshot(generation: "g", entries: [shared, separate])
+        XCTAssertEqual(snapshot.used, 2, "Same-family files remain separate capacity entries")
+        XCTAssertEqual(snapshot.verifiedTotalBytes, 300)
+        let uses = snapshot.references(to: separate, rules: [rule])
+        XCTAssertEqual(uses.map(\.rule), [rule], "A variable reference also uses its static equivalent")
+        XCTAssertEqual(uses.first?.styles, ["Condensed Bold Italic"], "Names stay exact")
+        XCTAssertEqual(uses.first?.otherFilenames, ["variable.ttf"])
+        let remaining = FontManagementSnapshot(generation: "next", entries: [shared])
+        XCTAssertEqual(remaining.references(to: shared, rules: [rule]).map(\.rule), [rule])
+        XCTAssertEqual(rule.face, reference, "Removing membership never rewrites a portable reference")
+    }
+
+    func testFontManagementUnknownSizeAndInstalledCapacityAreNotZeroByteFiles() {
+        let installed = FontManagedEntry(filename: "Installed-Fixture", sha256: "", displayName: "Fixture", installed: true,
+                                         faces: [], verifiedBytes: nil)
+        let unreadable = FontManagedEntry(filename: "unreadable.ttf", sha256: Self.hash, displayName: "Fixture", installed: false,
+                                          faces: [], verifiedBytes: nil)
+        let referenceOnly = FontManagementSnapshot(generation: "g", entries: [installed])
+        XCTAssertEqual(referenceOnly.used, 1)
+        XCTAssertEqual(referenceOnly.files.count, 0)
+        XCTAssertEqual(referenceOnly.installed.count, 1)
+        XCTAssertNil(installed.verifiedBytes)
+        XCTAssertNil(FontManagementSnapshot(generation: "g", entries: [installed, unreadable]).verifiedTotalBytes)
+    }
+
+    func testFontManagementDoesNotMatchFamilyNameOrWrongVariation() throws {
+        let record = FontFaceRecord(id: .init(rawValue: "face"), family: "Fixture", style: "Bold", postScriptName: "Fixture",
+                                    source: .downloaded,
+                                    locator: .file(relativePath: "file.ttf", sha256: Self.hash, faceIndex: 0, variations: ["wght": 700]), assetID: nil)
+        let entry = FontManagedEntry(filename: "file.ttf", sha256: Self.hash, displayName: "Fixture", installed: false,
+                                     faces: [record], verifiedBytes: 123)
+        var different = try XCTUnwrap(FontFaceReference(record: record))
+        different.identity = .file(sha256: Self.hash, faceIndex: 0, variations: ["wght": 400])
+        XCTAssertFalse(entry.uses(different))
+        different.identity = .file(sha256: String(repeating: "c", count: 64), faceIndex: 0, variations: ["wght": 700])
+        XCTAssertFalse(entry.uses(different))
     }
 }

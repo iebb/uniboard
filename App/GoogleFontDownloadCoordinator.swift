@@ -15,6 +15,29 @@ enum GoogleFontURLPolicy {
               let url = URL(string: "https://raw.githubusercontent.com/google/fonts/\(commit)/\(path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")") else { throw FontLibraryFailure.invalidFile }
         return url
     }
+
+    /// A pinned single-style instance: https://fonts.gstatic.com/s/<family>/v<n>/<name>.ttf only.
+    static func instanceURL(path: String) throws -> URL {
+        guard GoogleFontCatalog.safeInstancePath(path),
+              let url = URL(string: "https://\(GoogleFontCatalog.instanceHost)/\(path)") else { throw FontLibraryFailure.invalidFile }
+        return url
+    }
+
+    /// The only two shapes the transport will fetch, each re-derived from its own parts.
+    static func isPinned(_ url: URL) -> Bool {
+        guard url.scheme == "https", url.user == nil, url.password == nil, url.port == nil,
+              url.query == nil, url.fragment == nil else { return false }
+        switch url.host {
+        case "raw.githubusercontent.com":
+            guard url.path.hasPrefix("/google/fonts/") else { return false }
+            let components = url.path.split(separator: "/").map(String.init)
+            return components.count >= 4 && (try? Self.url(commit: components[2], path: components.dropFirst(3).joined(separator: "/"))) == url
+        case GoogleFontCatalog.instanceHost:
+            return (try? instanceURL(path: String(url.path.dropFirst()))) == url
+        default:
+            return false
+        }
+    }
 }
 final class RejectFontRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -27,11 +50,7 @@ final class RejectFontRedirects: NSObject, URLSessionTaskDelegate, @unchecked Se
 }
 struct PinnedGoogleFontTransport: GoogleFontTransport {
     func fetch(url: URL, limit: Int64, progress: @escaping @Sendable (Int64, Int64?) -> Void) async throws -> Data {
-        guard url.scheme == "https", url.host == "raw.githubusercontent.com", url.user == nil, url.password == nil,
-              url.port == nil, url.path.hasPrefix("/google/fonts/") else { throw FontLibraryFailure.invalidFile }
-        let components = url.path.split(separator: "/").map(String.init)
-        guard components.count >= 4, url.query == nil, url.fragment == nil,
-              (try? GoogleFontURLPolicy.url(commit: components[2], path: components.dropFirst(3).joined(separator: "/"))) == url else { throw FontLibraryFailure.invalidFile }
+        guard GoogleFontURLPolicy.isPinned(url) else { throw FontLibraryFailure.invalidFile }
         let config = URLSessionConfiguration.ephemeral
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false
@@ -62,9 +81,15 @@ struct PinnedGoogleFontTransport: GoogleFontTransport {
     }
 }
 
+/// What one Download row fetches: the whole repository file, or the style's pinned single-style instance.
+enum GoogleFontDownloadScope: Equatable, Sendable { case file, instance }
+
 @MainActor
 final class GoogleFontDownloadCoordinator: ObservableObject {
+    /// Keyed by download id: a repository file id, or a `GoogleFontInstance.id` ("gstatic:s/…").
     @Published private(set) var states: [String: GoogleFontDownloadState] = [:]
+    /// Imported/downloaded files and installed references share the existing 16-entry quota.
+    @Published private(set) var libraryFileCount = 0
     private let catalog: GoogleFontCatalogSnapshot
     private let trustedCatalog: GoogleFontCatalog?
     @Published private(set) var libraryFailure: FontLibraryFailure?
@@ -75,94 +100,173 @@ final class GoogleFontDownloadCoordinator: ObservableObject {
     private var active = 0
     private var removing: Set<String> = []
 
+    /// One download, resolved from the catalog: never from a payload.
+    private struct Source {
+        let id: String
+        let url: URL?
+        let bytes: Int64
+        let sha256: String
+        let expectedPostScriptNames: [String]
+        let file: GoogleFontFile
+        let kind: FontLibrarySourceKind
+        let faces: [FontFaceRecord]
+    }
+
     init(catalog: GoogleFontCatalogSnapshot, store: CustomFontStore = .shared,
          transport: any GoogleFontTransport = PinnedGoogleFontTransport()) {
         self.catalog = catalog; self.store = store; self.transport = transport
         trustedCatalog = try? GoogleFontCatalog(snapshot: catalog)
         do {
             let state = try store.readLibraryState()
-            for file in catalog.files {
-                if trustedCatalog == nil { states[file.id] = .failed(.invalidFile) }
-                else if let id = state.assetIDs[file.id] { states[file.id] = .downloaded(assetID: id) }
-                else { states[file.id] = .ready }
+            libraryFileCount = state.snapshot.customEntryCount
+            let ids = catalog.files.map(\.id) + catalog.families.flatMap { $0.styles.compactMap { $0.instance?.id } }
+            for id in ids {
+                if trustedCatalog == nil { states[id] = .failed(.invalidFile) }
+                else if let asset = state.assetIDs[id] { states[id] = .downloaded(assetID: asset) }
+                else { states[id] = .ready }
             }
         } catch {
             libraryFailure = (error as? FontLibraryFailure) ?? .storageFailure
         }
     }
 
-    func download(styleID: String) async throws {
-        guard let trustedCatalog else { throw FontLibraryFailure.invalidFile }
+    /// Reconcile idle rows with authoritative membership after imports or file
+    /// management elsewhere. Retained immutable bytes do not mean a receipt is
+    /// still downloaded. Never overwrite an in-flight job's progress/state.
+    func refreshLibrary() {
+        do {
+            let state = try store.readLibraryState()
+            libraryFileCount = state.snapshot.customEntryCount
+            libraryFailure = nil
+            let ids = Set(states.keys).union(catalog.files.map(\.id))
+                .union(catalog.families.flatMap { $0.styles.compactMap { $0.instance?.id } })
+            for id in ids where jobs[id] == nil && !removing.contains(id) {
+                guard trustedCatalog != nil else { states[id] = .failed(.invalidFile); continue }
+                if let asset = state.assetIDs[id] {
+                    states[id] = .downloaded(assetID: asset)
+                } else if case .downloaded = states[id] {
+                    states[id] = .ready
+                } else if states[id] == nil {
+                    states[id] = .ready
+                }
+            }
+        } catch {
+            // Unreadable storage is not evidence that every receipt was removed.
+            libraryFailure = (error as? FontLibraryFailure) ?? .storageFailure
+        }
+    }
+
+    var freeFileSpaces: Int { max(0, CustomFontStore.maximumFonts - libraryFileCount) }
+
+    private func source(styleID: String, scope: GoogleFontDownloadScope, trusted: GoogleFontCatalog) throws -> Source {
         guard let family = catalog.families.first(where: { $0.styles.contains(where: { $0.id == styleID }) }),
               let style = family.styles.first(where: { $0.id == styleID }),
-              let file = catalog.files.first(where: { $0.id == style.fileID }) else { throw FontLibraryFailure.invalidFile }
-        guard !removing.contains(file.id) else { throw CancellationError() }
+              let file = trusted.file(id: style.fileID) else { throw FontLibraryFailure.invalidFile }
+        switch scope {
+        case .file:
+            let faces = catalog.families.flatMap { family in family.styles.filter { $0.fileID == file.id }.map { style in
+                FontFaceRecord(id: .init(rawValue: "google:\(file.id):\(style.id)"), family: family.name, style: style.name,
+                               postScriptName: style.postScriptName, source: .downloaded,
+                               locator: .process(postScriptName: style.postScriptName, variations: style.variationInstance ?? [:]), assetID: nil,
+                               equivalents: style.instance.map { [.file(relativePath: "", sha256: $0.sha256, faceIndex: 0, variations: [:])] })
+            } }
+            return Source(id: file.id, url: try? trusted.downloadURL(for: file), bytes: file.bytes, sha256: file.sha256, expectedPostScriptNames: file.expectedPostScriptNames,
+                          file: file, kind: .repository, faces: faces)
+        case .instance:
+            guard let instance = style.instance, trusted.instance(id: instance.id) == instance else { throw FontLibraryFailure.invalidFile }
+            // Every catalog style this static file stands in for (repeated named instances share it).
+            let faces = catalog.families.flatMap { family in family.styles.filter { $0.instance == instance }.map { style in
+                FontFaceRecord(id: .init(rawValue: "google:\(GoogleFontCatalog.instanceIDPrefix)\(style.id)"), family: family.name, style: style.name,
+                               postScriptName: instance.postScriptName, source: .downloaded,
+                               locator: .process(postScriptName: instance.postScriptName, variations: [:]), assetID: nil,
+                               equivalents: trusted.file(id: style.fileID).map { [.file(relativePath: "", sha256: $0.sha256, faceIndex: 0, variations: style.variationInstance ?? [:])] })
+            } }
+            return Source(id: instance.id, url: try trusted.downloadURL(for: instance), bytes: instance.bytes, sha256: instance.sha256,
+                          expectedPostScriptNames: [instance.postScriptName], file: file, kind: .gstatic, faces: faces)
+        }
+    }
+
+    func download(styleID: String, scope: GoogleFontDownloadScope = .file) async throws {
+        guard let trustedCatalog else {
+            if let id = catalog.families.flatMap(\.styles).first(where: { $0.id == styleID }).map({ scope == .file ? $0.fileID : ($0.instance?.id ?? $0.fileID) }) {
+                states[id] = .failed(.invalidFile)
+            }
+            throw FontLibraryFailure.invalidFile
+        }
+        let source = try source(styleID: styleID, scope: scope, trusted: trustedCatalog)
+        let file = source.file
+        guard !removing.contains(source.id) else { throw CancellationError() }
         do {
             let current = try store.readLibraryState()
             libraryFailure = nil
-            if let id = current.assetIDs[file.id] {
+            libraryFileCount = current.snapshot.customEntryCount
+            if let id = current.assetIDs[source.id] {
                 // Missing bytes must go through a validated redownload/repair.
                 if let url = store.url(forRelativePath: id), FileManager.default.fileExists(atPath: url.path) {
-                    states[file.id] = .downloaded(assetID: id); return
+                    // readLibraryState enriches old records from the bundled
+                    // identities in memory, including this no-download path.
+                    // Do not reinstall or rewrite an existing 1.3 record.
+                    states[source.id] = .downloaded(assetID: id); return
                 }
             }
-            if case .downloaded = states[file.id] { states[file.id] = .ready }
+            if case .downloaded = states[source.id] { states[source.id] = .ready }
         } catch {
             let failure = (error as? FontLibraryFailure) ?? .storageFailure
-            libraryFailure = failure; states[file.id] = .failed(failure); throw failure
+            libraryFailure = failure; states[source.id] = .failed(failure); throw failure
         }
-        if let job = jobs[file.id] { _ = try await job.value; return }
-        guard file.unavailableReason == nil else { states[file.id] = .failed(.invalidFile); throw FontLibraryFailure.invalidFile }
-        guard file.bytes <= Int64(CustomFontStore.maximumBytes) else { states[file.id] = .failed(.tooLarge(limitBytes: Int64(CustomFontStore.maximumBytes))); throw FontLibraryFailure.tooLarge(limitBytes: Int64(CustomFontStore.maximumBytes)) }
-        let url = try trustedCatalog.downloadURL(for: file)
-        let token = UUID(); tokens[file.id] = token; states[file.id] = .queued
+        if let job = jobs[source.id] { _ = try await job.value; return }
+        guard file.unavailableReason == nil, let url = source.url else {
+            states[source.id] = .failed(.invalidFile); throw FontLibraryFailure.invalidFile
+        }
+        guard source.bytes <= Int64(CustomFontStore.maximumBytes) else { states[source.id] = .failed(.tooLarge(limitBytes: Int64(CustomFontStore.maximumBytes))); throw FontLibraryFailure.tooLarge(limitBytes: Int64(CustomFontStore.maximumBytes)) }
+        let id = source.id
+        let token = UUID(); tokens[id] = token; states[id] = .queued
         let job = Task<String, Error> { [self] in
             // Cooperative queue: waiting tasks never own a network session.
             while active >= 2 { try await Task.sleep(nanoseconds: 40_000_000) }
             try Task.checkCancellation()
             active += 1
             defer { active -= 1 }
-            states[file.id] = .downloading(received: 0, expected: file.bytes > 0 ? file.bytes : nil)
+            states[id] = .downloading(received: 0, expected: source.bytes > 0 ? source.bytes : nil)
             let data = try await transport.fetch(url: url, limit: Int64(CustomFontStore.maximumBytes)) { [weak self] received, expected in
                 Task { @MainActor in
-                    guard let self, self.tokens[file.id] == token, case .downloading = self.states[file.id] else { return }
-                    self.states[file.id] = .downloading(received: received, expected: expected)
+                    guard let self, self.tokens[id] == token, case .downloading = self.states[id] else { return }
+                    self.states[id] = .downloading(received: received, expected: expected)
                 }
             }
             try Task.checkCancellation()
-            guard Int64(data.count) == file.bytes else { throw FontLibraryFailure.invalidFile }
-            states[file.id] = .preparing
+            guard Int64(data.count) == source.bytes else { throw FontLibraryFailure.invalidFile }
+            states[id] = .preparing
+            // The repository file's license notices apply to its gstatic instance too.
             let licenses = file.licenseIDs.compactMap { id in catalog.licenses.first { $0.id == id } }.map {
                 FontLibraryLicense(id: $0.id, name: $0.name, repositoryPath: $0.repositoryPath, sha256: $0.sha256, text: $0.text)
             }
             guard licenses.count == file.licenseIDs.count else { throw FontLibraryFailure.invalidFile }
-            let receipt = FontLibraryReceipt(fileID: file.id, repositoryCommit: catalog.repositoryCommit, repositoryPath: file.repositoryPath,
-                                             snapshotDate: catalog.snapshotDate, sha256: file.sha256, licenses: licenses)
-            let faces = catalog.families.flatMap { family in family.styles.filter { $0.fileID == file.id }.map { style in
-                FontFaceRecord(id: .init(rawValue: "google:\(file.id):\(style.id)"), family: family.name, style: style.name,
-                               postScriptName: style.postScriptName, source: .downloaded,
-                               locator: .process(postScriptName: style.postScriptName, variations: style.variationInstance ?? [:]), assetID: nil)
-            } }
+            let receipt = FontLibraryReceipt(fileID: id, repositoryCommit: catalog.repositoryCommit, repositoryPath: file.repositoryPath,
+                                             snapshotDate: catalog.snapshotDate, sha256: source.sha256, licenses: licenses,
+                                             sourceKind: source.kind, sourceURL: url.absoluteString)
             let worker = Task.detached { [store] in
                 try Task.checkCancellation()
-                return try store.installGoogleFont(data: data, receipt: receipt, faces: faces, expectedPostScriptNames: file.expectedPostScriptNames,
+                return try store.installGoogleFont(data: data, receipt: receipt, faces: source.faces, expectedPostScriptNames: source.expectedPostScriptNames,
                                                    checkCancellation: { try Task.checkCancellation() })
             }
             return try await withTaskCancellationHandler(operation: { try await worker.value }, onCancel: { worker.cancel() })
         }
-        jobs[file.id] = job
+        jobs[id] = job
         do {
-            let id = try await withTaskCancellationHandler(operation: { try await job.value }, onCancel: { job.cancel() })
-            if tokens[file.id] == token { states[file.id] = .downloaded(assetID: id); jobs[file.id] = nil }
+            let asset = try await withTaskCancellationHandler(operation: { try await job.value }, onCancel: { job.cancel() })
+            if tokens[id] == token { states[id] = .downloaded(assetID: asset); jobs[id] = nil }
+            refreshLibrary()
         } catch {
-            if tokens[file.id] == token {
-                states[file.id] = error is CancellationError ? .cancelled : .failed(Self.failure(error))
-                jobs[file.id] = nil
+            if tokens[id] == token {
+                states[id] = error is CancellationError ? .cancelled : .failed(Self.failure(error))
+                jobs[id] = nil
             }
             throw error
         }
     }
 
+    /// `fileID` is any download id: a repository file or a gstatic instance.
     func cancel(fileID: String) async throws {
         guard let job = jobs[fileID] else { return }
         let token = tokens[fileID]
@@ -173,13 +277,15 @@ final class GoogleFontDownloadCoordinator: ObservableObject {
         if tokens[fileID] == token { jobs[fileID] = nil }
     }
 
+    /// Removes exactly one downloaded file; other files supplying the same styles stay.
     func remove(fileID: String) async throws {
-        guard trustedCatalog != nil, catalog.files.contains(where: { $0.id == fileID }) else { throw FontLibraryFailure.invalidFile }
+        guard let trustedCatalog, trustedCatalog.file(id: fileID) != nil || trustedCatalog.instance(id: fileID) != nil else { throw FontLibraryFailure.invalidFile }
         guard removing.insert(fileID).inserted else { return }
         defer { removing.remove(fileID) }
         try await cancel(fileID: fileID)
         try await Task.detached { [store] in try store.removeGoogleFont(fileID: fileID) }.value
         tokens[fileID] = UUID(); states[fileID] = .ready
+        refreshLibrary()
     }
 
     private static func failure(_ error: Error) -> FontLibraryFailure {

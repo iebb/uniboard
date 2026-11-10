@@ -47,14 +47,18 @@ struct SymbolPageSettings {
     /// nil when the payload is empty, oversized, malformed or of an unknown schema.
     static func decode(_ data: Data) -> Snapshot? {
         guard !data.isEmpty, data.count <= maximumPayloadBytes,
-              let file = try? JSONDecoder().decode(File.self, from: data), file.schemaVersion == 1 else { return nil }
+              let file = try? JSONDecoder().decode(File.self, from: data), (1...2).contains(file.schemaVersion),
+              file.schemaVersion >= 2 || file.pages.allSatisfy(\.isLegacy),
+              file.pages.allSatisfy({ $0.id != SymbolPageRules.favoritesID || ($0.isLegacy && $0.keys.isEmpty) }) else { return nil }
+        if file.pages.contains(where: { !$0.isLegacy }), !SymbolPageRules.validPages(file.pages, starPageID: file.starPageID) { return nil }
         return Snapshot(pages: file.pages, starPageID: file.starPageID)
     }
 
     /// The store's own encoding (sorted keys); nil over the size cap.
     static func encode(_ snapshot: Snapshot) -> Data? {
+        if snapshot.pages.contains(where: { !$0.isLegacy }), !SymbolPageRules.validPages(snapshot.pages, starPageID: snapshot.starPageID) { return nil }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(File(schemaVersion: 1, pages: snapshot.pages, starPageID: snapshot.starPageID)),
+        guard let data = try? encoder.encode(File(schemaVersion: snapshot.pages.contains { !$0.isLegacy } ? 2 : 1, pages: snapshot.pages, starPageID: snapshot.starPageID)),
               data.count <= maximumPayloadBytes else { return nil }
         return data
     }
@@ -62,8 +66,70 @@ struct SymbolPageSettings {
     /// Only the containing app calls this.
     @discardableResult func save(_ snapshot: Snapshot) -> Bool {
         guard let container = containerURL(), container.isFileURL, let data = Self.encode(snapshot) else { return false }
-        do { try writeAtomically(data, container.appendingPathComponent(Self.filename)); return true }
-        catch { return false }
+        do {
+            return try ArrangementPublication.withLock(directory: container) {
+                guard containerURL() == container else { return false }
+                try writeAtomically(data, container.appendingPathComponent(Self.filename))
+                return true
+            }
+        } catch { return false }
+    }
+
+    struct ArrangementRevision: Equatable {
+        let context: ArrangementPublication.Context
+        let favoriteBytes: Data?
+    }
+    struct ArrangementPublicationResult {
+        let snapshot: Snapshot
+        let revision: ArrangementRevision
+    }
+    /// Missing/corrupt state cannot authorize Undo. Reads are made again while
+    /// holding the configuration/Favorites writer lock, not at a view boundary.
+    func arrangementRevision() -> ArrangementRevision? {
+        guard let directory = containerURL(), load() != nil,
+              let context = ArrangementPublication.context(in: directory,
+                excluding: [Self.filename, FavoriteSync.filename]) else { return nil }
+        do {
+            let favorites = try FavoriteSync.readFile(directory.appendingPathComponent(FavoriteSync.filename))
+            if let favorites, FavoriteSync.decode(favorites) == nil { return nil }
+            return .init(context: context, favoriteBytes: favorites)
+        } catch { return nil }
+    }
+
+    /// Replaces only the edited page in freshly loaded authoritative state.
+    /// `seed` is permitted for a first direct edit, never a restore.
+    func replaceArrangement(expected: SymbolBoard, replacement: SymbolBoard,
+                            revision: ArrangementRevision?, seed: Snapshot? = nil,
+                            favoriteGuard: Bool = false) -> ArrangementPublicationResult? {
+        guard expected.id == replacement.id, let directory = containerURL() else { return nil }
+        return try? ArrangementPublication.withLock(directory: directory) {
+            guard containerURL() == directory,
+                  let context = ArrangementPublication.context(in: directory,
+                    excluding: [Self.filename, FavoriteSync.filename]),
+                  revision == nil || revision?.context == context else { throw FileError.unavailable }
+            let favoriteBytes = try FavoriteSync.readFile(directory.appendingPathComponent(FavoriteSync.filename))
+            if let favoriteBytes, FavoriteSync.decode(favoriteBytes) == nil { throw FileError.unavailable }
+            if favoriteGuard, let revision, revision.favoriteBytes != favoriteBytes { throw FileError.unavailable }
+            let url = directory.appendingPathComponent(Self.filename)
+            let bytes = try FavoriteSync.readFile(url)
+            let current: Snapshot
+            if let bytes {
+                guard let decoded = Self.decode(bytes), SymbolPageRules.validPages(decoded.pages, starPageID: decoded.starPageID) else { throw FileError.unavailable }
+                current = decoded
+            } else {
+                guard revision == nil, let seed else { throw FileError.unavailable }
+                current = seed
+            }
+            guard let index = current.pages.firstIndex(where: { $0.id == expected.id }),
+                  current.pages[index] == expected else { throw FileError.unavailable }
+            var next = current
+            next.pages[index] = replacement
+            guard SymbolPageRules.validPages(next.pages, starPageID: next.starPageID),
+                  let data = Self.encode(next), containerURL() == directory else { throw FileError.unavailable }
+            if next != current || bytes == nil { try writeAtomically(data, url) }
+            return ArrangementPublicationResult(snapshot: next,
+                revision: .init(context: context, favoriteBytes: favoriteBytes))
+        }
     }
 
     private struct File: Codable {

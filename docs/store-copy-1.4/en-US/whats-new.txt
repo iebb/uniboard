@@ -1,0 +1,7 @@
+• Customize keyboard rows with Left, Center, Right and Spread alignment, plus clearer symbol editing.
+• Show or hide emoji categories across the app and keyboard, resize emoji in the app, and reverse block order.
+• Compare font widths and download individual styles where available.
+• Use Japanese romaji and Mandarin pinyin on familiar letter keys, with optional dictionary downloads and flat conversion choices.
+• Add custom words, preview dictionary imports, export dictionaries and undo an import.
+
+Downloaded languages need Full Access for local file sharing. Conversion runs on-device; nothing downloads automatically.

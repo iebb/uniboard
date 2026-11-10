@@ -185,6 +185,7 @@ struct ConfigurationService {
         CatalogPreferences.shared.refreshEdition()
         FontRulePreferences.shared.reload()
         KeyboardKeyPreferences.shared.refresh()
+        LanguageInputEnvironment.shared.reloadConfiguration()
         SymbolBoardStore.shared.adoptReplacement()
     }
 

@@ -140,6 +140,62 @@ final class KeyboardVariantPolicyTests: XCTestCase {
         XCTAssertTrue(KeyboardVariantPolicy.stockVariants(for: "£").contains("¥"), "Actual currency keys retain their currency family")
     }
 
+    func testArabicAndHebrewAddTheirPunctuationFirstOnlyWhileActiveAndUnsaved() throws {
+        let arabic = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "ar"))
+        let hebrew = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "he"))
+        func hold(_ key: String, _ alphabet: KeyboardAlphabet, _ layout: KeyboardTypingLayout = .numbers,
+                  settings: KeyboardKeySettings.Snapshot = .defaults) -> [String] {
+            var state = KeyboardTypingState(); state.selectAlphabet(alphabet); state.selectLayout(layout)
+            return KeyboardVariantPolicy.gestureCandidates(for: key, original: key, state: state, settings: settings).longPress
+        }
+        // The key's own text stays the tap; the layout's mark is the first choice beside it.
+        XCTAssertEqual(hold(",", arabic), [",", "،"])
+        XCTAssertEqual(hold("?", arabic), ["?", "؟", "¿"])
+        XCTAssertEqual(hold(";", arabic), [";", "؛"])
+        XCTAssertEqual(hold("?", arabic, .symbols), ["?", "؟", "¿"], "#+= shares the 123 page's punctuation keys")
+        XCTAssertEqual(hold("$", arabic), KeyboardVariantPolicy.options(text: "$", variants: KeyboardVariantPolicy.stockVariants(for: "$")))
+        XCTAssertEqual(Array(hold("$", hebrew).prefix(3)), ["$", "₪", "¢"])
+        XCTAssertEqual(hold("$", hebrew).count, 12, "₪ joins the whole currency family")
+        XCTAssertEqual(hold(",", hebrew), [","])
+        for alphabet in KeyboardAlphabet.catalog where !alphabet.isCaseless {
+            XCTAssertEqual(hold(",", alphabet), [","], alphabet.id)
+            XCTAssertEqual(hold("?", alphabet), ["?", "¿"], alphabet.id)
+            XCTAssertFalse(hold("$", alphabet).contains("₪"), alphabet.id)
+        }
+        // Saved hold choices win in every layout, exactly; an empty list stays off.
+        let comma = try XCTUnwrap(KeyboardKeySettings.identifier(forCharacter: ","))
+        let saved = KeyboardKeySettings.Snapshot(overrides: [comma: .init(longPress: [";", "…"])])
+        XCTAssertEqual(hold(",", arabic, settings: saved), [";", "…"])
+        XCTAssertEqual(hold(",", .english, settings: saved), [";", "…"])
+        let off = KeyboardKeySettings.Snapshot(overrides: [comma: .init(longPress: [])])
+        XCTAssertEqual(hold(",", arabic, settings: off), [])
+        // A swipe saved on the key leaves the hold's addition in place, and nothing is written.
+        let swiped = KeyboardKeySettings.Snapshot(overrides: [comma: .init(swipeUp: ["‚"])])
+        XCTAssertEqual(hold(",", arabic, settings: swiped), [",", "،"])
+        XCTAssertNil(swiped.candidates(for: comma, gesture: .longPress))
+        // The editor's built-in choices are the shared page's, whatever layout is shown.
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: comma, gesture: .longPress, alphabet: arabic), [","])
+    }
+
+    func testCaselessLettersKeepTheirOwnHoldChoicesUnderShiftAndHaveNoFlicks() throws {
+        let hebrew = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "he"))
+        let arabic = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "ar"))
+        for shift in [0, 1, 2] {
+            var state = KeyboardTypingState(); state.selectAlphabet(hebrew)
+            // Automatic capitals or a Caps Lock kept from another layout change nothing here.
+            if shift > 0 { state.pressShift(at: 1) }
+            if shift > 1 { state.pressShift(at: 1.1) }
+            let shin = KeyboardVariantPolicy.gestureCandidates(for: "ש", original: state.label(for: "ש"), state: state, settings: .defaults)
+            XCTAssertEqual(shin.longPress, ["ש", "שׁ", "שּׁ", "שׂ", "שּׂ"], "shift \(shift)")
+            XCTAssertTrue((shin.swipeUp + shin.swipeDown).isEmpty)
+            XCTAssertFalse(KeyboardTypingLayoutPolicy.usesShiftedTap(for: "ש", state: state, ansiPad: false))
+        }
+        var state = KeyboardTypingState(); state.selectAlphabet(arabic)
+        XCTAssertEqual(KeyboardVariantPolicy.gestureCandidates(for: "ل", original: "ل", state: state, settings: .defaults).longPress, ["ل", "لا"])
+        XCTAssertEqual(KeyboardVariantPolicy.holdVariants(for: "ض", state: state), [], "No Latin accents on Arabic letters")
+        XCTAssertEqual(KeyboardVariantPolicy.defaultCandidates(for: "letter.05E9", gesture: .longPress), ["ש", "שׁ", "שּׁ", "שׂ", "שּׂ"])
+    }
+
     func testExplicitGestureChoicesWinWithoutMutatingSettingsOrNormalizingUnicode() throws {
         let keyID = try XCTUnwrap(KeyboardKeySettings.identifier(forCharacter: "a"))
         let exact = ["é", "e\u{301}", "A", "1"]

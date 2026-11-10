@@ -38,7 +38,8 @@ enum FontPickerInventory {
     /// Listed faces only: never "."-prefixed private faces or LastResort.
     static func entries(_ records: [FontFaceRecord], evidence: KeyboardFontEvidence?,
                         systemVersion: String = ProcessInfo.processInfo.operatingSystemVersionString) -> [FontPickerEntry] {
-        records.compactMap { record in
+        // One entry per face even when two downloaded files supply it (design §8).
+        FontFaceRecord.collapsingEquivalents(records).compactMap { record in
             guard FontPickerSection.isListed(postScriptName: record.postScriptName, family: record.family),
                   let reference = FontFaceReference(record: record) else { return nil }
             let isPack: Bool
@@ -78,13 +79,17 @@ enum KeyboardFontEvidenceCache {
         return evidence
     }
 
+    static func status(of entry: FontManagedEntry) -> KeyboardFontStatus? {
+        entry.keyboardStatus(evidence: evidence, systemVersion: ProcessInfo.processInfo.operatingSystemVersionString)
+    }
+
     static func status(of face: FontFaceReference) -> KeyboardFontStatus {
         KeyboardFontEvidence.status(source: face.source, postScriptName: face.postScriptName, evidence: evidence,
                                     systemVersion: ProcessInfo.processInfo.operatingSystemVersionString)
     }
 }
 
-/// "App Only" or "Keyboard Unverified", on its own line under the subtitle.
+/// Only confirmed "App Only" status is tagged under a subtitle.
 struct KeyboardFontTag: View {
     let status: KeyboardFontStatus
 
@@ -145,7 +150,12 @@ final class FontRulePickerModel: ObservableObject {
             let built = await Task.detached(priority: .userInitiated) { FontPickerInventory.entries(snapshot.faces, evidence: evidence) }.value
             try Task.checkCancellation()
             entries = Dictionary(built.map { ($0.face.id, $0) }, uniquingKeysWith: { first, _ in first })
-            byIdentity = Dictionary(entries.values.map { ($0.reference.identityKey, $0.face.id) }, uniquingKeysWith: { min($0, $1) })
+            var identities = Dictionary(entries.values.map { ($0.reference.identityKey, $0.face.id) }, uniquingKeysWith: { min($0, $1) })
+            // A saved reference to the other file of the same face still finds its entry.
+            for entry in entries.values {
+                for key in entry.record.identityKeys.dropFirst() where identities[key] == nil { identities[key] = entry.face.id }
+            }
+            byIdentity = identities
             support = entries.mapValues { _ in .checking }
             families = FontPickerFamily.grouping(entries.values.map(\.face))
             loading = false

@@ -360,6 +360,43 @@ final class FontLibraryStorageTests: XCTestCase {
         XCTAssertEqual(concurrent.fonts.count, 1)
     }
 
+    func testGstaticReceiptAndEquivalentsRoundTripAndBadShapesFailClosed() throws {
+        let store = store()
+        let (data, name) = try fixture()
+        let license = FontLibraryLicense(id: "l", name: "Runtime fixture", repositoryPath: "test/license", sha256: CustomFontStore.digest(Data("test".utf8)), text: "test")
+        let path = "s/roboto/v51/KFOMCnqEu92Fr1ME7kSn66aGLdTylUAMQXC89YmC2DPNWuYjammT.ttf"
+        func receipt(fileID: String = "gstatic:" + path, url: String? = "https://fonts.gstatic.com/" + path) -> FontLibraryReceipt {
+            var value = FontLibraryReceipt(fileID: fileID, repositoryCommit: String(repeating: "a", count: 40), repositoryPath: "ofl/roboto/Roboto[wdth,wght].ttf",
+                                           snapshotDate: "2026-10-23", sha256: CustomFontStore.digest(data), licenses: [license])
+            value.sourceKind = .gstatic; value.sourceURL = url
+            return value
+        }
+        let variableHash = String(repeating: "b", count: 64)
+        func faces(_ equivalents: [FontLocator]) -> [FontFaceRecord] {
+            [FontFaceRecord(id: .init(rawValue: "bold"), family: "Fixture", style: "Bold", postScriptName: name, source: .downloaded,
+                            locator: .process(postScriptName: name, variations: [:]), assetID: nil, equivalents: equivalents)]
+        }
+        let equivalent = FontLocator.file(relativePath: "", sha256: variableHash, faceIndex: 0, variations: ["wght": 700, "wdth": 100])
+        // Wrong host, wrong path shape, mismatched id, missing URL: nothing is committed.
+        for bad in [receipt(url: "https://fonts.googleapis.com/" + path), receipt(url: "https://fonts.gstatic.com/s/roboto/v51/../x.ttf"),
+                    receipt(fileID: "gstatic:s/roboto/v51/other.ttf"), receipt(url: nil)] {
+            XCTAssertThrowsError(try store.installGoogleFont(data: data, receipt: bad, faces: faces([equivalent]), expectedPostScriptNames: [name]))
+        }
+        // An equivalent must be a content identity, not a path, and not this file.
+        for bad in [FontLocator.file(relativePath: "Custom-x.ttf", sha256: variableHash, faceIndex: 0, variations: [:]),
+                    FontLocator.file(relativePath: "", sha256: CustomFontStore.digest(data), faceIndex: 0, variations: [:]),
+                    FontLocator.process(postScriptName: name, variations: [:])] {
+            XCTAssertThrowsError(try store.installGoogleFont(data: data, receipt: receipt(), faces: faces([bad]), expectedPostScriptNames: [name]))
+        }
+        XCTAssertTrue(store.fonts.isEmpty)
+        try store.installGoogleFont(data: data, receipt: receipt(), faces: faces([equivalent]), expectedPostScriptNames: [name])
+        let relaunched = CustomFontStore(directory: store.directory)
+        let stored = try XCTUnwrap(relaunched.receipt(fileID: "gstatic:" + path))
+        XCTAssertEqual(stored.sourceKind, .gstatic)
+        XCTAssertEqual(stored.sourceURL, "https://fonts.gstatic.com/" + path)
+        XCTAssertEqual(relaunched.localLibrary.faces.first?.equivalents, [equivalent])
+    }
+
     func testInvalidHashMagicAndCancellationDoNotChangeManifest() throws {
         let store = store()
         _ = try store.addInstalled(postScriptName: "Helvetica")
@@ -402,6 +439,137 @@ final class FontLibraryStorageTests: XCTestCase {
         }
         XCTAssertThrowsError(try GoogleFontURLPolicy.url(commit: "main", path: "ofl/test/test.ttf"))
         XCTAssertEqual(try GoogleFontURLPolicy.url(commit: commit, path: "ofl/test/Test[wght].ttf").host, "raw.githubusercontent.com")
+    }
+}
+
+extension FontLibraryStorageTests {
+    private func managementFixture(_ store: CustomFontStore, id: String = "management") throws -> (Data, String) {
+        let (data, name) = try fixture()
+        let license = FontLibraryLicense(id: "management", name: "Fixture", repositoryPath: "test/license",
+                                         sha256: CustomFontStore.digest(Data("test".utf8)), text: "test")
+        let receipt = FontLibraryReceipt(fileID: id, repositoryCommit: String(repeating: "a", count: 40),
+                                         repositoryPath: "test/font.ttf", snapshotDate: "2026-10-31",
+                                         sha256: CustomFontStore.digest(data), licenses: [license])
+        let faces = ["Normal", "Condensed Bold Italic"].enumerated().map { index, style in
+            FontFaceRecord(id: .init(rawValue: id + "-" + style), family: "Management Fixture", style: style,
+                           postScriptName: name, source: .downloaded,
+                           locator: .process(postScriptName: name, variations: ["wght": Double(400 + index * 300)]), assetID: nil)
+        }
+        _ = try store.installGoogleFont(data: data, receipt: receipt, faces: faces, expectedPostScriptNames: [name])
+        return (data, name)
+    }
+
+    func testManagementGroupsActualBinaryNotReceiptsAndVerifiesSize() throws {
+        let store = store()
+        let (data, name) = try managementFixture(store)
+        _ = try managementFixture(store, id: "second-receipt")
+        _ = try store.addInstalled(postScriptName: name)
+        let snapshot = try store.readManagementSnapshot()
+        XCTAssertEqual(snapshot.used, 2)
+        XCTAssertEqual(snapshot.files.count, 1)
+        XCTAssertEqual(snapshot.installed.count, 1)
+        XCTAssertEqual(snapshot.files.first?.receiptIDs.count, 2)
+        XCTAssertEqual(snapshot.files.first?.styleCount, 2)
+        XCTAssertEqual(snapshot.files.first?.faces.map(\.style), ["Normal", "Condensed Bold Italic"])
+        XCTAssertEqual(snapshot.verifiedTotalBytes, Int64(data.count))
+        XCTAssertNil(snapshot.installed.first?.verifiedBytes)
+        let entry = try XCTUnwrap(snapshot.files.first)
+        let binary = try XCTUnwrap(store.url(forRelativePath: entry.filename))
+        try Data("corrupt".utf8).write(to: binary)
+        let corrupt = try store.readManagementSnapshot()
+        XCTAssertEqual(corrupt.used, 2)
+        XCTAssertNil(corrupt.files.first?.verifiedBytes)
+        XCTAssertNil(corrupt.verifiedTotalBytes)
+        try FileManager.default.removeItem(at: binary)
+        XCTAssertNil(try store.readManagementSnapshot().files.first?.verifiedBytes)
+    }
+
+    func testManagementRemovalKeepsAllRulesOtherMembershipAndImmutableBytes() throws {
+        let store = store()
+        let (data, name) = try managementFixture(store)
+        _ = try store.addInstalled(postScriptName: name)
+        let snapshot = try store.readManagementSnapshot()
+        let entry = try XCTUnwrap(snapshot.files.first)
+        let reference = try XCTUnwrap(entry.faces.first.flatMap(FontFaceReference.init(record:)))
+        let rules = [FontRule(id: "kept", selector: .codePoint(65), face: reference)]
+        let encodedRules = try XCTUnwrap(FontRuleStore.encode(rules))
+        let binary = try XCTUnwrap(store.url(forRelativePath: entry.filename))
+        try store.removeManagedEntry(entry, expectedGeneration: snapshot.generation, expectedRules: rules, readRules: { rules })
+        XCTAssertEqual(try store.readManagementSnapshot().used, 1)
+        XCTAssertEqual(try store.readManagementSnapshot().installed.count, 1)
+        XCTAssertEqual(try Data(contentsOf: binary), data)
+        XCTAssertEqual(FontRuleStore.encode(rules), encodedRules)
+        XCTAssertNil(store.receipt(fileID: "management"))
+    }
+
+    func testManagementCancelAndStaleWritersNeverRemoveMembership() throws {
+        let store = store()
+        let (_, name) = try managementFixture(store)
+        let snapshot = try store.readManagementSnapshot()
+        let entry = try XCTUnwrap(snapshot.files.first)
+        var checks = 0
+        XCTAssertThrowsError(try store.removeManagedEntry(entry, expectedGeneration: snapshot.generation, expectedRules: [], readRules: { [] }, checkCancellation: {
+            checks += 1
+            if checks == 2 { throw CancellationError() }
+        }))
+        XCTAssertEqual(checks, 2)
+        XCTAssertEqual(store.revision, snapshot.generation)
+        let otherWriter = CustomFontStore(directory: store.directory)
+        _ = try otherWriter.addInstalled(postScriptName: name)
+        XCTAssertThrowsError(try store.removeManagedEntry(entry, expectedGeneration: snapshot.generation, expectedRules: [], readRules: { [] }))
+        XCTAssertEqual(try store.readManagementSnapshot().used, 2)
+        let fresh = try store.readManagementSnapshot()
+        let reference = try XCTUnwrap(entry.faces.first.flatMap(FontFaceReference.init(record:)))
+        let addedRule = FontRule(id: "new", selector: .codePoint(65), face: reference)
+        var reads = 0
+        XCTAssertThrowsError(try store.removeManagedEntry(entry, expectedGeneration: fresh.generation, expectedRules: [], readRules: {
+            reads += 1
+            return reads == 1 ? [] : [addedRule]
+        }))
+        XCTAssertEqual(reads, 2)
+        XCTAssertEqual(store.revision, fresh.generation)
+        XCTAssertThrowsError(try store.removeManagedEntry(entry, expectedGeneration: fresh.generation, expectedRules: [], readRules: { nil }))
+        XCTAssertEqual(store.revision, fresh.generation)
+    }
+
+    func testManagementCorruptManifestIsNotAnEmptyLibraryAndCannotBeRemoved() throws {
+        let store = store()
+        _ = try managementFixture(store)
+        let snapshot = try store.readManagementSnapshot()
+        let entry = try XCTUnwrap(snapshot.files.first)
+        let url = try XCTUnwrap(store.directory).appendingPathComponent("library-v2.json")
+        let corrupt = Data("not a manifest".utf8)
+        try corrupt.write(to: url, options: .atomic)
+        XCTAssertThrowsError(try store.readManagementSnapshot())
+        XCTAssertThrowsError(try store.removeManagedEntry(entry, expectedGeneration: snapshot.generation, expectedRules: [], readRules: { [] }))
+        XCTAssertEqual(try Data(contentsOf: url), corrupt)
+    }
+
+    func testManagementInstalledReferencesUseExistingSixteenEntryQuota() throws {
+        let store = store()
+        let (data, _) = try fixture()
+        var installedNames: [String] = []
+        let names = CTFontManagerCopyAvailablePostScriptNames() as! [String]
+        for name in names where installedNames.count < CustomFontStore.maximumFonts {
+            do {
+                _ = try store.addInstalled(postScriptName: name)
+                installedNames.append(name)
+            } catch CustomFontStore.Failure.notAFont { continue }
+        }
+        XCTAssertEqual(installedNames.count, 16)
+        let snapshot = try store.readManagementSnapshot()
+        XCTAssertEqual(snapshot.used, 16)
+        XCTAssertEqual(snapshot.files.count, 0)
+        XCTAssertEqual(snapshot.installed.count, 16)
+        XCTAssertThrowsError(try store.add(data))
+        // Existing references remain idempotent even at capacity.
+        _ = try store.addInstalled(postScriptName: XCTUnwrap(installedNames.first))
+        let entry = try XCTUnwrap(snapshot.installed.first)
+        try store.removeManagedEntry(entry, expectedGeneration: snapshot.generation, expectedRules: [], readRules: { [] })
+        XCTAssertEqual(try store.readManagementSnapshot().used, 15)
+        XCTAssertEqual(CTFontCopyPostScriptName(CTFontCreateWithName(installedNames[0] as CFString, 12, nil)) as String, installedNames[0])
+        _ = try store.add(data)
+        XCTAssertEqual(try store.readManagementSnapshot().used, 16)
     }
 }
 #endif

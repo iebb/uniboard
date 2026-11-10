@@ -20,13 +20,26 @@ final class CatalogPreferences: ObservableObject {
     @Published private(set) var autoCapitalization: AutoCapitalizationMode
     @Published private(set) var autoCapitalizationSaveError: String?
     private let autoCapitalizationSetting: AutoCapitalizationSetting
+    /// Emoji categories hidden in the app's and keyboard's emoji browsing and search.
+    @Published private(set) var hiddenEmojiGroups: Set<String>
+    @Published private(set) var emojiCategoriesSaveError: String?
+    private let emojiCategorySetting: EmojiCategorySetting
+    @Published private(set) var skinToneVariants: SkinToneVariants
+    @Published private(set) var emojiBrowsingSaveError: String?
+    private let emojiBrowsingSetting: EmojiBrowsingSetting
     private let editionSettings: UnicodeEditionSettings
     private let fontRules: FontRuleStore?
 
     /// `fontRules` nil leaves the rules previews use unchanged.
     init(editionSettings: UnicodeEditionSettings = .shared, fontRules: FontRuleStore? = .shared,
-         autoCapitalization: AutoCapitalizationSetting = .shared) {
+         autoCapitalization: AutoCapitalizationSetting = .shared,
+         emojiCategories: EmojiCategorySetting = .shared,
+         emojiBrowsing: EmojiBrowsingSetting = .shared) {
         self.editionSettings = editionSettings
+        emojiBrowsingSetting = emojiBrowsing
+        skinToneVariants = emojiBrowsing.load()
+        emojiCategorySetting = emojiCategories
+        hiddenEmojiGroups = emojiCategories.load()
         autoCapitalizationSetting = autoCapitalization
         self.autoCapitalization = autoCapitalization.load()
         self.fontRules = fontRules
@@ -128,6 +141,45 @@ final class CatalogPreferences: ObservableObject {
         reloadFontRules()
         let mode = autoCapitalizationSetting.load()
         if autoCapitalization != mode { autoCapitalization = mode }
+        let hidden = emojiCategorySetting.load()
+        if hiddenEmojiGroups != hidden { hiddenEmojiGroups = hidden }
+        let variants = emojiBrowsingSetting.load()
+        if skinToneVariants != variants { skinToneVariants = variants }
+    }
+
+    /// Save only the independent browsing choice; never touch categories, size,
+    /// sorting, saved pages, favorites, recent entries or configuration snapshots.
+    func selectSkinToneVariants(_ value: SkinToneVariants) {
+        guard value != skinToneVariants else { return }
+        guard emojiBrowsingSetting.save(value) else {
+            emojiBrowsingSaveError = "Couldn’t save these keyboard settings. Please try again."
+            return
+        }
+        emojiBrowsingSaveError = nil
+        skinToneVariants = value
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                             CFNotificationName(EmojiBrowsingSetting.changedNotification as CFString), nil, nil, true)
+    }
+
+    /// Saves at once and tells a visible keyboard to read it again.
+    func setEmojiGroup(_ group: String, shown: Bool) {
+        var hidden = hiddenEmojiGroups
+        if shown { hidden.remove(group) } else { hidden.insert(group) }
+        saveHiddenEmojiGroups(hidden)
+    }
+    func showAllEmojiGroups() { saveHiddenEmojiGroups([]) }
+    /// Hides every group the catalog lists, keeping any other stored names.
+    func hideAllEmojiGroups() { saveHiddenEmojiGroups(hiddenEmojiGroups.union(emojis.groups)) }
+    private func saveHiddenEmojiGroups(_ hidden: Set<String>) {
+        guard hidden != hiddenEmojiGroups else { return }
+        guard emojiCategorySetting.save(hidden) else {
+            emojiCategoriesSaveError = "Couldn’t save these keyboard settings. Please try again."
+            return
+        }
+        emojiCategoriesSaveError = nil
+        hiddenEmojiGroups = hidden
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                             CFNotificationName(EmojiCategorySetting.changedNotification as CFString), nil, nil, true)
     }
     /// Saves at once; the keyboard reads it the next time it appears.
     func selectAutoCapitalization(_ mode: AutoCapitalizationMode) {

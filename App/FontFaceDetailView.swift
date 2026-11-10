@@ -79,7 +79,6 @@ private struct CatalogFontFaceDetail: View {
     /// nil until the user picks a cell: the grid's default cell is selected.
     @State private var selectedStyleID: String?
     @StateObject private var samples = StyleSampleLoader()
-    @State private var confirmingRemoval = false
     @State private var operationError: String?
     @State private var verifiedFace: FontFaceRecord?
     @State private var checkingPreview = false
@@ -104,14 +103,28 @@ private struct CatalogFontFaceDetail: View {
     private func selection(in grid: StyleGrid) -> (set: StyleGrid.StyleSet, cell: StyleGrid.Cell)? {
         selectedStyleID.flatMap { grid.location(of: $0) } ?? grid.defaultCell
     }
+    private var current: (set: StyleGrid.StyleSet, cell: StyleGrid.Cell)? { selection(in: grid) }
     private var style: GoogleFontStyle? {
-        let id = selection(in: grid)?.cell.style.id ?? selectedStyleID
+        let id = current?.cell.style.id ?? selectedStyleID
         return family.styles.first { $0.id == id }
     }
+    /// The repository file the style comes from (licenses, availability).
     private var file: GoogleFontFile? { style.flatMap { catalog.file(id: $0.fileID) } }
-    private var state: GoogleFontDownloadState { file.flatMap { coordinator.states[$0.id] } ?? .ready }
+    private var ownFile: StyleGridDownload? { current.flatMap { grid.ownFile(of: $0.cell) } }
+    private var sharedFile: StyleGridDownload? { current.flatMap { grid.sharedFile(of: $0.cell) } }
+    private func state(_ download: StyleGridDownload?) -> GoogleFontDownloadState {
+        download.flatMap { coordinator.states[$0.id] } ?? .ready
+    }
+    private func isDownloaded(_ download: StyleGridDownload?) -> Bool {
+        if case .downloaded = state(download) { return download != nil }; return false
+    }
+    private var anyDownloaded: Bool { isDownloaded(ownFile) || isDownloaded(sharedFile) }
+    /// The file that draws the style: own first (§8).
+    private var drawingFile: StyleGridDownload? {
+        isDownloaded(ownFile) ? ownFile : isDownloaded(sharedFile) ? sharedFile : nil
+    }
     private var inspection: FontInspection { FontInspection(originalText: text ?? "Aa", characterName: text == nil ? "Sample" : "Selected character") }
-    private var isDownloaded: Bool { if case .downloaded = state { return true }; return false }
+    private var noRoom: Bool { coordinator.freeFileSpaces == 0 }
 
     var body: some View {
         List {
@@ -127,7 +140,7 @@ private struct CatalogFontFaceDetail: View {
                         .frame(minHeight: 252).padding(.vertical, 16).accessibilityIdentifier("fontDetail.verifiedPreview")
                 } else if checkingPreview {
                     ProgressView("Checking available fonts…")
-                } else if isDownloaded {
+                } else if anyDownloaded {
                     Text("Preview unavailable").font(.headline)
                     Text(previewMessage).font(.footnote)
                     Button("Check Again") { previewRevision = UUID() }
@@ -140,11 +153,12 @@ private struct CatalogFontFaceDetail: View {
             Section("License") {
                 if let failure = licenses.failure { Text(FontDownloadCopy.message(for: failure)) }
                 if let file {
-                    if let receipt = licenses.receipt, receipt.fileID == file.id {
+                    if let receipt = licenses.receipt, receipt.fileID == drawingFile?.id {
                         ForEach(receipt.licenses, id: \.id) { license in
                             NavigationLink(license.name) { FontLicenseText(name: license.name, text: license.text) }
                         }
                     } else {
+                        // A single-style instance carries its repository file's licenses.
                         ForEach(file.licenseIDs, id: \.self) { id in
                             if let license = catalog.license(id: id) {
                                 NavigationLink(license.name) { FontLicenseText(name: license.name, text: license.text) }
@@ -153,30 +167,19 @@ private struct CatalogFontFaceDetail: View {
                     }
                 }
             }
-            if isDownloaded {
-                Section {
-                    Button("Remove Download", role: .destructive) { confirmingRemoval = true }.accessibilityIdentifier("fontDetail.remove")
-                        .disabled(operationRunning)
-                        // On the button, so the popover's arrow points at what was tapped.
-                        .confirmationDialog("Remove \(family.name) \(selectedName)?", isPresented: $confirmingRemoval, titleVisibility: .visible) {
-                            Button("Remove Download", role: .destructive) { perform(.remove) }
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            let count = file.map { grid.styleCount(fileID: $0.id) } ?? 0
-                            Text(count > 1 ? StyleGridCopy.removeShared(count) : "This removes the downloaded font from Uniboard. You can download it again later.")
-                        }
-                }
-            }
         }
         .navigationTitle(family.name).navigationBarTitleDisplayMode(.inline)
         .task(id: previewRevision) {
-            if let file, isDownloaded, licenses.receipt?.fileID != file.id { await licenses.load(fileID: file.id) }
+            coordinator.refreshLibrary()
+            if let drawing = drawingFile, licenses.receipt?.fileID != drawing.id { await licenses.load(fileID: drawing.id) }
             await checkPreview()
         }
-        .onChange(of: state) { _, _ in previewRevision = UUID() }
+        .onReceive(NotificationCenter.default.publisher(for: .fontExplorationLibraryChanged)) { _ in previewRevision = UUID() }
+        .onChange(of: state(ownFile)) { _, _ in previewRevision = UUID() }
+        .onChange(of: state(sharedFile)) { _, _ in previewRevision = UUID() }
     }
 
-    /// §6's derived name ("Bold Italic", "Condensed Medium"), not the catalog's.
+    /// §6's derived name ("Condensed Bold", "Bold Italic"), not the catalog's.
     private var selectedName: String {
         let grid = grid
         return selection(in: grid).map { grid.displayName(of: $0.cell, in: $0.set) } ?? style?.name ?? ""
@@ -190,8 +193,8 @@ private struct CatalogFontFaceDetail: View {
         previewRevision = UUID()
     }
 
-    /// design/styles-grid: the Width / Variant menu, the grid, the selected
-    /// style and its download controls, with the limits as the footer.
+    /// design/styles-grid-1.4: the Variant menu (non-width sets only), the
+    /// grid, the selected style and its rows, with the capacity footer (§7).
     private var stylesSection: some View {
         let grid = grid
         let current = selection(in: grid)
@@ -217,7 +220,7 @@ private struct CatalogFontFaceDetail: View {
                 Text(StyleGridCopy.noStyles).font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
             }
             if let failure = coordinator.libraryFailure { Text(FontDownloadCopy.message(for: failure)) }
-            downloadControls
+            if current != nil { actionRows(grid: grid) }
             if let operationError { Text(operationError).foregroundStyle(.red) }
             if let file, let reason = file.unavailableReason {
                 Text(reason).font(.footnote)
@@ -226,7 +229,8 @@ private struct CatalogFontFaceDetail: View {
         } header: {
             Text("Styles")
         } footer: {
-            Text("Up to 16 imported, installed or downloaded font files; 40 MiB maximum per file. Remove a downloaded font or manage Your Fonts in Font Downloads to make room.")
+            Text(FontFileManagementCopy.remaining(coordinator.freeFileSpaces) + " 40 MiB maximum per file.")
+                .accessibilityIdentifier("fontDetail.capacity")
         }
     }
 
@@ -234,20 +238,30 @@ private struct CatalogFontFaceDetail: View {
         Dictionary(family.styles.compactMap { catalog.file(id: $0.fileID) }.map { ($0.id, $0) }) { first, _ in first }
     }
 
-    /// §6 row 1: the derived name, "{file name} · {size}" and, for a shared
-    /// file, which styles and sets it covers.
+    private func size(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
+
+    /// §6 row 1: the name; the file(s) giving the style (both when both are
+    /// downloaded, case G, smallest first); the shared-only note.
     private func selectedStyleRow(grid: StyleGrid, current: (set: StyleGrid.StyleSet, cell: StyleGrid.Cell)) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let own = grid.ownFile(of: current.cell)
+        let shared = grid.sharedFile(of: current.cell)
+        let listed: [StyleGridDownload]
+        if isDownloaded(own) && isDownloaded(shared) {
+            listed = [own!, shared!].sorted { $0.bytes < $1.bytes }
+        } else {
+            listed = [own ?? shared].compactMap { $0 }
+        }
+        return VStack(alignment: .leading, spacing: 4) {
             Text(grid.displayName(of: current.cell, in: current.set)).font(.body).foregroundStyle(Color(uiColor: .label))
-            if let file {
-                let name = (file.repositoryPath as NSString).lastPathComponent
-                Text(verbatim: name + " · " + ByteCountFormatter.string(fromByteCount: file.bytes, countStyle: .file))
-                    .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel)).textSelection(.enabled)
-                let count = grid.styleCount(fileID: file.id)
-                if count > 1 {
-                    Text(StyleGridCopy.sharedFile(count, across: grid.options(coveredBy: file.id)))
-                        .font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(listed, id: \.id) { item in
+                    Text(verbatim: item.filename + " · " + size(item.bytes))
                 }
+            }
+            .font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel)).textSelection(.enabled)
+            if own == nil, let shared {
+                Text(StyleGridCopy.sharedOnly(shared.styleCount))
+                    .font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -255,41 +269,108 @@ private struct CatalogFontFaceDetail: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder private var downloadControls: some View {
-        switch state {
-        case .ready, .cancelled:
-            if state == .cancelled { Text("Download cancelled") }
-            downloadButton(downloadLabel)
-        case .queued:
-            ProgressView("Waiting to download…")
-            Button("Cancel") { perform(.cancel) }
-        case .downloading(let received, let expected):
-            if let expected, expected > 0 {
-                ProgressView(value: min(Double(received) / Double(expected), 1))
-                Text("Downloading… \(min(100, Int(Double(received) / Double(expected) * 100)))%")
-            } else { ProgressView("Downloading…") }
-            Button("Cancel") { perform(.cancel) }
-        case .preparing: ProgressView("Preparing font…")
-        case .downloaded:
+    /// §6 action rows: downloaded rows once, then the own file's row, then the shared file's.
+    @ViewBuilder private func actionRows(grid: StyleGrid) -> some View {
+        let own = ownFile, shared = sharedFile
+        if anyDownloaded {
             Label("Downloaded", systemImage: "checkmark.circle").accessibilityIdentifier("fontDetail.downloaded")
-            Text("Available in the app only").font(.footnote)
-        case .failed(let failure):
-            Text(FontDownloadCopy.message(for: failure))
-            downloadButton("Try Again")
+        }
+        // Case E: no single download once the shared file gives the style.
+        let showsOwn = own != nil && !(isDownloaded(shared) && !isDownloaded(own) && isIdle(own!))
+        if let own, showsOwn {
+            fileRows(own, grid: grid, isOwn: true, other: shared, secondary: false)
+        }
+        if let shared {
+            fileRows(shared, grid: grid, isOwn: false, other: own, secondary: showsOwn)
         }
     }
-    /// "Download Style" for a single-style file, "Download File ({n} Styles)" for a shared one.
-    private var downloadLabel: String {
-        let count = file.map { grid.styleCount(fileID: $0.id) } ?? 0
-        return count > 1 ? StyleGridCopy.downloadFile(count) : StyleGridCopy.downloadStyle
+
+    private func isIdle(_ download: StyleGridDownload) -> Bool {
+        switch state(download) {
+        case .ready, .cancelled, .failed: return true
+        default: return false
+        }
     }
-    private func downloadButton(_ label: String) -> some View {
-        Button(label) { perform(.download) }.accessibilityIdentifier("fontDetail.download")
-            .disabled(operationRunning || file == nil || file?.unavailableReason != nil || (file?.bytes ?? 0) > GoogleFontCatalog.maximumFileBytes)
+
+    /// `secondary`: the shared file's row under the own file's; identifiers get ".file".
+    @ViewBuilder private func fileRows(_ download: StyleGridDownload, grid: StyleGrid, isOwn: Bool, other: StyleGridDownload?,
+                                       secondary: Bool) -> some View {
+        let suffix = secondary ? ".file" : ""
+        switch state(download) {
+        case .ready, .cancelled, .failed:
+            if state(download) == .cancelled { Text("Download cancelled") }
+            if case .failed(let failure) = state(download) { Text(FontDownloadCopy.message(for: failure)) }
+            let retry: Bool = { if case .failed = state(download) { return true }; return false }()
+            actionButton(title: retry ? "Try Again" : (isOwn ? StyleGridCopy.downloadStyle(selectedName) : StyleGridCopy.downloadFile(download.styleCount)),
+                         caption: isOwn ? nil : downloadCaption(download, grid: grid), size: download.bytes, role: nil,
+                         identifier: "fontDetail.download" + suffix) { perform(.download, download) }
+                .disabled(operationRunning || noRoom || !downloadable(download))
+        case .queued:
+            ProgressView("Waiting to download…")
+            Button("Cancel") { perform(.cancel, download) }.accessibilityIdentifier("fontDetail.cancel" + suffix)
+        case .downloading(let received, let expected):
+            if let expected, expected > 0 {
+                let percent = min(100, Int(Double(received) / Double(expected) * 100))
+                ProgressView(value: min(Double(received) / Double(expected), 1))
+                Text(isOwn ? StyleGridCopy.downloadingStyle(selectedName, percent: percent)
+                     : StyleGridCopy.downloadingFile(download.styleCount, percent: percent))
+            } else { ProgressView("Downloading…") }
+            Button("Cancel") { perform(.cancel, download) }.accessibilityIdentifier("fontDetail.cancel" + suffix)
+        case .preparing: ProgressView("Preparing font…")
+        case .downloaded:
+            // All removal paths share the file-oriented reference check and
+            // guarded confirmation. A catalog receipt is not a separate file.
+            NavigationLink {
+                FontFileDetailView(receiptID: download.id)
+            } label: {
+                Label("Manage File", systemImage: "doc")
+            }
+            .accessibilityIdentifier("fontDetail.manage" + suffix)
+
+        }
     }
-    private enum Operation { case download, cancel, remove }
-    private func perform(_ operation: Operation) {
-        guard let style, let file else { return }
+
+    /// "Includes {n} styles in one file." + " Existing downloads are kept." + the width line.
+    private func downloadCaption(_ shared: StyleGridDownload, grid: StyleGrid) -> String {
+        let kept = grid.cells(coveredBy: shared.id).contains { cell in
+            grid.ownFile(of: cell).map { coordinator.states[$0.id].map { if case .downloaded = $0 { return true }; return false } ?? false } ?? false
+        }
+        var caption = StyleGridCopy.includes(shared.styleCount) + (kept ? StyleGridCopy.existingKept : "")
+        if let line = grid.coverageLine(fileID: shared.id) { caption += "\n" + line }
+        return caption
+    }
+
+    private func downloadable(_ download: StyleGridDownload) -> Bool {
+        guard let file, file.unavailableReason == nil else { return false }
+        return download.bytes <= GoogleFontCatalog.maximumFileBytes
+    }
+
+    /// Title in tint (or red), 17 pt; the size trailing, part of the hit area.
+    private func actionButton(title: String, caption: String?, size bytes: Int64?, role: ButtonRole?, identifier: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(role: role, action: action) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.body)
+                    if let caption {
+                        Text(caption).font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if let bytes {
+                    Text(size(bytes)).font(.body).monospacedDigit().foregroundStyle(Color(uiColor: .secondaryLabel))
+                }
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier(identifier)
+    }
+
+    private enum Operation { case download, cancel }
+    private func perform(_ operation: Operation, _ download: StyleGridDownload) {
+        guard let style else { return }
         operationError = nil
         if operation != .cancel { operationRunning = true }
         Task { @MainActor in
@@ -300,21 +381,20 @@ private struct CatalogFontFaceDetail: View {
             }
             do {
                 switch operation {
-                case .download: try await coordinator.download(styleID: style.id)
-                case .cancel: try await coordinator.cancel(fileID: file.id)
-                case .remove: try await coordinator.remove(fileID: file.id)
+                case .download: try await coordinator.download(styleID: style.id, scope: download.isInstance ? .instance : .file)
+                case .cancel: try await coordinator.cancel(fileID: download.id)
                 }
             } catch is CancellationError {
                 // The coordinator publishes the authoritative cancelled state.
             } catch let failure as FontLibraryFailure {
                 operationError = FontDownloadCopy.message(for: failure)
-            } catch { operationError = operation == .remove ? "Couldn’t remove this download. Try again in a moment." : "Couldn’t download this font. Try again in a moment." }
+            } catch { operationError = "Couldn’t download this font. Try again in a moment." }
         }
     }
     private func checkPreview() async {
         let revision = previewRevision
         verifiedFace = nil
-        guard isDownloaded, let file, let style else { checkingPreview = false; return }
+        guard anyDownloaded, let file, let style else { checkingPreview = false; return }
         checkingPreview = true
         previewMessage = inspection.isApplicable ? "Exact font support could not be verified." : "Font preview is not applicable to this invisible character."
         defer { if revision == previewRevision { checkingPreview = false } }
@@ -343,13 +423,17 @@ enum StyleFileStatus: Equatable {
     case unavailable(reason: String)
 
     init(file: GoogleFontFile, state: GoogleFontDownloadState?) {
+        self.init(unavailableReason: file.unavailableReason, bytes: file.bytes, state: state)
+    }
+
+    init(unavailableReason: String?, bytes: Int64, state: GoogleFontDownloadState?) {
         switch state ?? .ready {
         case .downloaded: self = .downloaded
         case .queued, .downloading, .preparing: self = .downloading
         case .ready, .cancelled, .failed:
-            if let reason = file.unavailableReason {
+            if let reason = unavailableReason {
                 self = .unavailable(reason: reason)
-            } else if file.bytes > GoogleFontCatalog.maximumFileBytes {
+            } else if bytes > GoogleFontCatalog.maximumFileBytes {
                 self = .unavailable(reason: FontDownloadCopy.message(for: .tooLarge(limitBytes: GoogleFontCatalog.maximumFileBytes)))
             } else {
                 self = .notDownloaded
@@ -414,7 +498,9 @@ private final class FontReceiptViewModel: ObservableObject {
             }.value
             guard token == request, !Task.isCancelled else { return }
             selection = FontDetailIdentity.selection(for: face, catalog: catalog, state: state)
-            receipt = selection.flatMap { state.receipts[$0.style.fileID] }
+            receipt = selection.flatMap { selection in
+                selection.style.instance.flatMap { face.locatorSHA == $0.sha256 ? state.receipts[$0.id] : nil } ?? state.receipts[selection.style.fileID]
+            }
             failure = nil
         } catch {
             guard token == request, !Task.isCancelled else { return }
@@ -438,6 +524,10 @@ private final class FontReceiptViewModel: ObservableObject {
     }
 }
 
+extension FontFaceRecord {
+    var locatorSHA: String? { if case let .file(_, sha256, _, _) = locator { return sha256 }; return nil }
+}
+
 struct FontCatalogFaceSelection {
     let family: GoogleFontFamily
     let style: GoogleFontStyle
@@ -445,10 +535,16 @@ struct FontCatalogFaceSelection {
 
 /// Persisted IDs are navigation identities; aliases may have the same physical face.
 enum FontDetailIdentity {
+    /// The style's face from its repository file (with its instance
+    /// coordinates) or from its pinned single-style instance (none).
     static func matches(_ face: FontFaceRecord, file: GoogleFontFile, style: GoogleFontStyle) -> Bool {
-        guard style.fileID == file.id, case let .file(_, _, index, axes) = face.locator, index == 0,
+        guard style.fileID == file.id, case let .file(_, sha256, index, axes) = face.locator, index == 0,
               PublicFontInventory.canonicalAxes(axes) != nil,
               PublicFontInventory.canonicalAxes(style.variationInstance ?? [:]) != nil else { return false }
+        if let instance = style.instance, sha256 == instance.sha256 {
+            return PublicFontInventory.identity(face.locator)
+                == PublicFontInventory.identity(.file(relativePath: "", sha256: instance.sha256, faceIndex: 0, variations: [:]))
+        }
         let requested = FontLocator.file(relativePath: "", sha256: file.sha256, faceIndex: 0,
                                          variations: style.variationInstance ?? [:])
         return PublicFontInventory.identity(face.locator) == PublicFontInventory.identity(requested)
@@ -459,16 +555,18 @@ enum FontDetailIdentity {
         guard case let .file(path, _, _, _) = face.locator else { return nil }
         let candidates = catalog.snapshot.families.flatMap { family in
             family.styles.compactMap { style -> FontCatalogFaceSelection? in
-                guard let file = catalog.file(id: style.fileID),
-                      let asset = state.assetIDs[file.id],
-                      asset == face.assetID || asset == path,
-                      let receipt = state.receipts[file.id], receipt.sha256 == file.sha256,
-                      matches(face, file: file, style: style) else { return nil }
+                guard let file = catalog.file(id: style.fileID), matches(face, file: file, style: style) else { return nil }
+                // The downloaded file this face record lives in: the repository file or the style's instance.
+                let downloadID = style.instance.map { face.locatorSHA == $0.sha256 ? $0.id : file.id } ?? file.id
+                let sha = downloadID == file.id ? file.sha256 : style.instance!.sha256
+                guard let asset = state.assetIDs[downloadID], asset == face.assetID || asset == path,
+                      let receipt = state.receipts[downloadID], receipt.sha256 == sha else { return nil }
                 return FontCatalogFaceSelection(family: family, style: style)
             }
         }
         func rank(_ candidate: FontCatalogFaceSelection) -> Int {
-            if face.id.rawValue == "google:\(candidate.style.fileID):\(candidate.style.id)" { return 0 }
+            if face.id.rawValue == "google:\(candidate.style.fileID):\(candidate.style.id)"
+                || face.id.rawValue == "google:\(GoogleFontCatalog.instanceIDPrefix)\(candidate.style.id)" { return 0 }
             if face.family == candidate.family.name && face.style == candidate.style.name { return 1 }
             return 2
         }

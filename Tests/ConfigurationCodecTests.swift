@@ -51,6 +51,9 @@ final class ConfigurationCodecTests: XCTestCase {
         c.browse.showsPrivateUse = true
         c.browse.exploreDescending = true
         c.browse.emojiSortOrder = .newestFirst
+        c.browse.emojiColumns = 4
+        c.browse.blocksDescending = true
+        c.hiddenEmojiCategories = ["Flags", "Activities", "Future Group"]
         let standard = MainKeyboardArrangement.standard(for: .english)
         c.keys = KeyboardKeySettings.Snapshot(
             overrides: ["letter.a": .init(tap: ["á"], longPress: [], swipeUp: ["ä", "å"]), "digit.1": .init(shiftedTap: ["!"], swipeDown: ["¹"])],
@@ -104,8 +107,9 @@ final class ConfigurationCodecTests: XCTestCase {
 
     func testBrowseReadsDefaultsForUnsetValuesAndWritesEveryValue() {
         XCTAssertEqual(ConfigurationBrowse(AppPresentationSettings.Values()), ConfigurationBrowse())
-        let values = AppPresentationSettings.Values(integers: ["exploreGridDensity": 8, "blockGridDensity": 16, "tileColumns": 4, "explorePlane": 2],
-                                                    booleans: ["exploreShowsPrivateUse": true, "exploreDescending": true],
+        let values = AppPresentationSettings.Values(integers: ["exploreGridDensity": 8, "blockGridDensity": 16, "tileColumns": 4, "explorePlane": 2,
+                                                               "emojiColumns": 6],
+                                                    booleans: ["exploreShowsPrivateUse": true, "exploreDescending": true, "blocksDescending": true],
                                                     strings: ["emojiSortOrder": "oldestFirst"])
         let browse = ConfigurationBrowse(values)
         XCTAssertEqual(browse.exploreGridDensity, 8)
@@ -115,7 +119,16 @@ final class ConfigurationCodecTests: XCTestCase {
         XCTAssertTrue(browse.showsPrivateUse)
         XCTAssertTrue(browse.exploreDescending)
         XCTAssertEqual(browse.emojiSortOrder, .oldestFirst)
+        XCTAssertEqual(browse.emojiColumns, 6)
+        XCTAssertTrue(browse.blocksDescending)
         XCTAssertEqual(browse.values, values)
+        XCTAssertEqual(ConfigurationBrowse().emojiColumns, 0, "Automatic")
+        XCTAssertFalse(ConfigurationBrowse().blocksDescending)
+        XCTAssertTrue(ConfigurationBrowse.validEmojiColumns(0))
+        XCTAssertTrue(ConfigurationBrowse.validEmojiColumns(2))
+        XCTAssertTrue(ConfigurationBrowse.validEmojiColumns(256))
+        XCTAssertFalse(ConfigurationBrowse.validEmojiColumns(1))
+        XCTAssertFalse(ConfigurationBrowse.validEmojiColumns(257))
         XCTAssertEqual(ConfigurationBrowse(AppPresentationSettings.Values(strings: ["emojiSortOrder": "nope"])).emojiSortOrder, .codePoint)
     }
 
@@ -128,7 +141,8 @@ final class ConfigurationCodecTests: XCTestCase {
         let rich = try richConfiguration()
         let files = try XCTUnwrap(rich.compile())
         XCTAssertEqual(Set(files.keys), [UnicodeEditionSettings.filename, KeyboardKeySettings.filename, SymbolPageSettings.filename, FavoriteSync.filename,
-                                         FontRuleStore.filename, ImageColorSettings.filename, AutoCapitalizationSetting.filename, AppPresentationSettings.filename])
+                                         FontRuleStore.filename, ImageColorSettings.filename, AutoCapitalizationSetting.filename, AppPresentationSettings.filename,
+                                         EmojiCategorySetting.filename, LanguageInputSettings.filename])
         for (name, data) in files { try data.write(to: directory.appendingPathComponent(name)) }
         let captured = UniboardConfiguration.capture(directory: directory, presentation: rich.browse.values, favorites: rich.favorites)
         XCTAssertEqual(captured, rich)
@@ -164,6 +178,13 @@ final class ConfigurationCodecTests: XCTestCase {
         var rules = rich
         rules.fontRules.removeLast()
         XCTAssertFalse(rules.matches(rich, in: .fontsAndRules))
+        var categories = rich
+        categories.hiddenEmojiCategories.remove("Flags")
+        XCTAssertFalse(categories.matches(rich, in: .settings))
+        XCTAssertTrue(categories.matches(rich, in: .layoutsAndKeys))
+        // A set the store refuses can't compile.
+        categories.hiddenEmojiCategories = [" Flags"]
+        XCTAssertNil(categories.compile())
     }
 
     // MARK: Export
@@ -268,6 +289,11 @@ final class ConfigurationCodecTests: XCTestCase {
                 : FontRule(selector: .codePoint(0x20000 + UInt32(index)), face: faces[index % faces.count])
         }
         XCTAssertNotNil(FontRuleStore.encode(c.fontRules))
+        // 32 names of 64 UTF-8 bytes, each 16 tag characters the writer escapes.
+        c.hiddenEmojiCategories = Set((0..<EmojiCategorySetting.maximumGroups).map { index in
+            String(format: "%02d", index) + String(repeating: "\u{E0041}", count: 15) + "xx"
+        })
+        XCTAssertTrue(c.hiddenEmojiCategories.allSatisfy { $0.utf8.count == EmojiCategorySetting.maximumNameBytes })
         XCTAssertNotNil(c.compile())
 
         let data = try XCTUnwrap(ConfigurationCodec.encode(c, inLibrary: { _ in true }))
@@ -290,7 +316,7 @@ final class ConfigurationCodecTests: XCTestCase {
         XCTAssertEqual(syntax.count, 1)
         XCTAssertTrue(syntax[0].hasPrefix("Check line 1, column "), syntax[0])
         XCTAssertEqual(problems("[settings]\n"), [ConfigurationCodec.missingVersion])
-        XCTAssertEqual(problems("schema_version = 2\n"), [ConfigurationCodec.unsupportedVersion])
+        XCTAssertEqual(problems("schema_version = 4\n"), [ConfigurationCodec.unsupportedVersion])
         XCTAssertEqual(problems("schema_version = \"1\"\n"), [ConfigurationCodec.unsupportedVersion])
         XCTAssertEqual(problems(header + "extra = 1\n[\"odd key\"]\n"), ["Unrecognized setting: extra.", "Unrecognized setting: \"odd key\"."])
         XCTAssertEqual(problems(header + "settings = 1\n"), ["Check settings: a table."])
@@ -317,6 +343,9 @@ final class ConfigurationCodecTests: XCTestCase {
         explore_plane = 17
         emoji_sort_order = 3
         mystery = 1
+        hidden_emoji_categories = ["Flags", " Objects"]
+        emoji_columns = 1
+        blocks_descending = "yes"
         """
         XCTAssertEqual(problems(text), [
             "Unrecognized setting: settings.other.",
@@ -330,7 +359,36 @@ final class ConfigurationCodecTests: XCTestCase {
             "Check settings.browse.tile_columns: a whole number from 2 to 256.",
             "Check settings.browse.explore_plane: -1 for all planes, or 0 to 16.",
             "Check settings.browse.emoji_sort_order: \"newestFirst\", \"oldestFirst\" or \"codePoint\".",
+            "Check settings.browse.hidden_emoji_categories[2]: a category name such as \"Flags\".",
+            "Check settings.browse.emoji_columns: 0 for Automatic, or a whole number from 2 to 256.",
+            "Check settings.browse.blocks_descending: true or false.",
         ])
+    }
+
+    func testHiddenEmojiCategoriesReadValidateAndExportInCatalogOrder() throws {
+        let browse = header + "[settings]\n[settings.browse]\n"
+        let result = try decoded(browse + "hidden_emoji_categories = [\"Flags\", \"Smileys & Emotion\", \"Later\"]\nemoji_columns = 9\nblocks_descending = true\n")
+        XCTAssertEqual(result.configuration.hiddenEmojiCategories, ["Flags", "Smileys & Emotion", "Later"])
+        XCTAssertEqual(result.configuration.browse.emojiColumns, 9)
+        XCTAssertTrue(result.configuration.browse.blocksDescending)
+        let text = try XCTUnwrap(String(data: try XCTUnwrap(ConfigurationCodec.encode(result.configuration)), encoding: .utf8))
+        XCTAssertTrue(text.contains("hidden_emoji_categories = [\"Smileys & Emotion\", \"Flags\", \"Later\"]"), text)
+        XCTAssertTrue(text.contains("emoji_columns = 9"))
+        XCTAssertTrue(text.contains("blocks_descending = true"))
+        XCTAssertTrue(try decoded(browse + "hidden_emoji_categories = []\nemoji_columns = 0\n").configuration.hiddenEmojiCategories.isEmpty)
+        let defaults = try XCTUnwrap(String(data: try XCTUnwrap(ConfigurationCodec.encode(.factoryDefaults)), encoding: .utf8))
+        XCTAssertTrue(defaults.contains("hidden_emoji_categories = []\nemoji_columns = 0\nblocks_descending = false\n"), defaults)
+        // 1.3 files without the keys read the defaults.
+        XCTAssertEqual(try decoded(browse + "tile_columns = 3\n").configuration.hiddenEmojiCategories, [])
+        XCTAssertEqual(problems(browse + "hidden_emoji_categories = \"Flags\"\n"),
+                       ["Check settings.browse.hidden_emoji_categories: a list of text in quotes."])
+        XCTAssertEqual(problems(browse + "hidden_emoji_categories = [\"Flags\", \"Flags\"]\n"),
+                       ["settings.browse.hidden_emoji_categories[2] appears more than once."])
+        XCTAssertEqual(problems(browse + "hidden_emoji_categories = [\"\(String(repeating: "é", count: 33))\"]\n"),
+                       ["Check settings.browse.hidden_emoji_categories[1]: a category name such as \"Flags\"."])
+        let many = (0...32).map { "\"G\($0)\"" }.joined(separator: ", ")
+        XCTAssertEqual(problems(browse + "hidden_emoji_categories = [\(many)]\n"),
+                       ["settings.browse.hidden_emoji_categories exceeds the limit of 32."])
     }
 
     private func editionChoices() -> String {
@@ -851,7 +909,13 @@ final class ConfigurationCodecTests: XCTestCase {
             "Explore Plane: All Planes → Plane 1",
             "Explore Order: Ascending → Descending",
             "Emoji Order: Code point → Newest first",
+            "Hidden Emoji Categories: None → Activities, Flags, Future Group",
+            "Emoji Size: Automatic → 4 per Row",
+            "Blocks Order: Code Point: Low to High → Code Point: High to Low",
         ])
+        let back = ConfigurationDiff(current: rich, incoming: .factoryDefaults).change(.settings).lines
+        XCTAssertTrue(back.contains("Hidden Emoji Categories: Activities, Flags, Future Group → None"), "\(back)")
+        XCTAssertTrue(back.contains("Emoji Size: 4 per Row → Automatic"))
         XCTAssertEqual(ConfigurationDiff(current: rich, incoming: .factoryDefaults).change(.settings).lines.first, "Extra Unicode Fonts: On → Off")
         XCTAssertEqual(diff.change(.layoutsAndKeys).lines, [
             "Layouts: English → English, Ελληνικά",
@@ -960,5 +1024,118 @@ final class ConfigurationCodecTests: XCTestCase {
         XCTAssertEqual(ConfigurationDiff.keyCount(1), "1 key")
         XCTAssertEqual(ConfigurationDiff.favoriteCount(4096), "4,096 favorites")
         XCTAssertEqual(ConfigurationDiff.layoutName("zz"), "zz")
+    }
+}
+
+extension ConfigurationCodecTests {
+    func testExplicitRowsRoundTripCaptureCompileAndDiffIncludingAlignmentOnlyChanges() throws {
+        var c = UniboardConfiguration.factoryDefaults
+        let a = SymbolBoardKey(id: "decomposed", text: "e\u{301}", variants: ["é"], up: ["👩‍💻"], down: ["↓"])
+        c.pages.append(SymbolBoard(id: "explicit", name: "Explicit", rows: [
+            .init(alignment: .right, cells: [.halfGap, .key(a), .gap]),
+            .init(alignment: .spaced, cells: [.key(.init(id: "composed", text: "é", variants: []))]),
+        ]))
+        var main = MainKeyboardArrangement.standard(for: .english).resolvedRows
+        main[1].alignment = .left
+        c.keys = .init(overrides: ["letter.a": .init(longPress: [], swipeUp: nil, swipeDown: ["é"])], arrangements: ["en": .init(rows: main)])
+        let data = try XCTUnwrap(ConfigurationCodec.encode(c))
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(text.hasPrefix("schema_version = 2"))
+        let result = try decoded(text)
+        XCTAssertEqual(result.formatVersion, 2)
+        XCTAssertEqual(result.configuration, c)
+        XCTAssertEqual(try XCTUnwrap(ConfigurationCodec.encode(result.configuration)), data)
+        XCTAssertEqual(result.configuration.keys.overrides["letter.a"]?.longPress, [])
+        XCTAssertNil(result.configuration.keys.overrides["letter.a"]?.swipeUp)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = try XCTUnwrap(c.compile(replacementID: "rows-test", revision: "rows-test"))
+        for (name, payload) in files { try payload.write(to: root.appendingPathComponent(name)) }
+        let before = try XCTUnwrap(files[SymbolPageSettings.filename])
+        XCTAssertEqual(UniboardConfiguration.capture(directory: root, presentation: c.browse.values, favorites: c.favorites), c)
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(SymbolPageSettings.filename)), before)
+        var changed = c
+        var rows = try XCTUnwrap(changed.pages.last?.explicitRows)
+        rows[0].alignment = .center
+        XCTAssertTrue(changed.pages[changed.pages.count - 1].setExplicitRows(rows))
+        let diff = ConfigurationDiff(current: c, incoming: changed, missingSections: [])
+        XCTAssertFalse(diff.isIdentical)
+        XCTAssertTrue(diff.change(.layoutsAndKeys).lines.contains("Changes the rows of page Explicit"))
+        XCTAssertFalse(c.matches(changed, in: .layoutsAndKeys))
+        var payloadOnly = c
+        payloadOnly.pages[payloadOnly.pages.count - 1].keys[0].variants = ["x"]
+        XCTAssertEqual(ConfigurationDiff(current: c, incoming: payloadOnly).change(.layoutsAndKeys).lines,
+                       ["Changes keys on page Explicit"])
+        let legacyData = try XCTUnwrap(ConfigurationCodec.encode(.factoryDefaults))
+        XCTAssertTrue(String(decoding: legacyData, as: UTF8.self).hasPrefix("schema_version = 1"))
+    }
+
+    func testExplicitRowsRejectOverlongMixedUnknownAndFavoritesButOldLongRowsStayLegacy() throws {
+        let pageHeader = "schema_version = 2\n[pages]\n[[pages.page]]\nid = 'p'\nname = 'Page'\n"
+        let row = "[[pages.page.row]]\nalignment = 'right'\n"
+        let cells = "cell = [" + Array(repeating: "{key={id='a',text='a'}}", count: 13).joined(separator: ",") + "]\n"
+        let issues = problems(pageHeader + row + cells)
+        XCTAssertTrue(issues.contains { $0.contains("Page, row 1: This row exceeds the limit of 12 standard-key widths.") && $0.contains("pages.page[1].row[1]") })
+        for tail in [
+            "row = [{alignment='left',cell=[{gap='full'}]}]",
+            "row = [{alignment='bad',cell=[{key={id='a',text='a'}}]}]",
+            "row = [{alignment='left'}]",
+            "row = [{alignment='left',cell=[{}]}]",
+            "row = [{alignment='left',cell=[{key={id='a',text='a'},gap='half'}]}]",
+            "row = [{alignment='left',cell=[{gap='bad'}]}]",
+            "row = [{alignment='left',cell=[{key='a'}]}]",
+            "row = [{alignment='left',cell=[{key={id='a',text='a'}}],extra=1}]",
+            "key = []\nrow = []",
+        ] { XCTAssertFalse(problems(pageHeader + tail).isEmpty) }
+        XCTAssertTrue(problems(pageHeader.replacingOccurrences(of: "id = 'p'", with: "id = 'migrated-favorites'") + "row = []").contains { $0.contains("Favorites stays dynamic") })
+        XCTAssertTrue(problems(pageHeader.replacingOccurrences(of: "schema_version = 2", with: "schema_version = 1") + "row = []").contains { $0.contains("Unrecognized setting") })
+        // The old parser's 16-slot policy remains distinct from the new 12-unit limit.
+        var legacy = MainKeyboardArrangement.standard(for: .english)
+        legacy.layout = "kkkkkkkkkkkkkk/kkkkkkkkkkkk/kkkkkkkkkkkk"
+        XCTAssertTrue(legacy.isValid(for: .english))
+        XCTAssertFalse(legacy.convertToExplicitRows())
+        var config = UniboardConfiguration.factoryDefaults
+        config.keys = .init(arrangements: ["en": legacy])
+        XCTAssertEqual(try decoded(String(decoding: try XCTUnwrap(ConfigurationCodec.encode(config)), as: UTF8.self)).configuration.keys.arrangements["en"], legacy)
+    }
+}
+
+extension ConfigurationCodecTests {
+    func testExplicitRowsRejectInvalidExportAndMainRowPayloadsWithPrecisePaths() throws {
+        var invalid = UniboardConfiguration.factoryDefaults
+        let key = SymbolBoardKey(id: "k", text: "x", variants: [])
+        invalid.pages[0] = .init(id: SymbolPageRules.stockID, name: "Symbols", rows: [.init(cells: Array(repeating: .key(key), count: 13))])
+        XCTAssertNil(ConfigurationCodec.encode(invalid))
+        XCTAssertNil(invalid.compile())
+        invalid = .factoryDefaults
+        invalid.keys = .init(arrangements: ["unknown": .init(rows: [.init(cells: [.key("a")])])])
+        XCTAssertNil(ConfigurationCodec.encode(invalid))
+        for tail in [
+            "row=[{alignment='left',cell=[{key=3}]}]",
+            "keys=[]\nrow=[]",
+            "places='k'\nrow=[]",
+            "row=[{alignment='left',cell=[{gap='half'}]}]",
+            "row=[{alignment='left',cell=[{key='a',extra=true}]}]",
+        ] {
+            XCTAssertFalse(problems("schema_version=2\n[[keyboard.arrangement]]\nlayout='en'\n" + tail).isEmpty)
+        }
+        let gaps = Array(repeating: "{gap='full'}", count: 12).joined(separator: ",")
+        let issue = problems("schema_version=2\n[[keyboard.arrangement]]\nlayout='en'\nrow=[{alignment='left',cell=[{key='{delete}'}," + gaps + "]}]")
+        XCTAssertTrue(issue.contains { $0.contains("row 1: This row exceeds the limit of 12 standard-key widths.") && $0.contains("keyboard.arrangement[1].row[1]") })
+        let tooMany = Array(repeating: "{alignment='left',cell=[{key={id='a',text='a'}}]}", count: 65).joined(separator: ",")
+        XCTAssertTrue(problems("schema_version=2\n[[pages.page]]\nid='p'\nname='P'\nrow=[" + tooMany + "]").contains { $0.contains("up to 64 rows") })
+    }
+}
+
+extension ConfigurationCodecTests {
+    func testExplicitRowsDiagnoseMissingPageNameAndNonTableRowArrays() {
+        for body in [
+            "[[pages.page]]\nid='p'\nrow=[]",
+            "[[pages.page]]\nid='p'\nname='P'\nrow=3",
+            "[[keyboard.arrangement]]\nlayout='en'\nrow='not a row table list'",
+        ] {
+            XCTAssertFalse(problems("schema_version=2\n" + body).isEmpty)
+        }
     }
 }

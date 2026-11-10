@@ -104,6 +104,8 @@ struct SharedConfigurationLocation {
         FontRuleStore.filename: FontRuleStore.maximumPayloadBytes,
         ImageColorSettings.filename: ImageColorSettings.maximumPayloadBytes,
         AutoCapitalizationSetting.filename: AutoCapitalizationSetting.maximumPayloadBytes,
+        LanguageInputSettings.filename: LanguageInputSettings.maximumPayloadBytes,
+        EmojiCategorySetting.filename: EmojiCategorySetting.maximumPayloadBytes,
         AppPresentationSettings.filename: AppPresentationSettings.maximumPayloadBytes,
     ]
     static let snapshotFiles = fileLimits.keys.sorted()
@@ -449,6 +451,8 @@ enum ConfigurationSnapshotValidation {
         FontRuleStore.filename: { FontRuleStore.decode($0, blocks: UnicodeCatalog.shared.blocks) != nil },
         ImageColorSettings.filename: { ImageColorSettings.decode($0) != nil },
         AutoCapitalizationSetting.filename: { AutoCapitalizationSetting.decode($0) != nil },
+        LanguageInputSettings.filename: { LanguageInputSettings.decode($0) != nil },
+        EmojiCategorySetting.filename: { EmojiCategorySetting.decode($0) != nil },
         AppPresentationSettings.filename: { AppPresentationSettings.decode($0) != nil },
     ]
 }
@@ -467,8 +471,10 @@ enum AppPresentationSettings {
     static let integerValues: [String: Set<Int>] = [
         "exploreGridDensity": [3, 8, 16, 32], "blockGridDensity": [3, 8, 16, 32],
         "tileColumns": Set(2...256), "explorePlane": Set(-1...16),
+        // 0 is Automatic.
+        "emojiColumns": Set([0] + Array(2...256)),
     ]
-    static let booleanKeys: Set<String> = ["exploreShowsPrivateUse", "exploreDescending"]
+    static let booleanKeys: Set<String> = ["exploreShowsPrivateUse", "exploreDescending", "blocksDescending"]
     static let stringValues: [String: Set<String>] = ["emojiSortOrder": Set(UnicodeSortOrder.allCases.map(\.rawValue))]
 
     /// Only set, well-typed values; an unset key stays unset.

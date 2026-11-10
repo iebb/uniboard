@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Keyboard tab: the main keyboard's editor and its symbol keys, then
+/// The Keyboard tab: the main keyboard's editor, for its letters, 123 and #+= keys, then
 /// the keyboard's pages, configured here and shown there in this order:
 /// Favorites, the Symbols page and any custom pages.
 struct PagesView: View {
@@ -11,20 +11,23 @@ struct PagesView: View {
     @State private var naming = false
     @State private var newName = ""
     @State private var failed = false
+    @State private var warningSurfaceActive = false
     @State private var exporting = false
     @State private var importing = false
 
     var body: some View {
         List {
             Section {
+                // Letters, 123 and #+= are all edited here, as 1.3's Symbol Keys did.
                 NavigationLink { MainKeyboardEditorView() } label: {
-                    Label("Main Keyboard", systemImage: "keyboard")
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Main Keyboard")
+                            Text("Letters, numbers and symbol keys").font(.subheadline).foregroundStyle(.secondary)
+                        }
+                    } icon: { Image(systemName: "keyboard") }
                 }
                 .accessibilityIdentifier("pages.keyboard")
-                NavigationLink { KeyboardKeySettingsView(kinds: [.character]) } label: {
-                    Label("Symbol Keys", systemImage: "textformat.123")
-                }
-                .accessibilityIdentifier("pages.symbolKeys")
             }
             Section {
                 ForEach(boards.boards) { board in
@@ -43,6 +46,13 @@ struct PagesView: View {
                     let ids = offsets.map { boards.boards[$0].id }.filter(Self.removable)
                     failed = !ids.allSatisfy { boards.deleteBoard($0) }
                 }
+            }
+            if boards.localCopyWarningID != nil {
+                Label { Text("Your change is saved and available to the keyboard, but the app couldn’t update its local copy.") } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+                .font(.footnote).foregroundStyle(.secondary)
+                .accessibilityIdentifier("pages.localCopyWarning")
             }
             if failed {
                 Text("This change could not be saved. Check the page file, name and storage limits.")
@@ -76,6 +86,17 @@ struct PagesView: View {
             Button("Create") { failed = boards.createBoard(named: newName) == nil }
         }
         .onAppear { boards.refreshPages() }
+        .onDisappear { warningSurfaceActive = false; boards.dismissLocalCopyWarning() }
+        .onAppear {
+            warningSurfaceActive = true
+            if boards.localCopyWarningID != nil {
+                UIAccessibility.post(notification: .announcement, argument: "Your change is saved and available to the keyboard, but the app couldn’t update its local copy.")
+            }
+        }
+        .onChange(of: boards.localCopyWarningID) { _, warning in
+            guard warningSurfaceActive, warning != nil else { return }
+            UIAccessibility.post(notification: .announcement, argument: "Your change is saved and available to the keyboard, but the app couldn’t update its local copy.")
+        }
         .fileExporter(isPresented: $exporting, document: boards.exportedPages().map(PagesDocument.init),
                       contentType: .json, defaultFilename: "Uniboard Pages") { result in
             if case .failure = result { failed = true }

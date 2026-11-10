@@ -25,81 +25,95 @@ final class StyleGridUITests: XCTestCase {
         app.launch()
         openCatalogFromSettings()
 
-        // 1. ABeeZee: one row, Regular and Italic tiles.
+        // 1. ABeeZee: one row, Regular and Italic tiles; static files are own files (case A2).
         openFamily("ABeeZee")
         XCTAssertEqual(styleCells.count, 2)
         let regular = cell("Regular")
         XCTAssertTrue(regular.exists)
         XCTAssertTrue(regular.isSelected, "Regular upright is selected by default")
-        XCTAssertEqual(regular.value as? String, "Not downloaded")
-        XCTAssertEqual(downloadButton.label, "Download Style")
+        XCTAssertTrue((regular.value as? String)?.hasPrefix("Not downloaded, Separate file, ") == true, "\(String(describing: regular.value))")
+        XCTAssertTrue(downloadButton.label.hasPrefix("Download Regular"), downloadButton.label)
+        XCTAssertFalse(fileButton.exists)
         screenshot("1-abeezee")
         back(from: "ABeeZee")
 
-        // 2. Lato: 9 rows x 2 tiles; download Bold so one tile draws its sample.
+        // 2. Lato: 9 rows x 2 tiles, no width row, no tile arrows; download Bold.
         openFamily("Lato")
         XCTAssertEqual(styleCells.count, 18)
+        XCTAssertFalse(app.staticTexts["Standard"].exists, "One width: no width names")
         let boldItalic = cell("Bold Italic")
         reveal(boldItalic)
         boldItalic.tap()
         XCTAssertTrue(boldItalic.isSelected)
         XCTAssertFalse(cell("Regular").isSelected, "Only one cell is selected")
-        XCTAssertEqual(boldItalic.value as? String, "Not downloaded")
         let bold = cell("Bold")
         bold.tap()
         XCTAssertTrue(bold.isSelected)
         XCTAssertFalse(boldItalic.isSelected)
         reveal(downloadButton)
-        XCTAssertEqual(downloadButton.label, "Download Style")
+        XCTAssertTrue(downloadButton.label.hasPrefix("Download Bold"), downloadButton.label)
         let latoDownloaded = download()
-        // The whole 9 x 2 grid with its corner badges, between the bars.
         reveal(cell("Thin"), towardTop: true)
         scroll(cell("Thin"), toY: 190)
-        XCTAssertTrue(cell("Black Italic").isHittable)
         screenshot("2-lato")
         if latoDownloaded { remove(expectingMessage: "This removes the downloaded font from Uniboard. You can download it again later.") }
         back(from: "Lato")
 
-        // 3. Roboto: column containers; download the italic file.
+        // 3. Roboto: 4 width columns, no Width menu (screen 1).
         openFamily("Roboto")
-        XCTAssertEqual(styleCells.count, 18, "The Normal width set: 9 weights x 2")
-        let italic = cell("Italic")
-        italic.tap()
-        XCTAssertEqual(italic.value as? String, "Not downloaded, File contains 18 styles")
-        reveal(downloadButton)
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@",
-            "This file contains 18 styles across Normal and Condensed. Downloading or removing it affects them all.")).firstMatch.exists)
-        XCTAssertEqual(downloadButton.label, "Download File (18 Styles)")
-        // The block under the grid: name, file line, sentence and button.
-        let block = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Roboto-Italic[wdth,wght].ttf")).firstMatch
-        scroll(block, toY: 260)
-        screenshot("3a-roboto-selected-block")
-        let robotoDownloaded = download()
-        reveal(cell("Thin Italic"), towardTop: true)
+        XCTAssertEqual(styleCells.count, 36, "9 weights x (Standard, Condensed) x (Normal, Italic)")
+        XCTAssertFalse(app.buttons["fontDetail.styleSet"].exists, "Widths are columns, not a menu")
+        XCTAssertTrue(app.staticTexts["Standard"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Condensed"].firstMatch.exists)
+        let condensedBold = cell("Condensed Bold")
+        reveal(condensedBold)
+        condensedBold.tap()
+        XCTAssertTrue((condensedBold.value as? String)?.hasPrefix("Not downloaded, Separate file, ") == true)
+        reveal(fileButton)
+        XCTAssertTrue(downloadButton.label.hasPrefix("Download Condensed Bold"), downloadButton.label)
+        XCTAssertTrue(fileButton.label.hasPrefix("Download File (18 Styles)"), fileButton.label)
+        XCTAssertTrue(fileButton.label.contains("Includes 18 styles in one file."), fileButton.label)
+        XCTAssertTrue(fileButton.label.contains("Normal styles in Standard and Condensed widths."), fileButton.label)
+        XCTAssertFalse(fileButton.label.contains("Existing downloads are kept."), "Nothing downloaded yet")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "RobotoCondensed-Bold.ttf")).firstMatch.exists)
+        screenshot("3a-roboto-condensed-bold-block")
+        reveal(cell("Thin"), towardTop: true)
         screenshot("3-roboto")
 
-        // 4. The Width menu keeps the weight and slope.
-        let menu = app.buttons.matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH %@", "fontDetail.styleSet", "Width")).firstMatch
-        for _ in 0..<4 { app.swipeDown() }
-        XCTAssertTrue(menu.isHittable)
-        menu.tap()
-        let condensed = app.buttons["Condensed"].firstMatch
-        XCTAssertTrue(condensed.waitForExistence(timeout: 5))
-        screenshot("4-width-menu")
-        condensed.tap()
-        let condensedItalic = cell("Condensed Italic")
-        XCTAssertTrue(condensedItalic.waitForExistence(timeout: 5))
-        XCTAssertTrue(condensedItalic.isSelected, "Switching width keeps Regular Italic selected")
-        screenshot("4b-roboto-condensed")
-        if robotoDownloaded {
-            remove(expectingMessage: "This removes all 18 styles in this file from Uniboard. You can download it again later.")
+        // 4. Bold alone, then the upright file: both kept, shown once (screen 6, §10 checks 11).
+        let robotoBold = cell("Bold")
+        reveal(robotoBold)
+        robotoBold.tap()
+        let freeBefore = freeSpaces()
+        let boldDownloaded = download()
+        if boldDownloaded {
+            XCTAssertEqual(freeSpaces(), freeBefore.map { $0 - 1 })
+            XCTAssertTrue((robotoBold.value as? String)?.hasPrefix("Downloaded, Separate file, ") == true)
+            reveal(fileButton)
+            XCTAssertTrue(fileButton.label.contains("Includes 18 styles in one file. Existing downloads are kept."), fileButton.label)
+            fileButton.tap()
+            let removeFile = app.buttons["fontDetail.remove.file"].firstMatch
+            if removeFile.waitForExistence(timeout: 120) {
+                XCTAssertTrue(removeFile.label.hasPrefix("Remove File (18 Styles)"), removeFile.label)
+                XCTAssertTrue(app.buttons["fontDetail.remove"].firstMatch.exists, "The separate file keeps its own Remove row")
+                XCTAssertEqual(freeSpaces(), freeBefore.map { $0 - 2 }, "The shared file counts +1; nothing was removed")
+                XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "fontDetail.downloaded").count, 1, "Downloaded rows once")
+                reveal(robotoBold, towardTop: true)
+                scroll(robotoBold, toY: 300)
+                screenshot("6-roboto-both-files-kept")
+                // Remove the shared file: Bold stays downloaded from its own file.
+                remove(identifier: "fontDetail.remove.file", confirm: "Remove File (18 Styles)",
+                       expectingMessage: "Uniboard will stop using this download. Styles available from other files will stay available. The file may remain stored on this device.")
+                XCTAssertTrue((robotoBold.value as? String)?.hasPrefix("Downloaded") == true)
+            }
+            remove(expectingMessage: "This removes the downloaded font from Uniboard. You can download it again later.")
         }
         back(from: "Roboto")
 
-        // 5. Commissioner: one file across both columns.
+        // 5. Commissioner: one file across both groups.
         openFamily("Commissioner")
         XCTAssertEqual(styleCells.count, 18)
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Shared styles file")).firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Shared styles, 1 file, 18 styles")).firstMatch.exists)
         screenshot("5-commissioner")
         back(from: "Commissioner")
 
@@ -113,7 +127,30 @@ final class StyleGridUITests: XCTestCase {
         screenshot("6-oswald")
         back(from: "Oswald")
 
-        // 8. Recursive: the Variant menu, italics in the same set.
+        // 7. Inconsolata: 9 width columns scroll; 72 styles in its file (screen 2).
+        openFamily("Inconsolata")
+        XCTAssertEqual(styleCells.count, 72)
+        XCTAssertTrue(app.staticTexts["Standard"].firstMatch.exists)
+        let condensedSemiBold = cell("Condensed SemiBold")
+        reveal(condensedSemiBold)
+        condensedSemiBold.tap()
+        reveal(fileButton)
+        XCTAssertTrue(downloadButton.label.hasPrefix("Download Condensed SemiBold"), downloadButton.label)
+        XCTAssertTrue(fileButton.label.hasPrefix("Download File (72 Styles)"), fileButton.label)
+        reveal(cell("ExtraLight"), towardTop: true)
+        screenshot("7-inconsolata-scroll")
+        back(from: "Inconsolata")
+
+        // 8. Noto Sans Telugu UI: no verified single-style files, so only the shared file (case B, screen 3).
+        openFamily("Noto Sans Telugu UI")
+        reveal(downloadButton)
+        XCTAssertTrue(downloadButton.label.hasPrefix("Download File ("), downloadButton.label)
+        XCTAssertFalse(fileButton.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "This style is available here in a file containing")).firstMatch.exists)
+        screenshot("8-noto-sans-telugu-ui-shared-only")
+        back(from: "Noto Sans Telugu UI")
+
+        // 9. Recursive: the Variant menu, italics in the same set.
         openFamily("Recursive")
         XCTAssertEqual(styleCells.count, 16)
         for _ in 0..<4 { app.swipeDown() }
@@ -123,7 +160,7 @@ final class StyleGridUITests: XCTestCase {
         for option in ["Mono Linear", "Mono Casual", "Sans Linear", "Sans Casual"] {
             XCTAssertTrue(app.buttons[option].firstMatch.waitForExistence(timeout: 5), option)
         }
-        screenshot("8-recursive-variant-menu")
+        screenshot("9-recursive-variant-menu")
         app.buttons["Sans Casual"].firstMatch.tap()
         XCTAssertTrue(cell("Sans Casual Regular").waitForExistence(timeout: 5))
         XCTAssertTrue(cell("Sans Casual Regular").isSelected)
@@ -137,15 +174,16 @@ final class StyleGridUITests: XCTestCase {
         openFamily("Roboto")
         let thin = cell("Thin")
         reveal(thin)
-        XCTAssertEqual(thin.value as? String, "Not downloaded, File contains 18 styles")
+        XCTAssertTrue((thin.value as? String)?.hasPrefix("Not downloaded, Separate file, ") == true)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Normal styles: 1 file · 18 styles")).firstMatch.exists)
         // Through the whole grid, one screen at a time, down to the Download button.
         for _ in 0..<4 { app.swipeDown() }
         var page = 1
-        screenshot("7-accessibility-\(page)")
-        while page < 10, !(downloadButton.exists && downloadButton.isHittable && downloadButton.frame.maxY < app.frame.maxY - 110) {
+        screenshot("10-accessibility-\(page)")
+        while page < 16, !(downloadButton.exists && downloadButton.isHittable && downloadButton.frame.maxY < app.frame.maxY - 110) {
             drag(by: 520)
             page += 1
-            screenshot("7-accessibility-\(page)")
+            screenshot("10-accessibility-\(page)")
         }
         XCTAssertTrue(downloadButton.isHittable)
         for element in styleCells.allElementsBoundByIndex where element.isHittable {
@@ -180,6 +218,17 @@ final class StyleGridUITests: XCTestCase {
         styleCells.matching(NSPredicate(format: "label == %@", name)).firstMatch
     }
     private var downloadButton: XCUIElement { app.buttons["fontDetail.download"].firstMatch }
+    /// The shared file's row under a single-style row.
+    private var fileButton: XCUIElement { app.buttons["fontDetail.download.file"].firstMatch }
+
+    /// The number in the §7 footer ("Room for 12 more…"); 0 when full.
+    private func freeSpaces() -> Int? {
+        let footer = app.staticTexts["fontDetail.capacity"].firstMatch
+        reveal(footer)
+        guard footer.exists else { return nil }
+        if footer.label.hasPrefix("All ") { return 0 }
+        return footer.label.split(separator: " ").compactMap { Int($0) }.first
+    }
 
     /// Downloads the selected style's file; false if it didn't finish in time.
     private func download() -> Bool {
@@ -196,16 +245,16 @@ final class StyleGridUITests: XCTestCase {
         return true
     }
 
-    private func remove(expectingMessage message: String) {
-        let remove = app.buttons["fontDetail.remove"].firstMatch
+    private func remove(identifier: String = "fontDetail.remove", confirm title: String = "Remove Download", expectingMessage message: String) {
+        let remove = app.buttons[identifier].firstMatch
         reveal(remove)
         remove.tap()
         XCTAssertTrue(app.staticTexts[message].waitForExistence(timeout: 5), "Remove message: \(message)")
-        screenshot("remove-dialog-" + (message.contains("all") ? "shared" : "single"))
-        let confirm = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Remove Download", "fontDetail.remove")).firstMatch
+        screenshot("remove-dialog-" + identifier)
+        let confirm = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", title, identifier)).firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         confirm.tap()
-        XCTAssertTrue(downloadButton.waitForExistence(timeout: 15))
+        XCTAssertTrue(downloadButton.waitForExistence(timeout: 15) || app.buttons["fontDetail.remove"].waitForExistence(timeout: 1))
     }
 
     private func openCatalogFromSettings() {

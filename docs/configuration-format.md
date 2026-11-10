@@ -154,6 +154,16 @@ e.g. `settings.number_row`), and a file that differs only in them still shows
 | `explore_plane` | int | `-1` | −1 (all) or 0…16 |
 | `explore_descending` | bool | `false` | |
 | `emoji_sort_order` | string | `"codePoint"` | `newestFirst` \| `oldestFirst` \| `codePoint` |
+| `hidden_emoji_categories` | array of strings | `[]` | Emoji categories (Unicode/CLDR group names such as `"Flags"`) hidden from emoji browsing and emoji search in the app **and** the keyboard (1.4). Saved pages, favorites, Recent and What's New are unaffected. Only hidden names are stored, so a group a later catalog adds starts shown. Up to 32 unique names of 1–64 bytes without control characters or surrounding spaces; a name this catalog doesn't list is kept and hides nothing. Export writes catalog group order. Stored in the App Group as `emoji-categories-v1.json` |
+| `emoji_columns` | int | `0` | Emoji tab tile columns (1.4): `0` = Automatic (the 1.3 layout), otherwise 2…256; the grid shows at most what fits its width. App only; the keyboard's emoji grid has a fixed size |
+| `blocks_descending` | bool | `false` | Blocks list order by starting code point (1.4): `false` Low to High, `true` High to Low. Block detail ⌃/⌄ and its navigator follow it |
+
+Older files without these three keys import as their defaults (all categories
+shown, Automatic size, Low to High); like any absent key in a present
+`[settings.browse]`, Review Import lists the change if the current value
+differs. Diff lines: "Hidden Emoji Categories: None → Flags", "Emoji Size:
+Automatic → 4 per Row", "Blocks Order: Code Point: Low to High → Code Point:
+High to Low".
 
 ### 4.2 `[keyboard]` — Layouts and Keys
 
@@ -383,7 +393,10 @@ JSON snapshot in the App Group, in a versioned configuration location
 
 A generation holds `unicode-edition-v1.json`, `keyboard-keys-v1.json`,
 `symbol-pages-v1.json`, `favorites-v1.json`, `font-rules-v1.json`,
-`image-colors-v1.json`, `auto-capitalization-v1.json` and
+`image-colors-v1.json`, `auto-capitalization-v1.json`,
+`emoji-categories-v1.json` (`{"hidden":[…],"schemaVersion":1}`, sorted names;
+the keyboard reads it on appear and when the app posts the Darwin
+notification `ad.neko.uniboard.emojiCategoriesChanged`) and
 `app-presentation-v1.json` (the app's own browse preferences; the keyboard
 never reads it). A missing file means the store's default, as before.
 `image-colors-v1.json` (schema 1) carries the Copy Image preset, the two

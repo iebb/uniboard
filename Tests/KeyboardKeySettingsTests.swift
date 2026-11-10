@@ -102,7 +102,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
         XCTAssertEqual(load(try data(.defaults)), .defaults)
         for bad in [#"{"schemaVersion":2,"overrides":[],"arrangements":{}}"#,
                     #"{"schemaVersion":3,"overrides":[],"arrangements":{"en":{"keys":["q"],"layout":"k"}}}"#,
-                    #"{"schemaVersion":5,"overrides":[]}"#,
+                    #"{"schemaVersion":6,"overrides":[]}"#,
                     // An earlier file's arrangements never held digits or a fourth row.
                     #"{"schemaVersion":3,"overrides":[],"arrangements":{"en":{"keys":["1","q","w","e","r","t","y","u","i","o","p","a","s","d","f","g","h","j","k","l","{shift}","z","x","c","v","b","n","m","{delete}"],"layout":"kkkkkkkkkkk/kkkkkkkkk/kkkkkkkkk"}}}"#] {
             XCTAssertEqual(load(json(bad)), .defaults)
@@ -299,6 +299,44 @@ final class KeyboardKeySettingsTests: XCTestCase {
         }
     }
 
+    func testHebrewAndArabicLettersGetTheirOwnIdentifiersWithoutChangingAnyEarlierOne() throws {
+        // The 1.3 scheme: cased letters only. Every one of those IDs is kept, in order, first.
+        var seen = Set("abcdefghijklmnopqrstuvwxyz".map(String.init))
+        let earlier = KeyboardAlphabet.catalog.filter { !$0.isCaseless }.flatMap { alphabet in
+            alphabet.keys.compactMap { key -> String? in
+                guard alphabet.isCasedLetter(key), key.unicodeScalars.count == 1, seen.insert(key).inserted else { return nil }
+                return String(format: "letter.%04X", key.unicodeScalars.first!.value)
+            }
+        }
+        let letters = Settings.descriptors.filter { $0.kind == .letter }.map(\.id)
+        XCTAssertEqual(Array(letters.prefix(26 + earlier.count)), Array("abcdefghijklmnopqrstuvwxyz").map { "letter.\($0)" } + earlier)
+        XCTAssertEqual(letters.count, 26 + earlier.count + 27 + 31, "Then Hebrew's 27 keys and Arabic's 31")
+        XCTAssertEqual(Settings.identifier(forCharacter: "ק"), "letter.05E7")
+        XCTAssertEqual(Settings.identifier(forCharacter: "ך"), "letter.05DA", "Final forms are keys of their own")
+        XCTAssertEqual(Settings.identifier(forCharacter: "ض"), "letter.0636")
+        XCTAssertEqual(Settings.identifier(forCharacter: "ء"), "letter.0621")
+        XCTAssertNil(Settings.identifier(forCharacter: "שׁ"), "A letter with a point is a choice, not a key")
+        XCTAssertNil(Settings.identifier(forCharacter: "\u{064E}"), "Diacritics are not customizable in 1.4")
+        XCTAssertNil(Settings.identifier(forCharacter: "،"))
+        let shin = try XCTUnwrap(Settings.descriptor(for: "letter.05E9"))
+        XCTAssertEqual(shin.title, "ש")
+        XCTAssertEqual(shin.text, "ש")
+        XCTAssertEqual(shin.kind, .letter)
+        for alphabet in KeyboardAlphabet.catalog where alphabet.isCaseless {
+            for key in alphabet.keys {
+                let id = try XCTUnwrap(Settings.identifier(forCharacter: key), "\(alphabet.id) \(key)")
+                XCTAssertEqual(Settings.descriptor(for: id)?.text, key)
+            }
+        }
+        // They save and load like any other key; a tap stays the same under Shift.
+        let changed = try XCTUnwrap(Settings.Snapshot().updating(["שׁ"], for: "letter.05E9", gesture: .tap)?
+            .updating(["שׂ", "ש"], for: "letter.05E9", gesture: .swipeUp))
+        XCTAssertEqual(load(try data(changed)), changed)
+        XCTAssertEqual(changed.tapOutput(for: "letter.05E9", defaultText: "ש", shifted: false), "שׁ")
+        XCTAssertEqual(changed.candidates(for: "letter.05E9", gesture: .swipeUp), ["שׂ", "ש"])
+        XCTAssertNil(changed.removingOverride(for: "letter.05E9").candidates(for: "letter.05E9", gesture: .swipeUp))
+    }
+
     func testEveryRetiredFunctionOverrideIsIgnoredWithoutLosingExactCharacterChoicesOrWriting() throws {
         let functions = ["space", "return", "delete", "shift", "layout", "unicode", "favorites", "collapse"]
         var entries: [[String: Any]] = functions.map {
@@ -477,7 +515,7 @@ final class KeyboardKeySettingsTests: XCTestCase {
 
     func testEditableReadRequiresValidBoundedSnapshotWhileKeyboardRetainsSafeFallback() throws {
         let valid = try data(example)
-        let malformed = [Data(), Data([0xFF]), Data(valid.dropLast()), json(#"{"schemaVersion":5,"overrides":[]}"#),
+        let malformed = [Data(), Data([0xFF]), Data(valid.dropLast()), json(#"{"schemaVersion":6,"overrides":[]}"#),
                          json(#"{"schemaVersion":1,"overrides":[{"keyID":"unknown"}]}"#),
                          valid + Data(repeating: 0x20, count: Settings.maximumPayloadBytes + 1 - valid.count)]
         for bytes in malformed {

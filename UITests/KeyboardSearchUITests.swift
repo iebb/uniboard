@@ -209,6 +209,28 @@ final class KeyboardSearchUITests: UniboardUITestCase {
         XCTAssertEqual(input.value as? String, context, "Changing the result kind must not insert text")
     }
 
+    /// 1.4: the app's hidden emoji categories leave the keyboard's Emojis grid and emoji search.
+    func testSystemKeyboardEmojisLeaveOutHiddenCategories() throws {
+        try requirePhoneKeyboardIntegration()
+        app.terminate()
+        app.launchArguments = Self.setUpLaunchArguments + ["--hidden-emoji-categories", "Flags"]
+        app.launch()
+        _ = openSystemKeyboardHost()
+        defer { restoreEnglishKeyboard() }
+        selectKeyboardSection("emojis")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'keyboard.emoji.'")).firstMatch.waitForExistence(timeout: 10))
+        attachScreenshot("Keyboard Emojis with Flags hidden")
+        enterKeyboardQuery("flag japan")
+        XCTAssertTrue(app.staticTexts["No matching emoji in the categories shown"].waitForExistence(timeout: 10),
+                      "\(app.debugDescription)")
+        XCTAssertFalse(app.buttons["keyboard.emoji.1F1EF-1F1F5"].exists)
+        attachScreenshot("Keyboard emoji search with Flags hidden")
+        enterKeyboardQuery("1F1EF 1F1F5")
+        XCTAssertTrue(app.staticTexts["No matching emoji in the categories shown"].waitForExistence(timeout: 10))
+        enterKeyboardQuery("rocket")
+        XCTAssertTrue(app.buttons["keyboard.emoji.1F680"].firstMatch.waitForExistence(timeout: 10), "Other categories still match")
+    }
+
     func testSystemKeyboardHeldDeleteKeepsQueryAndHostScopesSeparate() throws {
         try requireKeyboardIntegration()
         let context = "Retain this host context."

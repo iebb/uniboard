@@ -283,7 +283,8 @@ final class AppBrowsingUITests: UniboardUITestCase {
 
     func testEmojiSortByVersionAndExploreHighToLow() {
         selectAppTab("Emoji")
-        let order = app.buttons["emojiOrder"].firstMatch
+        // 1.4: the order picker lives in the View Options menu, whose value is the order.
+        let order = app.buttons["emojiViewOptions"].firstMatch
         XCTAssertTrue(order.waitForExistence(timeout: 5))
         order.tap()
         app.buttons["Newest first"].firstMatch.tap()
@@ -306,6 +307,139 @@ final class AppBrowsingUITests: UniboardUITestCase {
         options.tap()
         app.buttons["Low to High"].firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["character-U+0020"].firstMatch.waitForExistence(timeout: 10))
+    }
+
+    private func emojiTile() -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'emoji-'")).firstMatch
+    }
+
+    /// A Smaller/Larger button in the View Options menu, whatever name the menu reports.
+    private func sizeButton(_ id: String, _ title: String, _ spoken: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier == %@ OR label == %@ OR label == %@", id, title, spoken)).firstMatch
+    }
+
+    /// Design §3: tile width for `columns` across the Emoji tab's grid.
+    private func expectedTileWidth(columns: Int) -> CGFloat {
+        let grid = min(780, app.frame.width - 32)
+        return (grid - CGFloat(columns - 1) * 8) / CGFloat(columns)
+    }
+
+    func testEmojiSizeStepsFromViewOptionsAndSurvivesRelaunch() {
+        selectAppTab("Emoji")
+        let tile = emojiTile()
+        XCTAssertTrue(tile.waitForExistence(timeout: 10))
+        let grid = min(780, app.frame.width - 32)
+        let automatic = max(2, Int((grid + 8) / 104))
+        XCTAssertEqual(tile.frame.width, expectedTileWidth(columns: automatic), accuracy: 1.5, "Automatic is the 1.3 layout")
+        attachScreenshot("Emoji default size")
+        let options = app.buttons["emojiViewOptions"].firstMatch
+        options.tap()
+        let larger = sizeButton("emojiLarger", "Larger", "Increase emoji size")
+        let smaller = sizeButton("emojiSmaller", "Smaller", "Decrease emoji size")
+        XCTAssertTrue(larger.waitForExistence(timeout: 5))
+        attachScreenshot("View Options with Emoji Size")
+        for _ in 2..<automatic { larger.tap() }
+        XCTAssertTrue(larger.waitUntilEnabled(false), "Two columns is the largest size")
+        XCTAssertTrue(smaller.exists, "The menu stays open while resizing")
+        XCTAssertEqual(tile.frame.width, expectedTileWidth(columns: 2), accuracy: 1.5)
+        attachScreenshot("Emoji at two columns")
+        var steps = 0
+        while smaller.isEnabled && steps < 40 { smaller.tap(); steps += 1 }
+        let maximum = Int((grid + 8) / 40)
+        XCTAssertEqual(steps, maximum - 2, "Smaller stops where tiles would go under 32 points")
+        XCTAssertEqual(tile.frame.width, expectedTileWidth(columns: maximum), accuracy: 1.5)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap()
+        XCTAssertTrue(smaller.waitUntilAbsent())
+        attachScreenshot("Emoji at the smallest size")
+
+        app.terminate()
+        app.launchArguments = ["--text-preview", "off"]
+        app.launch()
+        selectAppTab("Emoji")
+        XCTAssertTrue(emojiTile().waitForExistence(timeout: 10))
+        XCTAssertEqual(emojiTile().frame.width, expectedTileWidth(columns: maximum), accuracy: 1.5, "The size survives relaunch")
+    }
+
+    func testEmojiCategoriesHideFlagsHideAllAndShowAll() {
+        selectAppTab("Emoji")
+        let categories = app.buttons["emojiCategories"].firstMatch
+        XCTAssertTrue(categories.waitForExistence(timeout: 5))
+        XCTAssertTrue(categories.waitUntilValueEquals("All categories shown"))
+        XCTAssertFalse(app.buttons["emojiFilterSummary"].exists)
+        categories.tap()
+        let flags = app.switches["emojiCategory.Flags"].firstMatch
+        XCTAssertTrue(flags.waitForExistence(timeout: 5))
+        XCTAssertTrue(flags.label.hasPrefix("Flags, "), flags.label)
+        tapSwitch(flags)
+        XCTAssertTrue(flags.waitUntilValueEquals("0"))
+        attachScreenshot("Emoji Categories with Flags hidden")
+        app.buttons["emojiCategories.done"].firstMatch.tap()
+        XCTAssertTrue(categories.waitUntilValueEquals("8 of 9 categories shown"))
+        let summary = app.buttons["emojiFilterSummary"].firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+        XCTAssertEqual(summary.label, "8 of 9 categories shown")
+        let search = app.descendants(matching: .any)["emojiSearch"].firstMatch
+        search.tap()
+        search.typeText("flag japan")
+        XCTAssertTrue(app.staticTexts["No matching emoji in the categories shown"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["emoji-1F1EF-1F1F5"].exists)
+        dismissAppSearchKeyboard()
+        attachScreenshot("Filtered emoji search with no visible matches")
+
+        app.buttons["emojiChooseCategories"].firstMatch.tap()
+        let hideAll = app.buttons["emojiCategories.hideAll"].firstMatch
+        revealByScrolling(hideAll, in: app)
+        hideAll.tap()
+        XCTAssertFalse(hideAll.isEnabled)
+        app.buttons["emojiCategories.done"].firstMatch.tap()
+        XCTAssertTrue(categories.waitUntilValueEquals("0 of 9 categories shown"))
+        XCTAssertTrue(app.staticTexts["No emoji categories shown"].waitForExistence(timeout: 5))
+        attachScreenshot("Every emoji category hidden")
+
+        app.buttons["emojiChooseCategories"].firstMatch.tap()
+        let showAll = app.buttons["emojiCategories.showAll"].firstMatch
+        revealByScrolling(showAll, in: app)
+        showAll.tap()
+        app.buttons["emojiCategories.done"].firstMatch.tap()
+        XCTAssertTrue(categories.waitUntilValueEquals("All categories shown"))
+        XCTAssertTrue(app.descendants(matching: .any)["emoji-1F1EF-1F1F5"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(summary.exists)
+    }
+
+    func testBlocksSortHighToLowKeepsItsOrderInSearchDetailAndRelaunch() {
+        selectAppTab("Blocks")
+        let sort = app.buttons["blockSort"].firstMatch
+        XCTAssertTrue(sort.waitForExistence(timeout: 5))
+        XCTAssertTrue(sort.waitUntilValueEquals("Code Point: Low to High"))
+        sort.tap()
+        app.buttons["Code Point: High to Low"].firstMatch.tap()
+        XCTAssertTrue(sort.waitUntilValueEquals("Code Point: High to Low"))
+        XCTAssertTrue(app.buttons["Supplementary Private Use Area-B"].firstMatch.waitForExistence(timeout: 5), "The highest block comes first")
+        XCTAssertFalse(app.buttons["Basic Latin"].exists)
+        attachScreenshot("Blocks from High to Low")
+        let blockSearch = app.descendants(matching: .any)["blockSearch"].firstMatch
+        blockSearch.tap()
+        blockSearch.typeText("latin")
+        let g = app.buttons["Latin Extended-G"].firstMatch, f = app.buttons["Latin Extended-F"].firstMatch
+        XCTAssertTrue(g.waitForExistence(timeout: 5))
+        XCTAssertTrue(f.exists)
+        XCTAssertLessThan(g.frame.minY, f.frame.minY, "Search keeps High to Low")
+        XCTAssertTrue(sort.waitUntilValueEquals("Code Point: High to Low"))
+        attachScreenshot("Latin blocks from High to Low")
+        dismissAppSearchKeyboard()
+        g.tap()
+        let previous = app.buttons["block.previous"].firstMatch, next = app.buttons["block.next"].firstMatch
+        XCTAssertTrue(next.waitForExistence(timeout: 5))
+        XCTAssertEqual(previous.label, "Previous block, Glagolitic Supplement", "The row above in High to Low")
+        next.tap()
+        XCTAssertTrue(previous.waitUntilLabelEquals("Previous block, Latin Extended-G"), "⌄ goes to the row below")
+
+        app.terminate()
+        app.launchArguments = ["--text-preview", "off"]
+        app.launch()
+        selectAppTab("Blocks")
+        XCTAssertTrue(app.buttons["blockSort"].firstMatch.waitUntilValueEquals("Code Point: High to Low"), "The order survives relaunch")
+        XCTAssertTrue(app.buttons["Supplementary Private Use Area-B"].firstMatch.waitForExistence(timeout: 5))
     }
 
     func testConScriptCharactersShowTheirBlock() {

@@ -50,6 +50,76 @@ final class CatalogPreferencesTests: XCTestCase {
         }
     }
 
+    func testEmojiCategoriesSaveHiddenNamesAtOnceAndRefresh() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("emoji-categories-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try withDefaults { _ in
+            let storage = try SharedFile(.previous)
+            let setting = EmojiCategorySetting(directory: { directory })
+            let preferences = CatalogPreferences(editionSettings: storage.settings, emojiCategories: setting)
+            XCTAssertEqual(preferences.hiddenEmojiGroups, [])
+            preferences.setEmojiGroup("Flags", shown: false)
+            XCTAssertEqual(preferences.hiddenEmojiGroups, ["Flags"])
+            XCTAssertEqual(setting.load(), ["Flags"])
+            preferences.setEmojiGroup("Flags", shown: true)
+            XCTAssertEqual(setting.load(), [])
+            preferences.hideAllEmojiGroups()
+            XCTAssertEqual(preferences.hiddenEmojiGroups, Set(preferences.emojis.groups))
+            XCTAssertEqual(preferences.emojis.shownGroupCount(hiding: preferences.hiddenEmojiGroups), 0)
+            preferences.showAllEmojiGroups()
+            XCTAssertEqual(setting.load(), [])
+            // A name another version stored survives Hide All.
+            XCTAssertTrue(setting.save(["Future"]))
+            preferences.refreshEdition()
+            XCTAssertEqual(preferences.hiddenEmojiGroups, ["Future"])
+            preferences.hideAllEmojiGroups()
+            XCTAssertTrue(preferences.hiddenEmojiGroups.contains("Future"))
+            let unwritable = CatalogPreferences(editionSettings: storage.settings, emojiCategories: EmojiCategorySetting(directory: { nil }))
+            unwritable.setEmojiGroup("Flags", shown: false)
+            XCTAssertEqual(unwritable.hiddenEmojiGroups, [], "A failed save keeps every category shown")
+            XCTAssertNotNil(unwritable.emojiCategoriesSaveError)
+            unwritable.showAllEmojiGroups()
+            XCTAssertNotNil(unwritable.emojiCategoriesSaveError, "No change, no new save")
+        }
+    }
+
+    func testSkinToneVariantsPersistRefreshAndFailedSavePreserveOtherPreferences() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("emoji-browsing-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try withDefaults { defaults in
+            let storage = try SharedFile(.previous)
+            let setting = EmojiBrowsingSetting(directory: { root })
+            let categories = EmojiCategorySetting(directory: { root })
+            XCTAssertTrue(categories.save(["Flags"]))
+            defaults.set(7, forKey: "emojiColumns")
+            defaults.set("newestFirst", forKey: "emojiSortOrder")
+            let preferences = CatalogPreferences(editionSettings: storage.settings, fontRules: nil,
+                                                emojiCategories: categories, emojiBrowsing: setting)
+            XCTAssertEqual(preferences.skinToneVariants, .all)
+            let snapshot = storage.settings.loadSnapshot()
+            preferences.selectSkinToneVariants(.fewer)
+            XCTAssertEqual(preferences.skinToneVariants, .fewer)
+            XCTAssertEqual(setting.load(), .fewer)
+            XCTAssertEqual(preferences.hiddenEmojiGroups, ["Flags"])
+            XCTAssertEqual(categories.load(), ["Flags"])
+            XCTAssertEqual(storage.settings.loadSnapshot(), snapshot)
+            XCTAssertEqual(defaults.integer(forKey: "emojiColumns"), 7)
+            XCTAssertEqual(defaults.string(forKey: "emojiSortOrder"), "newestFirst")
+            preferences.showAllEmojiGroups()
+            XCTAssertEqual(setting.load(), .fewer, "Category reset does not reset the independent variant choice")
+            XCTAssertTrue(setting.save(.all))
+            preferences.refreshEdition()
+            XCTAssertEqual(preferences.skinToneVariants, .all)
+            let unavailable = CatalogPreferences(editionSettings: storage.settings, fontRules: nil,
+                                                 emojiCategories: categories, emojiBrowsing: .init(directory: { nil }))
+            unavailable.selectSkinToneVariants(.fewer)
+            XCTAssertEqual(unavailable.skinToneVariants, .all)
+            XCTAssertNotNil(unavailable.emojiBrowsingSaveError)
+        }
+    }
+
     func testLayoutsPersistInOrderAndRejectEmptyOrUnknownLists() throws {
         try withDefaults { _ in
             let storage = try SharedFile(.previous)

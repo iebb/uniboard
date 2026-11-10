@@ -8,6 +8,8 @@ struct KeyLayersPanel<Destination: View>: View {
     typealias Gesture = KeyboardKeySettings.Gesture
     typealias Position = SymbolPageLayout.Position
     var layers: [Gesture] = [.swipeUp, .longPress, .swipeDown]
+    /// Read-only layout additions, separate from the editable saved choices.
+    var holdNotes: [KeyboardPunctuationChoice] = []
     /// A layer's choices, and whether they are the built-in defaults.
     let choices: (Gesture) -> (values: [String], isDefault: Bool)
     let destination: (Gesture) -> Destination
@@ -33,7 +35,25 @@ struct KeyLayersPanel<Destination: View>: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            ForEach(layers, id: \.rawValue) { gesture in row(gesture) }
+            ForEach(layers, id: \.rawValue) { gesture in
+                VStack(alignment: .leading, spacing: 0) {
+                    row(gesture)
+                    if gesture == .longPress {
+                        ForEach(holdNotes, id: \.text) { note in
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Text(note.noteLabel).font(.caption).foregroundStyle(.secondary)
+                                Text("\u{2068}\(note.text)\u{2069}").font(.subheadline).foregroundStyle(.primary)
+                            }
+                            .environment(\.layoutDirection, .leftToRight)
+                            .padding(.leading, 46).padding(.trailing, 12).padding(.bottom, 10)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(note.noteAccessibilityLabel)
+                            .accessibilityIdentifier("layers.holdNote.\(note.script.rawValue)")
+                        }
+                    }
+                }
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
         }
         .navigationDestination(item: $editing) { destination($0) }
         .onAppear { drag.fit(rowCounts: rows.map(\.count)) }
@@ -82,7 +102,6 @@ struct KeyLayersPanel<Destination: View>: View {
             Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 12).frame(minHeight: 52)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture { open(gesture) }
         .accessibilityElement(children: .ignore)

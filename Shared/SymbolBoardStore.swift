@@ -4,7 +4,7 @@ import CoreFoundation
 
 /// Text is deliberately compared by UTF-16, not String's canonical equality.
 /// A keyboard must preserve the exact original scalar/emoji sequence.
-struct SymbolBoardKey: Codable, Identifiable, Equatable {
+struct SymbolBoardKey: Codable, Identifiable, Equatable, Sendable {
     let id: String
     var text: String
     /// Hold choices.
@@ -15,6 +15,7 @@ struct SymbolBoardKey: Codable, Identifiable, Equatable {
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.id == rhs.id && exact(lhs.text, rhs.text) && exact(lhs.variants, rhs.variants)
+            && (lhs.up == nil) == (rhs.up == nil) && (lhs.down == nil) == (rhs.down == nil)
             && exact(lhs.up ?? [], rhs.up ?? []) && exact(lhs.down ?? [], rhs.down ?? [])
     }
     static func exact(_ lhs: [String], _ rhs: [String]) -> Bool {
@@ -25,12 +26,71 @@ struct SymbolBoardKey: Codable, Identifiable, Equatable {
     }
 }
 
-struct SymbolBoard: Codable, Identifiable, Equatable {
+struct SymbolBoard: Codable, Identifiable, Equatable, Sendable {
+    typealias Row = KeyboardRow<SymbolBoardKey>
     let id: String
     var name: String
-    var keys: [SymbolBoardKey]
-    /// The page's rows as `SymbolPageLayout` text; nil lays keys out in rows of ten.
-    var layout: String? = nil
+    private var legacyKeys: [SymbolBoardKey]
+    private var legacyLayout: String?
+    private(set) var explicitRows: [Row]?
+    var isLegacy: Bool { explicitRows == nil }
+    var resolvedRows: [Row] { explicitRows ?? Row.legacy(keys: legacyKeys, layout: legacyLayout, alignment: .left) }
+    /// Compatibility projection. New editors mutate complete rows instead.
+    var keys: [SymbolBoardKey] {
+        get { explicitRows?.flatMap { $0.cells.compactMap(\.key) } ?? legacyKeys }
+        set {
+            if let rows = explicitRows { explicitRows = Row.replacingKeys(rows, with: newValue, alignment: .left) }
+            else { legacyKeys = newValue }
+        }
+    }
+    var layout: String? {
+        get { explicitRows.map { $0.isEmpty ? nil : Row.layout($0) } ?? legacyLayout }
+        set {
+            if let rows = explicitRows { explicitRows = Row.replacingLayout(rows, with: newValue, alignment: .left) }
+            else { legacyLayout = newValue }
+        }
+    }
+    init(id: String, name: String, keys: [SymbolBoardKey], layout: String? = nil) {
+        self.id = id; self.name = name; legacyKeys = keys; legacyLayout = layout
+    }
+    init(id: String, name: String, rows: [Row]) {
+        self.id = id; self.name = name; legacyKeys = []; legacyLayout = nil; explicitRows = rows
+    }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && SymbolBoardKey.exact(lhs.name, rhs.name)
+            && lhs.legacyKeys == rhs.legacyKeys && lhs.explicitRows == rhs.explicitRows
+            && (lhs.legacyLayout == nil) == (rhs.legacyLayout == nil)
+            && SymbolBoardKey.exact(lhs.legacyLayout ?? "", rhs.legacyLayout ?? "")
+    }
+    @discardableResult mutating func setExplicitRows(_ rows: [Row]) -> Bool {
+        guard id != SymbolPageRules.favoritesID, Row.valid(rows) else { return false }
+        let next = SymbolBoard(id: id, name: name, rows: rows)
+        guard SymbolPageRules.validBoard(next) else { return false }
+        self = next; return true
+    }
+    @discardableResult mutating func convertToExplicitRows() -> Bool { setExplicitRows(resolvedRows) }
+    private enum CodingKeys: String, CodingKey { case id, name, keys, layout, rows }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try c.decode(String.self, forKey: .id), name = try c.decode(String.self, forKey: .name)
+        if c.contains(.rows) {
+            try ExplicitRowCoding.allow(decoder, ["id", "name", "rows"])
+            let rows = try c.decode([Row].self, forKey: .rows)
+            self.init(id: id, name: name, rows: rows)
+            guard id != SymbolPageRules.favoritesID, Row.valid(rows), SymbolPageRules.validBoard(self) else { throw ExplicitRowCoding.invalid }
+        } else {
+            self.init(id: id, name: name, keys: try c.decode([SymbolBoardKey].self, forKey: .keys),
+                      layout: try c.decodeIfPresent(String.self, forKey: .layout))
+        }
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id); try c.encode(name, forKey: .name)
+        if let rows = explicitRows {
+            guard id != SymbolPageRules.favoritesID, Row.valid(rows), SymbolPageRules.validBoard(self) else { throw ExplicitRowCoding.invalid }
+            try c.encode(rows, forKey: .rows)
+        } else { try c.encode(legacyKeys, forKey: .keys); try c.encodeIfPresent(legacyLayout, forKey: .layout) }
+    }
 }
 
 struct SymbolBoardPickerTarget: Equatable {
@@ -77,8 +137,16 @@ final class SymbolBoardStore: ObservableObject {
     @Published private(set) var activeBoardID: String
     @Published private(set) var preferredStarBoardID: String
     @Published private(set) var loadIssue: LoadIssue?
-    /// One complete Data value is persisted before adopting any in-memory
-    /// fields. An injected writer must leave prior bytes untouched on failure.
+    /// Detailed standalone JSON page import error; no state is adopted on failure.
+    @Published private(set) var pageImportIssue: String?
+    /// Shared page publication is authoritative; a rejected local cache update
+    /// does not reject an already-published page change. Local-only edits still
+    /// require acknowledgement. An injected local writer must preserve old bytes
+    /// on failure. This warning never schedules a replay of an older snapshot.
+    @Published private(set) var localCopyWarningID: UUID?
+    @Published private(set) var localCopyWarning = false
+    /// Dismiss presentation only; a no-op must not claim the cache was repaired.
+    func dismissLocalCopyWarning() { localCopyWarningID = nil }
     enum SyncStatus { case local, current, fullAccessRequired, unavailable }
     @Published private(set) var syncStatus: SyncStatus = .local
     private let sync: FavoriteSync?
@@ -91,6 +159,93 @@ final class SymbolBoardStore: ObservableObject {
     private var favoriteReplacementID: String?
     private var syncing = false
     private let persist: (Data) -> Bool
+    private let loadLocal: () -> Data?
+    private var arrangementLocalBytes: Data?
+    private var hasSharedPages = false
+    @Published private(set) var arrangementUndoBoardID: String?
+    private var arrangementHistory = ArrangementHistory<SymbolBoard>()
+    private var arrangementRevision: SymbolPageSettings.ArrangementRevision?
+    func invalidateArrangementUndo() {
+        arrangementHistory.invalidate(); arrangementRevision = nil; arrangementLocalBytes = nil; arrangementUndoBoardID = nil
+    }
+    func validateArrangementUndo() {
+        guard let step = arrangementHistory.step else { return }
+        guard boards.first(where: { $0.id == step.expectedAfter.id }) == step.expectedAfter else {
+            invalidateArrangementUndo(); return
+        }
+        if pages == nil, loadLocal() != arrangementLocalBytes { invalidateArrangementUndo(); return }
+        if let pages {
+            guard let revision = pages.arrangementRevision(), let expected = arrangementRevision,
+                  revision.context == expected.context,
+                  step.expectedAfter.id != Self.favoritesID || revision.favoriteBytes == expected.favoriteBytes,
+                  pages.load()?.pages.first(where: { $0.id == step.expectedAfter.id }) == Self.shareable([step.expectedAfter]).first else {
+                invalidateArrangementUndo(); return
+            }
+        }
+    }
+
+    @discardableResult func undoArrangement(boardID: String) -> ArrangementUndoResult {
+        guard let step = arrangementHistory.step, step.expectedAfter.id == boardID else { return .invalidated }
+        // Synchronize real Favorites content before comparing; the empty shared
+        // Favorites page is never a content guard or an explicit-row snapshot.
+        if boardID == Self.favoritesID { refreshFavorites() }
+        validateArrangementUndo()
+        guard arrangementHistory.step != nil else { return .invalidated }
+        if commitArrangement(step.before, replacing: step.expectedAfter, restoring: true) {
+            invalidateArrangementUndo(); return .restored
+        }
+        validateArrangementUndo()
+        return arrangementHistory.step == nil ? .invalidated : .failed
+    }
+
+    private func commitArrangement(_ replacement: SymbolBoard, replacing before: SymbolBoard,
+                                   restoring: Bool = false) -> Bool {
+        guard canEdit, configuresPages, before.id == replacement.id,
+              let index = boards.firstIndex(where: { $0.id == before.id }), boards[index] == before else { return false }
+        guard replacement != before else { return true }
+        var next = boards
+        var preferred = preferredStarBoardID
+        var revision: SymbolPageSettings.ArrangementRevision?
+        var publishedPages = false
+        if let pages {
+            let expected = Self.shareable([before])[0], changed = Self.shareable([replacement])[0]
+            guard let result = pages.replaceArrangement(expected: expected, replacement: changed,
+                revision: restoring ? arrangementRevision : pages.arrangementRevision(),
+                seed: restoring || hasSharedPages ? nil : .init(pages: Self.shareable(boards), starPageID: preferred),
+                favoriteGuard: before.id == Self.favoritesID) else { return false }
+            publishedPages = expected != changed
+            hasSharedPages = true
+            next = result.snapshot.pages
+            preferred = result.snapshot.starPageID
+            if let favorite = next.firstIndex(where: { $0.id == Self.favoritesID }) {
+                next[favorite].keys = before.id == Self.favoritesID ? replacement.keys : boards.first(where: { $0.id == Self.favoritesID })?.keys ?? []
+            }
+            revision = result.revision
+        } else { next[index] = replacement }
+        let active = next.contains(where: { $0.id == activeBoardID }) ? activeBoardID : Self.stockID
+        let state = State(version: 2, activeBoardID: active, preferredStarBoardID: preferred,
+            boards: next, favoriteBaseline: sync == nil ? nil : favoriteBaseline,
+            favoriteReplacementID: sync == nil ? nil : favoriteReplacementID)
+        let localSaved = Self.encoded(state).map(persist) ?? false
+        guard publishedPages || localSaved else { return false }
+        localCopyWarning = !localSaved; localCopyWarningID = localSaved ? nil : UUID()
+        boards = next; preferredStarBoardID = preferred; activeBoardID = active
+        if before.id == Self.favoritesID && localSaved { refreshFavorites() }
+        if !restoring, let after = boards.first(where: { $0.id == before.id }) {
+            // A concurrent Favorites addition/removal must never become part
+            // of the arrangement snapshot being restored.
+            if before.id == Self.favoritesID && before.keys.sorted(by: { $0.id < $1.id }) != after.keys.sorted(by: { $0.id < $1.id }) {
+                invalidateArrangementUndo(); return true
+            }
+            arrangementLocalBytes = pages == nil ? loadLocal() : nil
+            arrangementHistory.record(before: before, after: after, succeeded: true)
+            if let revision, before.id == Self.favoritesID, let current = pages?.arrangementRevision() {
+                arrangementRevision = .init(context: revision.context, favoriteBytes: current.favoriteBytes)
+            } else { arrangementRevision = revision }
+            arrangementUndoBoardID = before.id
+        }
+        return true
+    }
     var activeBoard: SymbolBoard { Self.selectedBoard(in: boards, activeBoardID: activeBoardID) }
     var preferredStarBoard: SymbolBoard { Self.selectedBoard(in: boards, activeBoardID: preferredStarBoardID) }
     /// Persistence validates the reference before adopting state. This also
@@ -108,6 +263,7 @@ final class SymbolBoardStore: ObservableObject {
          sharedWriteAllowed: Bool = false, configuresPages: Bool = true) {
         self.sync = sync
         self.pages = pages
+        self.loadLocal = { defaults.data(forKey: SymbolBoardStore.storageKey) }
         self.configuresPages = configuresPages
         self.sharedWriteAllowed = sharedWriteAllowed
         defer { refreshPages(); refreshFavorites() }
@@ -124,7 +280,7 @@ final class SymbolBoardStore: ObservableObject {
             guard let data = stored as? Data else { loadIssue = .unreadable; return }
             guard data.count <= Self.maximumPayloadBytes else { loadIssue = .oversized; return }
             guard var state = try? JSONDecoder().decode(State.self, from: data) else { loadIssue = .unreadable; return }
-            guard state.version == 1 || state.version == 2 else { loadIssue = .unsupportedVersion; return }
+            guard (1...3).contains(state.version) && (state.version >= 3 || state.boards.allSatisfy(\.isLegacy)) else { loadIssue = .unsupportedVersion; return }
             // Read migration never overwrites the original v1 payload. Its
             // first successful mutation writes v2 with this explicit choice.
             if state.version == 1 { state.preferredStarBoardID = Self.favoritesID }
@@ -227,7 +383,7 @@ final class SymbolBoardStore: ObservableObject {
         let key = SymbolBoardKey(id: UUID().uuidString.lowercased(), text: text, variants: [])
         var next = boards
         // Only the app edits rows; in the keyboard, new Favorites flow on in rows of ten.
-        if configuresPages, var layout = next[index].layout.flatMap(SymbolPageLayout.init) {
+        if configuresPages, next[index].isLegacy, var layout = next[index].layout.flatMap(SymbolPageLayout.init) {
             layout = layout.fitted(keyCount: next[index].keys.count)
             layout.appendKey()
             next[index].layout = layout.text
@@ -235,18 +391,18 @@ final class SymbolBoardStore: ObservableObject {
         next[index].keys.append(key)
         return commit(next) ? key.id : nil
     }
-    @discardableResult func removeKey(boardID: String, keyID: String) -> Bool {
+    @discardableResult func removeKey(boardID: String, keyID: String, recordingArrangement: Bool = false) -> Bool {
         guard let index = boards.firstIndex(where: { $0.id == boardID }),
               let position = boards[index].keys.firstIndex(where: { $0.id == keyID }) else { return false }
         var next = boards
         // Only the app edits rows; in the keyboard, new Favorites flow on in rows of ten.
-        if configuresPages, var layout = next[index].layout.flatMap(SymbolPageLayout.init) {
+        if configuresPages, next[index].isLegacy, var layout = next[index].layout.flatMap(SymbolPageLayout.init) {
             layout = layout.fitted(keyCount: next[index].keys.count)
             layout.removeKeySlot(position)
             next[index].layout = layout.rows.isEmpty ? nil : layout.text
         }
         next[index].keys.remove(at: position)
-        return commit(next)
+        return recordingArrangement ? commitArrangement(next[index], replacing: boards[index]) : commit(next)
     }
     @discardableResult func moveKey(boardID: String, keyID: String, by offset: Int) -> Bool {
         guard let board = boards.firstIndex(where: { $0.id == boardID }),
@@ -262,8 +418,35 @@ final class SymbolBoardStore: ObservableObject {
     private struct PageFile: Codable {
         struct Page: Codable {
             let name: String
-            let keys: [Key]
+            let keys: [Key]?
             var layout: String?
+            var rows: [SymbolBoard.Row]? = nil
+            private enum CodingKeys: String, CodingKey { case name, keys, layout, rows }
+            init(name: String, keys: [Key]?, layout: String?, rows: [SymbolBoard.Row]?) {
+                self.name = name; self.keys = keys; self.layout = layout; self.rows = rows
+            }
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                name = try c.decode(String.self, forKey: .name)
+                if c.contains(.rows) {
+                    try ExplicitRowCoding.allow(decoder, ["name", "rows"])
+                    do { rows = try c.decode([SymbolBoard.Row].self, forKey: .rows) }
+                    catch DecodingError.dataCorrupted(let context) where context.debugDescription == ExplicitRowCoding.widthProblem {
+                        let row = context.codingPath.reduce(1) { row, field in
+                            field.intValue.map { $0 + 1 } ?? row
+                        }
+                        let field = context.codingPath.reduce("") { result, key in
+                            if let index = key.intValue { return result + "[\(index + 1)]" }
+                            return result + (result.isEmpty ? "" : ".") + key.stringValue
+                        }
+                        throw ExplicitRowCoding.RowWidthProblem(message: ExplicitRowCoding.widthMessage(label: name, row: row, field: field))
+                    }
+                    keys = nil; layout = nil
+                } else {
+                    keys = try c.decode([Key].self, forKey: .keys)
+                    layout = try c.decodeIfPresent(String.self, forKey: .layout)
+                }
+            }
         }
         struct Key: Codable {
             let text: String
@@ -278,9 +461,9 @@ final class SymbolBoardStore: ObservableObject {
     var customPages: [SymbolBoard] { boards.filter { $0.id != Self.stockID && $0.id != Self.favoritesID } }
 
     func exportedPages() -> Data? {
-        let file = PageFile(schemaVersion: 1, pages: customPages.map { board in
-            PageFile.Page(name: board.name, keys: board.keys.map { PageFile.Key(text: $0.text, variants: $0.variants, up: $0.up, down: $0.down) },
-                          layout: board.layout)
+        let file = PageFile(schemaVersion: customPages.contains { !$0.isLegacy } ? 2 : 1, pages: customPages.map { board in
+            PageFile.Page(name: board.name, keys: board.isLegacy ? board.keys.map { PageFile.Key(text: $0.text, variants: $0.variants, up: $0.up, down: $0.down) } : nil,
+                          layout: board.isLegacy ? board.layout : nil, rows: board.explicitRows)
         })
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -290,15 +473,36 @@ final class SymbolBoardStore: ObservableObject {
     /// Adds a file's pages as new pages, returning how many. nil when the file
     /// is not a page file, is invalid, or the pages would not fit.
     @discardableResult func importPages(_ data: Data) -> Int? {
-        guard data.count <= Self.maximumPayloadBytes, let file = try? JSONDecoder().decode(PageFile.self, from: data),
-              file.schemaVersion == 1, !file.pages.isEmpty, boards.count + file.pages.count <= Self.maximumBoards else { return nil }
-        let imported = file.pages.map { page in
-            SymbolBoard(id: UUID().uuidString.lowercased(), name: page.name, keys: page.keys.map {
+        pageImportIssue = nil
+        let file: PageFile
+        guard data.count <= Self.maximumPayloadBytes else { pageImportIssue = "These pages exceed the import limit."; return nil }
+        do { file = try JSONDecoder().decode(PageFile.self, from: data) }
+        catch let issue as ExplicitRowCoding.RowWidthProblem { pageImportIssue = issue.message; return nil }
+        catch { pageImportIssue = "These pages could not be read."; return nil }
+        guard (1...2).contains(file.schemaVersion), !file.pages.isEmpty,
+              boards.count + file.pages.count <= Self.maximumBoards else { pageImportIssue = "These pages could not be imported."; return nil }
+        guard file.pages.allSatisfy({ page in
+            if let rows = page.rows { return file.schemaVersion == 2 && page.keys == nil && page.layout == nil && SymbolBoard.Row.valid(rows) }
+            return page.keys != nil
+        }) else { pageImportIssue = "These pages could not be imported."; return nil }
+        // The shape guard above guarantees keys on every legacy page.
+        let imported = file.pages.map { page -> SymbolBoard in
+            if let rows = page.rows { return SymbolBoard(id: UUID().uuidString.lowercased(), name: page.name, rows: rows) }
+            return SymbolBoard(id: UUID().uuidString.lowercased(), name: page.name, keys: page.keys!.map {
                 SymbolBoardKey(id: UUID().uuidString.lowercased(), text: $0.text, variants: $0.variants, up: $0.up, down: $0.down)
             }, layout: page.layout)
         }
         // Committing validates every name, key, variant and row.
-        return commit(boards + imported) ? imported.count : nil
+        guard commit(boards + imported) else { pageImportIssue = "These pages could not be imported."; return nil }
+        return imported.count
+    }
+
+    /// Explicit row edit, persisted as one complete value; never Favorites.
+    @discardableResult func setExplicitRows(boardID: String, rows: [SymbolBoard.Row]) -> Bool {
+        guard configuresPages, let index = boards.firstIndex(where: { $0.id == boardID }) else { return false }
+        var next = boards
+        guard next[index].setExplicitRows(rows) else { return false }
+        return next == boards || commitArrangement(next[index], replacing: boards[index])
     }
 
     /// Saves a page's rows, nil for rows of ten, and reorders its keys when a
@@ -315,7 +519,7 @@ final class SymbolBoardStore: ObservableObject {
         }
         guard layout.map({ SymbolPageLayout($0.text) != nil }) ?? true else { return false }
         next[index].layout = layout?.text
-        return next == boards || commit(next)
+        return next == boards || commitArrangement(next[index], replacing: boards[index])
     }
     @discardableResult func setVariants(boardID: String, keyID: String, variants: [String]) -> Bool {
         guard let board = boards.firstIndex(where: { $0.id == boardID }),
@@ -361,16 +565,23 @@ final class SymbolBoardStore: ObservableObject {
                           preferredStarBoardID: selectedPreferred, boards: next, favoriteBaseline: sync == nil ? nil : favoriteBaseline,
                           favoriteReplacementID: sync == nil ? nil : favoriteReplacementID)
         guard let data = Self.encoded(state) else { return false }
+        var publishedPages = false
         if let pages, Self.shareable(next) != Self.shareable(boards) || selectedPreferred != preferredStarBoardID {
-            // A page change is published to the shared file before it is adopted.
+            // Successful publication is the page mutation's commit point.
             guard configuresPages, pages.save(.init(pages: Self.shareable(next), starPageID: selectedPreferred)) else { return false }
+            publishedPages = true
+            hasSharedPages = true
         }
-        guard persist(data) else { return false }
+        let localSaved = persist(data)
+        guard publishedPages || localSaved else { return false }
+        localCopyWarning = !localSaved
+        localCopyWarningID = localSaved ? nil : UUID()
         let favoritesChanged = boards.first { $0.id == Self.favoritesID }?.keys != next.first { $0.id == Self.favoritesID }?.keys
+        if boards != next || preferredStarBoardID != selectedPreferred || activeBoardID != state.activeBoardID { invalidateArrangementUndo() }
         boards = next
         activeBoardID = state.activeBoardID
         preferredStarBoardID = selectedPreferred
-        if !syncing && favoritesChanged { refreshFavorites() }
+        if !syncing && favoritesChanged && localSaved { refreshFavorites() }
         return true
     }
     var favoriteTexts: [String] { boards.filter { $0.id == Self.favoritesID }.flatMap(\.keys).map(\.text) }
@@ -383,6 +594,7 @@ final class SymbolBoardStore: ObservableObject {
         guard let pages, canEdit else { return }
         let favorites = boards.filter { $0.id == Self.favoritesID }.flatMap(\.keys)
         let snapshot = pages.load()
+        if snapshot != nil { hasSharedPages = true }
         var next = snapshot?.pages ?? Self.initialBoards(favorites: [])
         var preferred = snapshot?.starPageID ?? Self.favoritesID
         if let index = next.firstIndex(where: { $0.id == Self.favoritesID }) { next[index].keys = favorites }
@@ -395,6 +607,7 @@ final class SymbolBoardStore: ObservableObject {
         if boards != next { boards = next }
         if preferredStarBoardID != preferred { preferredStarBoardID = preferred }
         if activeBoardID != active { activeBoardID = active }
+        validateArrangementUndo()
     }
 
     /// Pages as shared with the keyboard: Favorites keys sync separately.
@@ -419,6 +632,8 @@ final class SymbolBoardStore: ObservableObject {
             let state = State(version: 2, activeBoardID: activeBoardID, preferredStarBoardID: preferredStarBoardID,
                               boards: next, favoriteBaseline: baseline, favoriteReplacementID: result.replacementID)
             guard let data = Self.encoded(state), persist(data) else { syncStatus = .unavailable; return }
+            localCopyWarning = false
+            localCopyWarningID = nil
             favoriteBaseline = baseline
             favoriteReplacementID = result.replacementID
             if boards != next { boards = next }
@@ -429,6 +644,7 @@ final class SymbolBoardStore: ObservableObject {
     /// After this app replaced or restored the configuration: adopt the
     /// shared pages, and the shared favorites wholesale.
     func adoptReplacement() {
+        invalidateArrangementUndo()
         refreshPages()
         refreshFavorites()
     }
@@ -450,6 +666,8 @@ final class SymbolBoardStore: ObservableObject {
         return SymbolPageRules.validPages(state.boards, starPageID: preferred)
     }
     private static func encoded(_ state: State) -> Data? {
+        var state = state
+        state.version = state.boards.contains { !$0.isLegacy } ? 3 : 2
         guard valid(state), let data = try? JSONEncoder().encode(state), data.count <= maximumPayloadBytes else { return nil }
         return data
     }
@@ -529,6 +747,7 @@ enum SymbolPageRules {
     }
     static func validBoard(_ board: SymbolBoard) -> Bool {
         validID(board.id) && validName(board.name) == board.name && board.keys.count <= keyLimit(board.id)
+            && (board.explicitRows.map { board.id != favoritesID && SymbolBoard.Row.valid($0) } ?? true)
             && (board.layout.map({ SymbolPageLayout($0) != nil }) ?? true)
             && Set(board.keys.map(\.id)).count == board.keys.count
             && uniqueExact(board.keys.map(\.text)).count == board.keys.count

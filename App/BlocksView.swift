@@ -4,12 +4,15 @@ struct BlocksView: View {
     var select: (UnicodeCharacter) -> Void
     @State private var query = ""
     @EnvironmentObject private var preferences: CatalogPreferences
+    /// Highest starting code point first. Search keeps it.
+    @AppStorage("blocksDescending") private var descending = false
     private var catalog: UnicodeCatalog { preferences.catalog }
+    private var ordered: [UnicodeBlock] { BlockOrder.blocks(catalog.blocks, descending: descending) }
 
     private var blocks: [UnicodeBlock] {
         let tokens = query.lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init)
-        if tokens.isEmpty { return catalog.blocks }
-        return catalog.blocks.filter { block in
+        if tokens.isEmpty { return ordered }
+        return ordered.filter { block in
             tokens.allSatisfy { block.name.lowercased().contains($0) || block.rangeLabel.lowercased().contains($0) }
         }
     }
@@ -28,7 +31,7 @@ struct BlocksView: View {
             Section {
                 ForEach(blocks) { block in
                     NavigationLink {
-                        BlockDetailView(block: block, select: select)
+                        BlockDetailView(block: block, descending: descending, select: select)
                     } label: {
                         let symbol = catalog.representative(of: block)
                         HStack(spacing: 12) {
@@ -58,12 +61,38 @@ struct BlocksView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Blocks")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Sort Blocks", selection: $descending) {
+                        Label(BlockOrder.title(descending: false), systemImage: "arrow.down").tag(false)
+                        Label(BlockOrder.title(descending: true), systemImage: "arrow.up").tag(true)
+                    }
+                    .pickerStyle(.inline)
+                } label: { Image(systemName: "arrow.up.arrow.down") }
+                .accessibilityLabel("Sort Blocks")
+                .accessibilityValue(BlockOrder.title(descending: descending))
+                .accessibilityIdentifier("blockSort")
+            }
+        }
         .scrollDismissesKeyboard(.interactively)
     }
 }
 
+/// The Blocks list's one sort key, starting code point, in either direction.
+/// Characters inside a block always keep code-point order.
+enum BlockOrder {
+    static func blocks(_ blocks: [UnicodeBlock], descending: Bool) -> [UnicodeBlock] {
+        descending ? blocks.reversed() : blocks
+    }
+    static func title(descending: Bool) -> String { descending ? "Code Point: High to Low" : "Code Point: Low to High" }
+}
+
 struct BlockDetailView: View {
     var select: (UnicodeCharacter) -> Void
+    /// The order of the list this detail was opened from, so ⌃/⌄ and the
+    /// navigator step through the rows as that list showed them.
+    let descending: Bool
     /// The block on show; the navigator at the top switches it.
     @State private var block: UnicodeBlock
     @State private var characters: [UnicodeCharacter] = []
@@ -77,14 +106,15 @@ struct BlockDetailView: View {
     private var shown: GridDensity { density.fitting(width) }
     /// The blocks before and after this one, for stepping through them.
     private func neighbour(_ offset: Int) -> UnicodeBlock? {
-        let blocks = preferences.catalog.blocks
+        let blocks = BlockOrder.blocks(preferences.catalog.blocks, descending: descending)
         guard let index = blocks.firstIndex(where: { $0.start == block.start }),
               blocks.indices.contains(index + offset) else { return nil }
         return blocks[index + offset]
     }
 
-    init(block: UnicodeBlock, select: @escaping (UnicodeCharacter) -> Void) {
+    init(block: UnicodeBlock, descending: Bool = false, select: @escaping (UnicodeCharacter) -> Void) {
         _block = State(initialValue: block)
+        self.descending = descending
         self.select = select
     }
 
@@ -129,7 +159,7 @@ struct BlockDetailView: View {
         // Preferring ConScript renames its characters.
         .onChange(of: preferences.catalog.usesConScript) { _, _ in reload() }
         .sheet(isPresented: $showNavigator) {
-            BlockNavigator(blocks: preferences.catalog.blocks, current: block.start) { chosen in
+            BlockNavigator(blocks: BlockOrder.blocks(preferences.catalog.blocks, descending: descending), current: block.start) { chosen in
                 block = chosen
                 reload()
             }

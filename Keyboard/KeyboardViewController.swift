@@ -5,6 +5,40 @@ import UIKit
 /// original scalar or complete emoji sequence to the host's document proxy.
 final class KeyboardViewController: UIInputViewController {
     private let model = KeyboardModel()
+    private var language: KeyboardLanguageCoordinator { model.language }
+    private var lastAppliedPrimaryLanguage: String?
+    private let english = KeyboardEnglishCorrectionCoordinator()
+    /// Explicit events revoke capabilities even when exposed host strings match.
+    private var englishInteraction = UUID()
+    private var englishWriteInProgress = false
+    private var manualEnglishExpected: KeyboardCorrectionContext?
+    private var manualEnglishResult: KeyboardCorrectionContext?
+
+    /// In-memory, exact host anchor. Neither this nor pending actions is persisted.
+    private struct CompositionAnchor: Equatable {
+        let document: UUID
+        let interaction: UUID
+        let before: [UInt8]?
+        let after: [UInt8]?
+        let selection: [UInt8]?
+    }
+    private var compositionAnchor: CompositionAnchor?
+    /// Only these audited, non-host-writing transitions may continue without a
+    /// verified post-write text anchor. Never put an arbitrary closure here.
+    private enum InputModeTransition {
+        case target(String)
+        case directTyping
+    }
+    private enum PendingConversionAction {
+        case guardedAction(() -> Void)
+        case inputMode(InputModeTransition, LanguageCompositionModeTransitionScope)
+    }
+    private var pendingConversionAction: PendingConversionAction?
+    private var pendingConversionAnchor: CompositionAnchor?
+    private var queuedPunctuation: String?
+    private var completingConversion = false
+    private var conversionPostWriteAnchor: CompositionAnchor?
+
     private var hostingController: UIHostingController<UnicodeKeyboardView>?
     private var deleteInteractionID = UUID()
     private var doubleSpaceState = KeyboardDoubleSpaceState()
@@ -46,9 +80,31 @@ final class KeyboardViewController: UIInputViewController {
         inputView?.backgroundColor = .clear
         inputView?.isOpaque = false
         NotificationCenter.default.addObserver(self, selector: #selector(updateBackdrop), name: UIAccessibility.reduceTransparencyStatusDidChangeNotification, object: nil)
+        // The app posts this after changing Emoji Categories; Darwin
+        // notifications arrive on the main thread. Removed in deinit.
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque(), { _, observer, _, _, _ in
+            guard let observer else { return }
+            let controller = Unmanaged<KeyboardViewController>.fromOpaque(observer).takeUnretainedValue()
+            MainActor.assumeIsolated { controller.model.refreshEmojiCategories() }
+        }, EmojiCategorySetting.changedNotification as CFString, nil, .deliverImmediately)
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque(), { _, observer, _, _, _ in
+            guard let observer else { return }
+            let controller = Unmanaged<KeyboardViewController>.fromOpaque(observer).takeUnretainedValue()
+            Task { @MainActor [weak controller] in controller?.model.refreshEmojiCategories() }
+        }, EmojiBrowsingSetting.changedNotification as CFString, nil, .deliverImmediately)
+        // Payload-free publication notice; reload only our fixed App Group stores.
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque(), { _, observer, _, _, _ in
+            guard let observer else { return }
+            let controller = Unmanaged<KeyboardViewController>.fromOpaque(observer).takeUnretainedValue()
+            Task { @MainActor [weak controller] in
+                controller?.model.refreshEditionFromAppSettings()
+                controller?.invalidateEnglish()
+                controller?.language.refresh()
+            }
+        }, "ad.neko.uniboard.language-input.changed" as CFString, nil, .deliverImmediately)
         updateBackdrop()
         let root = UnicodeKeyboardView(
-            model: model, store: CharacterStore.shared, controller: self,
+            model: model, language: language, store: CharacterStore.shared, controller: self,
             delete: { [weak self] mode, isQuery in self?.makeDeleteAction(renderedMode: mode, isQuery: isQuery) ?? { false } },
             action: { [weak self] mode, command in self?.makeInputAction(renderedMode: mode, command: command) ?? { false } },
             shiftSlide: { [weak self] mode in self?.makeShiftSlideAction(renderedMode: mode) },
@@ -98,6 +154,7 @@ final class KeyboardViewController: UIInputViewController {
         view.addGestureRecognizer(keyTouchObserver)
         model.presentationChanged = { [weak self] in self?.updateKeyboardHeight() }
         model.queryEdited = { [weak self] in
+            self?.invalidateEnglish()
             self?.doubleSpaceState.reset()
             self?.expectedHostEdit = nil
         }
@@ -106,9 +163,28 @@ final class KeyboardViewController: UIInputViewController {
             self?.applyPrimaryLanguage()
             self?.synchronizeHostTraits()
         }
+        language.onChange = { [weak self] in
+            guard let self else { return }
+            // A disabled idle converter must not keep consuming ordinary taps.
+            if self.language.mode != .direct, self.language.rawInput.isEmpty,
+               !self.language.preferences.isEnabled(self.language.mode) {
+                self.language.select(.direct)
+            }
+            self.invalidateEnglish()
+            self.synchronizeEnglishOptions()
+            self.model.synchronizeLanguageKeyboard()
+            if self.language.mode != .direct { self.model.synchronizeCapitalization(false) }
+            self.applyPrimaryLanguage()
+            self.updateKeyboardHeight()
+        }
+        language.validateAnchor = { [weak self] in
+            guard let self else { return false }
+            return self.compositionAnchor == nil || self.compositionAnchor == self.readCompositionAnchor()
+        }
         applyPrimaryLanguage()
         model.inputModeChanged = { [weak self] in
             guard let self else { return }
+            self.invalidateEnglish()
             KeyboardVariantButton.cancelInteractions(in: self.view)
             self.doubleSpaceState.reset()
             self.expectedHostEdit = nil
@@ -120,12 +196,21 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         model.refreshEditionFromAppSettings()
+        invalidateEnglish()
+        language.refresh()
+        synchronizeEnglishOptions()
         SymbolBoardStore.shared.refreshPages()
         SymbolBoardStore.shared.refreshFavorites(canWrite: hasFullAccess)
         KeyboardTouchFeedback.hapticsAllowed = hasFullAccess
         if hasFullAccess {
             // The app's font picker tags fonts the keyboard can't open (design/font-picker §4).
-            DispatchQueue.global(qos: .utility).async { KeyboardFontEvidenceStore.appGroup.record(.current()) }
+            // At most once a minute after a successful run; a failed run is retried.
+            let throttle = KeyboardFontEvidenceThrottle.shared
+            if throttle.begin() {
+                DispatchQueue.global(qos: .utility).async {
+                    throttle.finish(succeeded: KeyboardFontEvidenceStore.appGroup.recordAndConfirm(.current()))
+                }
+            }
         }
         synchronizeHostTraits()
         updateKeyboardHeight()
@@ -155,8 +240,11 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillDisappear(_ animated: Bool) {
         // A remote host may hide and reuse this same window without detaching
         // individual keys. Invalidate every captured input/hover action first.
+        invalidateComposition()
         deleteInteractionID = UUID()
         model.symbolBoardManagerPresented = false
+        // The Arabic Diacritics panel never stays open across launches.
+        model.closeDiacritics()
         closePreviewImagePanel()
         closeTextInspection()
         KeyboardVariantButton.cancelInteractions(in: view)
@@ -185,6 +273,7 @@ final class KeyboardViewController: UIInputViewController {
         #endif
         // A selection move can leave the same preceding suffix. Never infer
         // permission for a destructive Space edit from that suffix alone.
+        invalidateComposition()
         doubleSpaceState.reset()
         expectedHostEdit = nil
         model.symbolBoardManagerPresented = false
@@ -204,6 +293,7 @@ final class KeyboardViewController: UIInputViewController {
     /// The picture uses the remembered fixed sRGB colors, never the
     /// keyboard's appearance, so light and dark keyboards copy the same PNG.
     fileprivate func openPreviewImagePanel(excerpt: KeyboardPreviewExcerpt, availableWidth: CGFloat, visibleHeight: CGFloat) {
+        invalidateEnglish()
         // Adopts an imported or restored choice; reads the shared file only here.
         let choice = KeyboardImageColorStore.load(shared: .shared, hasFullAccess: hasFullAccess)
         if model.previewImageColors != choice { model.previewImageColors = choice }
@@ -274,6 +364,7 @@ final class KeyboardViewController: UIInputViewController {
     /// read, kept or logged; Full Access is never needed to inspect.
     fileprivate func openTextInspection(excerpt: KeyboardPreviewExcerpt) {
         guard model.previewImageExport == nil else { return }
+        invalidateEnglish()
         let proxy = textDocumentProxy
         // No context at all while the field reports text: the host isn't sharing it.
         let contextAvailable = proxy.documentContextBeforeInput != nil || proxy.documentContextAfterInput != nil || !proxy.hasText
@@ -356,6 +447,7 @@ final class KeyboardViewController: UIInputViewController {
         // character key when neither input trait has changed.
         if model.needsInputModeSwitchKey != needsInputModeSwitchKey { model.needsInputModeSwitchKey = needsInputModeSwitchKey }
         guard let document = currentDocumentIdentifier else {
+            invalidateEnglish()
             doubleSpaceState.reset()
             expectedHostEdit = nil
             if hostSignature != nil {
@@ -369,12 +461,14 @@ final class KeyboardViewController: UIInputViewController {
         let proxy = textDocumentProxy
         let signature = HostSignature(documentIdentifier: document, traits: KeyboardHostInputTraits(reading: proxy))
         if signature != hostSignature {
+            invalidateComposition()
             hostSignature = signature
             doubleSpaceState.reset()
             expectedHostEdit = nil
             model.hostDidEdit(invalidateMode: true)
         }
         guard !model.isSearching else { return }
+        if language.mode != .direct { model.synchronizeCapitalization(false); return }
         // Follow App keeps the host's own request; the other modes replace
         // it. Restricted fields (URL, email, credentials, secure entry,
         // non-default keyboards) never get automatic capitals.
@@ -388,7 +482,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private var permitsEnglishAssistance: Bool {
-        KeyboardHostInputTraits(reading: textDocumentProxy).permitsEnglishAssistance
+        language.mode == .direct && KeyboardHostInputTraits(reading: textDocumentProxy).permitsEnglishAssistance
     }
 
     private static func contextSuffix(_ text: String) -> [Unicode.Scalar] {
@@ -396,6 +490,16 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func acknowledgeHostChange() {
+        let snapshot = englishContext()
+        let manualAcknowledged = manualEnglishExpected.map { Self.sameEnglishObservation($0, snapshot) } == true
+            || manualEnglishResult.map { Self.sameEnglishObservation($0, snapshot) } == true
+        let englishAcknowledged = english.observeHostSnapshot(snapshot)
+        if englishSurfaceAvailable && (manualAcknowledged || englishAcknowledged) {
+            // Own expected writes acknowledge callbacks; never invent context.
+            expectedHostEdit = nil
+            return
+        }
+        publishEnglishState()
         let expected = expectedHostEdit
         expectedHostEdit = nil
         let literalScope = currentLiteralWriteScope()
@@ -408,6 +512,7 @@ final class KeyboardViewController: UIInputViewController {
            textDocumentProxy.selectedText?.isEmpty != false,
            let context = textDocumentProxy.documentContextBeforeInput,
            Self.contextSuffix(context) == expected.before { return }
+        invalidateComposition()
         doubleSpaceState.reset()
         // Additional same-document text notifications can follow our own
         // edits. Reset punctuation/case hints, but do not invalidate another
@@ -415,8 +520,519 @@ final class KeyboardViewController: UIInputViewController {
         model.hostDidEdit()
     }
 
+    // MARK: English assistance (local, opt-in, synchronous proxy transactions)
+
+    private var englishSurfaceAvailable: Bool {
+        LanguageInputSettings.englishAssistanceAvailable && language.mode == .direct && model.typingState.alphabet.id == KeyboardAlphabet.english.id
+            && !model.showsUnicode && !model.isSearching && !model.hasSymbolBoardOverlay
+            && !model.hasKeyboardPanel && !model.finishingConversion && !model.expandedConversion
+    }
+
+    private var englishPermission: KeyboardCorrectionHostPermission {
+        guard englishSurfaceAvailable else { return .literalField }
+        return KeyboardHostInputTraits(reading: textDocumentProxy).englishCorrectionPermission
+    }
+
+    private func englishContext() -> KeyboardCorrectionContext {
+        let proxy = textDocumentProxy
+        return KeyboardCorrectionContext(before: proxy.documentContextBeforeInput,
+            after: proxy.documentContextAfterInput, selectedText: proxy.selectedText,
+            scope: currentDocumentIdentifier.map {
+                KeyboardEnglishInputScope(documentIdentifier: $0, modeIdentifier: model.inputModeID)
+            }, completeness: .unknownOrTruncated)
+    }
+
+    private static func sameEnglishObservation(_ lhs: KeyboardCorrectionContext,
+                                               _ rhs: KeyboardCorrectionContext) -> Bool {
+        func same(_ a: String?, _ b: String?) -> Bool {
+            switch (a, b) {
+            case let (.some(a), .some(b)): return a.unicodeScalars.elementsEqual(b.unicodeScalars)
+            case (.none, .none): return true
+            default: return false
+            }
+        }
+        return lhs.scope != nil && lhs.scope == rhs.scope
+            && same(lhs.before, rhs.before) && same(lhs.after, rhs.after)
+            && same(lhs.selectedText, rhs.selectedText)
+    }
+
+    private func synchronizeEnglishOptions() {
+        english.setOptions(KeyboardEnglishCorrectionOptions(
+            suggestionsEnabled: language.preferences.effectiveEnglishSuggestions,
+            autocorrectionEnabled: language.preferences.effectiveEnglishAutocorrection))
+        publishEnglishState()
+    }
+
+    private func invalidateEnglish() {
+        englishInteraction = UUID()
+        model.englishRevision = UUID()
+        manualEnglishExpected = nil
+        manualEnglishResult = nil
+        english.invalidate()
+        publishEnglishState()
+    }
+
+    private func englishVisibleSuggestions() -> [String] {
+        guard englishSurfaceAvailable, language.preferences.effectiveEnglishSuggestions,
+              let word = english.trackedWord,
+              KeyboardHostInputTraits(reading: textDocumentProxy).permitsEnglishAssistance else { return [] }
+        let custom = language.englishCustomOutputs(for: word) ?? []
+        var seen = Set<[UInt32]>()
+        // Scalar identities preserve canonically equivalent but distinct outputs.
+        return Array((custom + english.suggestions).filter {
+            seen.insert($0.unicodeScalars.map(\.value)).inserted
+        }.prefix(12))
+    }
+
+    private func publishEnglishState() {
+        let values = englishVisibleSuggestions()
+        let original = english.hasImmediateUndo ? english.correctedOriginalWord : nil
+        let canReplace = englishSurfaceAvailable && english.hasVerifiedReplacementScope
+            && english.trackedWord != nil && englishPermission == .permits
+        let hasUndo = englishSurfaceAvailable && english.hasImmediateUndo
+        let undoAvailabilityChanged = model.englishHasUndo != hasUndo
+        let status: String
+        if !values.isEmpty && !canReplace { status = "Suggestions unavailable here." }
+        else if english.dictionaryAvailability == .dictionaryUnavailable { status = "English suggestions unavailable" }
+        else { status = "English" }
+        if model.englishSuggestions.map({ Array($0.utf8) }) != values.map({ Array($0.utf8) })
+            || model.englishOriginal.map({ Array($0.utf8) }) != original.map({ Array($0.utf8) })
+            || model.englishCanReplace != canReplace || model.englishHasUndo != hasUndo
+            || model.englishStatus != status {
+            model.englishSuggestions = values
+            model.englishOriginal = original
+            model.englishCanReplace = canReplace
+            model.englishHasUndo = hasUndo
+            model.englishStatus = status
+            model.englishRevision = UUID()
+        }
+        if undoAvailabilityChanged { updateKeyboardHeight() }
+    }
+
+    private struct EnglishExecutionGuard: Equatable {
+        let document: UUID
+        let mode: UUID
+        let interaction: UUID
+        let englishInteraction: UUID
+        let traits: KeyboardHostInputTraits
+    }
+
+    private func englishExecutionGuard() -> EnglishExecutionGuard? {
+        guard englishSurfaceAvailable, let document = currentDocumentIdentifier else { return nil }
+        return EnglishExecutionGuard(document: document, mode: model.inputModeID,
+            interaction: deleteInteractionID, englishInteraction: englishInteraction,
+            traits: KeyboardHostInputTraits(reading: textDocumentProxy))
+    }
+
+    /// Returns true once a plan is dispatched, INCLUDING a partial failure. A
+    /// failed transaction must never replay the delimiter into another field.
+    private func insertEnglishDelimiter(_ delimiter: String,
+                                        onCorrection: ((KeyboardCorrectionContext) -> Void)? = nil) -> Bool {
+        guard englishSurfaceAvailable, KeyboardAutocorrectionPolicy.isAutomaticDelimiter(delimiter),
+              let reading = english.trackedWord else { return false }
+        let customProtected = language.protectsEnglishCustomReading(reading)
+        guard let plan = english.planForDelimiter(delimiter, context: englishContext(),
+            hostPermission: englishPermission, isKnownCustomReading: customProtected) else {
+            publishEnglishState(); return false
+        }
+        if executeEnglishPlan(plan, protectedReading: reading) {
+            let actual = englishContext()
+            if english.hasImmediateUndo, Self.sameEnglishObservation(plan.resultingContext, actual) {
+                onCorrection?(actual)
+            }
+        }
+        return true
+    }
+
+    private func insertOrdinaryEnglish(_ text: String) -> Bool {
+        guard literalWriteToken == nil, englishSurfaceAvailable,
+              let bound = englishExecutionGuard() else { return false }
+        if insertEnglishDelimiter(text) { return true }
+        // Bind rendered suggestion actions to this exact input revision even
+        // when two successive words happen to receive identical suggestions.
+        model.englishRevision = UUID()
+        // Ordinary provenance never applies to saved keys, variants or Unicode.
+        english.willInsert(text, origin: .ordinaryKey, context: englishContext(), hostPermission: englishPermission)
+        englishWriteInProgress = true
+        defer { englishWriteInProgress = false; publishEnglishState() }
+        expectedHostEdit = nil
+        previewCursorDriver.keyboardWillEdit()
+        guard englishExecutionGuard() == bound else { invalidateEnglish(); return false }
+        textDocumentProxy.insertText(text)
+        guard englishExecutionGuard() == bound else { invalidateEnglish(); return true }
+        english.didInsert(context: englishContext(), hostPermission: englishPermission)
+        return true
+    }
+
     @discardableResult
-    private func insertHostText(_ text: String, literalToken: UUID? = nil) -> Bool {
+    private func executeEnglishPlan(_ plan: KeyboardGuardedReplacementPlan,
+                                    protectedReading: String? = nil) -> Bool {
+        guard !englishWriteInProgress, let bound = englishExecutionGuard() else { invalidateEnglish(); return false }
+        englishWriteInProgress = true
+        defer { englishWriteInProgress = false; publishEnglishState() }
+        expectedHostEdit = nil
+        previewCursorDriver.keyboardWillEdit()
+        for (index, step) in plan.steps.enumerated() {
+            guard englishExecutionGuard() == bound,
+                  protectedReading.map({ !language.protectsEnglishCustomReading($0) }) ?? true,
+                  english.authorizesStep(index, of: plan, context: englishContext(), hostPermission: englishPermission)
+            else { invalidateEnglish(); return false }
+            switch step.operation {
+            case .deleteBackward: textDocumentProxy.deleteBackward()
+            case .insertText(let text): textDocumentProxy.insertText(text)
+            }
+            guard englishExecutionGuard() == bound,
+                  english.validateStepResult(index, of: plan, context: englishContext(), hostPermission: englishPermission)
+            else { invalidateEnglish(); return false }
+        }
+        return english.didExecute(plan, context: englishContext(), hostPermission: englishPermission)
+    }
+
+    fileprivate func undoEnglish(revision: UUID) {
+        guard revision == model.englishRevision, englishSurfaceAvailable,
+              let plan = english.planUndo(context: englishContext(), hostPermission: englishPermission) else {
+            publishEnglishState(); return
+        }
+        _ = executeEnglishPlan(plan)
+        didEditHostText()
+    }
+
+    /// Explicit manual selection permits arbitrary saved Unicode output, never
+    /// automatic substitution. The deleted span is ONLY our verified ASCII word.
+    fileprivate func chooseEnglish(_ text: String, revision: UUID) {
+        guard revision == model.englishRevision, !englishWriteInProgress,
+              english.hasVerifiedReplacementScope, englishPermission == .permits,
+              let word = english.trackedWord, !word.isEmpty, word.utf8.count <= 32,
+              word.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) }),
+              englishVisibleSuggestions().contains(where: { $0.unicodeScalars.elementsEqual(text.unicodeScalars) }),
+              let bound = englishExecutionGuard() else { return }
+        let start = englishContext()
+        guard english.observeHostSnapshot(start), english.hasVerifiedReplacementScope,
+              english.trackedWord?.unicodeScalars.elementsEqual(word.unicodeScalars) == true,
+              let before = start.before, let after = start.after, start.selectedText == "",
+              before.utf8.suffix(word.utf8.count).elementsEqual(word.utf8),
+              before.unicodeScalars.count <= 4096, after.unicodeScalars.count <= 4096,
+              !text.isEmpty, text.unicodeScalars.count <= 256 else { invalidateEnglish(); return }
+        var expected = before
+        let requiresCustom = !english.suggestions.contains(where: { $0.unicodeScalars.elementsEqual(text.unicodeScalars) })
+        guard !requiresCustom || language.englishCustomOutputs(for: word)?.contains(where: {
+            $0.unicodeScalars.elementsEqual(text.unicodeScalars)
+        }) == true else { invalidateEnglish(); return }
+        // Capture the live verified target BEFORE revoking the automatic plan.
+        english.invalidate()
+        englishWriteInProgress = true
+        defer {
+            manualEnglishExpected = nil; manualEnglishResult = nil
+            englishWriteInProgress = false; publishEnglishState()
+        }
+        previewCursorDriver.keyboardWillEdit()
+        expectedHostEdit = nil
+        func context(_ before: String) -> KeyboardCorrectionContext {
+            KeyboardCorrectionContext(before: before, after: after, selectedText: "",
+                scope: start.scope, completeness: .unknownOrTruncated)
+        }
+        for index in 0...word.count {
+            let input = context(expected)
+            let output: String
+            if index < word.count { output = String(expected.dropLast()) }
+            else { output = expected + text }
+            let result = context(output)
+            manualEnglishExpected = input; manualEnglishResult = result
+            guard englishExecutionGuard() == bound, englishPermission == .permits,
+                  Self.sameEnglishObservation(input, englishContext()),
+                  !requiresCustom || language.englishCustomOutputs(for: word)?.contains(where: {
+                      $0.unicodeScalars.elementsEqual(text.unicodeScalars)
+                  }) == true else { invalidateEnglish(); return }
+            if index < word.count { textDocumentProxy.deleteBackward() }
+            else { textDocumentProxy.insertText(text) }
+            guard englishExecutionGuard() == bound, englishPermission == .permits,
+                  Self.sameEnglishObservation(result, englishContext()) else { invalidateEnglish(); return }
+            expected = output
+        }
+        // The completed selection is literal and cannot be immediately recorrected.
+        didEditHostText()
+    }
+
+    private func readCompositionAnchor() -> CompositionAnchor? {
+        guard let document = currentDocumentIdentifier else { return nil }
+        let proxy = textDocumentProxy
+        return CompositionAnchor(document: document, interaction: deleteInteractionID,
+            before: proxy.documentContextBeforeInput.map { Array($0.utf8) },
+            after: proxy.documentContextAfterInput.map { Array($0.utf8) },
+            selection: proxy.selectedText.map { Array($0.utf8) })
+    }
+
+    private func invalidateComposition() {
+        invalidateEnglish()
+        guard !completingConversion else { return }
+        language.documentChanged()
+        compositionAnchor = nil
+        conversionPostWriteAnchor = nil
+        pendingConversionAction = nil
+        pendingConversionAnchor = nil
+        queuedPunctuation = nil
+        model.queuedConversionPunctuation = nil
+        model.finishingConversion = false
+        model.expandedConversion = false
+    }
+
+    @discardableResult
+    private func finishConversionBefore(_ action: @escaping () -> Void) -> Bool {
+        finishConversionBefore(.guardedAction(action))
+    }
+
+    @discardableResult
+    private func finishConversionBeforeInputMode(_ transition: InputModeTransition) -> Bool {
+        guard !model.finishingConversion else { return false }
+        guard !language.rawInput.isEmpty else { performInputModeTransition(transition); return true }
+        guard let scope = readConversionModeScope() else { return false }
+        return finishConversionBefore(.inputMode(transition, scope))
+    }
+
+    private func performConversionAction(_ action: PendingConversionAction) {
+        switch action {
+        case .guardedAction(let action): action()
+        case .inputMode(let transition, _): performInputModeTransition(transition)
+        }
+    }
+
+    /// Keep this dispatcher local-only: no host insert/delete/cursor operations.
+    private func performInputModeTransition(_ transition: InputModeTransition) {
+        switch transition {
+        case .target(let id): switchInputTarget(id)
+        case .directTyping:
+            language.select(.direct)
+            model.synchronizeLanguageKeyboard()
+        }
+    }
+
+    private func readConversionModeScope() -> LanguageCompositionModeTransitionScope? {
+        guard isKeyboardShown, let document = currentDocumentIdentifier else { return nil }
+        // inputModeID also revokes on selection/focus/trait callbacks, even if
+        // their exposed strings and document ID happen to return unchanged.
+        return .init(document: document, inputMode: model.inputModeID,
+            interaction: deleteInteractionID,
+            selection: textDocumentProxy.selectedText.map { Array($0.utf8) })
+    }
+
+    @discardableResult
+    private func finishConversionBefore(_ action: PendingConversionAction) -> Bool {
+        guard !model.finishingConversion else { return false }
+        guard !language.rawInput.isEmpty else { performConversionAction(action); return true }
+        guard let anchor = compositionAnchor, anchor == readCompositionAnchor() else {
+            invalidateComposition(); return false
+        }
+        pendingConversionAction = action
+        pendingConversionAnchor = anchor
+        model.finishingConversion = true
+        return true
+    }
+
+    fileprivate func resolveConversionTransition(keepTypedText: Bool?, token: LanguageCompositionToken) {
+        // An old view activation must never clear newer input/resources.
+        guard token == language.state.token, model.finishingConversion,
+              let anchor = pendingConversionAnchor else { return }
+        guard anchor == readCompositionAnchor() else {
+            invalidateComposition(); return
+        }
+        guard let keepTypedText else {
+            pendingConversionAction = nil; pendingConversionAnchor = nil
+            model.finishingConversion = false
+            return
+        }
+        guard let action = pendingConversionAction else { return }
+        if case .inputMode(_, let scope) = action, readConversionModeScope() != scope {
+            invalidateComposition(); return
+        }
+        // Keep the request visible if commit-time resource validation revokes
+        // this token. A fresh panel action can still recover the exact raw text.
+        var expected = anchor
+        if keepTypedText {
+            let effects = language.mode == .koreanTwoSetHangul
+                ? language.commitDefault(token: token) : language.commitLiteral(token: token)
+            guard !effects.isEmpty else { return }
+            switch action {
+            case .inputMode(_, let scope):
+                guard commitConversionForInputMode(effects, scope: scope) else {
+                    invalidateComposition(); return
+                }
+            case .guardedAction:
+                guard applyConversionEffects(effects), let postWrite = conversionPostWriteAnchor else {
+                    invalidateComposition(); return
+                }
+                expected = postWrite
+            }
+        } else { language.cancel(); compositionAnchor = nil }
+        pendingConversionAction = nil; pendingConversionAnchor = nil
+        model.finishingConversion = false
+        switch action {
+        case .inputMode(_, let scope):
+            guard readConversionModeScope() == scope,
+                  keepTypedText || readCompositionAnchor() == expected else { invalidateComposition(); return }
+        case .guardedAction:
+            // Arbitrary actions (including second host writes) still require
+            // ALL exposed context before replay.
+            guard readCompositionAnchor() == expected else { invalidateComposition(); return }
+        }
+        performConversionAction(action)
+    }
+
+    /// A single accepted commit can finish a LOCAL mode change even when the
+    /// proxy withholds or delays its text context. This never mints an anchor
+    /// for punctuation, a saved key, cursor movement, or another host write.
+    private func commitConversionForInputMode(_ effects: [LanguageCompositionEffect],
+                                             scope: LanguageCompositionModeTransitionScope) -> Bool {
+        conversionPostWriteAnchor = nil
+        guard let text = LanguageCompositionModeTransitionScope.completeCommitText(in: effects),
+              language.rawInput.isEmpty, scope.selection?.isEmpty != false,
+              readConversionModeScope() == scope,
+              let anchor = compositionAnchor, anchor == readCompositionAnchor() else { return false }
+        completingConversion = true
+        defer { completingConversion = false }
+        let accepted = insertHostText(text, resolvingComposition: false)
+        guard scope.permitsContinuation(after: effects, commitAccepted: accepted,
+                                        current: readConversionModeScope()) else { return false }
+        compositionAnchor = nil
+        model.expandedConversion = false
+        doubleSpaceState.reset()
+        synchronizeHostTraits()
+        return readConversionModeScope() == scope
+    }
+
+    private func expectedAnchor(afterInserting text: String, into anchor: CompositionAnchor) -> CompositionAnchor? {
+        // Without preceding context we cannot authorize a second chained write.
+        guard let before = anchor.before, anchor.selection?.isEmpty != false else { return nil }
+        return CompositionAnchor(document: anchor.document, interaction: anchor.interaction,
+            before: before + Array(text.utf8), after: anchor.after, selection: anchor.selection)
+    }
+
+    @discardableResult
+    private func applyConversionEffects(_ effects: [LanguageCompositionEffect]) -> Bool {
+        conversionPostWriteAnchor = nil
+        guard let anchor = compositionAnchor, anchor == readCompositionAnchor(), !effects.isEmpty else { return false }
+        completingConversion = true
+        defer { completingConversion = false }
+        var expected = anchor
+        for effect in effects {
+            guard readCompositionAnchor() == expected else { return false }
+            switch effect {
+            case .commit(let text, _):
+                let postWrite = expectedAnchor(afterInserting: text, into: expected)
+                guard insertHostText(text, resolvingComposition: false) else { return false }
+                // A focus/cursor change or a host transformation can happen
+                // synchronously inside insertText, even in the same document.
+                guard let postWrite, readCompositionAnchor() == postWrite else {
+                    compositionAnchor = nil
+                    model.expandedConversion = false
+                    return false
+                }
+                expected = postWrite
+            case .hostDelete: return false
+            }
+        }
+        conversionPostWriteAnchor = expected
+        compositionAnchor = language.rawInput.isEmpty ? nil : expected
+        model.expandedConversion = false
+        doubleSpaceState.reset()
+        synchronizeHostTraits()
+        return true
+    }
+
+    private func insertQueuedPunctuation(_ punctuation: String?) {
+        guard let punctuation else { return }
+        guard let expected = conversionPostWriteAnchor, readCompositionAnchor() == expected else {
+            invalidateComposition(); return
+        }
+        if insertHostText(punctuation, resolvingComposition: false) { didEditHostText() }
+    }
+
+    fileprivate func chooseConversion(_ id: String, token: LanguageCompositionToken) {
+        guard token == language.state.token else { return }
+        guard let anchor = compositionAnchor, anchor == readCompositionAnchor() else { invalidateComposition(); return }
+        let punctuation = queuedPunctuation
+        let effects = language.choose(id: id, token: token)
+        guard !effects.isEmpty else { return }
+        queuedPunctuation = nil; model.queuedConversionPunctuation = nil
+        guard applyConversionEffects(effects) else { invalidateComposition(); return }
+        insertQueuedPunctuation(punctuation)
+    }
+
+    fileprivate func keepRomanLetters(token: LanguageCompositionToken) {
+        guard token == language.state.token else { return }
+        guard let anchor = compositionAnchor, anchor == readCompositionAnchor() else { invalidateComposition(); return }
+        let punctuation = queuedPunctuation
+        let effects = language.commitLiteral(token: token)
+        guard !effects.isEmpty else { return }
+        queuedPunctuation = nil; model.queuedConversionPunctuation = nil
+        guard applyConversionEffects(effects) else { invalidateComposition(); return }
+        insertQueuedPunctuation(punctuation)
+    }
+
+    fileprivate func cancelConversion(token: LanguageCompositionToken) {
+        guard token == language.state.token else { return }
+        language.cancel(); compositionAnchor = nil; queuedPunctuation = nil
+        model.queuedConversionPunctuation = nil
+        model.expandedConversion = false
+    }
+
+    fileprivate func expandConversion() { model.expandedConversion = true }
+    fileprivate func closeConversionChoices() { model.expandedConversion = false; queuedPunctuation = nil; model.queuedConversionPunctuation = nil }
+
+    /// Returns true when this tap belongs to local composition. Explicit saved
+    /// outputs and gesture variants are never routed through this function.
+    private func insertTypingText(_ text: String, normalTap: Bool) -> Bool {
+        if language.mode == .direct {
+            return normalTap && englishSurfaceAvailable
+                ? insertOrdinaryEnglish(text) : insertHostText(text)
+        }
+        guard normalTap else { return insertHostText(text) }
+        guard !model.showsUnicode else { return false }
+        if language.rawInput.isEmpty { compositionAnchor = readCompositionAnchor() }
+        guard compositionAnchor != nil, compositionAnchor == readCompositionAnchor() else { invalidateComposition(); return false }
+        // The mode-specific parser owns eligibility. Punctuation is a boundary,
+        // not permission to reinterpret arbitrary explicit Unicode output.
+        let recognized: Bool
+        switch language.mode {
+        case .japaneseRomaji: recognized = JapaneseInputReading.normalize(mode: .japaneseRomaji, rawInput: language.rawInput + text) != nil
+        case .koreanTwoSetHangul: recognized = KoreanTwoSetKeyboard.accepts(language.rawInput + text)
+        case .mandarinPinyin: recognized = (try? MandarinPinyinReading(language.rawInput + text)) != nil
+        default: recognized = false
+        }
+        if recognized { return language.append(text) }
+        if text.unicodeScalars.allSatisfy({ CharacterSet.punctuationCharacters.contains($0) || CharacterSet.decimalDigits.contains($0) }) {
+            if !language.rawInput.isEmpty { return confirmConversion(then: text) }
+            compositionAnchor = nil
+            return insertHostText(text)
+        }
+        // Unsupported phonetics never leak into the host under a conversion label.
+        return language.append(text)
+    }
+
+    @discardableResult
+    private func confirmConversion(then punctuation: String? = nil, space: Bool = false) -> Bool {
+        guard !language.rawInput.isEmpty else { return false }
+        guard compositionAnchor == readCompositionAnchor() else { invalidateComposition(); return true }
+        if model.showsUnicode || model.compositionShelfHeight == 0 {
+            queuedPunctuation = punctuation; model.queuedConversionPunctuation = punctuation
+            model.expandedConversion = true
+            return true
+        }
+        let token = language.state.token
+        let effects = language.commitDefault(token: token, space: space)
+        guard !effects.isEmpty else { return true }
+        guard applyConversionEffects(effects) else { invalidateComposition(); return true }
+        insertQueuedPunctuation(punctuation)
+        return true
+    }
+
+    @discardableResult
+    private func insertHostText(_ text: String, literalToken: UUID? = nil, resolvingComposition: Bool = true, onInserted: @escaping () -> Void = {}) -> Bool {
+        if resolvingComposition && !completingConversion && !language.rawInput.isEmpty {
+            return finishConversionBefore { [weak self] in
+                guard let self, self.insertHostText(text, resolvingComposition: false, onInserted: onInserted) else { return }
+                self.didEditHostText()
+            }
+        }
         guard literalWriteToken == nil || literalWriteToken == literalToken,
               let document = currentDocumentIdentifier else { return false }
         let proxy = textDocumentProxy
@@ -424,8 +1040,10 @@ final class KeyboardViewController: UIInputViewController {
             expectedHostEdit = ExpectedHostEdit(document: document,
                 before: Self.contextSuffix(before + text), expires: ProcessInfo.processInfo.systemUptime + 1)
         } else { expectedHostEdit = nil }
+        invalidateEnglish()
         previewCursorDriver.keyboardWillEdit()
         proxy.insertText(text)
+        onInserted()
         return true
     }
 
@@ -437,6 +1055,13 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func insertLiteralGestureText(_ text: String) -> Bool {
+        if !language.rawInput.isEmpty {
+            guard literalWriteToken == nil, let scope = currentLiteralWriteScope() else { return false }
+            return finishConversionBefore { [weak self] in
+                guard let self, self.currentLiteralWriteScope() == scope else { return }
+                _ = self.insertLiteralGestureText(text)
+            }
+        }
         guard literalWriteToken == nil, let scope = currentLiteralWriteScope(),
               let token = literalWriteTransaction.begin(scope: scope) else { return false }
         literalWriteToken = token
@@ -491,23 +1116,53 @@ final class KeyboardViewController: UIInputViewController {
             orientationIsLandscape: landscape)
             && KeyboardTypingLayoutPolicy.usesANSI(availableWidth: view.bounds.width - 16, isPad: pad, isLandscape: true)
         if model.isLandscapePadLayout != landscapePad { model.isLandscapePadLayout = landscapePad }
-        // The arrangement's rows, the same on every page; the typing area is
-        // 8 points in from each side. A full ANSI row of digits is a fourth.
+        // Preserve the preexisting normal-key baseline even when autocorrection
+        // has no suggestions/Undo to show. Shelf visibility is a separate choice.
+        let usesCompositionLayout = !model.showsUnicode && (language.mode != .direct
+            || (englishSurfaceAvailable && (language.preferences.effectiveEnglishSuggestions
+                || language.preferences.effectiveEnglishAutocorrection || model.englishHasUndo)))
+        let conversionVisible = usesCompositionLayout && (language.mode != .direct
+            || language.preferences.effectiveEnglishSuggestions || model.englishHasUndo)
+        // Resolve compact geometry BEFORE counting projected rows. The compact
+        // predicate is independent of row count; never use last frame's mode.
+        let geometryMetrics = KeyboardLayoutPolicy.metrics(
+            viewWidth: view.bounds.width, displaySize: scene?.screen.bounds.size,
+            sceneHeight: usesCompositionLayout ? nil : sceneSize?.height, isPad: pad,
+            compactVertical: traitCollection.verticalSizeClass == .compact)
+        model.updateTypingLayoutContext(isPhone: traitCollection.userInterfaceIdiom == .phone,
+            isPad: pad, compact: geometryMetrics.isCompactLayout)
+        // The same presentation drives height, rendering and action routing.
         let rows = model.typingArrangement.keyRows(widePad: pad && view.bounds.width - 16 >= 650)
-        let keyRows = landscapePad && model.padLayout == .ansiNumbers ? max(MainKeyboardArrangement.maximumRows, rows) : rows
+        let keyRows = language.mode != .koreanTwoSetHangul && landscapePad && model.typingArrangement.isLegacy && model.padLayout == .ansiNumbers ? max(MainKeyboardArrangement.maximumRows, rows) : rows
+        let prefersCompactShelf = language.mode == .direct || language.mode == .koreanTwoSetHangul
+            || model.typingPresentation.isCompactConversion || !KeyboardConversionShelfMetrics.regularCaptionFits(
+            mode: language.mode, containerWidth: max(0, view.bounds.width - 16), traits: traitCollection)
         let metrics = KeyboardLayoutPolicy.metrics(
             viewWidth: view.bounds.width, displaySize: scene?.screen.bounds.size,
-            sceneHeight: sceneSize?.height, isPad: pad,
+            sceneHeight: usesCompositionLayout ? nil : sceneSize?.height, isPad: pad,
             compactVertical: traitCollection.verticalSizeClass == .compact,
             keyRows: keyRows,
             searching: model.isSearching, browsing: model.showsUnicode && !model.isSearching,
             showsTextPreview: model.showsTextPreview,
             previewImagePanel: model.hasKeyboardPanel)
-        if model.isCompactLayout != metrics.isCompactLayout { model.isCompactLayout = metrics.isCompactLayout }
-        if model.isPadLayout != pad { model.isPadLayout = pad }
+        // The existing metrics include preview/footer/gaps; the optional typing
+        // toolbar is actual additional chrome, not borrowed key-row space.
+        let toolbarChrome = usesCompositionLayout && model.showsUnicodeToolbar ? metrics.typingKeyHeight : 0
+        let compositionPlan = KeyboardCompositionLayoutPolicy.plan(
+            baselineHeight: metrics.height + toolbarChrome, baselineKeyHeight: metrics.typingKeyHeight,
+            sceneHeight: sceneSize?.height, actualGrantedHeight: view.bounds.height,
+            conversionEnabled: conversionVisible, surfaceAvailable: !model.hasKeyboardPanel,
+            baselineKeyRows: keyRows, rowSpacing: pad && view.bounds.width >= 666 ? 6 : 4,
+            hostHeightIsSettled: isKeyboardShown && view.window != nil,
+            prefersCompactShelf: prefersCompactShelf, englishSingleRow: language.mode == .direct)
+        let shelf = conversionVisible ? compositionPlan.shelfHeight : 0
+        if model.compositionShelfHeight != shelf { model.compositionShelfHeight = shelf }
+        model.updateTypingGeometry(availableWidth: max(0, view.bounds.width - 16),
+            normalKeyHeight: usesCompositionLayout ? compositionPlan.mergeNormalKeyHeight : metrics.typingKeyHeight)
         let typingHeight = metrics.typingKeyHeight
         if model.typingKeyHeight != typingHeight { model.typingKeyHeight = typingHeight }
-        applyKeyboardHeight(metrics.height, animated: animated && !UIAccessibility.isReduceMotionEnabled)
+        applyKeyboardHeight(usesCompositionLayout ? compositionPlan.requestedHeight : metrics.height,
+            animated: animated && !UIAccessibility.isReduceMotionEnabled)
     }
 
 
@@ -541,6 +1196,7 @@ final class KeyboardViewController: UIInputViewController {
         return { [weak self] in
             guard let self else { return false }
             return self.model.inputModeID == renderedMode
+                && !self.model.finishingConversion && !self.model.expandedConversion
                 && self.currentDocumentIdentifier == document && self.deleteInteractionID == interaction
         }
     }
@@ -558,6 +1214,11 @@ final class KeyboardViewController: UIInputViewController {
 
     private func makeTypingVariantActions(renderedMode: UUID, key: String, hasAuxiliaryRow: Bool,
                                           isAuxiliaryKey: Bool, widePad: Bool, ansiPad: Bool) -> KeyboardVariantActions? {
+        if language.mode == .koreanTwoSetHangul, model.typingState.layout == .letters {
+            return makeHangulKeyActions(renderedMode: renderedMode, key: key)
+        }
+        // Shift's place on a caseless layout holds the Arabic Diacritics key.
+        if key == MainKeyboardArrangement.shift { return makeDiacriticsActions(renderedMode: renderedMode) }
         guard !model.showsUnicode, !model.hasSymbolBoardOverlay, let current = makeBoardConfigurationGuard(renderedMode: renderedMode),
               model.typingAuxiliaryRowVisible.map({ $0 == hasAuxiliaryRow }) ?? true,
               model.typingWidePadVisible.map({ $0 == widePad }) ?? !widePad,
@@ -568,12 +1229,11 @@ final class KeyboardViewController: UIInputViewController {
               let keyID = KeyboardKeySettings.identifier(forCharacter: key) else { return nil }
         let captured = model.typingState
         let padLayout = model.padLayout
-        // A digit the app arranged among the letters types without a fourth row.
-        let original = isAuxiliaryKey
-            ? (hasAuxiliaryRow || captured.layout == .letters && MainKeyboardArrangement.isDigit(key)
-                ? KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: key, layout: captured.layout, ansiPad: ansiPad) : nil)
-            : KeyboardTypingLayoutPolicy.output(for: key, state: captured, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout)
+        let original = KeyboardTypingLayoutPolicy.routedOutput(for: key, state: captured,
+            hasAuxiliaryRow: hasAuxiliaryRow, isAuxiliaryKey: isAuxiliaryKey,
+            widePad: widePad, ansiPad: ansiPad, padLayout: padLayout, arrangement: model.typingArrangement, mergedSymbols: model.mergesSymbols)
         guard let original else { return nil }
+        let mergedSymbols = model.mergesSymbols
         let settings = model.keySettings
         let tapText = settings.tapOutput(for: keyID, defaultText: original,
             shifted: KeyboardTypingLayoutPolicy.usesShiftedTap(for: key, state: captured, ansiPad: ansiPad))
@@ -583,39 +1243,89 @@ final class KeyboardViewController: UIInputViewController {
         let accepts: () -> Bool = { [weak self] in
             current() && self?.model.showsUnicode == false && self?.model.hasSymbolBoardOverlay == false
                 && self?.model.keySettings == settings && self?.model.padLayout == padLayout
+                && self?.model.mergesSymbols == mergedSymbols
+                && self?.model.typingState.layout == captured.layout
                 && (self?.model.typingAuxiliaryRowVisible.map({ $0 == hasAuxiliaryRow }) ?? true)
                 && (self?.model.typingWidePadVisible.map({ $0 == widePad }) ?? !widePad)
                 && (self?.model.typingANSIPadVisible.map({ $0 == ansiPad }) ?? !ansiPad)
         }
-        let insertOrdinary: (String) -> Bool = { [weak self] text in
+        let insertOrdinary: (String, Bool) -> Bool = { [weak self] text, normalTap in
             guard let self, accepts() else { return false }
             self.doubleSpaceState.reset()
-            guard self.insertHostText(text) else { return false }
-            if captured.layout == .letters && !isAuxiliaryKey && (ansiPad || captured.output(for: key) != nil) { self.model.didInsertTypingKey(key, capturedState: captured, ansiPad: ansiPad, padLayout: padLayout) }
-            else { self.model.didInsertNumberRowKey(capturedState: captured) }
-            self.synchronizeHostTraits()
+            let didInsert: () -> Void = { [weak self] in
+                guard let self else { return }
+                if captured.layout == .letters && !isAuxiliaryKey && (ansiPad || captured.output(for: key) != nil) { self.model.didInsertTypingKey(key, capturedState: captured, ansiPad: ansiPad, padLayout: padLayout) }
+                else { self.model.didInsertNumberRowKey(capturedState: captured) }
+                self.synchronizeHostTraits()
+            }
+            if !normalTap {
+                // A saved exact tap/variant can be deferred. Do not consume
+                // one-shot Shift or mark the key used until the write occurs.
+                return self.insertHostText(text, onInserted: didInsert)
+            }
+            guard self.insertTypingText(text, normalTap: true) else { return false }
+            didInsert()
             return true
         }
         return .init(isCurrent: accepts, insert: { text in
-            KeyboardVariantPolicy.contains(text, in: choices) && insertOrdinary(text)
+            KeyboardVariantPolicy.contains(text, in: choices) && insertOrdinary(text, false)
         }, options: choices, longPressOptions: gestures.longPress, swipeUp: gestures.swipeUp, swipeDown: gestures.swipeDown,
-           tap: { tapText.map(insertOrdinary) ?? false },
+           tap: {
+            guard let tapText else { return false }
+            let normal = tapText.utf8.elementsEqual(original.utf8)
+                && settings.candidates(for: keyID, gesture: .tap) == nil
+                && settings.candidates(for: keyID, gesture: .shiftedTap) == nil
+            return insertOrdinary(tapText, normal)
+        },
            insertGesture: { [weak self] text, gesture in
             guard let self, accepts(), gesture == .longPress || gesture == .swipeUp || gesture == .swipeDown else { return false }
             let allowed = gesture == .longPress ? gestures.longPress : gesture == .swipeUp ? gestures.swipeUp : gestures.swipeDown
             guard KeyboardVariantPolicy.contains(text, in: allowed) else { return false }
             self.doubleSpaceState.reset()
             if gesture == .longPress, captured.layout == .letters, !isAuxiliaryKey, captured.output(for: key) != nil {
-                guard self.insertHostText(text) else { return false }
-                self.model.didInsertTypingKey(key, capturedState: captured)
-                self.synchronizeHostTraits()
+                return self.insertHostText(text, onInserted: { [weak self] in
+                    self?.model.didInsertTypingKey(key, capturedState: captured)
+                    self?.synchronizeHostTraits()
+                })
             } else { return self.insertLiteralGestureText(text) }
+        })
+    }
+
+    /// Jamo taps and the seven shifted hold choices are semantic physical IDs,
+    /// never saved English tap/gesture outputs or literal host text.
+    private func makeHangulKeyActions(renderedMode: UUID, key: String) -> KeyboardVariantActions? {
+        guard let current = makeBoardConfigurationGuard(renderedMode: renderedMode),
+              !model.showsUnicode, KoreanTwoSetKeyboard.rows.flatMap({ $0 }).contains(key) else { return nil }
+        let captured = model.typingState
+        let raw = KoreanTwoSetKeyboard.keyID(key, shifted: captured.shift != .lowercase)
+        let shiftedFace = KoreanTwoSetKeyboard.shiftedVariant(for: key)
+        let choices = shiftedFace.map { [$0] } ?? []
+        let accepts: () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return !self.model.showsUnicode && KoreanTwoSetKeyboard.acceptsHeldKey(
+                contextIsCurrent: current(), mode: self.language.mode,
+                captured: captured, current: self.model.typingState)
+        }
+        let insert: (String) -> Bool = { [weak self] rawID in
+            guard let self, accepts() else { return false }
+            self.doubleSpaceState.reset()
+            guard self.insertTypingText(rawID, normalTap: true) else { return false }
+            self.model.didInsertTypingKey(key, capturedState: captured)
+            self.synchronizeHostTraits()
             return true
+        }
+        return .init(isCurrent: accepts, insert: { face in
+            guard face == shiftedFace else { return false }
+            return insert(key.uppercased())
+        }, options: choices, longPressOptions: choices, tap: { insert(raw) },
+        insertGesture: { face, gesture in
+            guard gesture == .longPress, face == shiftedFace else { return false }
+            return insert(key.uppercased())
         })
     }
 
     private func makeShiftSlideAction(renderedMode: UUID) -> ((String) -> Bool)? {
-        guard !model.showsUnicode, model.typingState.layout == .letters,
+        guard language.mode != .koreanTwoSetHangul, !model.showsUnicode, model.typingState.layout == .letters,
               let current = makeBoardConfigurationGuard(renderedMode: renderedMode) else { return nil }
         let captured = model.typingState
         let settings = model.keySettings
@@ -634,35 +1344,124 @@ final class KeyboardViewController: UIInputViewController {
                       hasAuxiliaryRow: auxiliary, widePad: wide, ansiPad: ansi, padLayout: preset),
                   let text = settings.tapOutput(for: keyID, defaultText: original, shifted: true) else { return false }
             self.doubleSpaceState.reset()
-            guard self.insertHostText(text) else { return false }
-            self.model.didInsertTypingKey(key, capturedState: captured, ansiPad: ansi, padLayout: preset)
-            self.synchronizeHostTraits()
-            return true
+            return self.insertHostText(text, onInserted: { [weak self] in
+                self?.model.didInsertTypingKey(key, capturedState: captured, ansiPad: ansi, padLayout: preset)
+                self?.synchronizeHostTraits()
+            })
         }
+    }
+
+    /// The Arabic Diacritics key: hold and slide inserts one mark; a tap,
+    /// or VoiceOver activation, opens the panel and types nothing.
+    private func makeDiacriticsActions(renderedMode: UUID) -> KeyboardVariantActions? {
+        let marks = model.typingState.alphabet.diacritics.map(\.mark)
+        guard !marks.isEmpty, !model.showsUnicode, !model.hasSymbolBoardOverlay, model.typingState.layout == .letters,
+              let current = makeBoardConfigurationGuard(renderedMode: renderedMode) else { return nil }
+        let alphabetID = model.typingState.alphabet.id
+        let accepts: () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return current() && !self.model.showsUnicode && !self.model.hasSymbolBoardOverlay
+                && self.model.typingState.layout == .letters && self.model.typingState.alphabet.id == alphabetID
+        }
+        let insert: (String) -> Bool = { [weak self] mark in
+            guard let self, accepts(), KeyboardVariantPolicy.contains(mark, in: marks) else { return false }
+            return self.insertDiacritic(mark)
+        }
+        return .init(isCurrent: accepts, insert: insert, longPressOptions: marks,
+            tap: { [weak self] in
+                guard let self, accepts() else { return false }
+                self.doubleSpaceState.reset(); self.expectedHostEdit = nil
+                return self.model.openDiacritics()
+            },
+            insertGesture: { mark, gesture in gesture == .longPress && insert(mark) })
+    }
+
+    /// Exactly the mark's one scalar, never its dotted-circle picture, with
+    /// no normalization; it joins whatever precedes it. Closes the panel.
+    private func insertDiacritic(_ mark: String) -> Bool {
+        guard mark.unicodeScalars.count == 1, model.typingState.alphabet.diacritics.contains(where: { $0.mark == mark }) else { return false }
+        doubleSpaceState.reset()
+        return insertHostText(mark, onInserted: { [weak self] in
+            self?.model.closeDiacritics(returningFocus: true)
+            self?.didEditHostText()
+        })
     }
 
     /// Spell checking and dictation in the host follow the current layout.
     private func applyPrimaryLanguage() {
         let alphabet = model.typingState.alphabet
-        primaryLanguage = alphabet == .english ? "en-US" : alphabet.id
+        let desired: String
+        switch language.mode {
+        case .japaneseRomaji: desired = "ja-JP"
+        case .mandarinPinyin: desired = "zh-Hans"
+        case .koreanRomaja, .koreanTwoSetHangul: desired = "ko-KR"
+        case .direct: desired = alphabet == .english ? "en-US" : alphabet.id
+        }
+        guard lastAppliedPrimaryLanguage != desired else { return }
+        // UIKit can synchronously publish another selection/text callback from
+        // this setter. Cache BEFORE crossing that boundary to break reentry.
+        lastAppliedPrimaryLanguage = desired
+        primaryLanguage = desired
     }
 
     /// With several layouts, holding Space lists them, current first; a tap
     /// still types a space.
     private func makeLayoutActions(renderedMode: UUID) -> KeyboardVariantActions? {
-        guard model.layouts.count > 1, !model.isSearching, !model.hasSymbolBoardOverlay,
+        let choices = inputModeChoices
+        guard choices.count > 1, !model.isSearching, !model.hasSymbolBoardOverlay,
               let current = makeBoardConfigurationGuard(renderedMode: renderedMode) else { return nil }
-        let ids = model.layouts.map(\.id)
         let space = makeInputAction(renderedMode: renderedMode, command: .space)
+        let englishRevision = model.englishRevision
         let accepts: () -> Bool = { [weak self] in
-            guard let self else { return false }
-            return current() && !self.model.isSearching && !self.model.hasSymbolBoardOverlay && self.model.layouts.map(\.id) == ids
+            current() && self?.model.isSearching == false && self?.inputModeChoices == choices
         }
         return .init(isCurrent: accepts, insert: { [weak self] id in
-            guard let self, accepts(), ids.contains(id) else { return false }
-            self.doubleSpaceState.reset(); self.expectedHostEdit = nil
-            return self.model.selectLayout(id)
-        }, longPressOptions: KeyboardModel.layoutChoices(current: model.typingState.alphabet, layouts: model.layouts), tap: space)
+            guard let self, accepts(), choices.contains(id) else { return false }
+            if id == "conversion-choices" { self.expandConversion(); return true }
+            if id == "english-undo" { self.undoEnglish(revision: englishRevision); return true }
+            if id.hasPrefix("english-suggestion:") {
+                let components = id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+                guard components.count == 3 else { return false }
+                self.chooseEnglish(String(components[2]), revision: englishRevision)
+                return true
+            }
+            return self.finishConversionBeforeInputMode(.target(id))
+        }, longPressOptions: choices, tap: space)
+    }
+
+    fileprivate var inputModeChoices: [String] {
+        var ids = model.layouts.map(\.id)
+        if !ids.contains(model.typingState.alphabet.id) { ids.insert(model.typingState.alphabet.id, at: 0) }
+        ids += language.enabledModes.filter { $0 != .direct && $0 != .koreanRomaja }.map { "mode:" + $0.rawValue }
+        let selected = language.mode == .direct ? model.typingState.alphabet.id : "mode:" + language.mode.rawValue
+        ids.removeAll { $0 == selected }; ids.insert(selected, at: 0)
+        if language.mode != .direct && model.compositionShelfHeight == 0 { ids.insert("conversion-choices", at: 0) }
+        if englishSurfaceAvailable && model.compositionShelfHeight == 0 {
+            if model.englishHasUndo { ids.insert("english-undo", at: 0) }
+            if model.englishCanReplace {
+                ids += model.englishSuggestions.enumerated().map { "english-suggestion:\($0.offset):\($0.element)" }
+            }
+        }
+        return ids
+    }
+
+    fileprivate func switchToDirectTyping() {
+        _ = finishConversionBeforeInputMode(.directTyping)
+    }
+
+    private func switchInputTarget(_ id: String) {
+        invalidateEnglish()
+        doubleSpaceState.reset(); expectedHostEdit = nil
+        if id.hasPrefix("mode:"), let mode = LanguageInputMode(rawValue: String(id.dropFirst(5))),
+           mode != .direct, mode != .koreanRomaja {
+            guard language.select(mode) else { return }
+            model.useConversionKeyboard()
+        } else {
+            language.select(.direct)
+            _ = model.selectLayout(id)
+        }
+        compositionAnchor = nil
+        applyPrimaryLanguage(); synchronizeHostTraits(); updateKeyboardHeight()
     }
 
     private func makeFavoritesActions(renderedMode: UUID) -> KeyboardVariantActions? {
@@ -671,6 +1470,7 @@ final class KeyboardViewController: UIInputViewController {
         return .init(isCurrent: current, insert: { [weak self] _ in
             guard let self, current() else { return false }
             self.doubleSpaceState.reset(); self.expectedHostEdit = nil
+            self.model.closeDiacritics()
             return self.model.toggleFavorites()
         })
     }
@@ -692,14 +1492,15 @@ final class KeyboardViewController: UIInputViewController {
         return .init(isCurrent: accepts, insert: { [weak self] text in
             guard let self, accepts(), KeyboardVariantPolicy.contains(text, in: choices) else { return false }
             self.doubleSpaceState.reset()
-            guard self.insertHostText(text) else { return false }
-            if text.unicodeScalars.count == 1, let scalar = text.unicodeScalars.first {
-                CharacterStore.shared.recordUse(scalar.value)
-            } else if let emoji = self.model.emojiCatalog.entries.first(where: { $0.text.utf16.elementsEqual(text.utf16) }) {
-                CharacterStore.shared.recordEmojiUse(emoji)
-            }
-            self.didEditHostText()
-            return true
+            return self.insertHostText(text, onInserted: { [weak self] in
+                guard let self else { return }
+                if text.unicodeScalars.count == 1, let scalar = text.unicodeScalars.first {
+                    CharacterStore.shared.recordUse(scalar.value)
+                } else if let emoji = self.model.emojiCatalog.entry(text: text) {
+                    CharacterStore.shared.recordEmojiUse(emoji)
+                }
+                self.didEditHostText()
+            })
         }, inspect: { [weak self] text in
             guard let self, accepts(), KeyboardVariantPolicy.contains(text, in: choices) else { return false }
             self.model.inspectText(text)
@@ -747,14 +1548,16 @@ final class KeyboardViewController: UIInputViewController {
             guard let self else { return false }
             switch item {
             case .character(let character):
-                guard self.insertHostText(character.text) else { return false }
-                CharacterStore.shared.recordUse(character.codePoint)
+                return self.insertHostText(character.text, onInserted: { [weak self] in
+                    CharacterStore.shared.recordUse(character.codePoint)
+                    self?.didEditHostText()
+                })
             case .emoji(let emoji):
-                guard self.insertHostText(emoji.text) else { return false }
-                CharacterStore.shared.recordEmojiUse(emoji)
+                return self.insertHostText(emoji.text, onInserted: { [weak self] in
+                    CharacterStore.shared.recordEmojiUse(emoji)
+                    self?.didEditHostText()
+                })
             }
-            self.didEditHostText()
-            return true
         }), inspect: context.guardedAction(currentContext: current, perform: { [weak self] in
             guard let self else { return false }
             self.model.inspect(item)
@@ -771,12 +1574,27 @@ final class KeyboardViewController: UIInputViewController {
         guard !isQuery || model.isSearching else { return { false } }
         let context = KeyboardDeleteContext(modeIdentifier: renderedMode, isQuery: model.isSearching, documentIdentifier: document)
         return context.guardedAction(currentContext: { [weak self] in
-            guard let self, self.literalWriteToken == nil, !self.model.hasSymbolBoardOverlay, self.deleteInteractionID == interactionID,
+            guard let self, self.literalWriteToken == nil, !self.model.hasSymbolBoardOverlay,
+                  !self.model.finishingConversion, !self.model.expandedConversion, self.deleteInteractionID == interactionID,
                   let document = self.currentDocumentIdentifier else { return nil }
             return KeyboardDeleteContext(modeIdentifier: self.model.inputModeID, isQuery: self.model.isSearching, documentIdentifier: document)
         }, delete: { [weak self] in
-            if isQuery { self?.model.deleteQueryCharacter() }
+            if isQuery { self?.invalidateEnglish(); self?.model.deleteQueryCharacter() }
             else {
+                if let self, self.language.backspace() {
+                    if self.language.rawInput.isEmpty { self.compositionAnchor = nil }
+                    return
+                }
+                if let self, self.englishSurfaceAvailable, self.english.hasImmediateUndo {
+                    // A dispatched rollback owns this Backspace even on partial
+                    // failure: never follow it with an unrelated extra delete.
+                    if let plan = self.english.planUndo(context: self.englishContext(), hostPermission: self.englishPermission) {
+                        _ = self.executeEnglishPlan(plan)
+                        self.didEditHostText()
+                        return
+                    }
+                }
+                self?.invalidateEnglish()
                 self?.expectedHostEdit = nil
                 self?.previewCursorDriver.keyboardWillEdit()
                 self?.textDocumentProxy.deleteBackward()
@@ -797,8 +1615,21 @@ final class KeyboardViewController: UIInputViewController {
             return KeyboardInputActionContext(modeIdentifier: self.model.inputModeID,
                 documentIdentifier: document, interactionIdentifier: self.deleteInteractionID)
         }, perform: { [weak self] in
-            guard let self else { return false }
+            guard let self, !self.model.finishingConversion, !self.model.expandedConversion else { return false }
+            // Any other key, such as space or 123, also closes the Arabic Diacritics panel.
             switch command {
+            case .diacritic, .diacritics: break
+            default: self.model.closeDiacritics()
+            }
+            switch command {
+            case .diacritic(let mark):
+                guard !self.model.showsUnicode, self.model.typingState.layout == .letters else { return false }
+                return self.insertDiacritic(mark)
+            case .diacritics(let open):
+                self.invalidateEnglish()
+                guard open else { self.model.closeDiacritics(returningFocus: true); return true }
+                guard !self.model.showsUnicode else { return false }
+                return self.model.openDiacritics()
             case .query(let key):
                 guard self.model.isSearching else { return false }
                 self.doubleSpaceState.reset()
@@ -812,8 +1643,10 @@ final class KeyboardViewController: UIInputViewController {
                 guard self.insertHostText(text) else { return false }
                 self.didEditHostText()
             case .collapse:
+                self.invalidateEnglish()
                 self.dismissKeyboard()
             case .toolbar:
+                self.invalidateEnglish()
                 self.doubleSpaceState.reset()
                 self.expectedHostEdit = nil
                 self.model.toggleUnicodeToolbar()
@@ -822,13 +1655,14 @@ final class KeyboardViewController: UIInputViewController {
                       (self.model.isPadLayout && self.model.typingWidePadVisible == true)
                         || self.model.arrangementHas(MainKeyboardArrangement.tab) else { return false }
                 self.doubleSpaceState.reset()
-                guard self.insertHostText("\t") else { return false }
+                guard self.englishSurfaceAvailable ? self.insertOrdinaryEnglish("\t") : self.insertHostText("\t") else { return false }
                 self.didEditHostText()
             case .capsLock:
                 guard !self.model.showsUnicode, self.model.typingState.layout == .letters,
                       (self.model.isPadLayout && self.model.typingWidePadVisible == true)
                         || self.model.arrangementHas(MainKeyboardArrangement.caps) else { return false }
                 self.doubleSpaceState.reset(); self.expectedHostEdit = nil
+                self.invalidateEnglish()
                 self.model.toggleCapsLock()
             case .space: self.spaceKey()
             case .returnKey: self.returnKey()
@@ -836,9 +1670,11 @@ final class KeyboardViewController: UIInputViewController {
                 guard !self.model.showsUnicode else { return false }
                 self.doubleSpaceState.reset()
                 self.expectedHostEdit = nil
+                self.invalidateEnglish()
                 self.model.pressShift()
             case .layout(let layout):
                 guard !self.model.showsUnicode else { return false }
+                self.invalidateEnglish()
                 self.model.selectTypingLayout(layout)
                 self.synchronizeHostTraits()
             }
@@ -853,6 +1689,31 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         guard literalWriteToken == nil else { return }
+        if model.showsUnicode && !language.rawInput.isEmpty {
+            // Search Space remains local above; browser Space reveals choices.
+            expandConversion(); return
+        }
+        if confirmConversion(space: true) { return }
+        var correctedSpace: (context: KeyboardCorrectionContext, guardValue: EnglishExecutionGuard)?
+        if englishSurfaceAvailable && insertEnglishDelimiter(" ", onCorrection: { actual in
+            if let bound = self.englishExecutionGuard() { correctedSpace = (actual, bound) }
+        }) {
+            didEditHostText()
+            // didEditHostText resets punctuation state. Re-arm ONLY after a
+            // fully confirmed correction, with the exact actual first Space;
+            // a handled but partial/failed replacement never reaches this path.
+            if let correctedSpace, english.hasImmediateUndo,
+               englishExecutionGuard() == correctedSpace.guardValue,
+               englishPermission == .permits,
+               Self.sameEnglishObservation(correctedSpace.context, englishContext()),
+               correctedSpace.context.selectedText == "",
+               let before = correctedSpace.context.before, before.unicodeScalars.last == " ",
+               let scope = correctedSpace.context.scope {
+                _ = doubleSpaceState.spaceTap(before: String(before.dropLast()),
+                    at: ProcessInfo.processInfo.systemUptime, scope: scope, enabled: true)
+            }
+            return
+        }
         let proxy = textDocumentProxy
         guard let document = currentDocumentIdentifier else { doubleSpaceState.reset(); return }
         let mode = model.inputModeID
@@ -887,10 +1748,19 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func returnKey() {
+        if model.showsUnicode && !language.rawInput.isEmpty {
+            if model.isSearching { model.endSearch() }
+            else { expandConversion() }
+            return
+        }
+        if !model.showsUnicode && confirmConversion() { return }
         if model.inspection != nil { model.closeInspection() }
         else if model.symbolBoardInspectionText != nil { model.closeSymbolBoardInspection() }
         else if model.isSearching { model.endSearch() }
-        else { insertHostText("\n"); didEditHostText() }
+        else {
+            if !englishSurfaceAvailable || !insertEnglishDelimiter("\n") { insertHostText("\n") }
+            didEditHostText()
+        }
     }
 
     static func returnTitle(for type: UIReturnKeyType?) -> String {
@@ -910,9 +1780,30 @@ final class KeyboardViewController: UIInputViewController {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        CFNotificationCenterRemoveEveryObserver(CFNotificationCenterGetDarwinNotifyCenter(), Unmanaged.passUnretained(self).toOpaque())
     }
 }
 
+
+private func keyboardModeLabel(_ mode: LanguageInputMode) -> String {
+    switch mode {
+    case .direct: return "Direct Typing"
+    case .japaneseRomaji: return "日本語"
+    case .mandarinPinyin: return "拼音"
+    case .koreanRomaja: return "Romaja"
+    case .koreanTwoSetHangul: return "Two-Set Hangul"
+    }
+}
+
+private func keyboardInputTargetLabel(_ id: String) -> String {
+    if id == "english-undo" { return "Undo Correction" }
+    if id.hasPrefix("english-suggestion:") {
+        return id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false).last.map(String.init) ?? "English Suggestion"
+    }
+    if id == "conversion-choices" { return "Conversion Choices" }
+    if id.hasPrefix("mode:"), let mode = LanguageInputMode(rawValue: String(id.dropFirst(5))) { return keyboardModeLabel(mode) }
+    return KeyboardAlphabet.alphabet(id: id)?.nativeName ?? id
+}
 
 private enum KeyboardSection: String, CaseIterable {
     case symbols = "Symbols"
@@ -976,6 +1867,8 @@ private enum KeyboardItem {
 
 private enum KeyboardInputCommand {
     case query(String), queryHold(String), space, returnKey, shift, capsLock, tab, layout(KeyboardTypingLayout), toolbar, collapse
+    /// Arabic Diacritics: insert one mark, or open (true) or close the panel.
+    case diacritic(String), diacritics(Bool)
 }
 
 private enum KeyboardPanel { case typing, unicode }
@@ -983,6 +1876,21 @@ private enum KeyboardPanel { case typing, unicode }
 @MainActor
 private final class KeyboardTypingModel: ObservableObject {
     @Published private(set) var state = KeyboardTypingState()
+    /// The Arabic Diacritics panel shows in place of the letter rows.
+    @Published private(set) var showsDiacritics = false
+    /// VoiceOver focus goes back to the Arabic Diacritics key after the panel
+    /// closes from its own close key or a mark.
+    private(set) var returnsFocusToDiacriticsKey = false
+    func setDiacritics(_ shown: Bool, returningFocus: Bool = false) {
+        guard shown != showsDiacritics else { return }
+        returnsFocusToDiacriticsKey = !shown && returningFocus
+        showsDiacritics = shown
+    }
+    /// Once: whether the redrawn Arabic Diacritics key should take VoiceOver focus.
+    func takeFocusReturn() -> Bool {
+        defer { returnsFocusToDiacriticsKey = false }
+        return returnsFocusToDiacriticsKey && !showsDiacritics
+    }
     func update(_ change: (inout KeyboardTypingState) -> Void) {
         var next = state
         change(&next)
@@ -992,9 +1900,21 @@ private final class KeyboardTypingModel: ObservableObject {
 
 @MainActor
 private final class KeyboardModel: ObservableObject {
+    let language = KeyboardLanguageCoordinator()
+    @Published var englishSuggestions: [String] = []
+    @Published var englishOriginal: String?
+    @Published var englishCanReplace = false
+    @Published var englishHasUndo = false
+    @Published var englishStatus = ""
+    @Published var englishRevision = UUID()
+    @Published var compositionShelfHeight: CGFloat = 0
+    @Published var expandedConversion = false
+    @Published var finishingConversion = false
+    @Published var queuedConversionPunctuation: String?
+
     @Published private(set) var panel: KeyboardPanel = .typing {
         didSet {
-            if panel != oldValue { invalidateInputMode() }
+            if panel != oldValue { closeDiacritics(); invalidateInputMode() }
         }
     }
     let typing = KeyboardTypingModel()
@@ -1012,6 +1932,45 @@ private final class KeyboardModel: ObservableObject {
     var typingAuxiliaryRowVisible: Bool?
     var typingWidePadVisible: Bool?
     var typingANSIPadVisible: Bool?
+    @Published private(set) var mergesSymbols = false
+    private var typingAvailableWidth: CGFloat = 0
+    private var typingNormalKeyHeight = KeyboardTypingLayoutPolicy.regularKeyHeight
+
+    private var isPhoneLayout = false
+
+    func updateTypingLayoutContext(isPhone: Bool, isPad: Bool, compact: Bool) {
+        let previous = typingPresentation
+        let compactChanged = isCompactLayout != compact
+        isPhoneLayout = isPhone
+        if isPadLayout != isPad { isPadLayout = isPad }
+        if compactChanged { isCompactLayout = compact }
+        refreshMergedSymbols()
+        // Revoke outgoing key gestures, not the language composition/candidates.
+        if compactChanged || previous != typingPresentation { invalidateInputMode() }
+    }
+
+    func updateTypingGeometry(availableWidth: CGFloat, normalKeyHeight: CGFloat) {
+        let changed = typingAvailableWidth != availableWidth || typingNormalKeyHeight != normalKeyHeight
+        typingAvailableWidth = availableWidth
+        typingNormalKeyHeight = normalKeyHeight
+        refreshMergedSymbols()
+        if changed { invalidateInputMode() }
+    }
+
+    private func refreshMergedSymbols() {
+        let alphabet = KeyboardAlphabet.alphabet(id: typingState.alphabet.id) ?? typingState.alphabet
+        let merged = language.mode != .koreanTwoSetHangul && typingPresentation.allowsMergedSymbols
+            && KeyboardMergedSymbolsPolicy.isEligible(settings: keySettings, alphabet: alphabet,
+            availableWidth: typingAvailableWidth, isPad: isPadLayout,
+            isLandscape: isLandscapePadLayout, padLayout: padLayout, normalKeyHeight: typingNormalKeyHeight)
+        guard merged != mergesSymbols else { return }
+        mergesSymbols = merged
+        let page = KeyboardMergedSymbolsPolicy.page(typingState.layout, merged: merged)
+        if page != typingState.layout { typing.update { $0.selectLayout(page) } }
+        // Retiring a page/geometry cancels presses, even if #+= keeps its identity.
+        invalidateInputMode()
+    }
+
     @Published var typingKeyHeight: CGFloat = KeyboardTypingLayoutPolicy.regularKeyHeight
     @Published private(set) var inputModeID = UUID()
     var inputModeChanged: (() -> Void)?
@@ -1075,6 +2034,14 @@ private final class KeyboardModel: ObservableObject {
     var hasKeyboardPanel: Bool { previewImageExport != nil || textInspection != nil }
     /// The app's Auto-Capitalization choice, read on appear and refresh only.
     private(set) var autoCapitalization: AutoCapitalizationMode = .followApp
+    /// Emoji categories the app hides from the Emojis grid and emoji search;
+    /// read on appear and when the app posts its change notification.
+    @Published private(set) var hiddenEmojiGroups: Set<String> = []
+    @Published private(set) var skinToneVariants: SkinToneVariants = .all
+    /// Every category of this edition is hidden.
+    var hidesAllEmoji: Bool { !emojiCatalog.groups.isEmpty && emojiCatalog.shownGroupCount(hiding: hiddenEmojiGroups) == 0 }
+    /// At least one category of this edition is hidden.
+    var filtersEmoji: Bool { emojiCatalog.shownGroupCount(hiding: hiddenEmojiGroups) < emojiCatalog.groups.count }
     @Published private(set) var symbolPagesToolbarVisible: Bool?
     var showsUnicodeToolbar: Bool { symbolPagesToolbarVisible ?? showsUnicode }
     @Published private(set) var results: [UnicodeCharacter] = []
@@ -1144,10 +2111,18 @@ private final class KeyboardModel: ObservableObject {
     private func invalidateInputMode() { inputModeID = UUID(); inputModeChanged?() }
     func pressShift() { typing.update { $0.pressShift(at: ProcessInfo.processInfo.systemUptime) } }
     func toggleCapsLock() { typing.update { $0.toggleCapsLock() } }
+    /// Only on the letters of a layout with diacritics, such as Arabic.
+    func openDiacritics() -> Bool {
+        guard !showsUnicode, typingState.layout == .letters, !typingState.alphabet.diacritics.isEmpty else { return false }
+        typing.setDiacritics(true)
+        return true
+    }
+    func closeDiacritics(returningFocus: Bool = false) { typing.setDiacritics(false, returningFocus: returningFocus) }
     static func layoutChoices(current: KeyboardAlphabet, layouts: [KeyboardAlphabet]) -> [String] {
         [current.id] + layouts.map(\.id).filter { $0 != current.id }
     }
-    func selectTypingLayout(_ layout: KeyboardTypingLayout) {
+    func selectTypingLayout(_ requested: KeyboardTypingLayout) {
+        let layout = KeyboardMergedSymbolsPolicy.page(requested, merged: mergesSymbols)
         guard layout != typingState.layout else { return }
         typing.update { $0.selectLayout(layout) }
         invalidateInputMode()
@@ -1278,9 +2253,13 @@ private final class KeyboardModel: ObservableObject {
     /// Whether the app placed `key`, such as Tab, on this layout's keyboard.
     /// The current layout's main keyboard as it types: the saved
     /// arrangement, or the number row and the layout's own rows.
-    var typingArrangement: MainKeyboardArrangement {
-        keySettings.effectiveArrangement(for: KeyboardAlphabet.alphabet(id: typingState.alphabet.id) ?? typingState.alphabet)
+    var typingPresentation: KeyboardTypingPresentation {
+        let saved = language.mode == .koreanTwoSetHangul ? MainKeyboardArrangement.letters(for: .english)
+            : keySettings.effectiveArrangement(for: KeyboardAlphabet.alphabet(id: typingState.alphabet.id) ?? typingState.alphabet)
+        return KeyboardTypingPresentation(arrangement: saved, mode: language.mode,
+            isPhone: isPhoneLayout, isCompactLayout: isCompactLayout, isTyping: !showsUnicode)
     }
+    var typingArrangement: MainKeyboardArrangement { typingPresentation.arrangement }
     func arrangementHas(_ key: String) -> Bool {
         keySettings.arrangement(for: typingState.alphabet.id)?.keys.contains(key) == true
     }
@@ -1319,6 +2298,19 @@ private final class KeyboardModel: ObservableObject {
         fontRules.refresh()
         UnicodeFontSupport.ruleSet = FontRuleSet(rules: fontRules.rules)
         autoCapitalization = AutoCapitalizationSetting.shared.load()
+        hiddenEmojiGroups = EmojiCategorySetting.shared.load()
+        skinToneVariants = EmojiBrowsingSetting.shared.load()
+    }
+
+    /// Reloads the Emojis grid and emoji search when the app changed which
+    /// categories they show.
+    func refreshEmojiCategories() {
+        let hidden = EmojiCategorySetting.shared.load()
+        let variants = EmojiBrowsingSetting.shared.load()
+        guard hidden != hiddenEmojiGroups || variants != skinToneVariants else { return }
+        hiddenEmojiGroups = hidden
+        skinToneVariants = variants
+        refreshCatalog()
     }
 
     /// Keeps the current layout while it stays enabled, otherwise the one
@@ -1331,7 +2323,8 @@ private final class KeyboardModel: ObservableObject {
         if layouts != next || layouts.map(\.rows) != next.map(\.rows) { layouts = next }
         let remembered = defaults.string(forKey: Self.layoutDefaultsKey).flatMap { id in next.first { $0.id == id } }
         let current = keepingCurrent ? next.first { $0.id == typingState.alphabet.id } : nil
-        applyAlphabet(current ?? remembered ?? next[0])
+        if language.mode != .direct { useConversionKeyboard() }
+        else { applyAlphabet(current ?? remembered ?? next[0]) }
     }
     /// The keyboard remembers the chosen layout in its own defaults, which
     /// needs no Full Access.
@@ -1341,10 +2334,32 @@ private final class KeyboardModel: ObservableObject {
         applyAlphabet(alphabet)
         return true
     }
+    private var usesConversionAlphabet = false
+    private var renderedLanguageMode: LanguageInputMode = .direct
+    func useConversionKeyboard() {
+        usesConversionAlphabet = true
+        applyAlphabet(language.mode == .koreanTwoSetHangul ? .english
+            : KeyboardAlphabet.english.arranged(keySettings.arrangement(for: KeyboardAlphabet.english.id)?.letterRows))
+        refreshMergedSymbols()
+    }
+    func synchronizeLanguageKeyboard() {
+        if renderedLanguageMode != language.mode {
+            renderedLanguageMode = language.mode
+            invalidateInputMode() // Revoke presses even when both modes use English geometry.
+            if language.mode == .koreanTwoSetHangul { typing.update { $0.selectLayout(.letters) } }
+        }
+        if language.mode != .direct { useConversionKeyboard() }
+        else if usesConversionAlphabet {
+            usesConversionAlphabet = false
+            adoptLayouts(layouts.map(\.id), keepingCurrent: false)
+        }
+    }
     private func applyAlphabet(_ alphabet: KeyboardAlphabet) {
         // The same layout can come back rearranged.
         guard alphabet != typingState.alphabet || alphabet.rows != typingState.alphabet.rows else { return }
+        closeDiacritics()
         typing.update { $0.selectAlphabet(alphabet) }
+        refreshMergedSymbols()
         invalidateInputMode()
         presentationChanged?()
         alphabetChanged?()
@@ -1358,6 +2373,7 @@ private final class KeyboardModel: ObservableObject {
         refreshFontRules()
         // Applies to upcoming letters only; the caller re-synchronizes Shift.
         autoCapitalization = AutoCapitalizationSetting.shared.load()
+        refreshEmojiCategories()
         if showsCollapseKey != selected.showsCollapseKey { showsCollapseKey = selected.showsCollapseKey }
         if selectedPadLayout != selected.padLayout { selectedPadLayout = selected.padLayout; invalidateInputMode(); presentationChanged?() }
         if layouts.map(\.id) != selected.layouts {
@@ -1381,6 +2397,8 @@ private final class KeyboardModel: ObservableObject {
             if arranged { adoptLayouts(layouts.map(\.id), keepingCurrent: true) }
             invalidateInputMode()
         }
+        synchronizeLanguageKeyboard()
+        refreshMergedSymbols()
     }
 
     /// Adopts rules the app saved since the last appear; decodes only when
@@ -1482,11 +2500,11 @@ private final class KeyboardModel: ObservableObject {
     func loadEmojisPage() {
         guard moreEmojis, !loadingEmojiPage else { return }
         loadingEmojiPage = true
-        let activeCatalog = emojiCatalog, activeOrder = order, activeRevision = revision
+        let activeCatalog = emojiCatalog, activeOrder = order, activeRevision = revision, hidden = hiddenEmojiGroups, variants = skinToneVariants
         let offset = discoveryEmojis.count, limit = pageSize
         emojiPageTask = Task { [weak self] in
             let more = await CatalogWorker.run {
-                activeCatalog.entries(offset: offset, limit: limit, order: activeOrder)
+                activeCatalog.entries(offset: offset, limit: limit, order: activeOrder, hiding: hidden, skinToneVariants: variants)
             }
             guard !Task.isCancelled, let self, self.revision == activeRevision else { return }
             self.discoveryEmojis.append(contentsOf: more)
@@ -1518,12 +2536,12 @@ private final class KeyboardModel: ObservableObject {
         loadingSymbolPage = false
         loadingEmojiPage = false
         discoveryLoading = true
-        let activeCatalog = catalog, activeEmojis = emojiCatalog, activeOrder = order
+        let activeCatalog = catalog, activeEmojis = emojiCatalog, activeOrder = order, hidden = hiddenEmojiGroups, variants = skinToneVariants
         let activeRevision = revision, limit = pageSize
         discoveryTask = Task { [weak self] in
             let pages = await CatalogWorker.run {
                 (activeCatalog.orderedCharacters(offset: 0, limit: limit, order: activeOrder),
-                 activeEmojis.entries(offset: 0, limit: limit, order: activeOrder))
+                 activeEmojis.entries(offset: 0, limit: limit, order: activeOrder, hiding: hidden, skinToneVariants: variants))
             }
             guard !Task.isCancelled, let self, self.revision == activeRevision else { return }
             self.discoveryCharacters = pages.0
@@ -1546,7 +2564,7 @@ private final class KeyboardModel: ObservableObject {
         emojiResults = []
         guard !searchQuery.isEmpty else { searchInProgress = false; return }
         searchInProgress = true
-        let activeCatalog = catalog, activeEmojis = emojiCatalog, activeOrder = order
+        let activeCatalog = catalog, activeEmojis = emojiCatalog, activeOrder = order, hidden = hiddenEmojiGroups, variants = skinToneVariants
         let activeRevision = revision, searchEmojis = section == .emojis
         searchTask = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(100)) }
@@ -1556,7 +2574,7 @@ private final class KeyboardModel: ObservableObject {
             let started = DispatchTime.now().uptimeNanoseconds
 #endif
             let matches: ([UnicodeCharacter], [UnicodeEmojiEntry]) = await CatalogWorker.run {
-                if searchEmojis { return ([], activeEmojis.search(searchQuery, limit: 120, order: activeOrder)) }
+                if searchEmojis { return ([], activeEmojis.search(searchQuery, limit: 120, order: activeOrder, hiding: hidden, skinToneVariants: variants)) }
                 return (activeCatalog.search(searchQuery, limit: 120, order: activeOrder), [])
             }
 #if DEBUG
@@ -2683,7 +3701,9 @@ private struct KeyboardTypingWidePadVisible: PreferenceKey {
 }
 
 private struct UnicodeKeyboardView: View {
+    @Environment(\.displayScale) private var rowDisplayScale
     @ObservedObject var model: KeyboardModel
+    @ObservedObject var language: KeyboardLanguageCoordinator
     @ObservedObject var store: CharacterStore
     @ObservedObject var symbolBoards = SymbolBoardStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -2708,6 +3728,21 @@ private struct UnicodeKeyboardView: View {
     /// The gap above the content and above the footer.
     private var contentGap: CGFloat { model.usesCompactSearchLayout ? KeyboardLayoutPolicy.compactSearchRowSpacing : 4 }
     private var controlHeight: CGFloat { model.typingKeyHeight }
+    private var showsCompositionShelf: Bool {
+        !model.showsUnicode && !model.expandedConversion && !model.finishingConversion
+            && (language.mode != .direct || LanguageInputSettings.englishAssistanceAvailable)
+            && (language.mode == .koreanTwoSetHangul || (!isConversionLoading && !needsConversionRecovery)) && model.compositionShelfHeight > 0
+    }
+    private var showsEnglishShelf: Bool { showsCompositionShelf && language.mode == .direct }
+    // English owns the complete 44-point band. Keep baseline insets when absent,
+    // and keep conversion/preview/footer/key metrics independent of this row.
+    private var typingTopInset: CGFloat { showsEnglishShelf ? 0 : 4 }
+    private var typingContentTopGap: CGFloat { showsEnglishShelf ? 0 : contentGap }
+    private static let englishStatusInk = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 177.0 / 255, green: 177.0 / 255, blue: 186.0 / 255, alpha: 1) // #B1B1BA
+            : UIColor(red: 84.0 / 255, green: 84.0 / 255, blue: 93.0 / 255, alpha: 1) // #54545D
+    })
 
     var body: some View {
         VStack(spacing: 0) {
@@ -2720,13 +3755,31 @@ private struct UnicodeKeyboardView: View {
                 // The model restores the exact query and caret when shown.
                 if model.showsUnicodeToolbar {
                     toolbar.frame(height: headerHeight)
+                        .allowsHitTesting(!model.finishingConversion && !model.expandedConversion)
+                        .accessibilityHidden(model.finishingConversion || model.expandedConversion)
                 }
-                // Preserve the same row budget with the toolbar unmounted:
-                // four points before the content and before the footer.
-                Color.clear.frame(height: contentGap).accessibilityHidden(true)
+                if showsCompositionShelf {
+                    if showsEnglishShelf { englishShelf }
+                    else {
+                        conversionShelf
+                        Color.clear.frame(height: 4).accessibilityHidden(true)
+                    }
+                }
+                // English has no exterior gap; conversion and shelf-free typing
+                // retain their existing content gap. The footer gap stays intact.
+                Color.clear.frame(height: typingContentTopGap).accessibilityHidden(true)
                 ZStack {
-                    if model.showsUnicode {
+                    if model.finishingConversion {
+                        finishConversionPanel
+                    } else if model.expandedConversion {
+                        expandedConversionPanel
+                    } else if model.showsUnicode {
                         unicodeContent
+                    } else if isConversionLoading && language.mode != .koreanTwoSetHangul {
+                        // Unmount normal keys (including AX) until activation can retain input.
+                        conversionLoadingPanel
+                    } else if needsConversionRecovery && language.mode != .koreanTwoSetHangul {
+                        conversionRecoveryPanel
                     } else {
                         typingContent
                     }
@@ -2735,9 +3788,11 @@ private struct UnicodeKeyboardView: View {
                 .layoutPriority(1)
                 Color.clear.frame(height: contentGap).accessibilityHidden(true)
                 controls
+                    .allowsHitTesting(!model.finishingConversion && !model.expandedConversion)
+                    .accessibilityHidden(model.finishingConversion || model.expandedConversion)
             }
             .padding(.horizontal, 8)
-            .padding(.top, 4)
+            .padding(.top, typingTopInset)
             .padding(.bottom, 6)
             // Hidden, not dimmed, under a panel that covers them.
             .opacity(model.hasKeyboardPanel ? 0 : 1)
@@ -2878,12 +3933,179 @@ private struct UnicodeKeyboardView: View {
         }
     }
 
+    private var conversionStatusText: String? {
+        if language.isLoading { return "Loading language…" }
+        switch language.status {
+        case .ready: return nil
+        case .missingResources: return "Download required. Open Uniboard to manage languages."
+        case .unsupportedMode: return "This input mode isn’t available."
+        case .unsupportedInput: return "No matching conversion. Keep typed text or cancel."
+        case .failed: return "Conversion unavailable. Switch to Direct Typing or keep typed text."
+        }
+    }
+
+    private var isConversionLoading: Bool {
+        language.mode != .direct && language.isLoading
+    }
+
+    private var needsConversionRecovery: Bool {
+        guard language.mode != .direct, !language.isLoading else { return false }
+        switch language.status {
+        case .missingResources, .unsupportedMode, .failed: return true
+        case .ready, .unsupportedInput: return false
+        }
+    }
+
+    private var conversionLoadingPanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Loading language…")
+                    .font(.headline)
+                    .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Switch to Direct Typing") { controller?.switchToDirectTyping() }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("keyboard.conversion.switchToDirect")
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+        }
+        .keyboardUnmaskedScrollEdges()
+        .accessibilityIdentifier("keyboard.conversion.loading")
+    }
+
+    private var conversionRecoveryPanel: some View {
+        let token = language.state.token
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(language.name, systemImage: "exclamationmark.triangle").font(.headline)
+                    .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                Text(conversionStatusText ?? "Conversion unavailable.")
+                    .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if language.status == .missingResources,
+                   language.mode.conversionEngineABI != nil {
+                    Text("Full Access required").font(.subheadline.weight(.semibold))
+                        .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                    Text("Allow Full Access to use downloaded languages. Direct Typing is still available.")
+                        .font(.footnote)
+                        .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("The keyboard needs Full Access to read language files shared locally by Uniboard.")
+                        .font(.footnote)
+                        .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button("Switch to Direct Typing") { controller?.switchToDirectTyping() }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("keyboard.conversion.switchToDirect")
+                if !language.rawInput.isEmpty {
+                    Text(language.preedit).fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                    if language.mode.offersLiteralConversion {
+                        Button("Keep Typed Text") { controller?.keepRomanLetters(token: token) }.frame(minHeight: 44)
+                    }
+                    Button("Cancel Conversion") { controller?.cancelConversion(token: token) }.frame(minHeight: 44)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+        }
+    }
+
+    private var englishShelf: some View {
+        let revision = model.englishRevision
+        let suggestionsUnavailable = !model.englishSuggestions.isEmpty && !model.englishCanReplace
+        let status = suggestionsUnavailable ? "Suggestions unavailable here." : model.englishStatus
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                if model.englishHasUndo, let original = model.englishOriginal {
+                    Button { controller?.undoEnglish(revision: revision) } label: {
+                        Label("Undo “\(original)”", systemImage: "arrow.uturn.backward")
+                            .lineLimit(1).padding(.horizontal, 12)
+                            .frame(minWidth: 44, minHeight: 44, maxHeight: 44)
+                            .foregroundStyle(Color(uiColor: .label))
+                            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Undo correction, restore \(original)")
+                    .accessibilityHint("Restores your spelling and removes the triggering delimiter.")
+                    .accessibilityIdentifier("keyboard.english.undo")
+                }
+                if model.englishCanReplace {
+                    HStack(spacing: 0) {
+                        ForEach(model.englishSuggestions.indices, id: \.self) { index in
+                            let suggestion = model.englishSuggestions[index]
+                            if index > 0 { KeyboardCandidateDivider() }
+                            Button { controller?.chooseEnglish(suggestion, revision: revision) } label: {
+                                KeyboardCandidateText(output: suggestion)
+                            }
+                            .buttonStyle(KeyboardCandidateButtonStyle())
+                            .disabled(!model.englishCanReplace)
+                            .accessibilityLabel("English suggestion, \(suggestion)")
+                            .accessibilityHint("Replace the word you just typed.")
+                            .accessibilityIdentifier("keyboard.english.suggestion.\(index)")
+                        }
+                    }
+                }
+                if suggestionsUnavailable || (model.englishSuggestions.isEmpty && !model.englishHasUndo) {
+                    Text(status).font(.footnote)
+                        .foregroundStyle(Self.englishStatusInk)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 8)
+                        .frame(height: 44)
+                        .accessibilityIdentifier("keyboard.english.status")
+                }
+            }
+        }
+        .keyboardUnmaskedScrollEdges()
+        .frame(height: 44)
+        .accessibilityIdentifier("keyboard.english.shelf")
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("English Suggestions")
+    }
+
+    private var conversionShelf: some View {
+        let token = language.state.token
+        return KeyboardConversionShelf(mode: language.mode, rawInput: language.rawInput,
+            preedit: language.preedit,
+            candidates: language.state.visibleResult?.candidates ?? [], token: token,
+            statusText: conversionStatusText, height: model.compositionShelfHeight,
+            onChoose: { controller?.chooseConversion($0, token: $1) },
+            onLiteral: { controller?.keepRomanLetters(token: token) },
+            onExpand: { controller?.expandConversion() })
+    }
+
+    private var expandedConversionPanel: some View {
+        let token = language.state.token
+        return GeometryReader { geometry in
+            KeyboardExpandedConversionView(mode: language.mode, rawInput: language.rawInput,
+            preedit: language.preedit,
+            candidates: language.state.visibleResult?.candidates ?? [], token: token,
+            statusText: conversionStatusText, height: geometry.size.height,
+            onChoose: { controller?.chooseConversion($0, token: $1) },
+            onLiteral: { controller?.keepRomanLetters(token: token) },
+            onClose: { controller?.closeConversionChoices() },
+            onCancel: { controller?.cancelConversion(token: token) },
+            queuedPunctuation: model.queuedConversionPunctuation)
+        }
+    }
+
+    private var finishConversionPanel: some View {
+        let token = language.state.token
+        return KeyboardFinishConversionView(rawInput: language.mode == .koreanTwoSetHangul ? language.preedit : language.rawInput,
+            confirmsComposedText: language.mode == .koreanTwoSetHangul,
+            onKeepTypedText: { controller?.resolveConversionTransition(keepTypedText: true, token: token) },
+            onCancelConversion: { controller?.resolveConversionTransition(keepTypedText: false, token: token) },
+            onKeepEditing: { controller?.resolveConversionTransition(keepTypedText: nil, token: token) })
+    }
+
     private var typingContent: some View {
-        return KeyboardTypingView(typing: model.typing, mode: model.inputModeID,
-            isPad: model.isPadLayout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout, compact: model.isCompactLayout,
+        return KeyboardTypingView(typing: model.typing, mode: model.inputModeID, koreanTwoSet: language.mode == .koreanTwoSetHangul,
+            presentation: model.typingPresentation,
+            isPad: model.isPadLayout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout, mergedSymbols: model.mergesSymbols, compact: model.isCompactLayout,
             enabled: !model.showsUnicode, useUnicodeFonts: model.useUnicodeFonts,
+            preservesNormalKeySize: language.mode != .direct || (model.typingState.alphabet.id == KeyboardAlphabet.english.id
+                && (language.preferences.effectiveEnglishSuggestions || language.preferences.effectiveEnglishAutocorrection)),
             delete: delete, variants: typingVariantActions,
-            keySettings: model.keySettings, returnTitle: model.returnTitle, action: action, shiftSlide: shiftSlide)
+            keySettings: model.keySettings, returnTitle: language.rawInput.isEmpty ? model.returnTitle : "Confirm", action: action, shiftSlide: shiftSlide)
     }
 
     private var sectionMenu: some View {
@@ -2921,6 +4143,7 @@ private struct UnicodeKeyboardView: View {
                 else { characterGrid(model.discoveryCharacters, pagination: model.loadSymbolsPage).id("symbols-\(model.editionValue)") }
             case .emojis:
                 if model.discoveryLoading { ProgressView("Loading emoji…").font(.system(size: 12)) }
+                else if model.hidesAllEmoji { allEmojiHiddenState }
                 else { emojiGrid(model.discoveryEmojis, pagination: model.loadEmojisPage).id("emojis-\(model.editionValue)") }
             case .blocks: blockContent
             case .saved: savedContent
@@ -3201,8 +4424,16 @@ private struct UnicodeKeyboardView: View {
         } else if model.searchInProgress {
             ProgressView("Searching…").font(.system(size: 12))
         } else if model.section == .emojis ? model.emojiResults.isEmpty : model.results.isEmpty {
-            Text("No results. Try a shorter name or code point.")
-                .font(.system(size: 12)).foregroundStyle(KeyboardPalette.secondary)
+            VStack(spacing: 2) {
+                Text(model.section != .emojis ? "No results. Try a shorter name or code point."
+                     : model.hidesAllEmoji ? "No emoji categories shown. Choose categories in the Uniboard app."
+                     : model.filtersEmoji ? "No matching emoji in the categories shown" : "No results. Try a shorter name or code point.")
+                if model.section == .emojis && !model.hidesAllEmoji && model.filtersEmoji {
+                    Text("Try another search, or show more categories in the Uniboard app.")
+                }
+            }
+            .font(.system(size: 12)).foregroundStyle(KeyboardPalette.secondary)
+            .multilineTextAlignment(.center).padding(.horizontal, 12)
         } else {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 5) {
@@ -3229,7 +4460,8 @@ private struct UnicodeKeyboardView: View {
         } else if model.searchInProgress {
             ProgressView().controlSize(.small).frame(maxWidth: .infinity)
         } else if emoji ? model.emojiResults.isEmpty : model.results.isEmpty {
-            compactSearchNote("No results")
+            compactSearchNote(emoji && model.hidesAllEmoji ? "No emoji categories shown"
+                              : emoji && model.filtersEmoji ? "No matching emoji in the categories shown" : "No results")
         } else {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 5) {
@@ -3280,7 +4512,12 @@ private struct UnicodeKeyboardView: View {
         } else if model.searchInProgress {
             ProgressView("Searching…").font(.system(size: 12))
         } else if model.section == .emojis {
-            if model.emojiResults.isEmpty { emptyState(icon: "face.smiling", title: "No emoji sequences found", detail: "Try a shorter name, a group, or a complete emoji.") }
+            if model.hidesAllEmoji { allEmojiHiddenState }
+            else if model.emojiResults.isEmpty && model.filtersEmoji {
+                emptyState(icon: "face.smiling", title: "No matching emoji in the categories shown",
+                           detail: "Try another search, or show more categories in the Uniboard app.")
+            }
+            else if model.emojiResults.isEmpty { emptyState(icon: "face.smiling", title: "No emoji sequences found", detail: "Try a shorter name, a group, or a complete emoji.") }
             else { emojiGrid(model.emojiResults) }
         } else if model.results.isEmpty {
             emptyState(icon: "magnifyingglass", title: "No characters found", detail: "Try a shorter name or a code point such as U+2192.")
@@ -3436,16 +4673,24 @@ private struct UnicodeKeyboardView: View {
                        title: "This page is empty", detail: "Hold a Unicode key and choose Save to add it to a page.")
         } else {
             // The page's own rows and gaps, or rows of ten, with one key width throughout.
-            let cells = SymbolPageLayout.resolved(board.layout, keyCount: board.keys.count).cells(keyCount: board.keys.count)
+            let cells = savedPageCells(board)
             let spacing: CGFloat = model.isPadLayout ? 7 : 5
             GeometryReader { geometry in
                 let width = SymbolPageLayout.keyWidth(for: cells, available: geometry.size.width, spacing: spacing)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 4) {
                         ForEach(cells.indices, id: \.self) { row in
-                            HStack(spacing: spacing) {
-                                ForEach(cells[row].indices, id: \.self) { column in
-                                    savedBoardCell(cells[row][column], board: board, keyWidth: width, spacing: spacing)
+                            if let rows = board.explicitRows {
+                                ExplicitKeyboardRow(alignment: rows[row].alignment, spacing: spacing, scale: rowDisplayScale) {
+                                    ForEach(cells[row].indices, id: \.self) { column in
+                                        savedBoardCell(cells[row][column], board: board, keyWidth: width, spacing: spacing)
+                                    }
+                                }.environment(\.layoutDirection, .leftToRight)
+                            } else {
+                                HStack(spacing: spacing) {
+                                    ForEach(cells[row].indices, id: \.self) { column in
+                                        savedBoardCell(cells[row][column], board: board, keyWidth: width, spacing: spacing)
+                                    }
                                 }
                             }
                         }
@@ -3455,6 +4700,14 @@ private struct UnicodeKeyboardView: View {
                 .accessibilityIdentifier("keyboard.boards.keys")
             }
         }
+    }
+    private func savedPageCells(_ board: SymbolBoard) -> [[SymbolPageLayout.Cell]] {
+        guard let rows = board.explicitRows else { return SymbolPageLayout.resolved(board.layout, keyCount: board.keys.count).cells(keyCount: board.keys.count) }
+        var index = 0
+        return rows.map { row in row.cells.map { cell in
+            if cell.key != nil { defer { index += 1 }; return .key(index) }
+            return cell == .halfGap ? .halfGap : .gap
+        } }
     }
     @ViewBuilder private func savedBoardCell(_ cell: SymbolPageLayout.Cell, board: SymbolBoard, keyWidth: CGFloat, spacing: CGFloat) -> some View {
         if case .key(let index) = cell, board.keys.indices.contains(index) {
@@ -3559,7 +4812,7 @@ private struct UnicodeKeyboardView: View {
     @ViewBuilder private func boardTextInspection(_ text: String) -> some View {
         if text.unicodeScalars.count == 1, let point = text.unicodeScalars.first?.value,
            let character = model.catalog.character(at: point) { inspectionPanel(.character(character)) }
-        else if let emoji = model.emojiCatalog.entries.first(where: { SymbolBoardKey.exact($0.text, text) }) { inspectionPanel(.emoji(emoji)) }
+        else if let emoji = model.emojiCatalog.entry(text: text) { inspectionPanel(.emoji(emoji)) }
         else {
             VStack(spacing: 6) {
                 inspectionHeader(title: "Unicode sequence", text: text, saved: symbolBoards.isFavorite(text))
@@ -3741,6 +4994,12 @@ private struct UnicodeKeyboardView: View {
         text.utf8.map { String(format: "%02X", $0) }.joined(separator: " ")
     }
 
+    /// Every emoji category is hidden in the app (no button: the keyboard can't open it).
+    private var allEmojiHiddenState: some View {
+        emptyState(icon: "line.3.horizontal.decrease.circle", title: "No emoji categories shown", detail: "Choose categories in the Uniboard app.")
+            .accessibilityIdentifier("keyboard.emojisAllHidden")
+    }
+
     private func emptyState(icon: String, title: String, detail: String) -> some View {
         VStack(spacing: 6) {
             Image(systemName: icon).font(.system(size: 22, weight: .light)).foregroundStyle(KeyboardPalette.accent)
@@ -3785,7 +5044,7 @@ private struct UnicodeKeyboardView: View {
         .padding(.horizontal, inset)
     }
 
-    private var usesPadFooter: Bool { usesPadKeyPositions }
+    private var usesPadFooter: Bool { usesPadKeyPositions && language.mode != .koreanTwoSetHangul }
     private var usesPadKeyPositions: Bool { model.isPadLayout && !model.showsUnicode && model.typingKeyHeight >= 44 }
     private var displaysCollapseKey: Bool { model.showsCollapseKey || usesPadFooter }
     /// Browsing Unicode (any section) shows its own Delete in the footer, so the
@@ -3799,7 +5058,7 @@ private struct UnicodeKeyboardView: View {
             if let plan = KeyboardFooterLayoutPolicy.plan(availableWidth: geometry.size.width,
                 hasGlobe: model.needsInputModeSwitchKey, showsCollapse: displaysCollapseKey,
                 showsPage: !model.showsUnicode || showsPagesDelete, isPad: model.isPadLayout,
-                showsReturn: !usesPadFooter && (model.showsUnicode || KeyboardTypingLayoutPolicy.padPlan(availableWidth: geometry.size.width,
+                showsReturn: language.mode == .koreanTwoSetHangul || !usesPadFooter && (model.showsUnicode || KeyboardTypingLayoutPolicy.padPlan(availableWidth: geometry.size.width,
                     isPad: model.isPadLayout, layout: model.typingState.layout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout,
                     alphabet: model.typingState.alphabet) == nil),
                 padTyping: usesPadFooter) {
@@ -3839,14 +5098,28 @@ private struct UnicodeKeyboardView: View {
                 contentPosition: usesPadKeyPositions ? .bottomLeft : .center,
                 factory: { [mode = model.inputModeID] in favoritesActions(mode) })
                 .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: true)
-            if model.layouts.count > 1 && !model.isSearching {
+            if (controller?.inputModeChoices.count ?? 0) > 1 && !model.isSearching {
                 let alphabet = model.typingState.alphabet
-                KeyboardVariantKey(text: alphabet.id, variants: [], identifier: "keyboard.space", label: "Insert space",
-                    value: alphabet.nativeName, route: model.inputModeID, fontSize: 14, foreground: .secondaryLabel,
-                    hint: "Tap to insert a space. Hold, slide to a layout, then lift your finger to switch.",
-                    longPressOptions: KeyboardModel.layoutChoices(current: alphabet, layouts: model.layouts),
-                    displayText: { KeyboardAlphabet.alphabet(id: $0)?.nativeName ?? $0 },
-                    actionName: { "Switch to \(KeyboardAlphabet.alphabet(id: $0)?.nativeName ?? $0)" },
+                KeyboardVariantKey(text: language.mode == .direct ? alphabet.id : keyboardModeLabel(language.mode), variants: [], identifier: "keyboard.space", label: language.rawInput.isEmpty ? "Insert space" : model.compositionShelfHeight == 0 ? "Open Conversion Choices" : language.mode == .koreanTwoSetHangul ? "Confirm and insert space" : "Confirm Conversion",
+                    value: language.mode == .direct ? alphabet.nativeName : language.name, route: model.inputModeID, fontSize: 14, foreground: .secondaryLabel,
+                    hint: !language.rawInput.isEmpty
+                        ? (model.compositionShelfHeight == 0 ? "Opens choices for your unfinished text without inserting it."
+                            : language.mode == .koreanTwoSetHangul ? "Inserts the composed text followed by one space." : "Confirms the composed text.")
+                        : LanguageInputSettings.englishAssistanceAvailable && model.englishHasUndo && model.compositionShelfHeight == 0
+                        ? "Tap to insert a space. Hold for Undo Correction or keyboard choices."
+                        : LanguageInputSettings.englishAssistanceAvailable
+                            ? "Tap to insert a space. Hold for keyboard choices and available English suggestions."
+                            : "Tap to insert a space. Hold for keyboard choices.",
+                    longPressOptions: controller?.inputModeChoices ?? [],
+                    secondaryText: language.mode == .koreanTwoSetHangul && model.compositionShelfHeight == 0 && language.hasComposition ? language.preedit : nil,
+                    displayText: { keyboardInputTargetLabel($0) },
+                    actionName: { id in
+                        if id.hasPrefix("mode:"), let mode = LanguageInputMode(rawValue: String(id.dropFirst(5))) {
+                            return "Switch to \(KeyboardLanguageCoordinator.name(for: mode))"
+                        }
+                        return id == "english-undo" ? "Undo Correction" : id.hasPrefix("english-suggestion:")
+                            ? "Use \(keyboardInputTargetLabel(id))" : "Switch to \(keyboardInputTargetLabel(id))"
+                    },
                     factory: { [mode = model.inputModeID] in layoutActions(mode) })
                     .frame(width: plan.spaceWidth, height: controlHeight).keyboardKeySurface()
             } else {
@@ -3861,9 +5134,10 @@ private struct UnicodeKeyboardView: View {
             }
             if plan.returnWidth > 0 {
                 let inspecting = model.inspection != nil || model.symbolBoardInspectionText != nil
-                KeyboardTouchKey(title: model.isSearching ? "Done" : inspecting ? "Back" : model.returnTitle,
-                    identifier: "keyboard.return", label: model.isSearching ? "Close search keys" : inspecting ? "Close Unicode properties" : "\(model.returnTitle) key",
+                KeyboardTouchKey(title: model.isSearching ? "Done" : inspecting ? "Back" : !language.rawInput.isEmpty ? "Confirm" : model.returnTitle,
+                    identifier: "keyboard.return", label: model.isSearching ? "Close search keys" : inspecting ? "Close Unicode properties" : !language.rawInput.isEmpty ? "Confirm" : "\(model.returnTitle) key",
                     fontSize: 14, isAction: true, contentPosition: usesPadKeyPositions ? .bottomRight : .center, route: model.inputModeID,
+                    accessibilityHint: !language.rawInput.isEmpty ? "Inserts the composed text without adding a line break or sending it." : nil,
                     factory: { [mode = model.inputModeID] in action(mode, .returnKey) })
                     .frame(width: plan.returnWidth, height: controlHeight)
                     .background(KeyboardPalette.action, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -3879,11 +5153,9 @@ private struct UnicodeKeyboardView: View {
     }
     private func footerPageKey(_ plan: KeyboardFooterLayoutPolicy.Plan) -> some View {
         let letters = model.typingState.layout != .letters
-        // The number page swaps its digits for symbols only while a fourth row shows them.
-        let symbols = model.typingAuxiliaryRowVisible ?? (model.typingArrangement.typingRowCount > MainKeyboardArrangement.letterRowCount)
-        return KeyboardTouchKey(title: letters ? "ABC" : symbols ? "#+=" : "123",
+        return KeyboardTouchKey(title: letters ? model.typingState.alphabet.lettersKeyTitle : model.mergesSymbols ? "#+=" : "123",
             identifier: letters ? "keyboard.typing.letters" : "keyboard.typing.numbers",
-            label: letters ? "Letters" : symbols ? "Symbols" : "Numbers", value: model.typingLayoutValue, fontSize: 13,
+            label: letters ? "Letters" : model.mergesSymbols ? "Symbols" : "Numbers", value: model.typingLayoutValue, fontSize: 13,
             contentPosition: usesPadKeyPositions ? .bottomRight : .center,
             route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .layout(letters ? .letters : .numbers)) })
             .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: true)
@@ -3893,21 +5165,47 @@ private struct UnicodeKeyboardView: View {
 
 /// Only this small subtree observes transient Shift/capitalization changes.
 /// The mounted Unicode browser is not rebuilt for each English character.
+private struct KeyboardTypingRowsViewport<Content: View>: View {
+    let scrolls: Bool
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if scrolls {
+            VStack(spacing: 2) {
+                Text("App height limited — scroll for all keys")
+                    .font(.caption2).foregroundStyle(KeyboardPalette.secondary)
+                    .frame(maxWidth: .infinity)
+                ScrollView(.vertical) { content }
+                    .defaultScrollAnchor(.bottom)
+                    .accessibilityHint("Scroll to reach all normal-size key rows.")
+            }
+        } else {
+            // Preserve the existing direct/fully-fitting keyboard hierarchy.
+            content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        }
+    }
+}
+
 private struct KeyboardTypingView: View {
     @ObservedObject var typing: KeyboardTypingModel
     let mode: UUID
+    let koreanTwoSet: Bool
+    let presentation: KeyboardTypingPresentation
     let isPad: Bool
     let isLandscape: Bool
     let padLayout: KeyboardPadLayout
+    let mergedSymbols: Bool
     let compact: Bool
     let enabled: Bool
     let useUnicodeFonts: Bool
+    let preservesNormalKeySize: Bool
     let delete: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
     let variants: (UUID, String, Bool, Bool, Bool, Bool) -> KeyboardVariantActions?
     let keySettings: KeyboardKeySettings.Snapshot
     let returnTitle: String
     let action: (UUID, KeyboardInputCommand) -> () -> Bool
     let shiftSlide: (UUID) -> ((String) -> Bool)?
+    @Environment(\.displayScale) private var rowDisplayScale
     private var layoutValue: String {
         switch typing.state.layout { case .letters: return "letters"; case .numbers: return "numbers"; case .symbols: return "symbols" }
     }
@@ -3917,61 +5215,88 @@ private struct KeyboardTypingView: View {
     var body: some View {
         GeometryReader { geometry in
             let arrangement = arrangement
-            if let plan = KeyboardTypingLayoutPolicy.plan(availableHeight: geometry.size.height,
+            let explicitLetters = (koreanTwoSet || !arrangement.isLegacy) && typing.state.layout == .letters
+            let arrangedKeyRows = arrangement.keyRows(widePad: isPad && geometry.size.width >= 650)
+            let fullANSI = !explicitLetters && KeyboardTypingLayoutPolicy.usesANSI(availableWidth: geometry.size.width,
+                isPad: isPad, isLandscape: isLandscape, padLayout: padLayout) && padLayout == .ansiNumbers
+            let keyRows = fullANSI ? max(4, arrangedKeyRows) : arrangedKeyRows
+            let spacing: CGFloat = isPad && geometry.size.width >= 650 ? 6 : 4
+            let normalHeight = KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: geometry.size.width, isPad: isPad)
+            let minimumHeight = CGFloat(keyRows) * normalHeight + CGFloat(max(0, keyRows - 1)) * spacing
+            let scrolls = preservesNormalKeySize && geometry.size.height < minimumHeight
+            if let plan = KeyboardTypingLayoutPolicy.plan(availableHeight: preservesNormalKeySize ? max(geometry.size.height, minimumHeight) : geometry.size.height,
                 availableWidth: geometry.size.width, compact: compact, layout: typing.state.layout,
-                isPad: isPad, isLandscape: isLandscape, padLayout: padLayout,
-                keyRows: arrangement.keyRows(widePad: isPad && geometry.size.width >= 650)) {
-                let ansiStyle = KeyboardTypingLayoutPolicy.usesANSI(availableWidth: geometry.size.width, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout)
-                let pad = KeyboardTypingLayoutPolicy.padPlan(availableWidth: geometry.size.width, isPad: isPad, layout: typing.state.layout, isLandscape: isLandscape, padLayout: padLayout,
+                isPad: isPad, isLandscape: explicitLetters ? false : isLandscape, padLayout: explicitLetters ? .stock : padLayout,
+                keyRows: arrangement.keyRows(widePad: isPad && geometry.size.width >= 650), mergedSymbols: mergedSymbols) {
+                let ansiStyle = !explicitLetters && KeyboardTypingLayoutPolicy.usesANSI(availableWidth: geometry.size.width, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout)
+                let pad = explicitLetters ? nil : KeyboardTypingLayoutPolicy.padPlan(availableWidth: geometry.size.width, isPad: isPad, layout: typing.state.layout, isLandscape: isLandscape, padLayout: padLayout,
                     alphabet: typing.state.alphabet)
-                // The app's own arrangement draws its digits where it put them.
-                let arranged = pad == nil && typing.state.layout == .letters && !isStandard(arrangement)
+                // Keep the original renderer as well as its width basis: a
+                // custom number row can project to stock-looking letters, but
+                // must not silently switch their key widths to stock rendering.
+                let abc = KeyboardABCRendering(alphabet: catalogAlphabet, arrangement: presentation.widthBasis,
+                    availableWidth: geometry.size.width, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout)
+                let arranged = typing.state.layout == .letters && abc.arranged
+                // A caseless layout has no Shift: letters one width, rows centred.
+                let caseless = typing.state.layout == .letters
+                    ? KeyboardTypingLayoutPolicy.caselessKeyWidths(for: typing.state.alphabet, available: geometry.size.width, spacing: isPad ? 7 : 5) : nil
+                KeyboardTypingRowsViewport(scrolls: scrolls) {
                 VStack(spacing: plan.rowSpacing) {
-                    if plan.numberRowCount > 0 && !arranged { numberRow(height: plan.keyHeight, ansiPad: ansiStyle) }
-                    if let pad {
-                        if pad.isANSI { ansiRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0) }
-                        else { padRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0) }
-                    } else if arranged {
-                        arrangedRows(arrangement, width: geometry.size.width, height: plan.keyHeight, hasAuxiliaryRow: plan.numberRowCount > 0)
+                    if showsDiacriticsPanel {
+                        // The panel takes the number row's and letter rows' place.
+                        KeyboardDiacriticsPanel(marks: typing.state.alphabet.diacritics, isPad: isPad, route: mode, action: action)
+                            .frame(height: plan.contentHeight)
                     } else {
-                        ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: typing.state.layout, hasAuxiliaryRow: plan.numberRowCount > 0, ansiPad: ansiStyle, padLayout: padLayout,
-                                alphabet: typing.state.alphabet).enumerated()), id: \.offset) { index, keys in
+                    if plan.auxiliaryRowCount > 0 && !arranged { auxiliaryRow(height: plan.keyHeight, ansiPad: ansiStyle) }
+                    if let pad {
+                        if pad.isANSI { ansiRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.auxiliaryRowCount > 0) }
+                        else { padRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.auxiliaryRowCount > 0) }
+                    } else if arranged {
+                        arrangedRows(arrangement, width: geometry.size.width, height: plan.keyHeight, hasAuxiliaryRow: plan.auxiliaryRowCount > 0)
+                    } else {
+                        ForEach(Array(KeyboardTypingLayoutPolicy.rows(for: typing.state.layout, hasAuxiliaryRow: plan.auxiliaryRowCount > 0, ansiPad: ansiStyle, padLayout: padLayout,
+                                alphabet: typing.state.alphabet, mergedSymbols: mergedSymbols).enumerated()), id: \.offset) { index, keys in
+                            let punctuationWidth: CGFloat? = mergedSymbols && typing.state.layout == .symbols && index == 3
+                                ? KeyboardMergedSymbolsPolicy.punctuationWidth(available: geometry.size.width,
+                                    spacing: isPad ? 7 : 5, deleteWidth: isPad ? 64 : 42) : nil
                             HStack(spacing: isPad ? 7 : 5) {
-                                if index == 2 { typingLeadingKey(height: plan.keyHeight) }
+                                if index == 2 && (typing.state.layout == .letters || !mergedSymbols) { typingLeadingKey(height: plan.keyHeight, width: caseless?.function, ansiPad: ansiStyle) }
                                 ForEach(keys, id: \.self) { key in
-                                    typingCharacterKey(key, hasAuxiliaryRow: plan.numberRowCount > 0,
+                                    typingCharacterKey(key, hasAuxiliaryRow: plan.auxiliaryRowCount > 0,
                                         isAuxiliaryKey: false, ansiPad: ansiStyle, identifier: "keyboard.typing.key.\(key)", fontSize: compact ? 20 : 23)
-                                        .frame(maxWidth: .infinity).frame(height: plan.keyHeight)
+                                        .frame(width: punctuationWidth ?? caseless?.letter).frame(maxWidth: caseless == nil && punctuationWidth == nil ? .infinity : nil).frame(height: plan.keyHeight)
                                         .keyboardKeySurface(radius: 7)
                                 }
-                                if index == 2 {
+                                if index == (mergedSymbols && typing.state.layout == .symbols ? 3 : 2) {
                                     RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete", padStyle: isPad)
-                                        .frame(width: isPad ? 64 : 42, height: plan.keyHeight)
+                                        .frame(width: caseless?.function ?? (isPad ? 64 : 42), height: plan.keyHeight)
                                         .keyboardKeySurface(radius: 7, modifier: true)
-                                    if isPad && geometry.size.width >= 650 { padReturn(width: 112, height: plan.keyHeight) }
+                                    if !koreanTwoSet && KeyboardTypingLayoutPolicy.showsSymbolReturn(availableWidth: geometry.size.width, isPad: isPad) { padReturn(width: 112, height: plan.keyHeight) }
                                 }
                             }
-                            .padding(.horizontal, index == 1 && typing.state.layout == .letters ? (isPad ? 24 : 12) : 0)
+                            .padding(.horizontal, index == 1 && typing.state.layout == .letters && caseless == nil ? (isPad ? 24 : 12) : 0)
                         }
+                    }
                     }
                 }
                 .frame(height: plan.contentHeight)
+                .frame(maxWidth: .infinity)
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .preference(key: KeyboardTypingAuxiliaryRowVisible.self, value: plan.numberRowCount > 0)
+                .preference(key: KeyboardTypingAuxiliaryRowVisible.self, value: plan.auxiliaryRowCount > 0)
                 .preference(key: KeyboardTypingWidePadVisible.self, value: pad != nil)
                 .preference(key: KeyboardTypingANSIPadVisible.self, value: ansiStyle)
             }
         }
     }
 
+    private var showsDiacriticsPanel: Bool {
+        typing.showsDiacritics && typing.state.layout == .letters && !typing.state.alphabet.diacritics.isEmpty
+    }
+
     private var catalogAlphabet: KeyboardAlphabet { KeyboardAlphabet.alphabet(id: typing.state.alphabet.id) ?? typing.state.alphabet }
     /// The layout's main keyboard as the app arranged it, or the standard one.
-    private var arrangement: MainKeyboardArrangement { keySettings.effectiveArrangement(for: catalogAlphabet) }
-    /// The layout's own rows, with or without the number row above them,
-    /// draw as the system keyboard does.
-    private func isStandard(_ arrangement: MainKeyboardArrangement) -> Bool {
-        arrangement == .standard(for: catalogAlphabet) || arrangement == .letters(for: catalogAlphabet)
-    }
+    private var arrangement: MainKeyboardArrangement { presentation.arrangement }
 
     /// Rows as the app arranged them: digits, letters, Shift, Delete and
     /// optional Tab and Caps Lock, with gaps, every key one width and each
@@ -3979,15 +5304,23 @@ private struct KeyboardTypingView: View {
     private func arrangedRows(_ arrangement: MainKeyboardArrangement, width: CGFloat, height: CGFloat, hasAuxiliaryRow: Bool) -> some View {
         let spacing: CGFloat = isPad ? 7 : 5
         let rows = arrangement.rows
-        let keyWidth = MainKeyboardArrangement.keyWidth(for: rows, available: width, spacing: spacing)
-        return ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-            HStack(spacing: spacing) {
-                ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                    arrangedCell(cell, width: MainKeyboardArrangement.width(of: cell, keyWidth: keyWidth, spacing: spacing),
-                                 height: height, hasAuxiliaryRow: hasAuxiliaryRow)
-                }
+        let keyWidth = MainKeyboardArrangement.keyWidth(for: presentation.widthBasis.rows, available: width, spacing: spacing)
+        return ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+            if let explicit = arrangement.explicitRows {
+                ExplicitKeyboardRow(alignment: explicit[index].alignment, spacing: spacing, scale: rowDisplayScale) {
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                        arrangedCell(cell, width: MainKeyboardArrangement.width(of: cell, keyWidth: keyWidth, spacing: spacing),
+                                     height: height, hasAuxiliaryRow: hasAuxiliaryRow)
+                    }
+                }.environment(\.layoutDirection, .leftToRight)
+            } else {
+                HStack(spacing: spacing) {
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                        arrangedCell(cell, width: MainKeyboardArrangement.width(of: cell, keyWidth: keyWidth, spacing: spacing),
+                                     height: height, hasAuxiliaryRow: hasAuxiliaryRow)
+                    }
+                }.frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
         }
     }
 
@@ -4030,11 +5363,16 @@ private struct KeyboardTypingView: View {
                         route: mode, factory: { [mode = mode] in action(mode, .tab) })
                         .frame(width: pad.characterWidth, height: height).keyboardKeySurface(radius: 7, modifier: true)
                 } else if row == 1 {
+                    if typing.state.alphabet.isCaseless { padGap(width: pad.capsWidth, height: height) } else {
                     KeyboardTouchKey(title: "caps lock", identifier: "keyboard.typing.capsLock", label: "Caps Lock",
                         value: typing.state.shift == .capsLock ? "on" : "off", fontSize: 12, contentPosition: .bottomLeft,
                         route: mode, factory: { [mode = mode] in action(mode, .capsLock) })
                         .frame(width: pad.capsWidth, height: height).keyboardKeySurface(radius: 7, modifier: true)
                         .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(typing.state.shift == .capsLock ? KeyboardPalette.accent : Color.clear, lineWidth: 1))
+                    }
+                } else if typing.state.alphabet.isCaseless {
+                    if typing.state.alphabet.diacritics.isEmpty { padGap(width: pad.shiftWidth, height: height) }
+                    else { diacriticsKey(width: pad.shiftWidth, height: height) }
                 } else {
                     padShift(width: pad.shiftWidth, height: height, right: false)
                 }
@@ -4048,6 +5386,8 @@ private struct KeyboardTypingView: View {
                         .frame(width: pad.characterWidth, height: height).keyboardKeySurface(radius: 7, modifier: true)
                 } else if row == 1 {
                     padReturn(width: pad.returnWidth, height: height)
+                } else if typing.state.alphabet.isCaseless {
+                    padGap(width: pad.shiftWidth, height: height)
                 } else {
                     padShift(width: pad.shiftWidth, height: height, right: true)
                 }
@@ -4088,7 +5428,7 @@ private struct KeyboardTypingView: View {
 
     private func padReturn(width: CGFloat, height: CGFloat) -> some View {
         KeyboardTouchKey(title: returnTitle, identifier: "keyboard.return", label: "\(returnTitle) key", fontSize: 14,
-            isAction: true, contentPosition: .bottomRight, route: mode, factory: { [mode = mode] in action(mode, .returnKey) })
+            isAction: true, contentPosition: .bottomRight, route: mode, accessibilityHint: returnTitle == "Confirm" ? "Inserts the composed text without adding a line break or sending it." : nil, factory: { [mode = mode] in action(mode, .returnKey) })
             .frame(width: width, height: height)
             .background(KeyboardPalette.action, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
@@ -4103,7 +5443,7 @@ private struct KeyboardTypingView: View {
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(typing.state.shift == .lowercase ? Color.clear : KeyboardPalette.accent.opacity(0.65), lineWidth: 1))
     }
 
-    private func numberRow(height: CGFloat, ansiPad: Bool) -> some View {
+    private func auxiliaryRow(height: CGFloat, ansiPad: Bool) -> some View {
         HStack(spacing: isPad ? 7 : 5) {
             ForEach(KeyboardTypingLayoutPolicy.auxiliaryRow(for: typing.state.layout, ansiPad: ansiPad), id: \.self) { key in
                 typingCharacterKey(key, hasAuxiliaryRow: true, isAuxiliaryKey: true, ansiPad: ansiPad,
@@ -4115,14 +5455,24 @@ private struct KeyboardTypingView: View {
         }
     }
 
-    private func typingCharacterKey(_ key: String, hasAuxiliaryRow: Bool, isAuxiliaryKey: Bool, widePad: Bool = false, ansiPad: Bool = false,
+    @ViewBuilder private func typingCharacterKey(_ key: String, hasAuxiliaryRow: Bool, isAuxiliaryKey: Bool, widePad: Bool = false, ansiPad: Bool = false,
                                     identifier: String, fontSize: CGFloat) -> some View {
+        if koreanTwoSet, typing.state.layout == .letters,
+           let face = KoreanTwoSetKeyboard.label(for: KoreanTwoSetKeyboard.keyID(key, shifted: typing.state.shift != .lowercase)) {
+            let shifted = KoreanTwoSetKeyboard.shiftedVariant(for: key).map { [$0] } ?? []
+            KeyboardVariantKey(text: face, variants: shifted, identifier: identifier,
+                label: KoreanTwoSetKeyboard.accessibleName(for: face), value: layoutValue,
+                route: mode, enabled: enabled, fontSize: fontSize, useUnicodeFonts: false,
+                preservesPressAcrossTextChanges: true, longPressOptions: shifted,
+                actionName: { KoreanTwoSetKeyboard.accessibleName(for: $0) },
+                factory: { [mode = mode] in variants(mode, key, false, false, false, false) })
+        } else {
         let keyID = KeyboardKeySettings.identifier(forCharacter: key) ?? ""
-        let original = isAuxiliaryKey ? key : KeyboardTypingLayoutPolicy.output(for: key, state: typing.state, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout) ?? key
+        let original = isAuxiliaryKey ? key : KeyboardTypingLayoutPolicy.output(for: key, state: typing.state, hasAuxiliaryRow: hasAuxiliaryRow, widePad: widePad, ansiPad: ansiPad, padLayout: padLayout, mergedSymbols: mergedSymbols) ?? key
         let text = keySettings.tapOutput(for: keyID, defaultText: original,
             shifted: KeyboardTypingLayoutPolicy.usesShiftedTap(for: key, state: typing.state, ansiPad: ansiPad))
         let gestures = KeyboardVariantPolicy.gestureCandidates(for: key, original: original, state: typing.state, settings: keySettings)
-        return KeyboardVariantKey(text: text ?? original,
+        KeyboardVariantKey(text: text ?? original,
             variants: KeyboardVariantPolicy.holdVariants(for: key, state: typing.state),
             identifier: identifier, value: layoutValue, route: mode, enabled: enabled, fontSize: fontSize,
             foreground: text == nil ? .secondaryLabel : .label,
@@ -4131,10 +5481,14 @@ private struct KeyboardTypingView: View {
             preservesPressAcrossTextChanges: true,
             longPressOptions: gestures.longPress, swipeUp: gestures.swipeUp, swipeDown: gestures.swipeDown,
             factory: { [mode = mode] in variants(mode, key, hasAuxiliaryRow, isAuxiliaryKey, widePad, ansiPad) })
+        }
     }
 
-    @ViewBuilder private func typingLeadingKey(height: CGFloat, width: CGFloat? = nil) -> some View {
-        if typing.state.layout == .letters {
+    @ViewBuilder private func typingLeadingKey(height: CGFloat, width: CGFloat? = nil, ansiPad: Bool = false) -> some View {
+        if typing.state.layout == .letters && typing.state.alphabet.isCaseless {
+            // No Shift at all: Arabic holds its Diacritics key there, Hebrew nothing.
+            if !typing.state.alphabet.diacritics.isEmpty { diacriticsKey(width: width ?? (isPad ? 64 : 42), height: height) }
+        } else if typing.state.layout == .letters {
             KeyboardTouchKey(title: nil,
                 symbol: typing.state.shift == .capsLock ? "capslock.fill" : typing.state.shift == .uppercase ? "shift.fill" : "shift",
                 identifier: "keyboard.typing.shift", label: "Shift", value: shiftValue,
@@ -4145,7 +5499,8 @@ private struct KeyboardTypingView: View {
                 .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(typing.state.shift == .lowercase ? Color.clear : KeyboardPalette.accent.opacity(0.65), lineWidth: 1))
         } else {
             let symbols = typing.state.layout == .numbers
-            KeyboardTouchKey(title: symbols ? "#+=" : isLandscape && padLayout == .ansiNumbers ? "=<>" : isPad ? ".?123" : "123",
+            KeyboardTouchKey(title: KeyboardTypingLayoutPolicy.symbolSwitchTitle(to: symbols ? .symbols : .numbers,
+                isPad: isPad, ansiPad: ansiPad, padLayout: padLayout),
                 identifier: symbols ? "keyboard.typing.symbols" : "keyboard.typing.numbers",
                 label: symbols ? "More symbols" : "Numbers", value: layoutValue, fontSize: 13,
                 contentPosition: isPad && height >= 44 ? .bottomLeft : .center,
@@ -4155,6 +5510,86 @@ private struct KeyboardTypingView: View {
         }
     }
 
+    /// The Arabic Diacritics key in Shift's place: hold and slide for a mark;
+    /// a tap or VoiceOver activation opens the panel.
+    private func diacriticsKey(width: CGFloat, height: CGFloat) -> some View {
+        let marks = typing.state.alphabet.diacritics
+        return KeyboardVariantKey(text: "\u{064E}", variants: [], identifier: "keyboard.typing.diacritics",
+            label: "Arabic Diacritics", route: mode, enabled: enabled, fontSize: compact ? 20 : 23,
+            hint: "Choose a mark to add to the text.", longPressOptions: marks.map(\.mark),
+            actionName: { mark in marks.first { $0.mark == mark }?.name ?? mark },
+            primaryActionName: "Choose Arabic Diacritic",
+            focusRequest: { [typing] in typing.takeFocusReturn() },
+            factory: { [mode = mode] in variants(mode, MainKeyboardArrangement.shift, false, false, false, false) })
+            .frame(width: width, height: height)
+            .keyboardKeySurface(radius: 7, modifier: true)
+    }
+
+    /// An empty place where a caseless layout has no Caps Lock or Shift.
+    private func padGap(width: CGFloat, height: CGFloat) -> some View {
+        Color.clear.frame(width: width, height: height).accessibilityHidden(true)
+    }
+
+}
+
+/// The Arabic Diacritics panel (design §7.4), in place of the number row
+/// and letter rows: a titled header with a close key, then one tile per mark.
+private struct KeyboardDiacriticsPanel: View {
+    let marks: [KeyboardDiacritic]
+    let isPad: Bool
+    let route: UUID
+    let action: (UUID, KeyboardInputCommand) -> () -> Bool
+    @AccessibilityFocusState private var titleFocused: Bool
+
+    var body: some View {
+        GeometryReader { geometry in
+            let columns = isPad ? 8 : 4, gap: CGFloat = 6
+            let rows = (marks.count + columns - 1) / columns
+            let tileHeight = max(48, (geometry.size.height - 36 - gap * CGFloat(rows)) / CGFloat(max(rows, 1)))
+            VStack(spacing: gap) {
+                HStack {
+                    Text("Arabic Diacritics")
+                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityFocused($titleFocused)
+                    Spacer(minLength: 8)
+                    KeyboardTouchKey(title: nil, symbol: "xmark", identifier: "keyboard.diacritics.close", label: "Close", fontSize: 15,
+                        route: route, factory: { [route] in action(route, .diacritics(false)) })
+                        .frame(width: 44, height: 32).keyboardKeySurface(radius: 7, modifier: true)
+                }
+                .frame(height: 36)
+                ForEach(0..<rows, id: \.self) { row in
+                    HStack(spacing: gap) {
+                        ForEach(marks[(row * columns)..<min(marks.count, (row + 1) * columns)], id: \.mark) { mark in
+                            tile(mark).frame(maxWidth: .infinity).frame(height: tileHeight)
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+        .onAppear {
+            // VoiceOver starts on the title, after the panel is in place.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { titleFocused = true }
+        }
+    }
+
+    private func tile(_ mark: KeyboardDiacritic) -> some View {
+        // The dotted circle only pictures the mark; the key types the mark alone.
+        KeyboardTouchKey(title: nil, identifier: "keyboard.diacritics.\(mark.name)", label: mark.name,
+            route: route, largeContentTitle: "\u{25CC}\(mark.mark) \(mark.name)",
+            factory: { [route] in action(route, .diacritic(mark.mark)) })
+            .overlay {
+                VStack(spacing: 2) {
+                    Text("\u{25CC}" + mark.mark).font(.system(size: 28))
+                    Text(mark.name).font(.system(size: 11)).foregroundStyle(.secondary)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
+                .padding(.horizontal, 4)
+                .allowsHitTesting(false).accessibilityHidden(true)
+            }
+            .keyboardKeySurface(radius: 7)
+    }
 }
 
 /// Single host actions bind their route when the finger goes down. SwiftUI
@@ -4186,6 +5621,7 @@ extension KeyboardViewController: KeyboardPreviewCursorHost, KeyboardPreviewCurs
     var previewPanelOpen: Bool { model.hasKeyboardPanel }
 
     func previewAdjust(by offset: Int) {
+        invalidateEnglish()
         textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
     }
 
@@ -4194,20 +5630,27 @@ extension KeyboardViewController: KeyboardPreviewCursorHost, KeyboardPreviewCurs
     }
 
     func previewCursorShouldBeginTouch(_ control: KeyboardPreviewCursorControl, at time: TimeInterval) -> Bool {
-        KeyboardPreviewCursorPolicy.acceptsTouch(at: time, lastKeyRelease: keyTouchObserver.lastRelease,
+        invalidateEnglish()
+        return KeyboardPreviewCursorPolicy.acceptsTouch(at: time, lastKeyRelease: keyTouchObserver.lastRelease,
                                                  keysDown: keyTouchObserver.keysDown)
     }
 
     func previewCursor(_ control: KeyboardPreviewCursorControl, request offset: Int) {
-        previewCursorDriver.request(offset)
+        _ = finishConversionBefore { [weak self] in self?.previewCursorDriver.request(offset) }
     }
 
     func previewCursor(_ control: KeyboardPreviewCursorControl, step forward: Bool, announce: Bool) -> Bool {
-        previewCursorDriver.step(forward: forward, announce: announce)
+        if !language.rawInput.isEmpty {
+            return finishConversionBefore { [weak self] in _ = self?.previewCursorDriver.step(forward: forward, announce: announce) }
+        }
+        return previewCursorDriver.step(forward: forward, announce: announce)
     }
 
     func previewCursor(_ control: KeyboardPreviewCursorControl, lineEdge: KeyboardPreviewCursorSession.Goal) -> Bool {
-        previewCursorDriver.lineEdge(lineEdge)
+        if !language.rawInput.isEmpty {
+            return finishConversionBefore { [weak self] in _ = self?.previewCursorDriver.lineEdge(lineEdge) }
+        }
+        return previewCursorDriver.lineEdge(lineEdge)
     }
 
     func previewCursorDidEndTouch(_ control: KeyboardPreviewCursorControl) {
@@ -4233,6 +5676,9 @@ private struct KeyboardTouchKey: UIViewRepresentable {
     var holdFactory: (() -> (() -> Bool))? = nil
     /// Names an invisible held character for its VoiceOver announcement.
     var holdSpokenName: ((String) -> String?)? = nil
+    /// Shown by the Large Content Viewer at accessibility text sizes.
+    var largeContentTitle: String? = nil
+    var accessibilityHint: String? = nil
     let factory: () -> (() -> Bool)
 
     func makeUIView(context: Context) -> KeyboardTouchActionButton {
@@ -4258,9 +5704,17 @@ private struct KeyboardTouchKey: UIViewRepresentable {
         let foreground = isAction ? KeyboardPalette.actionTextUI : tinted ? KeyboardPalette.accentUI : secondary ? UIColor.secondaryLabel : UIColor.label
         view.setTitleColor(foreground, for: .normal)
         view.tintColor = foreground
+        view.accessibilityHint = accessibilityHint
         view.accessibilityIdentifier = identifier
         view.accessibilityLabel = label ?? title
         view.accessibilityValue = value
+        if let largeContentTitle {
+            view.showsLargeContentViewer = true
+            view.largeContentTitle = largeContentTitle
+            if !view.interactions.contains(where: { $0 is UILargeContentViewerInteraction }) {
+                view.addInteraction(UILargeContentViewerInteraction())
+            }
+        }
     }
 }
 

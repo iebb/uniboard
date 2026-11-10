@@ -86,6 +86,49 @@ final class EmojiCatalogTests: XCTestCase {
         XCTAssertEqual(EmojiCatalog.shared.search(emoji.id).first, emoji)
     }
 
+    func testEntryLookupsByIDAndTextMatchLinearSearchInEveryEdition() {
+        for edition in UnicodeEdition.allCases {
+            let catalog = edition.emojiCatalog
+            // Ids and exact texts are unique, so a linear first match finds each entry itself.
+            XCTAssertEqual(Set(catalog.entries.map(\.id)).count, catalog.entries.count)
+            XCTAssertEqual(Set(catalog.entries.map { Array($0.text.utf16) }).count, catalog.entries.count)
+            for emoji in catalog.entries {
+                XCTAssertEqual(catalog.entry(id: emoji.id), emoji, emoji.id)
+                XCTAssertEqual(catalog.entry(text: emoji.text), emoji, emoji.id)
+            }
+            for emoji in catalog.entries.enumerated().filter({ $0.offset % 97 == 0 }).map(\.element) {
+                XCTAssertEqual(catalog.entry(id: emoji.id), catalog.entries.first { $0.id == emoji.id }, emoji.id)
+                XCTAssertEqual(catalog.entry(text: emoji.text), catalog.entries.first { SymbolBoardKey.exact($0.text, emoji.text) }, emoji.id)
+            }
+            for missing in ["", "A", "not-an-id", "1F680-FFFF", "\u{1F680}\u{1F680}"] {
+                XCTAssertNil(catalog.entry(id: missing), missing)
+                XCTAssertNil(catalog.entry(text: missing), missing)
+            }
+        }
+    }
+
+    func testEntryTextLookupIsExactUTF16AndIndexesAreThreadSafe() throws {
+        // Canonically equivalent, so equal as Strings, but different sequences.
+        let catalog = EmojiCatalog(resourceURL: try fixture([entry([0x00C5], name: "precomposed"),
+                                                             entry([0x0041, 0x030A], name: "decomposed")]))
+        XCTAssertNil(catalog.resourceError)
+        XCTAssertEqual(catalog.entry(text: "\u{00C5}")?.name, "precomposed")
+        XCTAssertEqual(catalog.entry(text: "A\u{030A}")?.name, "decomposed")
+        XCTAssertNil(catalog.entry(text: "\u{212B}"), "Angstrom sign: equivalent, but not the same code units")
+        XCTAssertNil(catalog.entry(text: "A"))
+        XCTAssertEqual(catalog.entry(id: "0041-030A")?.name, "decomposed")
+
+        let fresh = EmojiCatalog()
+        var found = [String?](repeating: nil, count: fresh.entries.count)
+        found.withUnsafeMutableBufferPointer { results in
+            DispatchQueue.concurrentPerform(iterations: results.count) { index in
+                let emoji = fresh.entries[index]
+                if fresh.entry(text: emoji.text) == emoji, fresh.entry(id: emoji.id) == emoji { results[index] = emoji.id }
+            }
+        }
+        XCTAssertEqual(found, fresh.entries.map { Optional($0.id) })
+    }
+
     func testHistoricalEmojiSetsExcludeNewerIntroductionsWithoutChangingSequences() throws {
         for edition in [UnicodeEdition.older, .previous, .latest] {
             let catalog = edition.emojiCatalog
@@ -296,6 +339,142 @@ final class EmojiCatalogTests: XCTestCase {
         for query in ["👩‍💻", "1F469-200D-1F4BB", "U+1F469 U+200D U+1F4BB"] {
             XCTAssertEqual(fixture.search(query).map(\.codePoints), [sequence])
             XCTAssertEqual(fixture.search(query).first?.text.unicodeScalars.map(\.value), sequence)
+        }
+    }
+
+    // MARK: 1.4 categories and size
+
+    func testGroupsKeepFileOrderCountsAndSamples() throws {
+        var flag = entry([0x1F3C1], name: "chequered flag", version: "1.0")
+        flag["group"] = "Flags"
+        var later = entry([0x1F600], name: "grinning face", version: "1.0")
+        later["group"] = "Smileys & Emotion"
+        var other = entry([0x1F601], name: "beaming face", version: "1.0")
+        other["group"] = "Smileys & Emotion"
+        // File order Fixture, Flags, Smileys: code-point sorting must not reorder groups.
+        let fixture = EmojiCatalog(resourceURL: try fixture([entry(), flag, later, other]))
+        XCTAssertEqual(fixture.groups, ["Fixture", "Flags", "Smileys & Emotion"])
+        XCTAssertEqual(fixture.count(inGroup: "Smileys & Emotion"), 2)
+        XCTAssertEqual(fixture.count(inGroup: "Fixture"), 1)
+        XCTAssertEqual(fixture.count(inGroup: "Nope"), 0)
+        XCTAssertEqual(fixture.sample(forGroup: "Flags"), "\u{1F3C1}")
+        XCTAssertEqual(fixture.sample(forGroup: "Fixture"), "\u{1F680}", "A group without a fixed sample uses its first entry")
+        XCTAssertNil(fixture.sample(forGroup: "Nope"))
+        XCTAssertEqual(fixture.shownGroupCount(hiding: []), 3)
+        XCTAssertEqual(fixture.shownGroupCount(hiding: ["Flags", "Elsewhere"]), 2)
+
+        let latest = EmojiCatalog.latest
+        XCTAssertEqual(latest.groups, ["Smileys & Emotion", "People & Body", "Animals & Nature", "Food & Drink",
+                                       "Travel & Places", "Activities", "Objects", "Symbols", "Flags"])
+        XCTAssertEqual(latest.groups.reduce(0) { $0 + latest.count(inGroup: $1) }, latest.entries.count)
+        for group in latest.groups { XCTAssertNotNil(latest.sample(forGroup: group), group) }
+        for (group, sample) in EmojiCatalog.groupSamples {
+            XCTAssertEqual(sample.unicodeScalars.count, 1)
+            XCTAssertEqual(UnicodeEdition.allCases.compactMap { $0.emojiCatalog.entries.first { $0.text == sample }?.group }.count,
+                           UnicodeEdition.allCases.count, "\(group) sample is in every edition")
+        }
+        // A final edition keeps every group, counted for that edition.
+        let oldest = try XCTUnwrap(UnicodeEdition.allCases.filter { $0 != .draft }.first).emojiCatalog
+        XCTAssertEqual(oldest.groups, latest.groups)
+        XCTAssertLessThanOrEqual(oldest.count(inGroup: "Flags"), latest.count(inGroup: "Flags"))
+        XCTAssertTrue(EmojiCatalog(resourceURL: URL(fileURLWithPath: "/nonexistent")).groups.isEmpty)
+    }
+
+    func testHiddenGroupsAreLeftOutBeforePagingAndInEverySearchPath() throws {
+        let catalog = EmojiCatalog.latest
+        let hidden: Set<String> = ["Flags"]
+        for order in UnicodeSortOrder.allCases {
+            let all = catalog.orderedEntries(order: order)
+            let shown = catalog.orderedEntries(order: order, hiding: hidden)
+            XCTAssertEqual(shown, all.filter { $0.group != "Flags" })
+            XCTAssertFalse(shown.isEmpty)
+            // Every page is full of shown emoji.
+            let page = catalog.entries(offset: 120, limit: 120, order: order, hiding: hidden)
+            XCTAssertEqual(page, Array(shown.dropFirst(120).prefix(120)))
+            XCTAssertEqual(catalog.search("", limit: 50, order: order, hiding: hidden), Array(shown.prefix(50)))
+        }
+        XCTAssertFalse(catalog.search("flag").filter { $0.group == "Flags" }.isEmpty)
+        XCTAssertTrue(catalog.search("flag", limit: Int.max, hiding: hidden).allSatisfy { $0.group != "Flags" })
+        XCTAssertEqual(catalog.search("flag Japan").map(\.group), ["Flags"])
+        XCTAssertEqual(catalog.search("flag Japan", hiding: hidden), [])
+        XCTAssertEqual(catalog.search("\u{1F1EF}\u{1F1F5}").count, 1)
+        XCTAssertEqual(catalog.search("\u{1F1EF}\u{1F1F5}", hiding: hidden), [], "An exact pasted flag is hidden too")
+        XCTAssertEqual(catalog.search("1F1EF 1F1F5", hiding: hidden), [])
+        XCTAssertFalse(catalog.search("1F1EF 1F1F5").isEmpty)
+        XCTAssertEqual(catalog.search("1F600", hiding: hidden).first?.codePoints, [0x1F600], "Other groups still match")
+        XCTAssertEqual(catalog.search("\u{1F600}", hiding: hidden).first?.codePoints, [0x1F600])
+        let everything = Set(catalog.groups)
+        XCTAssertTrue(catalog.entries(limit: Int.max, hiding: everything).isEmpty)
+        XCTAssertTrue(catalog.search("face", hiding: everything).isEmpty)
+        XCTAssertEqual(catalog.shownGroupCount(hiding: everything), 0)
+        XCTAssertEqual(catalog.orderedEntries(hiding: ["Not a group"]), catalog.entries)
+    }
+
+    func testEmojiCategorySettingStoresOnlyValidHiddenNames() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("EmojiCategories-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let setting = EmojiCategorySetting(directory: { root })
+        XCTAssertEqual(setting.load(), [], "Missing means every category is shown")
+        XCTAssertTrue(setting.save(["Flags", "Activities"]))
+        XCTAssertEqual(setting.load(), ["Flags", "Activities"])
+        XCTAssertEqual(String(decoding: try Data(contentsOf: root.appendingPathComponent(EmojiCategorySetting.filename)), as: UTF8.self),
+                       #"{"hidden":["Activities","Flags"],"schemaVersion":1}"#)
+        XCTAssertTrue(setting.save([]))
+        XCTAssertEqual(setting.load(), [])
+        XCTAssertFalse(setting.save([""]))
+        XCTAssertEqual(setting.load(), [], "A refused save keeps the stored value")
+        for invalid in [#"{"hidden":["Flags"],"schemaVersion":2}"#, #"{"hidden":["Flags","Flags"],"schemaVersion":1}"#,
+                        #"{"hidden":[" Flags"],"schemaVersion":1}"#, #"{"hidden":"Flags","schemaVersion":1}"#, "{",
+                        #"{"hidden":["a\u0007"],"schemaVersion":1}"#] {
+            XCTAssertNil(EmojiCategorySetting.decode(Data(invalid.utf8)), invalid)
+            try Data(invalid.utf8).write(to: root.appendingPathComponent(EmojiCategorySetting.filename))
+            XCTAssertEqual(setting.load(), [], invalid)
+        }
+        let padded = Data((#"{"hidden":[],"schemaVersion":1}"# + String(repeating: " ", count: EmojiCategorySetting.maximumPayloadBytes)).utf8)
+        XCTAssertNil(EmojiCategorySetting.decode(padded))
+        XCTAssertEqual(EmojiCategorySetting.decode(EmojiCategorySetting.encode(["Ünïcode"])!), ["Ünïcode"])
+        XCTAssertEqual(EmojiCategorySetting(directory: { nil }).load(), [])
+        XCTAssertFalse(EmojiCategorySetting(directory: { nil }).save(["Flags"]))
+        XCTAssertFalse(EmojiCategorySetting(directory: { root.appendingPathComponent("missing/deeper") }).save(["Flags"]))
+        _ = EmojiCategorySetting.shared.directory()
+
+        XCTAssertTrue(EmojiCategorySetting.isValidName("Smileys & Emotion"))
+        XCTAssertTrue(EmojiCategorySetting.isValidName(String(repeating: "a", count: 64)))
+        for name in ["", String(repeating: "a", count: 65), String(repeating: "é", count: 33), " Flags", "Flags\n", "Fl\u{0}ags"] {
+            XCTAssertFalse(EmojiCategorySetting.isValidName(name), name.debugDescription)
+        }
+        XCTAssertTrue(EmojiCategorySetting.isValid(Set((1...32).map { "G\($0)" })))
+        XCTAssertFalse(EmojiCategorySetting.isValid(Set((1...33).map { "G\($0)" })))
+        XCTAssertNil(EmojiCategorySetting.encode(Set((1...33).map { "G\($0)" })))
+        XCTAssertEqual(EmojiCategorySetting.ordered(["Zeta", "Flags", "Alpha", "Activities"], groups: ["Activities", "Objects", "Flags"]),
+                       ["Activities", "Flags", "Alpha", "Zeta"])
+        XCTAssertEqual(EmojiCategorySetting.ordered(["Flags", "Smileys & Emotion"]), ["Smileys & Emotion", "Flags"])
+    }
+
+    func testEmojiTileLayoutMatchesTheDesignTable() {
+        XCTAssertEqual(EmojiTileLayout.automaticColumns(in: 0), 3)
+        XCTAssertEqual(EmojiTileLayout.automaticColumns(in: 370), 3)
+        XCTAssertEqual(EmojiTileLayout.automaticColumns(in: 748), 7)
+        XCTAssertEqual(EmojiTileLayout.automaticColumns(in: 150), 2, "At least two")
+        // design §3 table, iPhone grid width 370.
+        let expected: [(width: Double, glyph: Double, named: Bool, large: Bool)] = [
+            (181, 64, true, true), (118, 34, true, false), (86.5, 32, true, false), (67.2, 30, false, false),
+            (55, 28, false, false), (46, 25, false, false), (39.3, 22, false, false), (34, 20, false, false)]
+        for row in expected {
+            XCTAssertEqual(EmojiTileLayout.glyphSize(tileWidth: row.width), row.glyph, "\(row.width)")
+            XCTAssertEqual(EmojiTileLayout.showsName(tileWidth: row.width), row.named, "\(row.width)")
+            XCTAssertEqual(EmojiTileLayout.usesLargeName(tileWidth: row.width), row.large, "\(row.width)")
+        }
+        XCTAssertEqual(EmojiTileLayout.glyphSize(tileWidth: 10), 20)
+        XCTAssertEqual(EmojiTileLayout.glyphSize(tileWidth: 250), 96)
+        XCTAssertEqual(EmojiTileLayout.glyphSize(tileWidth: 900), 96)
+        XCTAssertEqual(EmojiTileLayout.glyphSize(tileWidth: 100), 33, "iPad Automatic")
+        var previous = 0.0
+        for width in stride(from: 20.0, through: 400, by: 0.5) {
+            let glyph = EmojiTileLayout.glyphSize(tileWidth: width)
+            XCTAssertGreaterThanOrEqual(glyph, previous, "Never shrinks as tiles grow")
+            previous = glyph
         }
     }
 }

@@ -257,9 +257,12 @@ private struct InstalledFontPicker: UIViewControllerRepresentable {
 struct FontPackDownloadsView: View {
     @EnvironmentObject private var preferences: CatalogPreferences
     @StateObject private var downloads = FontPackDownloads.shared
-    @State private var customFonts = CustomFontStore.shared.fonts
+    @StateObject private var fontFiles = FontFileManagementModel()
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var fontRefresh = UUID()
+    @State private var addingFont = false
     @State private var importing = false
-    @State private var importFailed = false
+    @State private var importError: String?
     @State private var pickingInstalled = false
 
     var body: some View {
@@ -307,29 +310,12 @@ struct FontPackDownloadsView: View {
             } footer: {
                 Text("Cancelling keeps completed fonts, and a retry downloads only what’s missing.")
             }
-            Section {
-                ForEach(customFonts) { font in
-                    Text(font.displayName)
-                    .swipeActions {
-                        Button("Remove", role: .destructive) {
-                            try? CustomFontStore.shared.remove(font)
-                            reloadCustomFonts()
-                        }
-                    }
-                    .accessibilityIdentifier("fontDownloads.custom.\(font.filename)")
-                }
-                Button { importing = true } label: { Label("Add Font File", systemImage: "doc.badge.plus") }
-                    .disabled(customFonts.count >= CustomFontStore.maximumFonts)
-                    .accessibilityIdentifier("fontDownloads.addFont")
-                Button { pickingInstalled = true } label: { Label("Use Installed Font", systemImage: "textformat") }
-                    .disabled(customFonts.count >= CustomFontStore.maximumFonts)
-                    .accessibilityIdentifier("fontDownloads.useInstalled")
-                if importFailed {
-                    Text("This file could not be added as a font.").foregroundStyle(.red)
-                        .accessibilityIdentifier("fontDownloads.addFont.error")
-                }
-            } header: {
-                Text("Your Fonts")
+            YourFontManagementSections(model: fontFiles, importing: { importing = true }, pickingInstalled: { pickingInstalled = true })
+                .disabled(addingFont)
+            if addingFont { ProgressView("Adding font…") }
+            if let importError {
+                Text(importError).foregroundStyle(.red)
+                    .accessibilityIdentifier("fontDownloads.addFont.error")
             }
             Section {
                 if let message = downloads.message {
@@ -337,38 +323,59 @@ struct FontPackDownloadsView: View {
                         .accessibilityIdentifier("fontDownloads.message")
                 }
             } footer: {
-                Text("Downloads contact GitHub’s file CDN. No typing, search terms or favorites are included in download requests. Font licenses and source information are available in Settings.")
+                Text("Downloads contact GitHub’s file CDN and Google Fonts (fonts.gstatic.com). No typing, search terms or favorites are included in download requests. Font licenses and source information are available in Settings.")
             }
         }
         .navigationTitle("Font Downloads")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { downloads.reload(); reloadCustomFonts() }
+        .onAppear { downloads.reload() }
+        .task(id: fontRefresh) { await fontFiles.reload() }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { fontRefresh = UUID() } }
+        .onReceive(NotificationCenter.default.publisher(for: .fontExplorationLibraryChanged)) { _ in fontRefresh = UUID() }
         .sheet(isPresented: $pickingInstalled) {
             InstalledFontPicker { name in
                 pickingInstalled = false
                 guard let name else { return }
-                let added = try? CustomFontStore.shared.addInstalled(postScriptName: name)
-                importFailed = added == nil
-                if added != nil { preferences.selectUnicodeFonts(true) }
-                reloadCustomFonts()
+                addFont { try CustomFontStore.shared.addInstalled(postScriptName: name) }
             }
             .ignoresSafeArea()
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.font]) { result in
-            guard case .success(let url) = result else { return }
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            let added = (try? Data(contentsOf: url)).flatMap { try? CustomFontStore.shared.add($0) }
-            importFailed = added == nil
-            if added != nil { preferences.selectUnicodeFonts(true) }
-            reloadCustomFonts()
+            switch result {
+            case let .success(url):
+                addFont {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    // Bounded import keeps the existing 40 MiB policy.
+                    let data = try CustomFontStore.boundedRead(url, limit: CustomFontStore.maximumBytes)
+                    return try CustomFontStore.shared.add(data)
+                }
+            case .failure:
+                importError = "This font file couldn’t be read. Try again."
+            }
         }
     }
 
-    /// Your fonts are tried before the packs, in the app and the keyboard.
-    private func reloadCustomFonts() {
-        customFonts = CustomFontStore.shared.fonts
-        preferences.fontFilesChanged()
+    private func addFont(_ operation: @escaping @Sendable () throws -> CustomFont) {
+        guard !addingFont else { return }
+        addingFont = true
+        importError = nil
+        Task {
+            do {
+                _ = try await Task.detached(priority: .userInitiated) { try operation() }.value
+                preferences.selectUnicodeFonts(true)
+                preferences.fontFilesChanged()
+                NotificationCenter.default.post(name: .fontExplorationLibraryChanged, object: nil)
+            } catch CustomFontStore.Failure.tooMany {
+                importError = "The limit of 16 has been reached. Remove an added font to make room."
+            } catch CustomFontStore.Failure.unavailable {
+                importError = "Your font storage is unavailable. Nothing was added. Try again."
+            } catch {
+                importError = "This file could not be added as a font. Try a readable font file no larger than 40 MiB."
+            }
+            addingFont = false
+            fontRefresh = UUID()
+        }
     }
 
     private func size(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }

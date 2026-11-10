@@ -156,7 +156,10 @@ extension CustomFontStore {
                            locator: font.installed == true ? .process(postScriptName: font.postScriptName, variations: [:]) :
                             .file(relativePath: font.filename, sha256: font.sha256, faceIndex: 0, variations: [:]), assetID: font.filename)
         }
-        return .init(generation: manifest.generation, faces: legacy + manifest.downloads.flatMap(\.faces), customEntryCount: manifest.fonts.count)
+        return .init(generation: manifest.generation, faces: (legacy + manifest.downloads.flatMap(\.faces)).map { face in
+            guard case .file = face.locator else { return face }
+            return face.catalogEnriched(using: .bundled)
+        }, customEntryCount: manifest.fonts.count)
     }
 
     func receipt(fileID: String) -> FontLibraryReceipt? {
@@ -230,6 +233,16 @@ extension CustomFontStore {
             guard let font = value.fonts.first(where: { $0.filename == download.filename }) else { throw FontLibraryFailure.storageFailure }
             try require(font.installed != true && hash(receipt.sha256) && receipt.sha256 == font.sha256 && path(receipt.repositoryPath))
             try require(receipt.repositoryCommit.range(of: "^[0-9a-f]{40}$", options: .regularExpression) != nil)
+            switch receipt.sourceKind {
+            case .gstatic?:
+                // Exactly the pinned shape the transport accepts; the id is the same path.
+                let prefix = "https://" + GoogleFontURLShape.instanceHost + "/"
+                guard let url = receipt.sourceURL, url.hasPrefix(prefix) else { throw FontLibraryFailure.storageFailure }
+                let instancePath = String(url.dropFirst(prefix.count))
+                try require(GoogleFontURLShape.isInstancePath(instancePath) && receipt.fileID == GoogleFontURLShape.instanceIDPrefix + instancePath)
+            case .repository?, nil:
+                try require(receipt.sourceURL == nil || receipt.sourceURL!.hasPrefix("https://raw.githubusercontent.com/google/fonts/" + receipt.repositoryCommit + "/"))
+            }
             try require(receipt.snapshotDate.range(of: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", options: .regularExpression) != nil)
             try require(!receipt.licenses.isEmpty && unique(receipt.licenses.map(\.id)))
             for license in receipt.licenses {
@@ -240,6 +253,10 @@ extension CustomFontStore {
                 try require(face.source == .downloaded && face.assetID == download.filename && !face.family.isEmpty && !face.style.isEmpty && !face.postScriptName.isEmpty)
                 guard case let .file(relativePath, sha256, faceIndex, variations) = face.locator else { throw FontLibraryFailure.storageFailure }
                 try require(relativePath == download.filename && sha256 == receipt.sha256 && faceIndex == 0 && variations.allSatisfy { $0.key.utf8.count == 4 && $0.value.isFinite })
+                for equivalent in face.equivalents ?? [] {
+                    guard case let .file(path, hashValue, index, axes) = equivalent else { throw FontLibraryFailure.storageFailure }
+                    try require(path.isEmpty && hash(hashValue) && hashValue != receipt.sha256 && index == 0 && axes.allSatisfy { $0.key.utf8.count == 4 && $0.value.isFinite })
+                }
             }
             try require(value.downloads.filter { $0.filename == download.filename }.allSatisfy { $0.retainsImportedEntry == download.retainsImportedEntry })
         }
@@ -282,7 +299,8 @@ extension CustomFontStore {
             let variations: [String: Double]
             switch face.locator { case .file(_, _, _, let axes), .process(_, let axes): variations = axes }
             return FontFaceRecord(id: face.id, family: face.family, style: face.style, postScriptName: face.postScriptName,
-                                  source: .downloaded, locator: .file(relativePath: filename, sha256: receipt.sha256, faceIndex: 0, variations: variations), assetID: filename)
+                                  source: .downloaded, locator: .file(relativePath: filename, sha256: receipt.sha256, faceIndex: 0, variations: variations), assetID: filename,
+                                  equivalents: face.equivalents)
         }
         if let previous = manifest.downloads.first(where: { $0.receipt.fileID == receipt.fileID }), previous.filename != filename {
             throw FontLibraryFailure.storageFailure
@@ -305,6 +323,87 @@ extension CustomFontStore {
         if !download.retainsImportedEntry && !manifest.downloads.contains(where: { $0.filename == download.filename }) {
             manifest.fonts.removeAll { $0.filename == download.filename }
         }
+        try commitManifest(manifest)
+    }
+}
+
+extension CustomFontStore {
+    /// Call off-main. The single manifest read defines both grouping and capacity.
+    /// File size is reported only after a bounded, regular-file read and hash check.
+    func readManagementSnapshot(checkCancellation: () throws -> Void = {}) throws -> FontManagementSnapshot {
+        Self.writerLock.lock(); defer { Self.writerLock.unlock() }
+        let manifest = try readManifest()
+        let library = snapshot(manifest)
+        var entries: [FontManagedEntry] = []
+        for font in manifest.fonts {
+            try checkCancellation()
+            let installed = font.installed == true
+            var bytes: Int64?
+            var data: Data?
+            if !installed, let url = url(forRelativePath: font.filename) {
+                do {
+                    if let read = try SharedConfigurationLocation.readRegularFile(url, limit: Self.maximumBytes + 1),
+                       read.count <= Self.maximumBytes, Self.digest(read) == font.sha256 {
+                        data = read
+                        bytes = Int64(read.count)
+                    }
+                } catch { /* Membership remains visible, with Size unavailable. */ }
+            }
+            // Multiple receipts can describe the SAME file. Keep each exact
+            // style/instance once in this presentation, without rewriting metadata.
+            var seen = Set<String>()
+            var faces = library.faces.filter { face in
+                let belongs: Bool
+                switch face.locator {
+                case let .file(path, hash, _, _): belongs = !installed && path == font.filename && hash == font.sha256
+                case let .process(name, _): belongs = installed && name == font.postScriptName
+                }
+                guard belongs else { return false }
+                let key = (FontFaceReference.identityKey(of: face.locator) ?? face.id.rawValue) + "|" + face.style
+                return seen.insert(key).inserted
+            }
+            if !manifest.downloads.contains(where: { $0.filename == font.filename }) {
+                let actual: CTFont?
+                if installed {
+                    let opened = CTFontCreateWithName(font.postScriptName as CFString, 12, nil)
+                    actual = CTFontCopyPostScriptName(opened) as String == font.postScriptName ? opened : nil
+                } else if let data, let provider = CGDataProvider(data: data as CFData), let graphics = CGFont(provider) {
+                    actual = CTFontCreateWithGraphicsFont(graphics, 12, nil, nil)
+                } else { actual = nil }
+                if let original = faces.first {
+                    let style = actual.flatMap { CTFontCopyName($0, kCTFontStyleNameKey) as String? } ?? "Style unavailable"
+                    faces = [FontFaceRecord(id: original.id, family: original.family, style: style,
+                                            postScriptName: original.postScriptName, source: original.source,
+                                            locator: original.locator, assetID: original.assetID, equivalents: original.equivalents)]
+                }
+            }
+            entries.append(.init(filename: font.filename, sha256: font.sha256, displayName: faces.first?.family ?? font.displayName,
+                                 installed: installed, faces: faces, verifiedBytes: bytes,
+                                 receiptIDs: manifest.downloads.filter { $0.filename == font.filename }.map { $0.receipt.fileID }))
+        }
+        try checkCancellation()
+        return .init(generation: manifest.generation, entries: entries)
+    }
+
+    /// Removes only the confirmed membership (all its styles/receipts), not
+    /// immutable bytes or any rules. A stale confirmation is never rebased.
+    func removeManagedEntry(_ entry: FontManagedEntry, expectedGeneration: String, expectedRules: [FontRule],
+                            readRules: () -> [FontRule]?, checkCancellation: () throws -> Void = {}) throws {
+        Self.writerLock.lock(); defer { Self.writerLock.unlock() }
+        try checkCancellation()
+        var manifest = try readManifest()
+        guard manifest.generation == expectedGeneration,
+              let current = manifest.fonts.first(where: { $0.filename == entry.filename }),
+              current.sha256 == entry.sha256, (current.installed == true) == entry.installed else {
+            throw FontManagementFailure.changed
+        }
+        guard let rules = readRules() else { throw FontManagementFailure.rulesUnavailable }
+        guard rules == expectedRules else { throw FontManagementFailure.changed }
+        manifest.fonts.removeAll { $0.filename == entry.filename }
+        manifest.downloads.removeAll { $0.filename == entry.filename }
+        try checkCancellation()
+        guard let latestRules = readRules() else { throw FontManagementFailure.rulesUnavailable }
+        guard latestRules == expectedRules, try readManifest().generation == expectedGeneration else { throw FontManagementFailure.changed }
         try commitManifest(manifest)
     }
 }

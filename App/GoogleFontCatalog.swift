@@ -37,14 +37,40 @@ public struct GoogleFontStyle: Codable, Sendable, Equatable, Identifiable {
     public let fileID: String
     public let postScriptName: String
     public let variationInstance: [String: Double]?
+    /// Schema 2: the same named instance as one pinned static file on fonts.gstatic.com.
+    public let instance: GoogleFontInstance?
 
-    public init(id: String, name: String, fileID: String, postScriptName: String, variationInstance: [String: Double]? = nil) {
+    public init(id: String, name: String, fileID: String, postScriptName: String, variationInstance: [String: Double]? = nil,
+                instance: GoogleFontInstance? = nil) {
         self.id = id
         self.name = name
         self.fileID = fileID
         self.postScriptName = postScriptName
         self.variationInstance = variationInstance
+        self.instance = instance
     }
+}
+
+/// A single-style static TTF resolved at catalog-build time through the Google
+/// Fonts CSS2 API and accepted only when its cmap and font revision equal the
+/// pinned repository file's (Scripts/generate-google-font-catalog.py). The app
+/// never calls the API: it fetches exactly this path from fonts.gstatic.com and
+/// checks the size, SHA-256 and PostScript name (name ID 6).
+public struct GoogleFontInstance: Codable, Sendable, Equatable, Hashable {
+    /// "s/<family>/v<n>/<name>.ttf", relative to https://fonts.gstatic.com/.
+    public let path: String
+    public let bytes: Int64
+    public let sha256: String
+    /// The static file's own name ID 6 ("RobotoCondensed-Bold"), not the variable instance's.
+    public let postScriptName: String
+
+    public init(path: String, bytes: Int64, sha256: String, postScriptName: String) {
+        self.path = path; self.bytes = bytes; self.sha256 = sha256; self.postScriptName = postScriptName
+    }
+
+    /// The download/receipt identity; never a repository path.
+    public var id: String { GoogleFontCatalog.instanceIDPrefix + path }
+    public var filename: String { (path as NSString).lastPathComponent }
 }
 
 public struct GoogleFontFile: Codable, Sendable, Equatable, Identifiable {
@@ -87,9 +113,13 @@ public struct GoogleFontLicense: Codable, Sendable, Equatable, Identifiable {
 public struct GoogleFontCatalog: Sendable {
     public static let trustedRepositoryCommit = "e7db6ca603fd4862010383ff17ffd6cc4ffac1c0"
     public static let maximumFileBytes: Int64 = 40 * 1024 * 1024
+    public static let instanceHost = GoogleFontURLShape.instanceHost
+    public static let instanceIDPrefix = GoogleFontURLShape.instanceIDPrefix
     public let snapshot: GoogleFontCatalogSnapshot
     private let filesByID: [String: GoogleFontFile]
     private let licensesByID: [String: GoogleFontLicense]
+    /// Instance id → (instance, the repository file it stands in for).
+    private let instancesByID: [String: (instance: GoogleFontInstance, fileID: String)]
 
     public enum CatalogError: Error, LocalizedError {
         case resourceMissing
@@ -107,6 +137,9 @@ public struct GoogleFontCatalog: Sendable {
         self.snapshot = snapshot
         filesByID = Dictionary(uniqueKeysWithValues: snapshot.files.map { ($0.id, $0) })
         licensesByID = Dictionary(uniqueKeysWithValues: snapshot.licenses.map { ($0.id, $0) })
+        var instances: [String: (instance: GoogleFontInstance, fileID: String)] = [:]
+        for family in snapshot.families { for style in family.styles { if let instance = style.instance { instances[instance.id] = (instance, style.fileID) } } }
+        instancesByID = instances
     }
 
     public static func load(bundle: Bundle = .main) throws -> GoogleFontCatalog {
@@ -130,6 +163,23 @@ public struct GoogleFontCatalog: Sendable {
 
     public func file(id: String) -> GoogleFontFile? { filesByID[id] }
     public func license(id: String) -> GoogleFontLicense? { licensesByID[id] }
+    public func instance(id: String) -> GoogleFontInstance? { instancesByID[id]?.instance }
+    /// The repository file an instance was validated against; its licenses apply.
+    public func file(forInstance id: String) -> GoogleFontFile? { instancesByID[id].flatMap { filesByID[$0.fileID] } }
+
+    /// Only a catalog instance; host and scheme come from app code, the path is re-checked.
+    public func downloadURL(for instance: GoogleFontInstance) throws -> URL {
+        guard instancesByID[instance.id]?.instance == instance, Self.safeInstancePath(instance.path),
+              instance.bytes > 0, instance.bytes <= Self.maximumFileBytes,
+              file(forInstance: instance.id)?.unavailableReason == nil,
+              let url = URL(string: "https://\(Self.instanceHost)/" + instance.path) else {
+            throw CatalogError.invalid("Instance is unavailable or is not part of this catalog")
+        }
+        return url
+    }
+
+    /// "s/<lowercase family>/v<digits>/<base64url>.ttf" and nothing else.
+    static func safeInstancePath(_ path: String) -> Bool { GoogleFontURLShape.isInstancePath(path) }
 
     /// URL authority and commit never come from a downloadable payload.
     public func downloadURL(for file: GoogleFontFile) throws -> URL {
@@ -156,7 +206,7 @@ public struct GoogleFontCatalog: Sendable {
             text.count == 64 && text.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
         }
         func unique(_ ids: [String]) -> Bool { !ids.contains("") && Set(ids).count == ids.count }
-        try require(value.schemaVersion == 1, "Unsupported schema")
+        try require(value.schemaVersion == 1 || value.schemaVersion == 2, "Unsupported schema")
         try require(value.repositoryCommit == trustedRepositoryCommit, "Untrusted repository commit")
         try require(value.snapshotDate.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil, "Invalid snapshot date")
         try require(!value.families.isEmpty && !value.files.isEmpty && !value.licenses.isEmpty, "Empty catalog")
@@ -179,12 +229,24 @@ public struct GoogleFontCatalog: Sendable {
         }
         var allStyleIDs = [String]()
         var referenced = Set<String>()
+        var instances: [String: GoogleFontInstance] = [:]
         for family in value.families {
             try require(!family.name.isEmpty && !family.styles.isEmpty, "Empty family")
             for style in family.styles {
                 try require(!style.name.isEmpty && !style.postScriptName.isEmpty && fileMap[style.fileID] != nil, "Invalid style reference")
                 if let axes = style.variationInstance {
                     try require(!axes.isEmpty && axes.allSatisfy { $0.key.utf8.count == 4 && $0.value.isFinite }, "Invalid variation coordinates")
+                }
+                if let instance = style.instance {
+                    // Schema 2 only; an instance stands in for a named instance of an available variable file.
+                    try require(value.schemaVersion == 2 && style.variationInstance != nil && fileMap[style.fileID]?.unavailableReason == nil,
+                                "Unexpected instance")
+                    try require(safeInstancePath(instance.path) && instance.bytes > 0 && instance.bytes <= maximumFileBytes
+                                && digest(instance.sha256) && !instance.postScriptName.isEmpty
+                                && !instance.postScriptName.contains(where: { $0.isNewline || $0.asciiValue == 0 }), "Invalid instance")
+                    // One path, one set of bytes.
+                    if let other = instances[instance.path] { try require(other == instance, "Conflicting instance") }
+                    instances[instance.path] = instance
                 }
                 allStyleIDs.append(style.id); referenced.insert(style.fileID)
             }

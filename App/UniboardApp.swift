@@ -4,10 +4,28 @@ import os
 @main
 struct UniboardApp: App {
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var store = CharacterStore.shared
-    @StateObject private var preferences = CatalogPreferences.shared
+    @StateObject private var store: CharacterStore
+    @StateObject private var preferences: CatalogPreferences
+#if DEBUG
+    private let pageCacheWarningFixture: PageCacheWarningFixture?
+#endif
 
     init() {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--page-cache-warning-fixture") {
+            // Explicit isolated capture only: bypass recovery, migrations and all
+            // normal launch fixtures before any shared/App Group store is read.
+            let fixture = try! PageCacheWarningFixture()
+            pageCacheWarningFixture = fixture
+            _store = StateObject(wrappedValue: CharacterStore(defaults: fixture.defaults))
+            _preferences = StateObject(wrappedValue: CatalogPreferences(
+                editionSettings: UnicodeEditionSettings(containerURL: { fixture.directory }), fontRules: nil,
+                autoCapitalization: AutoCapitalizationSetting(directory: { fixture.directory }),
+                emojiCategories: EmojiCategorySetting(directory: { fixture.directory })))
+            return
+        }
+        pageCacheWarningFixture = nil
+#endif
         // Before any store reads: finish or discard an interrupted write, and
         // move the root files into the versioned configuration once.
         ConfigurationRecovery.run()
@@ -17,13 +35,21 @@ struct UniboardApp: App {
         if SharedConfigurationLocation.shared.currentGeneration() != nil {
             KeyboardKeySettings().migrateNumberRowIfNeeded()
         }
+        _store = StateObject(wrappedValue: CharacterStore.shared)
+        _preferences = StateObject(wrappedValue: CatalogPreferences.shared)
         if ProcessInfo.processInfo.arguments.contains("--uitesting") {
             CharacterStore.shared.reset()
             UserDefaults.standard.removeObject(forKey: "scratchpad")
-            for key in ["exploreGridDensity", "explorePlane", "exploreShowsPrivateUse"] {
+            for key in ["exploreGridDensity", "explorePlane", "exploreShowsPrivateUse", "emojiColumns", "blocksDescending"] {
                 UserDefaults.standard.removeObject(forKey: key)
             }
             CatalogPreferences.shared.reset(preservingEdition: true)
+            CatalogPreferences.shared.showAllEmojiGroups()
+            // "Flags|Objects": start a test with these categories hidden.
+            let arguments = ProcessInfo.processInfo.arguments
+            if let index = arguments.firstIndex(of: "--hidden-emoji-categories"), arguments.indices.contains(index + 1) {
+                for group in arguments[index + 1].split(separator: "|") { CatalogPreferences.shared.setEmojiGroup(String(group), shown: false) }
+            }
         }
 #if DEBUG
         FontRuleFixtures.applyLaunchArguments()
@@ -40,7 +66,11 @@ struct UniboardApp: App {
     var body: some Scene {
         WindowGroup {
 #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("--unit-testing") {
+            if let fixture = pageCacheWarningFixture {
+                NavigationStack {
+                    PageArrangeView(boardID: fixture.boardID, boards: fixture.boards)
+                }
+            } else if ProcessInfo.processInfo.arguments.contains("--unit-testing") {
                 // Unit tests render their own UIKit fixtures. Keep unrelated
                 // app navigation and keyboard restoration out of that host.
                 Color.clear
@@ -83,3 +113,51 @@ struct UniboardApp: App {
             .info("Search index ready: \(bytes ?? 0, privacy: .public) bytes in \(milliseconds, privacy: .public) ms")
     }
 }
+
+#if DEBUG
+/// Capture fixture uses the real publication/local-rejection path. It has no
+/// reference to the user's defaults, App Group, configuration or shared stores.
+@MainActor
+private final class PageCacheWarningFixture {
+    let defaults: UserDefaults
+    let directory: URL
+    let boards: SymbolBoardStore
+    let boardID: String
+    private let suiteName: String
+
+    init() throws {
+        let suiteName = "Uniboard.PageCacheWarningFixture.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var rejectLocal = false
+        let pages = SymbolPageSettings(containerURL: { directory })
+        let boards = SymbolBoardStore(defaults: defaults, persist: { data in
+            guard !rejectLocal else { return false }
+            defaults.set(data, forKey: SymbolBoardStore.storageKey)
+            return defaults.data(forKey: SymbolBoardStore.storageKey) == data
+        }, pages: pages)
+        guard let id = boards.createBoard(named: "Symbols") else { throw CocoaError(.fileWriteUnknown) }
+        for text in ["!", "?", "@", "#", "$", "%", "&", "*"] {
+            guard boards.add(text: text, to: id) != nil else { throw CocoaError(.fileWriteUnknown) }
+        }
+        var rows = boards.activeBoard.resolvedRows
+        rows[0].alignment = .right
+        rejectLocal = true
+        guard boards.setExplicitRows(boardID: id, rows: rows), boards.localCopyWarning,
+              pages.load()?.pages.first(where: { $0.id == id })?.explicitRows == rows else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        self.suiteName = suiteName
+        self.defaults = defaults
+        self.directory = directory
+        self.boards = boards
+        boardID = id
+    }
+
+    deinit {
+        defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(at: directory)
+    }
+}
+#endif

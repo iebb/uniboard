@@ -61,3 +61,65 @@ There are 131 binaries not explicitly referenced by METADATA.pb: 47 in the 25 di
 Catalog SHA-256: `9df0c07fd65ce8408c7945d438cc8aa64b1d09c362ef9022b670eedefd1f6804`.
 
 Local validation: `python -m unittest discover -s Scripts -p test_google_font_catalog.py` under the pinned temporary venv completed **6 tests, 0 failures, 0 skips**. Tests cover protobuf text escaping/unknown metadata, Git blob identity, safe paths, malformed font rejection, variable named-instance extraction from a real generated fixture font, and complete bundled coverage/license SHA-256s. Native app tests are supplied but not run by the catalog subtask; app build/registration evidence belongs to the parent integration work.
+
+## Compact shared equivalence resource (1.4)
+
+The preceding generated coverage table/hash describe the original schema-1 catalog.
+The current schema-2 catalog, with accepted pinned single-style instances, is
+**14,341,398 bytes**, SHA-256
+`9cd08fbab58d01db6c4b390c31815b2d53ce9da5d266841487f132d6a0b52b12`.
+The compact-resource change does not rewrite that catalog or `coverage.json`.
+
+`App/Resources/GoogleFonts/equivalences.json` is an identity-only, schema-compatible
+projection for `FontCatalogEquivalenceIndex`'s unchanged decoder. It contains
+`schemaVersion: 2`, the source `repositoryCommit`, exact-source-byte
+`catalogSHA256`, only referenced files (`id`, `sha256`), and only families with
+accepted styles. Each style retains `fileID`, its **complete** `variationInstance`,
+and `instance` (`path`, `sha256`). Display metadata, licenses, font bytes and
+unaccepted styles are excluded. Source order and repeated styles are preserved;
+5,439 styles reference 5,437 unique static paths, so deduplicating styles by path
+would lose equivalences. There are **730 files, 552 families, 5,439 styles**, in
+**1,565,640 bytes** (about 89% smaller than the full catalog), with an enforced
+**2 MiB** generation/test budget.
+
+Regenerate or verify entirely offline, from repository root, with **only the
+Python standard library** (no requests, fontTools, protobuf, network or fonts):
+
+```sh
+python3 Scripts/google_font_equivalences.py --help
+python3 Scripts/google_font_equivalences.py
+python3 Scripts/google_font_equivalences.py --check
+python3 -m unittest discover -s Scripts/tests -p 'test_*.py'
+```
+
+`--catalog PATH` and `--output PATH` select explicit files. `--check` writes
+nothing and fails on a missing resource, stale source digest, changed projection
+or nondeterministic bytes. The normal catalog generator and `--augment-instances`
+both emit the companion via their shared `write_catalog`. Default schema-1
+(no instances) generation remains supported and produces a schema-2 companion
+with empty files/families. Generation preserves any syntactically valid source
+commit, without granting runtime trust to new pins: the shared Swift decoder
+still accepts only its existing hardcoded trusted commit. Invalid accepted
+instance hashes, unavailable/missing references, unsafe paths and incomplete or
+malformed axes fail generation rather than silently removing relationships.
+
+The provenance digest is an **offline consistency check**, not runtime digest
+verification or an extra source of trust. Runtime equivalence loading now reads
+**only `GoogleFonts/equivalences.json`**: `Bundle.main`, then (for an `.appex`)
+the containing app bundle, as before. Missing/invalid resources fail closed to an
+empty index; there is **no full-catalog fallback**. The resource folder already
+belongs to the companion app only and automatically includes the new JSON;
+no target membership changes or keyboard copies are required. The keyboard
+reads this immutable containing-app resource without Full Access and no longer
+opens/decodes the full font catalog for equivalences. The app's full catalog
+search/download loader, storage, receipts, rules and font resolution behavior
+are unchanged.
+
+`Scripts/tests/test_google_font_equivalences.py` verifies exact independent
+projection, source-byte provenance, deterministic emission/check mode, malformed
+inputs, repeated identities and budget using routine dependency-free discovery.
+`Tests/GoogleFontCatalogTests.swift` fails if the compact app resource is absent
+and compares **both directions of every alias set** to the full projection,
+including shared static identities. Native execution is coordinated separately
+by the integration owner; this resource change does not itself establish device
+registration or runtime memory measurements.

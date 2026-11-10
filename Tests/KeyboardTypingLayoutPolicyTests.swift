@@ -38,6 +38,37 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
         XCTAssertFalse(KeyboardTypingLayoutPolicy.isLandscapeContext(viewWidth: 1376, sceneSize: nil, displaySize: nil))
     }
 
+    func testCaselessRowsGiveEveryLetterOneWidthAndRowThreesFunctionKeysTheRest() throws {
+        let hebrew = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "he"))
+        let arabic = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "ar"))
+        // iPhone 17 Pro: Hebrew's widest rows hold ten keys, so Delete is one letter wide.
+        let he = try XCTUnwrap(KeyboardTypingLayoutPolicy.caselessKeyWidths(for: hebrew, available: 386, spacing: 5))
+        XCTAssertEqual(he.letter, 34.1, accuracy: 0.0001)
+        XCTAssertEqual(he.function, he.letter, accuracy: 0.0001)
+        // Arabic: eleven keys a row; Arabic Diacritics and Delete split what nine letters leave.
+        let ar = try XCTUnwrap(KeyboardTypingLayoutPolicy.caselessKeyWidths(for: arabic, available: 386, spacing: 5))
+        XCTAssertEqual(ar.letter, 336.0 / 11, accuracy: 0.0001)
+        XCTAssertEqual(ar.function, ar.letter, accuracy: 0.0001)
+        for width: CGFloat in [320, 386, 430, 640] {
+            for alphabet in [hebrew, arabic] {
+                let value = try XCTUnwrap(KeyboardTypingLayoutPolicy.caselessKeyWidths(for: alphabet, available: width, spacing: 5))
+                let functions = CGFloat(alphabet.hasShiftSlot ? 2 : 1)
+                let last = CGFloat(alphabet.rows[2].count) * value.letter + functions * value.function
+                    + 5 * (CGFloat(alphabet.rows[2].count) + functions - 1)
+                XCTAssertEqual(last, width, accuracy: 0.0001, "Row 3 fills the width: \(alphabet.id)")
+                XCTAssertGreaterThanOrEqual(value.function, value.letter)
+                for row in alphabet.rows.prefix(2) {
+                    XCTAssertLessThanOrEqual(CGFloat(row.count) * value.letter + 5 * CGFloat(row.count - 1), width + 0.0001)
+                }
+            }
+        }
+        XCTAssertNil(KeyboardTypingLayoutPolicy.caselessKeyWidths(for: .english, available: 386, spacing: 5), "Cased layouts keep Shift")
+        XCTAssertNil(KeyboardTypingLayoutPolicy.caselessKeyWidths(for: hebrew, available: .infinity, spacing: 5))
+        XCTAssertNil(KeyboardTypingLayoutPolicy.caselessKeyWidths(for: hebrew, available: 386, spacing: .nan))
+        XCTAssertNil(KeyboardTypingLayoutPolicy.caselessKeyWidths(for: hebrew, available: 386, spacing: -1))
+        XCTAssertNil(KeyboardTypingLayoutPolicy.caselessKeyWidths(for: arabic, available: 40, spacing: 5))
+    }
+
     func testShiftedTapFollowsLettersAndManualANSIShiftButNeverSentenceDigitsOrOtherPages() {
         var state = KeyboardTypingState()
         XCTAssertFalse(KeyboardTypingLayoutPolicy.usesShiftedTap(for: "q", state: state, ansiPad: true))
@@ -161,10 +192,10 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
         var numbers = KeyboardTypingState()
         numbers.selectLayout(.numbers)
         XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "1", state: numbers, hasAuxiliaryRow: false), "1")
-        XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: "1", state: numbers, hasAuxiliaryRow: true))
-        // With the digits above it, the page's own digit row becomes symbols.
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "1", state: numbers, hasAuxiliaryRow: true), "1")
+        // A stale auxiliary preference must not replace the stock 123 digits.
         XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: "[", state: numbers, hasAuxiliaryRow: false))
-        XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: "[", state: numbers, hasAuxiliaryRow: true), "[")
+        XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: "[", state: numbers, hasAuxiliaryRow: true))
         XCTAssertNil(numbers.output(for: "["), "The base three-row state remains unchanged")
     }
 
@@ -178,7 +209,7 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
         for key in KeyboardTypingLayoutPolicy.rows(for: .numbers, hasAuxiliaryRow: true).flatMap({ $0 }) {
             XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: key, state: state, hasAuxiliaryRow: true), key)
         }
-        for key in ["", "1", "0", "_", "~", "01", "a", "A", "€ ", "€\u{FE0F}", "１", "١", "\\\\", "\n"] {
+        for key in ["", "[", "]", "_", "~", "01", "a", "A", "€ ", "€\u{FE0F}", "１", "١", "\\\\", "\n"] {
             XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: key, state: state, hasAuxiliaryRow: true), key)
         }
     }
@@ -192,11 +223,10 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
                 XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: invalid, layout: page), invalid)
             }
         }
-        // The digits stay above every page, so they never move.
-        for page in KeyboardTypingLayout.allCases {
-            XCTAssertEqual(KeyboardTypingLayoutPolicy.auxiliaryRow(for: page), Array("1234567890").map(String.init))
-        }
-        XCTAssertEqual(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "1", layout: .numbers), "1")
+        XCTAssertEqual(KeyboardTypingLayoutPolicy.auxiliaryRow(for: .letters), Array("1234567890").map(String.init))
+        XCTAssertTrue(KeyboardTypingLayoutPolicy.auxiliaryRow(for: .numbers).isEmpty)
+        XCTAssertTrue(KeyboardTypingLayoutPolicy.auxiliaryRow(for: .symbols).isEmpty)
+        XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "1", layout: .numbers))
         XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "[", layout: .numbers))
         XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "[", layout: .letters))
         XCTAssertNil(KeyboardTypingLayoutPolicy.auxiliaryRowOutput(for: "[", layout: .symbols))
@@ -229,7 +259,7 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
         }
     }
 
-    func testFixedFourRowsAlwaysContainDigitsInLettersAndRespectEveryPreset() throws {
+    func testLettersKeepFourRowsWhileSymbolPagesRespectStockAndANSIPresets() throws {
         for pad in [false, true] {
             for width: CGFloat in [64, 320, 649, 650, 752, 980, 1194] {
                 for compact in [false, true] {
@@ -238,19 +268,26 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
                             let plan = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 500,
                                 availableWidth: width, compact: compact, layout: layout, isPad: pad,
                                 isLandscape: true, padLayout: preset))
-                            XCTAssertEqual(plan.rowCount, 4)
-                            XCTAssertEqual(plan.keyHeight, pad && width >= 650 ? 52 * 1.15 : 36 * 1.15)
                             let ansi = KeyboardTypingLayoutPolicy.usesANSI(availableWidth: width, isPad: pad,
                                 isLandscape: true, padLayout: preset)
+                            let expectedRows = layout == .letters || layout == .symbols && ansi ? 4 : 3
+                            XCTAssertEqual(plan.rowCount, expectedRows)
+                            let ideal: CGFloat = pad && width >= 650 ? 52 * 1.15 : 36 * 1.15
+                            let abcHeight = 4 * ideal + 3 * plan.rowSpacing
+                            XCTAssertEqual(plan.contentHeight, abcHeight, accuracy: 0.000001)
+                            XCTAssertEqual(plan.keyHeight, (abcHeight - CGFloat(expectedRows - 1) * plan.rowSpacing) / CGFloat(expectedRows), accuracy: 0.000001)
+                            XCTAssertEqual(plan.numberRowCount > 0, layout == .letters && !(ansi && preset == .ansiNumbers))
+                            XCTAssertEqual(plan.extraSymbolRowCount > 0, layout == .symbols && ansi)
                             let wide = pad && width >= 650 && layout == .letters
                             let core = KeyboardTypingLayoutPolicy.rows(for: layout, hasAuxiliaryRow: plan.numberRowCount > 0,
                                 widePad: wide, ansiPad: ansi, padLayout: preset)
                             XCTAssertEqual(core.count, plan.mainRowsCount)
-                            let all = core.flatMap { $0 } + (plan.numberRowCount > 0 ? KeyboardTypingLayoutPolicy.auxiliaryRow(for: layout, ansiPad: ansi) : [])
+                            let all = core.flatMap { $0 } + (plan.auxiliaryRowCount > 0 ? KeyboardTypingLayoutPolicy.auxiliaryRow(for: layout, ansiPad: ansi) : [])
                             // The digits are on the letters and 123 pages exactly once.
-                            if layout != .symbols {
-                                for digit in "0123456789" { XCTAssertEqual(all.filter { $0 == String(digit) }.count, 1, "\(layout)") }
+                            for digit in "0123456789" {
+                                XCTAssertEqual(all.filter { $0 == String(digit) }.count, layout == .symbols ? 0 : 1, "\(layout)")
                             }
+                            XCTAssertEqual(Set(all).count, all.count, "No duplicate keys on a page")
                         }
                     }
                 }
@@ -272,11 +309,11 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
         let ansi = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 500, availableWidth: 1194,
             compact: false, layout: .letters, isPad: true, isLandscape: true, padLayout: .ansiNumbers, keyRows: 3))
         XCTAssertEqual(ansi.rowCount, 4, "Full ANSI keeps its own digit row")
-        // A fourth row of the arrangement adds one row; more never adds another.
+        // Arrangement row counts never add auxiliary digits to 123.
         for rows in [4, 5] {
             let four = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 500, availableWidth: 402,
                 compact: false, layout: .numbers, keyRows: rows))
-            XCTAssertEqual(four.numberRowCount, 1); XCTAssertEqual(four.rowCount, 4)
+            XCTAssertEqual(four.numberRowCount, 0); XCTAssertEqual(four.rowCount, 3)
         }
         for rows in [0, 1, 3] {
             XCTAssertEqual(try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 500, availableWidth: 402,
@@ -297,6 +334,133 @@ final class KeyboardTypingLayoutPolicyTests: XCTestCase {
                 XCTAssertEqual(plan.rowCount, 4)
                 XCTAssertTrue(plan.keyHeight.isFinite); XCTAssertGreaterThan(plan.keyHeight, 0)
                 XCTAssertLessThanOrEqual(plan.contentHeight, height + 0.000001)
+            }
+        }
+    }
+}
+
+extension KeyboardTypingLayoutPolicyTests {
+    func testStockSymbolContentsAndMembershipIgnoreStaleAuxiliaryWideAndANSIPreferences() {
+        let expected: [KeyboardTypingLayout: [String]] = [
+            .numbers: ["1234567890", "-/:;()$&@\"", ".,?!'"],
+            .symbols: ["[]{}#%^*+=", "_\\|~<>€£¥•", ".,?!'"]
+        ]
+        for (page, texts) in expected {
+            var state = KeyboardTypingState()
+            state.pressShift(at: 1)
+            state.selectLayout(page)
+            for auxiliary in [false, true] {
+                for wide in [false, true] {
+                    for ansi in [false, true] {
+                        for preset in KeyboardPadLayout.allCases {
+                            let rows = KeyboardTypingLayoutPolicy.rows(for: page, hasAuxiliaryRow: auxiliary,
+                                widePad: wide, ansiPad: ansi, padLayout: preset)
+                            XCTAssertEqual(rows.map { $0.joined() }, texts)
+                            XCTAssertEqual(Set(rows.flatMap { $0 }).count, 25)
+                            for key in rows.flatMap({ $0 }) {
+                                XCTAssertEqual(KeyboardTypingLayoutPolicy.output(for: key, state: state,
+                                    hasAuxiliaryRow: auxiliary, widePad: wide, ansiPad: ansi, padLayout: preset), key)
+                            }
+                            for key in page == .numbers ? ["[", "]", "§", "a"] : ["1", "0", "-", "§", "a"] {
+                                XCTAssertNil(KeyboardTypingLayoutPolicy.output(for: key, state: state,
+                                    hasAuxiliaryRow: auxiliary, widePad: wide, ansiPad: ansi, padLayout: preset))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testSymbolRowsKeepABCContentHeightAndSpacingWithNoBlankFourthRow() throws {
+        for pad in [false, true] {
+            for width: CGFloat in [386, 649, 650, 1008] {
+                for preset in KeyboardPadLayout.allCases {
+                    for landscape in [false, true] {
+                        for count in [0, 3, 4, 5] {
+                            for available: CGFloat in [18.01, 98, 177.6, 257.2, 500, .greatestFiniteMagnitude] {
+                                let abc = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: available,
+                                    availableWidth: width, compact: false, layout: .letters, isPad: pad,
+                                    isLandscape: landscape, padLayout: preset, keyRows: count))
+                                for page in [KeyboardTypingLayout.numbers, .symbols] {
+                                    let plan = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: available,
+                                        availableWidth: width, compact: false, layout: page, isPad: pad,
+                                        isLandscape: landscape, padLayout: preset, keyRows: count))
+                                    XCTAssertEqual(plan.numberRowCount, 0)
+                                    XCTAssertEqual(plan.contentHeight, abc.contentHeight, accuracy: 0.000001)
+                                    XCTAssertEqual(plan.rowSpacing, abc.rowSpacing)
+                                    XCTAssertEqual(plan.keySpacing, abc.keySpacing)
+                                    XCTAssertTrue(plan.keyHeight.isFinite)
+                                    XCTAssertGreaterThan(plan.keyHeight, 0)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let phone = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 177.6, availableWidth: 386,
+            compact: false, layout: .numbers))
+        XCTAssertEqual(phone.keyHeight, 169.6 / 3, accuracy: 0.000001)
+        let three = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 132.2, availableWidth: 386,
+            compact: false, layout: .symbols, keyRows: 3))
+        XCTAssertEqual(three.keyHeight, 41.4, accuracy: 0.000001)
+    }
+
+    func testEveryAuxiliaryRouteRequiresItsVisiblePageAndKeepsCustomABCDigits() {
+        let standard = MainKeyboardArrangement.standard(for: .english)
+        let letters = MainKeyboardArrangement.letters(for: .english)
+        var state = KeyboardTypingState()
+        func routed(_ key: String, auxiliary: Bool = true, isAuxiliaryKey: Bool = true,
+                    ansi: Bool = false, preset: KeyboardPadLayout = .ansiNumbers,
+                    arrangement: MainKeyboardArrangement = .standard(for: .english)) -> String? {
+            KeyboardTypingLayoutPolicy.routedOutput(for: key, state: state, hasAuxiliaryRow: auxiliary,
+                isAuxiliaryKey: isAuxiliaryKey, widePad: ansi, ansiPad: ansi,
+                padLayout: preset, arrangement: arrangement)
+        }
+        XCTAssertEqual(routed("a", isAuxiliaryKey: false), "a")
+        for digit in MainKeyboardArrangement.digits {
+            XCTAssertEqual(routed(digit), digit)
+            XCTAssertEqual(routed(digit, auxiliary: false, arrangement: standard), digit, "Embedded ABC digits still work")
+            XCTAssertNil(routed(digit, auxiliary: false, arrangement: letters))
+            XCTAssertNil(routed(digit, isAuxiliaryKey: false))
+        }
+        XCTAssertNil(routed("a"))
+        XCTAssertNil(routed("§", ansi: true))
+        for page in [KeyboardTypingLayout.numbers, .symbols] {
+            state.selectLayout(page)
+            for ansi in [false, true] {
+                for auxiliary in [false, true] {
+                    for digit in MainKeyboardArrangement.digits {
+                        XCTAssertNil(routed(digit, auxiliary: auxiliary, ansi: ansi), "Invisible auxiliary digit refused")
+                        XCTAssertEqual(routed(digit, auxiliary: auxiliary, isAuxiliaryKey: false, ansi: ansi), page == .numbers ? digit : nil)
+                    }
+                    for key in KeyboardTypingLayoutPolicy.auxiliaryRow(for: .symbols, ansiPad: true) {
+                        XCTAssertEqual(routed(key, auxiliary: auxiliary, ansi: ansi), page == .symbols && auxiliary && ansi ? key : nil)
+                        XCTAssertNil(routed(key, auxiliary: auxiliary, isAuxiliaryKey: false, ansi: ansi))
+                        XCTAssertNil(routed(key, auxiliary: auxiliary, ansi: ansi, preset: .stock))
+                        XCTAssertNil(routed(key, auxiliary: auxiliary, ansi: ansi, arrangement: letters))
+                    }
+                }
+            }
+        }
+    }
+
+    func testSymbolReturnAndBackSwitchUseMeasuredWidthAndActiveANSIStyle() {
+        for width: CGFloat in [.nan, .infinity, -.infinity, -1, 0, 320, 649, CGFloat(650).nextDown, 650, 980, 1008] {
+            for pad in [false, true] {
+                XCTAssertEqual(KeyboardTypingLayoutPolicy.showsSymbolReturn(availableWidth: width, isPad: pad),
+                               pad && width.isFinite && width >= 650)
+            }
+        }
+        for pad in [false, true] {
+            for ansi in [false, true] {
+                for preset in KeyboardPadLayout.allCases {
+                    XCTAssertEqual(KeyboardTypingLayoutPolicy.symbolSwitchTitle(to: .symbols, isPad: pad,
+                        ansiPad: ansi, padLayout: preset), "#+=")
+                    XCTAssertEqual(KeyboardTypingLayoutPolicy.symbolSwitchTitle(to: .numbers, isPad: pad,
+                        ansiPad: ansi, padLayout: preset), ansi && preset == .ansiNumbers ? "=<>" : pad ? ".?123" : "123")
+                }
             }
         }
     }

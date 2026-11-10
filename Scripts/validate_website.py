@@ -7,7 +7,7 @@ import json
 import sys
 
 SITE = Path(__file__).resolve().parents[1] / 'website'
-ORIGIN = 'https://uniboard-dxm.pages.dev'
+ORIGIN = 'https://uniboard.ieb.app'
 
 class Page(HTMLParser):
     def __init__(self):

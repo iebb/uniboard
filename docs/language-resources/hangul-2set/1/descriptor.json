@@ -1,0 +1,34 @@
+{
+  "formatVersion": 1,
+  "packID": "korean-hangul-2set",
+  "version": "1",
+  "modeID": "koreanTwoSetHangul",
+  "engineABI": "uniboard-hangul-1",
+  "sourceURL": "https://uniboard.ieb.app/data/korean/hangul-2set/1/hangul-2set.tar.gz",
+  "allowedHosts": [
+    "uniboard.ieb.app"
+  ],
+  "archiveByteCount": 2324,
+  "archiveSHA256": "a895f37d5e2f329f505587aa8bd44af5cf7b36d774c092f31faa93f6136f3952",
+  "installedBytes": 5960,
+  "fileCount": 3,
+  "files": [
+    {
+      "path": "mapping.json",
+      "byteCount": 2696,
+      "sha256": "39716f12019d4ac3d531fde5728641f3b959daa8b0fbc6851f78c7b50095a073"
+    },
+    {
+      "path": "LICENSE.txt",
+      "byteCount": 1067,
+      "sha256": "9060f97d3d332d8f6e33ad6046151b4c879f6d934e0dde91f10ecdc295aec586"
+    },
+    {
+      "path": "SOURCE.txt",
+      "byteCount": 2197,
+      "sha256": "22aebcab504d81064c77af6af958f2e3120028f3741dff1d6529838f895d07aa"
+    }
+  ],
+  "licenseNotice": "MIT License\n\nCopyright (c) 2026 Kitta Ltd.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+  "sourceNotice": "Uniboard Korean Two-Set Hangul Mapping, version 1\nCopyright (c) 2026 Kitta Ltd.\n\nOriginal Uniboard JSON encoding of factual modern Korean two-set key\nassignments. The encoding and accompanying original notices are released under\nthe MIT License in LICENSE.txt. No third-party code, dictionary, font, vendor\ntext, or vendor-specific input extensions are included.\n\nThe lowercase ASCII key IDs represent the QWERTY positions in these rows:\nqwertyuiop -> ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ\nasdfghjkl  -> ㅁㄴㅇㄹㅎㅗㅓㅏㅣ\nzxcvbnm   -> ㅋㅌㅊㅍㅠㅜㅡ\nUppercase IDs represent Shift. Q W E R T O P produce ㅃ ㅉ ㄸ ㄲ ㅆ ㅒ ㅖ;\nthe other uppercase IDs produce the same jamo as their lowercase positions.\n\nReference links supplied and reviewed for this release on 2026-10-31:\n- Typing Derby, Korean Keyboard Layout:\n  https://typingderby.com/en/korean-keyboard-layout\n  Reference for the complete key-position rows and shifted forms.\n- Hancom Office help, Korean keyboard:\n  https://help.hancom.com/hoffice/multi/ko_kr/show/insert/keyboard/keyboard(korea).htm\n  Reference identifying the KS X 5002 two-set keyboard standard.\n\nThese references identify the factual keyboard positions; no vendor content is\nredistributed and no endorsement, certification, or broader standards-compliance\nclaim is made. Vendor-specific extensions such as double-tap behavior are not\npart of this mapping.\n\nSchema: mapping.json contains schemaVersion 1 and exactly 52 key/jamo entries.\nIt is declarative key data only, not executable rules or a downloaded engine.\nModern L/V/T composition and compound handling are implemented by the separately\nshipped native Uniboard engine with ABI uniboard-hangul-1. This resource contains\nno romaja spelling grammar, Hanja, prediction, correction, or word corpus.\n\nReproduce offline with Scripts/generate_hangul_resources.py in the Uniboard\nrepository. Payload filenames and UTF-8/LF text encoding are fixed. The archive\nis gzip-compressed USTAR with root hangul-2set-1 and exactly three regular files,\n0644 permissions, uid/gid/mtime zero, empty owner/group names, and no extensions.\nThe gzip header has mtime zero and no original filename; compression level is 9.\n"
+}

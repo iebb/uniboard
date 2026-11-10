@@ -1,0 +1,686 @@
+import XCTest
+import Foundation
+import CryptoKit
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+#if canImport(UniboardCore)
+@testable import UniboardCore
+#else
+@testable import Uniboard
+#endif
+
+final class LanguagePackStoreTests: XCTestCase {
+    private var sandbox: URL!
+    private var store: LanguagePackStore!
+    private let bytes = Data("small real dictionary fixture\n".utf8)
+    private let mode = "japanese-romaji"
+    private let abi = "fixture-engine-v1"
+
+    override func setUpWithError() throws {
+        sandbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: false)
+        store = LanguagePackStore(root: sandbox.appendingPathComponent("packs"))
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: sandbox)
+        store = nil
+        sandbox = nil
+    }
+
+    private func digest(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func descriptor(version: String = "1", payload: Data? = nil, path: String = "Dictionary/words.dat") -> LanguagePackDescriptor {
+        let data = payload ?? bytes
+        return LanguagePackDescriptor(packID: "fixture-pack", version: version, modeID: mode, engineABI: abi,
+                                      sourceURL: URL(string: "https://data.example.test/pinned/archive")!,
+                                      allowedHosts: ["data.example.test"], archiveByteCount: Int64(data.count),
+                                      archiveSHA256: digest(data), installedBytes: Int64(data.count), fileCount: 1,
+                                      files: [.init(path: path, byteCount: Int64(data.count), sha256: digest(data))],
+                                      licenseNotice: "Fixture data created for these tests; no upstream data copied.",
+                                      sourceNotice: "Locally generated test fixture, not a production dictionary.")
+    }
+
+    private func manifest(_ value: LanguagePackDescriptor) throws -> Data { try JSONEncoder().encode(value) }
+
+    private func changed(_ change: (inout [String: Any]) -> Void) throws -> Data {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: manifest(descriptor())) as? [String: Any])
+        change(&object)
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    private func populate(_ directory: URL, data: Data? = nil) throws {
+        let dictionary = directory.appendingPathComponent("Dictionary")
+        try FileManager.default.createDirectory(at: dictionary, withIntermediateDirectories: false)
+        try (data ?? bytes).write(to: dictionary.appendingPathComponent("words.dat"))
+    }
+
+    @discardableResult
+    private func install(version: String = "1", expected: String? = nil) throws -> ValidatedInstalledLanguagePack {
+        try store.install(manifestData: manifest(descriptor(version: version)), expectedRevision: expected) { try populate($0) }
+    }
+
+    private func acquire() throws -> LanguagePackReadLease {
+        switch store.resolve(modeID: mode, engineABI: abi) {
+        case .available(let lease): return lease
+        default: XCTFail("expected available verified pack"); throw LanguagePackError.corruptStore("test resolution")
+        }
+    }
+
+    func testDiskBudgetIncludesSourcesTransportCopyCompileStageAndSQLiteTemporaries() throws {
+        let plan = try LanguagePackSpacePlan(sourceBytes: [100, 20], installedBytes: 510, compiledBytes: 500)
+        XCTAssertEqual(plan.requiredBytes, 120 + 100 + 2 * 510 + 2 * 500
+                       + LanguagePackSpacePlan.headroom + Int64(LanguagePackDescriptor.maximumManifestBytes))
+        let japanese = try LanguagePackSpacePlan(sourceBytes: [100], installedBytes: 500)
+        XCTAssertEqual(japanese.requiredBytes, 200 + 500 + LanguagePackSpacePlan.headroom
+                       + Int64(LanguagePackDescriptor.maximumManifestBytes))
+        XCTAssertThrowsError(try LanguagePackSpacePlan(sourceBytes: [Int64.max], installedBytes: 1))
+        XCTAssertThrowsError(try LanguagePackSpacePlan(sourceBytes: [1], installedBytes: 1, compiledBytes: 2))
+    }
+
+    func testInjectedCapacityLowUnknownAndSufficientPreservePublication() throws {
+        let original = try install()
+        let plan = try LanguagePackSpacePlan(sourceBytes: [100], installedBytes: 500)
+        let required = plan.requiredBytes
+        let locations = [store.root, sandbox!]
+        XCTAssertEqual(plan.assess(at: locations, capacity: { _ in 1 }), .insufficient(required: required, available: 1))
+        XCTAssertEqual(plan.assess(at: locations, capacity: { _ in nil }), .unknown(required: required))
+        XCTAssertEqual(plan.assess(at: locations, capacity: { _ in -1 }), .unknown(required: required))
+        XCTAssertEqual(plan.assess(at: locations, capacity: { _ in required }), .sufficient(required: required, available: required))
+        let storePath = store.root
+        XCTAssertEqual(plan.assess(at: locations, capacity: { $0 == storePath ? required : nil }), .unknown(required: required))
+        XCTAssertThrowsError(try plan.requireCapacity(at: locations, capacity: { _ in nil }))
+        XCTAssertThrowsError(try plan.requireCapacity(at: locations, capacity: { _ in 0 }))
+        XCTAssertNoThrow(try plan.requireCapacity(at: locations, capacity: { _ in required }))
+        XCTAssertEqual(try store.activeRevision(modeID: mode), original.revision)
+        let lease = try acquire(); defer { lease.release() }
+        XCTAssertEqual(lease.pack.revision, original.revision)
+    }
+
+    func testDamagedAndIncompatiblePublicationsRemainRemovableWithoutReadiness() throws {
+        let pack = try install()
+        let token = try XCTUnwrap(store.removablePublication(modeID: mode))
+        guard case .incompatible = store.resolve(modeID: mode, engineABI: "new-abi") else { return XCTFail("ABI") }
+        XCTAssertEqual(token.revision, pack.revision)
+        try FileManager.default.removeItem(at: pack.path.appendingPathComponent("Dictionary/words.dat"))
+        guard case .corrupt = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("damage") }
+        XCTAssertEqual(try store.removablePublication(modeID: mode), token)
+        try store.remove(token)
+        XCTAssertNil(try store.removablePublication(modeID: mode))
+    }
+
+    func testPostUnlinkSyncFailureStillReportsCommittedRemovalAndPreservesMyWords() throws {
+        let pack = try install()
+        let token = try XCTUnwrap(store.removablePublication(modeID: mode))
+        let wordsURL = sandbox.appendingPathComponent("My Words.json")
+        let words = Data("custom-words-must-survive-removal".utf8)
+        try words.write(to: wordsURL)
+        let pointer = store.root.appendingPathComponent("active/" + mode + ".json")
+        var syncCalls = 0
+        XCTAssertNoThrow(try store.remove(modeID: token.modeID, expectedRevision: token.revision, syncAfterUnlink: { directory in
+            syncCalls += 1
+            XCTAssertEqual(directory, self.store.root.appendingPathComponent("active"))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: pointer.path), "fault must occur after unlink commit")
+            throw LanguagePackError.filesystem(operation: "injected directory sync", code: EIO)
+        }))
+        XCTAssertEqual(syncCalls, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pointer.path))
+        XCTAssertNil(try store.activeRevision(modeID: mode))
+        XCTAssertNil(try store.removablePublication(modeID: mode))
+        guard case .missing = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("publication must be removed") }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pack.path.path), "ordinary unleased payload can still be reclaimed")
+        XCTAssertEqual(try Data(contentsOf: wordsURL), words)
+    }
+
+    func testEntirelyMissingVersionStillAllowsValidatedPointerRemoval() throws {
+        let pack = try install()
+        let token = try XCTUnwrap(store.removablePublication(modeID: mode))
+        try FileManager.default.removeItem(at: pack.path.deletingLastPathComponent())
+        guard case .corrupt = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("dangling pointer must not be ready") }
+        XCTAssertEqual(try store.removablePublication(modeID: mode), token)
+        XCTAssertNoThrow(try store.remove(token))
+        XCTAssertNil(try store.activeRevision(modeID: mode))
+        XCTAssertNil(try store.removablePublication(modeID: mode))
+    }
+
+    func testReadableValidPointerWithUnreadablePayloadStillAllowsRemoval() throws {
+        if geteuid() == 0 { throw XCTSkip("root bypasses filesystem permissions") }
+        let pack = try install()
+        let payload = pack.path.appendingPathComponent("Dictionary/words.dat")
+        let token = try XCTUnwrap(store.removablePublication(modeID: mode))
+        XCTAssertEqual(chmod(payload.path, mode_t(0o000)), 0)
+        defer { _ = chmod(payload.path, mode_t(0o600)) }
+        guard case .unreadable = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("payload must be unreadable") }
+        XCTAssertEqual(try store.removablePublication(modeID: mode), token)
+        XCTAssertNoThrow(try store.remove(token))
+        XCTAssertNil(try store.activeRevision(modeID: mode))
+        XCTAssertNil(try store.removablePublication(modeID: mode))
+    }
+
+    func testSymlinkAndHardlinkActivePointersGrantNoRemovalAuthorityOrExternalMutation() throws {
+        let pack = try install()
+        let token = try XCTUnwrap(store.removablePublication(modeID: mode))
+        let pointer = store.root.appendingPathComponent("active/" + mode + ".json")
+        let validPointer = try Data(contentsOf: pointer)
+        for hardlink in [false, true] {
+            let external = sandbox.appendingPathComponent(hardlink ? "external-hardlink.json" : "external-symlink.json")
+            try validPointer.write(to: external)
+            try FileManager.default.removeItem(at: pointer)
+            if hardlink {
+                try FileManager.default.linkItem(at: external, to: pointer)
+            } else {
+                try FileManager.default.createSymbolicLink(at: pointer, withDestinationURL: external)
+            }
+            XCTAssertThrowsError(try store.removablePublication(modeID: mode), "linked pointer must not authorize removal")
+            XCTAssertThrowsError(try store.activeRevision(modeID: mode))
+            XCTAssertThrowsError(try store.remove(token), "a previously valid confirmation cannot bypass current pointer guards")
+            XCTAssertEqual(try Data(contentsOf: external), validPointer)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: pointer.path), "must not unlink a rejected pointer")
+            XCTAssertEqual(try Data(contentsOf: pack.path.appendingPathComponent("Dictionary/words.dat")), bytes)
+            try FileManager.default.removeItem(at: pointer)
+            try validPointer.write(to: pointer)
+            XCTAssertEqual(try Data(contentsOf: external), validPointer)
+        }
+        XCTAssertEqual(try store.removablePublication(modeID: mode), token)
+    }
+
+    func testConfirmedRemovalTokenCannotDeleteReplacementAndHonorsLease() throws {
+        let first = try install()
+        let token = try XCTUnwrap(store.removablePublication(modeID: mode))
+        let lease = try acquire(); defer { lease.release() }
+        let second = try install(expected: first.revision)
+        XCTAssertThrowsError(try store.remove(token))
+        XCTAssertEqual(try store.activeRevision(modeID: mode), second.revision)
+        let currentLease = try acquire(); defer { currentLease.release() }
+        let currentToken = try XCTUnwrap(store.removablePublication(modeID: mode))
+        try store.remove(currentToken)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path.path))
+        XCTAssertEqual(try Data(contentsOf: first.path.appendingPathComponent("Dictionary/words.dat")), bytes)
+    }
+
+    func testMalformedPointerNeverGrantsRemovalAuthorityAndForeignVersionIsNotDeleted() throws {
+        let pack = try install()
+        let token = try XCTUnwrap(store.removablePublication(modeID: mode))
+        let pointer = store.root.appendingPathComponent("active/" + mode + ".json")
+        let validPointer = try Data(contentsOf: pointer)
+        try Data("{\"format\":1,\"modeID\":\"japanese-romaji\",\"revision\":\"../foreign\"}".utf8).write(to: pointer)
+        XCTAssertThrowsError(try store.removablePublication(modeID: mode))
+        XCTAssertThrowsError(try store.remove(token))
+        try validPointer.write(to: pointer)
+        let foreign = pack.path.deletingLastPathComponent().appendingPathComponent("foreign")
+        try bytes.write(to: foreign)
+        // Deactivation succeeds, but the guarded reclaimer refuses foreign contents.
+        try store.remove(token)
+        XCTAssertNil(try store.activeRevision(modeID: mode))
+        XCTAssertEqual(try Data(contentsOf: foreign), bytes)
+    }
+
+    func testRoundTripHasImmutableRevisionNotUpstreamVersionAndPreservesNotices() throws {
+        let first = try install()
+        let lease = try acquire()
+        defer { lease.release() }
+        XCTAssertEqual(lease.pack, first)
+        XCTAssertNotEqual(first.revision, first.descriptor.version)
+        XCTAssertEqual(try Data(contentsOf: first.path.appendingPathComponent("Dictionary/words.dat")), bytes)
+        XCTAssertEqual(lease.pack.descriptor.licenseNotice, descriptor().licenseNotice)
+        XCTAssertEqual(lease.pack.descriptor.sourceNotice, descriptor().sourceNotice)
+        let second = try install(expected: first.revision)
+        XCTAssertNotEqual(first.revision, second.revision)
+        XCTAssertNotEqual(first.path, second.path)
+        XCTAssertEqual(second.descriptor.version, first.descriptor.version)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path.path))
+    }
+
+    func testAbsentMissingIncompatibleAndMissingVersionAreDistinct() throws {
+        guard case .absent = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("absent store") }
+        let pack = try install()
+        guard case .missing = store.resolve(modeID: "other-mode", engineABI: abi) else { return XCTFail("missing mode") }
+        guard case .incompatible(let required, let installed) = store.resolve(modeID: mode, engineABI: "next-ABI") else {
+            return XCTFail("incompatible engine")
+        }
+        XCTAssertEqual(required, "next-ABI")
+        XCTAssertEqual(installed, abi)
+        XCTAssertEqual(try store.activeRevision(modeID: mode), pack.revision, "app can obtain a removal token despite ABI mismatch")
+        try FileManager.default.removeItem(at: pack.path.deletingLastPathComponent())
+        guard case .corrupt = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("dangling pointer is corrupt, not ordinary missing") }
+    }
+
+    func testUnreadableIsNotMissing() throws {
+        if geteuid() == 0 { throw XCTSkip("root bypasses filesystem permissions") }
+        _ = try install()
+        let lock = store.root.appendingPathComponent(".writer.lock")
+        XCTAssertEqual(chmod(lock.path, mode_t(0o000)), 0)
+        defer { _ = chmod(lock.path, mode_t(0o600)) }
+        guard case .unreadable = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("unreadable state") }
+    }
+
+    func testChooserMetadataDoesNotHashPayloadButActivationStillDoes() throws {
+        let pack = try install()
+        let payload = pack.path.appendingPathComponent("Dictionary/words.dat")
+        // Same length, wrong hash: stat-only readiness may advertise the choice,
+        // but cannot grant a lease or authorize opening an engine.
+        try Data(repeating: 120, count: bytes.count).write(to: payload)
+        guard case .available(let metadata) = store.publishedMetadata(modeID: mode, engineABI: abi) else {
+            return XCTFail("chooser inspection must not hash payload bytes")
+        }
+        XCTAssertEqual(metadata.revision, pack.revision)
+        XCTAssertEqual(metadata.descriptor, pack.descriptor)
+        guard case .corrupt = store.resolve(modeID: mode, engineABI: abi) else {
+            return XCTFail("activation must still reject the actual payload hash")
+        }
+    }
+
+    func testChooserMetadataNeverOpensPayloadFiles() throws {
+        if geteuid() == 0 { throw XCTSkip("root bypasses filesystem permissions") }
+        let pack = try install()
+        let payload = pack.path.appendingPathComponent("Dictionary/words.dat")
+        XCTAssertEqual(chmod(payload.path, mode_t(0o000)), 0)
+        defer { _ = chmod(payload.path, mode_t(0o600)) }
+        guard case .available = store.publishedMetadata(modeID: mode, engineABI: abi) else {
+            return XCTFail("metadata must work without permission to read payload contents")
+        }
+        guard case .unreadable = store.resolve(modeID: mode, engineABI: abi) else {
+            return XCTFail("activation must open/read the payload and fail without permission")
+        }
+    }
+
+    func testChooserMetadataChecksABIAndRegularFilePresence() throws {
+        guard case .absent = store.publishedMetadata(modeID: mode, engineABI: abi) else {
+            return XCTFail("absent store")
+        }
+        let pack = try install()
+        guard case .missing = store.publishedMetadata(modeID: "other-mode", engineABI: abi) else {
+            return XCTFail("missing pointer")
+        }
+        guard case .incompatible = store.publishedMetadata(modeID: mode, engineABI: "next-ABI") else {
+            return XCTFail("metadata must validate engine ABI")
+        }
+        let payload = pack.path.appendingPathComponent("Dictionary/words.dat")
+        try FileManager.default.removeItem(at: payload)
+        guard case .corrupt = store.publishedMetadata(modeID: mode, engineABI: abi) else {
+            return XCTFail("metadata must require declared file presence")
+        }
+        let foreign = sandbox.appendingPathComponent("foreign-data")
+        try bytes.write(to: foreign)
+        try FileManager.default.createSymbolicLink(at: payload, withDestinationURL: foreign)
+        guard case .corrupt = store.publishedMetadata(modeID: mode, engineABI: abi) else {
+            return XCTFail("metadata must not follow file links")
+        }
+    }
+
+    func testMetadataIsNotAnActivationOrCommitTokenAfterPointerReplacement() throws {
+        let first = try install()
+        guard case .available(let metadata) = store.publishedMetadata(modeID: mode, engineABI: abi) else {
+            return XCTFail("initial metadata")
+        }
+        let oldLease = try acquire()
+        defer { oldLease.release() }
+        let second = try install(version: "2", expected: first.revision)
+        XCTAssertNotEqual(try store.activeRevision(modeID: mode), metadata.revision,
+                          "activation/commit must recheck publication after asynchronous work")
+        XCTAssertNotEqual(try store.activeRevision(modeID: mode), oldLease.pack.revision,
+                          "a retained runtime lease protects lifetime, not publication validity")
+        let currentLease = try acquire()
+        defer { currentLease.release() }
+        XCTAssertEqual(currentLease.pack.revision, second.revision)
+        guard case .available(let current) = store.publishedMetadata(modeID: mode, engineABI: abi) else {
+            return XCTFail("replacement metadata")
+        }
+        XCTAssertEqual(current.revision, second.revision)
+        try store.remove(modeID: mode, expectedRevision: second.revision)
+        guard case .missing = store.publishedMetadata(modeID: mode, engineABI: abi) else {
+            return XCTFail("removal must immediately revoke chooser readiness")
+        }
+        XCTAssertNil(try store.activeRevision(modeID: mode))
+    }
+
+    func testManifestBoundsAndMetadataValidation() throws {
+        XCTAssertEqual(LanguagePackDescriptor.maximumFileCount, 4_096)
+        XCTAssertEqual(LanguagePackDescriptor.maximumManifestBytes, 2 * 1_024 * 1_024)
+        XCTAssertEqual(LanguagePackDescriptor.maximumInstalledBytes, 256 * 1_024 * 1_024)
+        XCTAssertThrowsError(try LanguagePackDescriptor.validated(from: Data(repeating: 32, count: LanguagePackDescriptor.maximumManifestBytes + 1)))
+        XCTAssertThrowsError(try LanguagePackDescriptor.validated(from: Data("{".utf8)))
+        let badFields: [(String, Any)] = [
+            ("formatVersion", 999), ("packID", "../foreign"), ("modeID", ""), ("engineABI", "../engine"),
+            ("fileCount", 4_097), ("installedBytes", 256 * 1_024 * 1_024 + 1),
+            ("archiveByteCount", 0), ("archiveByteCount", 256 * 1_024 * 1_024 + 1),
+            ("archiveSHA256", String(repeating: "A", count: 64)), ("archiveSHA256", "1234"),
+            ("sourceURL", "http://data.example.test/archive"), ("sourceURL", "https://evil.test/archive"),
+            ("sourceURL", "https://user:password@data.example.test/archive"),
+            ("sourceURL", "https://data.example.test:444/archive"),
+            ("allowedHosts", ["DATA.example.test"]), ("allowedHosts", ["data.example.test", "data.example.test"]),
+            ("licenseNotice", "  "), ("sourceNotice", "")
+        ]
+        for (key, value) in badFields {
+            let data = try changed { $0[key] = value }
+            XCTAssertThrowsError(try LanguagePackDescriptor.validated(from: data), "should reject \(key)")
+        }
+        let wrongSize = try changed { $0["installedBytes"] = bytes.count + 1 }
+        XCTAssertThrowsError(try LanguagePackDescriptor.validated(from: wrongSize))
+    }
+
+    func testStrictPathsHashesDuplicatesAndPrefixCollisions() throws {
+        let badPaths = ["", "/absolute", "../escape", "a/../b", "./a", "a/./b", "a//b", "a/", "a\\b", "a\0b", "a\nb", "e\u{301}.dat"]
+        for path in badPaths {
+            XCTAssertThrowsError(try descriptor(path: path).validate(), "reject \(path.debugDescription)")
+        }
+        for hash in [String(repeating: "F", count: 64), String(repeating: "g", count: 64), "", "00"] {
+            let data = try changed { object in
+                var files = object["files"] as! [[String: Any]]
+                files[0]["sha256"] = hash
+                object["files"] = files
+            }
+            XCTAssertThrowsError(try LanguagePackDescriptor.validated(from: data))
+        }
+        for paths in [["a", "a"], ["A", "a"], ["a", "a/child"]] {
+            let data = try changed { object in
+                let file = (object["files"] as! [[String: Any]])[0]
+                object["files"] = paths.map { path -> [String: Any] in var f = file; f["path"] = path; return f }
+                object["fileCount"] = 2
+                object["installedBytes"] = bytes.count * 2
+            }
+            XCTAssertThrowsError(try LanguagePackDescriptor.validated(from: data))
+        }
+    }
+
+    func testSHAAndSizeVerificationLeavePriorPointerUsable() throws {
+        let original = try install()
+        let badPayloads = [Data(repeating: 120, count: bytes.count), Data(bytes.dropLast()), bytes + Data([1])]
+        for bad in badPayloads {
+            XCTAssertThrowsError(try store.install(manifestData: manifest(descriptor(version: "2")), expectedRevision: original.revision) {
+                try populate($0, data: bad)
+            })
+            let lease = try acquire()
+            XCTAssertEqual(lease.pack.revision, original.revision)
+            lease.release()
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.root.appendingPathComponent("staging").path), [])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.root.appendingPathComponent("versions").path), [original.revision])
+    }
+
+    func testRejectsExtraMissingSymlinkHardlinkAndExecutablePayloads() throws {
+        let original = try install()
+        let foreign = sandbox.appendingPathComponent("foreign-data")
+        try bytes.write(to: foreign)
+        let mutations: [(URL) throws -> Void] = [
+            { directory in try self.bytes.write(to: directory.appendingPathComponent("extra")) },
+            { directory in try FileManager.default.createDirectory(at: directory.appendingPathComponent("unexpected"), withIntermediateDirectories: false) },
+            { directory in try FileManager.default.removeItem(at: directory.appendingPathComponent("Dictionary/words.dat")) },
+            { directory in
+                let file = directory.appendingPathComponent("Dictionary/words.dat")
+                try FileManager.default.removeItem(at: file)
+                try FileManager.default.createSymbolicLink(at: file, withDestinationURL: foreign)
+            },
+            { directory in
+                let dictionary = directory.appendingPathComponent("Dictionary")
+                try FileManager.default.removeItem(at: dictionary)
+                try FileManager.default.createSymbolicLink(at: dictionary, withDestinationURL: self.sandbox)
+            },
+            { directory in
+                let file = directory.appendingPathComponent("Dictionary/words.dat")
+                try FileManager.default.removeItem(at: file)
+                try FileManager.default.linkItem(at: foreign, to: file)
+            },
+            { directory in
+                let file = directory.appendingPathComponent("Dictionary/words.dat")
+                try FileManager.default.removeItem(at: file)
+                guard mkfifo(file.path, mode_t(0o600)) == 0 else { throw LanguagePackError.corruptStore("test mkfifo") }
+            },
+            { directory in
+                let file = directory.appendingPathComponent("Dictionary/words.dat")
+                guard chmod(file.path, mode_t(0o700)) == 0 else { throw LanguagePackError.corruptStore("test chmod") }
+            }
+        ]
+        for mutate in mutations {
+            XCTAssertThrowsError(try store.install(manifestData: manifest(descriptor(version: "2")), expectedRevision: original.revision) {
+                try populate($0)
+                try mutate($0)
+            })
+            XCTAssertEqual(try Data(contentsOf: foreign), bytes, "must not mutate/delete symlink or hardlink targets")
+            let lease = try acquire()
+            XCTAssertEqual(lease.pack.revision, original.revision)
+            lease.release()
+        }
+    }
+
+    func testArchiveVerificationUsesActualHashAndByteCount() throws {
+        let archive = sandbox.appendingPathComponent("archive")
+        try bytes.write(to: archive)
+        try LanguagePackStore.verifyArchive(at: archive, descriptor: descriptor())
+        try Data(repeating: 120, count: bytes.count).write(to: archive)
+        XCTAssertThrowsError(try LanguagePackStore.verifyArchive(at: archive, descriptor: descriptor()))
+        try bytes.dropLast().write(to: archive)
+        XCTAssertThrowsError(try LanguagePackStore.verifyArchive(at: archive, descriptor: descriptor()))
+    }
+
+    func testAllInjectedPrepublicationFaultsKeepLastGoodAndCleanOwnedPaths() throws {
+        enum Fault: Error { case injected }
+        let original = try install()
+        for target in 0..<3 {
+            var checkpoints = 0
+            XCTAssertThrowsError(try store.install(manifestData: manifest(descriptor(version: "2")), expectedRevision: original.revision,
+                                                   populate: { try populate($0) }, checkpoint: { _ in
+                defer { checkpoints += 1 }
+                if checkpoints == target { throw Fault.injected }
+            }))
+            let lease = try acquire()
+            XCTAssertEqual(lease.pack.revision, original.revision)
+            lease.release()
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.root.appendingPathComponent("staging").path), [])
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.root.appendingPathComponent("versions").path), [original.revision])
+        }
+    }
+
+    func testPartialPopulationFailureAndForeignStageAreNotDeleted() throws {
+        enum Fault: Error { case interrupted }
+        let original = try install()
+        let foreign = store.root.appendingPathComponent("staging/foreign-folder")
+        try FileManager.default.createDirectory(at: foreign, withIntermediateDirectories: false)
+        try bytes.write(to: foreign.appendingPathComponent("keep"))
+        let foreignUUID = store.root.appendingPathComponent("staging").appendingPathComponent(UUID().uuidString.lowercased())
+        try FileManager.default.createDirectory(at: foreignUUID, withIntermediateDirectories: false)
+        try bytes.write(to: foreignUUID.appendingPathComponent("keep"))
+        XCTAssertThrowsError(try store.install(manifestData: manifest(descriptor(version: "2")), expectedRevision: original.revision) {
+            try bytes.write(to: $0.appendingPathComponent("partial"))
+            throw Fault.interrupted
+        })
+        try store.reclaimUnusedVersions()
+        XCTAssertEqual(try Data(contentsOf: foreign.appendingPathComponent("keep")), bytes)
+        XCTAssertEqual(try Data(contentsOf: foreignUUID.appendingPathComponent("keep")), bytes)
+        XCTAssertEqual(try Set(FileManager.default.contentsOfDirectory(atPath: store.root.appendingPathComponent("staging").path)),
+                       Set(["foreign-folder", foreignUUID.lastPathComponent]))
+    }
+
+    func testConflictDoesNotInvokePopulationOrReplacePointer() throws {
+        let original = try install()
+        XCTAssertThrowsError(try store.install(manifestData: manifest(descriptor(version: "2")), expectedRevision: nil) { _ in
+            XCTFail("conflict must precede population")
+        }) { error in
+            XCTAssertEqual(error as? LanguagePackError, .revisionConflict(expected: nil, actual: original.revision))
+        }
+        XCTAssertThrowsError(try store.remove(modeID: mode, expectedRevision: "stale"))
+        let lease = try acquire()
+        XCTAssertEqual(lease.pack.revision, original.revision)
+        lease.release()
+    }
+
+    func testConcurrentIndependentAppWritersSerializeAndSecondConflicts() throws {
+        let original = try install()
+        let data = try manifest(descriptor(version: "2"))
+        let storeA = LanguagePackStore(root: store.root)
+        let storeB = LanguagePackStore(root: store.root)
+        let payloadBytes = bytes
+        let populated = expectation(description: "first writer holds lock")
+        let secondAttempt = expectation(description: "second writer begins")
+        let firstDone = expectation(description: "first writer publishes")
+        let secondDone = expectation(description: "second writer conflicts")
+        let resume = DispatchSemaphore(value: 0)
+        defer { resume.signal() }
+        DispatchQueue.global().async {
+            defer { firstDone.fulfill() }
+            do {
+                try storeA.install(manifestData: data, expectedRevision: original.revision) { directory in
+                    let subdirectory = directory.appendingPathComponent("Dictionary")
+                    try FileManager.default.createDirectory(at: subdirectory, withIntermediateDirectories: false)
+                    try payloadBytes.write(to: subdirectory.appendingPathComponent("words.dat"))
+                    populated.fulfill()
+                    _ = resume.wait(timeout: .now() + 10)
+                }
+            } catch { XCTFail("first writer failed: \(error)") }
+        }
+        wait(for: [populated], timeout: 5)
+        DispatchQueue.global().async {
+            defer { secondDone.fulfill() }
+            secondAttempt.fulfill()
+            do {
+                try storeB.install(manifestData: data, expectedRevision: original.revision) { _ in
+                    XCTFail("second writer cannot populate stale revision")
+                }
+                XCTFail("second writer must reject the stale expected revision")
+            } catch let error as LanguagePackError {
+                guard case .revisionConflict(let expected, let actual) = error else {
+                    return XCTFail("expected revision conflict, got \(error)")
+                }
+                XCTAssertEqual(expected, original.revision)
+                XCTAssertNotEqual(actual, original.revision)
+                XCTAssertNotNil(actual)
+            } catch {
+                XCTFail("expected revision conflict, got \(error)")
+            }
+        }
+        wait(for: [secondAttempt], timeout: 5)
+        resume.signal()
+        wait(for: [firstDone, secondDone], timeout: 10)
+        let lease = try acquire()
+        XCTAssertNotEqual(lease.pack.revision, original.revision)
+        lease.release()
+    }
+
+    func testRemoveImmediatelyDeactivatesButMultipleReadersRetainLazyFilesUntilRelease() throws {
+        let original = try install()
+        let first = try acquire()
+        let second = try acquire()
+        let customWords = sandbox.appendingPathComponent("custom-words")
+        try Data("user words stored elsewhere".utf8).write(to: customWords)
+        #if canImport(Darwin)
+        let versionFD = open(original.path.deletingLastPathComponent().path, O_EVTONLY | O_CLOEXEC)
+        XCTAssertGreaterThanOrEqual(versionFD, 0)
+        guard versionFD >= 0 else { first.release(); second.release(); return }
+        let reclaimed = expectation(description: "last reader release permits deletion")
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: versionFD, eventMask: .delete, queue: .global())
+        source.setEventHandler { reclaimed.fulfill() }
+        source.setCancelHandler { close(versionFD) }
+        source.resume()
+        defer { source.cancel() }
+        #endif
+        try store.remove(modeID: mode, expectedRevision: original.revision)
+        guard case .missing = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("remove must immediately hide pointer") }
+        try store.reclaimUnusedVersions()
+        XCTAssertEqual(try Data(contentsOf: original.path.appendingPathComponent("Dictionary/words.dat")), bytes)
+        first.release()
+        first.release() // Idempotent; must not close a subsequently reused descriptor.
+        try store.reclaimUnusedVersions()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: original.path.path))
+        second.release()
+        try store.reclaimUnusedVersions()
+        #if canImport(Darwin)
+        // A background waiter may momentarily own the lease lock while the explicit
+        // nonblocking sweep runs; wait for the observable deletion, not a timing race.
+        wait(for: [reclaimed], timeout: 10)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: original.path.path))
+        #endif
+        XCTAssertEqual(try String(contentsOf: customWords), "user words stored elsewhere")
+    }
+
+    func testUpdateAndReclaimPreserveReaderAndNewActiveVersion() throws {
+        let original = try install()
+        var lease: LanguagePackReadLease? = try acquire()
+        let next = try install(version: "2", expected: original.revision)
+        try store.reclaimUnusedVersions()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: original.path.path))
+        XCTAssertEqual(lease?.pack.revision, original.revision)
+        lease = nil // deinit releases the cross-process flock too.
+        try store.reclaimUnusedVersions()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: original.path.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: next.path.path))
+        let active = try acquire()
+        XCTAssertEqual(active.pack.revision, next.revision)
+        active.release()
+    }
+
+    func testJapaneseFileCountAndPinyinSizeFitInitialLimits() throws {
+        let files = (0..<3_397).map { index in
+            LanguagePackDescriptor.File(path: "Dictionary/\(index).dat", byteCount: 0, sha256: digest(Data()))
+        }
+        let japanese = LanguagePackDescriptor(packID: "fixture", version: "1", modeID: mode, engineABI: abi,
+                                             sourceURL: descriptor().sourceURL, allowedHosts: descriptor().allowedHosts,
+                                             archiveByteCount: 1, archiveSHA256: digest(Data([0])), installedBytes: 0,
+                                             fileCount: files.count, files: files, licenseNotice: "Fixture", sourceNotice: "Fixture")
+        try japanese.validate()
+        let fortySevenMiB: Int64 = 47 * 1_024 * 1_024
+        let pinyin = LanguagePackDescriptor(packID: "fixture", version: "1", modeID: "pinyin", engineABI: abi,
+                                          sourceURL: descriptor().sourceURL, allowedHosts: descriptor().allowedHosts,
+                                          archiveByteCount: 1, archiveSHA256: digest(Data([0])), installedBytes: fortySevenMiB,
+                                          fileCount: 1, files: [.init(path: "data", byteCount: fortySevenMiB, sha256: digest(Data()))],
+                                          licenseNotice: "Fixture", sourceNotice: "Fixture")
+        try pinyin.validate() // Metadata bounds only; these invented bytes would fail installation hashing.
+    }
+
+    func testResolverWorksWithReadOnlyStoreFiles() throws {
+        let original = try install()
+        let version = original.path.deletingLastPathComponent()
+        let directories = [store.root, store.root.appendingPathComponent("versions"), store.root.appendingPathComponent("active"),
+                           version, original.path, original.path.appendingPathComponent("Dictionary")]
+        let files = [store.root.appendingPathComponent(".writer.lock"), store.root.appendingPathComponent("active/\(mode).json"),
+                     version.appendingPathComponent(".lease"), version.appendingPathComponent(".owner"),
+                     version.appendingPathComponent("descriptor.json"), original.path.appendingPathComponent("Dictionary/words.dat")]
+        defer {
+            for directory in directories { _ = chmod(directory.path, mode_t(0o700)) }
+            for file in files { _ = chmod(file.path, mode_t(0o600)) }
+        }
+        for file in files { XCTAssertEqual(chmod(file.path, mode_t(0o400)), 0) }
+        for directory in directories.reversed() { XCTAssertEqual(chmod(directory.path, mode_t(0o500)), 0) }
+        let lease = try acquire()
+        XCTAssertEqual(lease.pack.revision, original.revision)
+        lease.release()
+    }
+
+    #if canImport(Darwin)
+    func testAppAutomaticallyReclaimsRemovedVersionWhenLastLeaseCloses() throws {
+        let original = try install()
+        let lease = try acquire()
+        let version = original.path.deletingLastPathComponent()
+        let fd = open(version.path, O_EVTONLY | O_CLOEXEC)
+        XCTAssertGreaterThanOrEqual(fd, 0)
+        guard fd >= 0 else { return }
+        let deleted = expectation(description: "app reclaimer deletes inactive leased revision")
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .delete, queue: .global())
+        source.setEventHandler { deleted.fulfill() }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        defer { source.cancel() }
+        try store.remove(modeID: mode, expectedRevision: original.revision)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: original.path.path))
+        lease.release()
+        wait(for: [deleted], timeout: 10)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: version.path))
+    }
+    #endif
+
+    func testTamperedInstalledPayloadAndPointerAreCorrupt() throws {
+        let original = try install()
+        try Data(repeating: 120, count: bytes.count).write(to: original.path.appendingPathComponent("Dictionary/words.dat"))
+        guard case .corrupt = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("tampered payload") }
+        let pointer = store.root.appendingPathComponent("active/\(mode).json")
+        try Data("{\"format\":1,\"modeID\":\"\(mode)\",\"revision\":\"../foreign\"}".utf8).write(to: pointer)
+        guard case .corrupt = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("unsafe pointer") }
+        XCTAssertThrowsError(try store.reclaimUnusedVersions(), "must not reclaim around untrusted active pointer")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: original.path.path))
+    }
+}

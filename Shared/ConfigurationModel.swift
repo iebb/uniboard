@@ -52,6 +52,8 @@ enum ConfigurationSection: String, CaseIterable, Sendable {
 struct ConfigurationBrowse: Equatable, Sendable {
     static let densities: Set<Int> = [3, 8, 16, 32]
     static let tileColumnRange = 2...256
+    /// 0 is Automatic (the 1.3 layout).
+    static func validEmojiColumns(_ value: Int) -> Bool { value == 0 || tileColumnRange.contains(value) }
     static let planeRange = -1...16
 
     var exploreGridDensity = 3
@@ -61,6 +63,10 @@ struct ConfigurationBrowse: Equatable, Sendable {
     var showsPrivateUse = false
     var exploreDescending = false
     var emojiSortOrder: UnicodeSortOrder = .codePoint
+    /// The app's emoji grid columns; 0 is Automatic.
+    var emojiColumns = 0
+    /// Blocks list order: highest starting code point first.
+    var blocksDescending = false
 
     init() {}
 
@@ -73,14 +79,17 @@ struct ConfigurationBrowse: Equatable, Sendable {
         showsPrivateUse = values.booleans["exploreShowsPrivateUse"] ?? false
         exploreDescending = values.booleans["exploreDescending"] ?? false
         emojiSortOrder = values.strings["emojiSortOrder"].flatMap(UnicodeSortOrder.init(rawValue:)) ?? .codePoint
+        emojiColumns = values.integers["emojiColumns"] ?? 0
+        blocksDescending = values.booleans["blocksDescending"] ?? false
     }
 
     /// Every value set explicitly, so the app adopts exactly these.
     var values: AppPresentationSettings.Values {
         AppPresentationSettings.Values(
             integers: ["exploreGridDensity": exploreGridDensity, "blockGridDensity": blockGridDensity,
-                       "tileColumns": tileColumns, "explorePlane": explorePlane],
-            booleans: ["exploreShowsPrivateUse": showsPrivateUse, "exploreDescending": exploreDescending],
+                       "tileColumns": tileColumns, "explorePlane": explorePlane, "emojiColumns": emojiColumns],
+            booleans: ["exploreShowsPrivateUse": showsPrivateUse, "exploreDescending": exploreDescending,
+                       "blocksDescending": blocksDescending],
             strings: ["emojiSortOrder": emojiSortOrder.rawValue])
     }
 }
@@ -89,7 +98,12 @@ struct UniboardConfiguration: Sendable {
     /// Edition, Extra Unicode Fonts, keyboard switches and the layouts list.
     var settings: UnicodeEditionSettings.Snapshot
     var autoCapitalization: AutoCapitalizationMode
+    /// Portable preferences and pinned pack identities, not pack/custom-word data.
+    var languageInput: LanguageInputSettings.Value = .defaults
     var browse: ConfigurationBrowse
+    /// Emoji categories (CLDR group names) hidden in app and keyboard emoji
+    /// browsing and search; shared with the keyboard.
+    var hiddenEmojiCategories: Set<String> = []
     var keys: KeyboardKeySettings.Snapshot
     /// Every page in display order; the Favorites page carries no keys.
     var pages: [SymbolBoard]
@@ -99,7 +113,8 @@ struct UniboardConfiguration: Sendable {
     var imageColors: ImageColorSettings.Value
 
     static let factoryDefaults = UniboardConfiguration(
-        settings: UnicodeEditionSettings.Snapshot(edition: .latest), autoCapitalization: .followApp, browse: ConfigurationBrowse(),
+        settings: UnicodeEditionSettings.Snapshot(edition: .latest), autoCapitalization: .followApp,
+        languageInput: .defaults, browse: ConfigurationBrowse(),
         keys: .defaults, pages: SymbolPageRules.initialBoards(favorites: []), starPageID: SymbolPageRules.favoritesID,
         favorites: [], fontRules: [], imageColors: ImageColorSettings.defaultValue)
 
@@ -109,7 +124,7 @@ struct UniboardConfiguration: Sendable {
     static func capture(directory: URL?, presentation: AppPresentationSettings.Values, favorites: [String]) -> UniboardConfiguration {
         let provider: () -> URL? = { directory }
         let stored = SymbolPageSettings(containerURL: provider).load()
-        var pages = stored?.pages.map { SymbolBoard(id: $0.id, name: $0.name, keys: $0.id == SymbolPageRules.favoritesID ? [] : $0.keys, layout: $0.layout) }
+        var pages = stored?.pages.map { $0.id == SymbolPageRules.favoritesID ? SymbolBoard(id: $0.id, name: $0.name, keys: [], layout: $0.layout) : $0 }
             ?? factoryDefaults.pages
         var star = stored?.starPageID ?? SymbolPageRules.favoritesID
         if !SymbolPageRules.validPages(pages, starPageID: star) { pages = factoryDefaults.pages; star = SymbolPageRules.favoritesID }
@@ -119,7 +134,9 @@ struct UniboardConfiguration: Sendable {
         return UniboardConfiguration(
             settings: UnicodeEditionSettings(containerURL: provider).loadSnapshot(),
             autoCapitalization: AutoCapitalizationSetting(directory: provider).load(),
+            languageInput: LanguageInputSettings(directory: provider).load(),
             browse: ConfigurationBrowse(presentation),
+            hiddenEmojiCategories: EmojiCategorySetting(directory: provider).load(),
             keys: KeyboardKeySettings(containerURL: provider).loadSnapshot(),
             pages: pages, starPageID: star, favorites: favorites,
             fontRules: FontRuleStore(directory: provider).load(blocks: UnicodeCatalog.shared.blocks) ?? [],
@@ -136,7 +153,9 @@ struct UniboardConfiguration: Sendable {
               let pageData = SymbolPageSettings.encode(SymbolPageSettings.Snapshot(pages: pages, starPageID: starPageID)),
               let favoriteData = FavoriteSync.replacementPayload(favorites, id: replacementID),
               let ruleData = FontRuleStore.encode(fontRules, blocks: UnicodeCatalog.shared.blocks),
-              let colorData = ImageColorSettings.encode(ImageColorSettings.Stored(value: imageColors, revision: revision)) else { return nil }
+              let colorData = ImageColorSettings.encode(ImageColorSettings.Stored(value: imageColors, revision: revision)),
+              let categoryData = EmojiCategorySetting.encode(hiddenEmojiCategories),
+              let languageData = LanguageInputSettings.encode(languageInput) else { return nil }
         return [
             UnicodeEditionSettings.filename: edition,
             KeyboardKeySettings.filename: keyData,
@@ -145,6 +164,8 @@ struct UniboardConfiguration: Sendable {
             FontRuleStore.filename: ruleData,
             ImageColorSettings.filename: colorData,
             AutoCapitalizationSetting.filename: AutoCapitalizationSetting.encode(autoCapitalization),
+            LanguageInputSettings.filename: languageData,
+            EmojiCategorySetting.filename: categoryData,
             AppPresentationSettings.filename: AppPresentationSettings.encode(browse.values),
         ]
     }
@@ -157,6 +178,7 @@ struct UniboardConfiguration: Sendable {
             var lhs = settings.withoutRetired, rhs = other.settings.withoutRetired
             lhs.layouts = []; rhs.layouts = []
             return lhs == rhs && autoCapitalization == other.autoCapitalization && browse == other.browse
+                && hiddenEmojiCategories == other.hiddenEmojiCategories && languageInput == other.languageInput
         case .layoutsAndKeys:
             return settings.layouts == other.settings.layouts && keys == other.keys && starPageID == other.starPageID
                 && pages.count == other.pages.count

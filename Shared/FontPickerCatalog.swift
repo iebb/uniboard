@@ -20,9 +20,9 @@ enum FontPickerCopy {
     static let appOnly = "App Only"
     static let appOnlyAccessibility = "App only, not on the keyboard"
     static let appOnlyFooter = "These fonts are available in the app, but not the keyboard. The keyboard uses the next matching rule or its default fonts."
-    static let keyboardUnverified = "Keyboard Unverified"
-    static let keyboardUnverifiedAccessibility = "Keyboard unverified"
-    static let keyboardUnverifiedFooter = "Available in the app. Keyboard availability hasn’t been confirmed."
+    static let keyboardNotChecked = "Not Checked Yet"
+    static let keyboardNotCheckedAccessibility = "Not checked yet"
+    static let keyboardNotCheckedFooter = "Uniboard checks this font when its keyboard opens with Full Access. It already works here in the app."
     static let cannotDisplayCharacter = "Can’t display this character"
     static let unsupportedCharacterFooter = "These fonts can’t display this character."
     static let unsupportedRangeFooter = "These fonts can’t display any of these characters."
@@ -106,7 +106,7 @@ enum FontPickerSection: Int, CaseIterable, Comparable, Sendable {
 enum KeyboardFontStatus: Hashable, Sendable {
     /// A file in the App Group or a system font, or confirmed by the keyboard.
     case available
-    /// No evidence either way: "Keyboard Unverified". Never App Only.
+    /// No current evidence either way. Shown only in details, never App Only.
     case unverified
     /// The keyboard confirmed it can't open it: "App Only".
     case appOnly
@@ -114,7 +114,7 @@ enum KeyboardFontStatus: Hashable, Sendable {
     var tag: String? {
         switch self {
         case .available: return nil
-        case .unverified: return FontPickerCopy.keyboardUnverified
+        case .unverified: return nil
         case .appOnly: return FontPickerCopy.appOnly
         }
     }
@@ -123,7 +123,7 @@ enum KeyboardFontStatus: Hashable, Sendable {
     var accessibilityText: String? {
         switch self {
         case .available: return nil
-        case .unverified: return FontPickerCopy.keyboardUnverifiedAccessibility
+        case .unverified: return nil
         case .appOnly: return FontPickerCopy.appOnlyAccessibility
         }
     }
@@ -132,15 +132,54 @@ enum KeyboardFontStatus: Hashable, Sendable {
     var footer: String? {
         switch self {
         case .available: return nil
-        case .unverified: return FontPickerCopy.keyboardUnverifiedFooter
+        case .unverified: return nil
+        case .appOnly: return FontPickerCopy.appOnlyFooter
+        }
+    }
+
+    /// Neutral value for the Keyboard row in font details; available needs no row.
+    var detailValue: String? {
+        switch self {
+        case .available: return nil
+        case .unverified: return FontPickerCopy.keyboardNotChecked
+        case .appOnly: return FontPickerCopy.appOnly
+        }
+    }
+
+    var detailAccessibilityValue: String? {
+        switch self {
+        case .available: return nil
+        case .unverified: return FontPickerCopy.keyboardNotCheckedAccessibility
+        case .appOnly: return FontPickerCopy.appOnlyAccessibility
+        }
+    }
+
+    /// Unverified guidance belongs in details, not repeated throughout the picker.
+    var detailFooter: String? {
+        switch self {
+        case .available: return nil
+        case .unverified: return FontPickerCopy.keyboardNotCheckedFooter
         case .appOnly: return FontPickerCopy.appOnlyFooter
         }
     }
 }
 
+extension FontManagedEntry {
+    /// Only describe the whole entry when all of its faces have the same status.
+    /// File-backed faces remain available under the existing evidence policy.
+    func keyboardStatus(evidence: KeyboardFontEvidence?, systemVersion: String) -> KeyboardFontStatus? {
+        let statuses = Set(faces.map {
+            KeyboardFontEvidence.status(source: $0.source, postScriptName: $0.postScriptName,
+                                        evidence: evidence, systemVersion: systemVersion)
+        })
+        return statuses.count == 1 ? statuses.first : nil
+    }
+}
+
 /// The PostScript names the keyboard process could open, recorded by the
-/// keyboard each time it appears, with the iOS build it ran on. Only the
-/// same iOS build counts as evidence; with none, process faces stay unverified.
+/// keyboard when it appears (at most once a minute), with the iOS build it
+/// ran on. Only the same iOS build counts as evidence; with none, process
+/// faces stay unverified.
 struct KeyboardFontEvidence: Equatable, Sendable {
     static let filename = "keyboard-fonts-v1.json"
     static let maximumPayloadBytes = 4 * 1024 * 1024
@@ -222,6 +261,52 @@ struct KeyboardFontEvidenceStore {
         } catch {
             return false
         }
+    }
+
+    /// True when the stored evidence is `evidence` afterwards: written now
+    /// or already there.
+    func recordAndConfirm(_ evidence: KeyboardFontEvidence) -> Bool {
+        record(evidence) || load() == evidence
+    }
+}
+
+/// Throttles the keyboard's font evidence recording: the font list and the
+/// evidence file are costly to read on every appearance, but a keyboard
+/// process that stays alive must still notice a font installed later. After
+/// a run that left current evidence, appearances skip recording for
+/// `interval`; a failed run (or one before Full Access) is retried on the
+/// next appearance. One run at a time.
+final class KeyboardFontEvidenceThrottle: @unchecked Sendable {
+    static let shared = KeyboardFontEvidenceThrottle()
+    let interval: TimeInterval
+    /// Monotonic seconds; injectable for tests.
+    private let now: () -> TimeInterval
+    private let lock = NSLock()
+    private var running = false
+    private var lastSuccess: TimeInterval?
+
+    init(interval: TimeInterval = 60, now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+        self.interval = interval
+        self.now = now
+    }
+
+    /// True when the caller should record now; it must then call `finish`.
+    /// False while another run is in flight, or within `interval` of the
+    /// last successful run.
+    func begin() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !running else { return false }
+        if let lastSuccess, now() - lastSuccess < interval { return false }
+        running = true
+        return true
+    }
+
+    func finish(succeeded: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        running = false
+        if succeeded { lastSuccess = now() }
     }
 }
 
@@ -435,10 +520,9 @@ struct FontPickerSectionContent: Identifiable, Equatable, Sendable {
     let rows: [FontPickerRow]
     var id: FontPickerSection { section }
 
-    /// Tags present on the rows' faces, App Only first, for the footer.
+    /// Only actual App Only faces need a picker footer.
     var keyboardFooters: [String] {
-        let statuses = Set(rows.flatMap { $0.faces.map(\.keyboard) })
-        return [KeyboardFontStatus.appOnly, .unverified].filter(statuses.contains).compactMap(\.footer)
+        rows.contains { $0.faces.contains { $0.keyboard == .appOnly } } ? [FontPickerCopy.appOnlyFooter] : []
     }
 }
 

@@ -3,6 +3,7 @@ import SwiftUI
 struct SetupView: View {
     @EnvironmentObject private var preferences: CatalogPreferences
     @ObservedObject private var fontRules = FontRulePreferences.shared
+    private let languageInput = LanguageInputEnvironment.shared
     /// Explore's Private Use rows and planes, hidden by default.
     @AppStorage("exploreShowsPrivateUse") private var showsPrivateUse = false
     var body: some View {
@@ -24,6 +25,12 @@ struct SetupView: View {
                     LabeledContent("Layouts", value: preferences.alphabets.map(\.nativeName).joined(separator: ", "))
                 }
                 .accessibilityIdentifier("keyboardLayouts")
+                NavigationLink("Languages") {
+                    LanguagesView(model: languageInput.languages, wordsModel: languageInput.myWords)
+                }
+                .accessibilityIdentifier("keyboardLanguages")
+                NavigationLink("My Words") { MyWordsView(model: languageInput.myWords) }
+                    .accessibilityIdentifier("keyboardMyWords")
                 NavigationLink { AutoCapitalizationSettingsView() } label: {
                     LabeledContent(AutoCapitalizationCopy.title, value: preferences.autoCapitalization.title)
                 }
@@ -98,8 +105,8 @@ struct SetupView: View {
             Section {
                 LabeledContent("Unicode Data", value: preferences.catalog.version)
                 NavigationLink("Data & License") { UnicodeLicenseView() }
-                Link("Privacy Policy", destination: URL(string: "https://docs.kitta.co/uniboard/")!)
-                Link("Help & Support", destination: URL(string: "https://uniboard-dxm.pages.dev/support/")!)
+                Link("Privacy Policy", destination: URL(string: "https://uniboard.ieb.app/privacy/")!)
+                Link("Help & Support", destination: URL(string: "https://uniboard.ieb.app/support/")!)
             } header: {
                 Text("About")
             } footer: {

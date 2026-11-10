@@ -1,0 +1,140 @@
+--- a/Package.swift
++++ b/Package.swift
+@@ -155,7 +155,7 @@
+         name: "KanaKanjiConverterModule",
+         dependencies: [
+             "SwiftUtils",
+-            .target(name: "EfficientNGram"),
++            .target(name: "EfficientNGram", condition: .when(traits: ["Zenzai", "ZenzaiCPU"])),
+             .target(name: "llama.cpp", condition: .when(traits: ["Zenzai", "ZenzaiCPU"])),
+             .product(name: "Collections", package: "swift-collections"),
+         ],
+--- a/Sources/KanaKanjiConverterModule/ConverterAPI/KanaKanjiConverter.swift
++++ b/Sources/KanaKanjiConverterModule/ConverterAPI/KanaKanjiConverter.swift
+@@ -7,9 +7,17 @@
+ //
+ 
+ import Algorithms
++#if Zenzai || ZenzaiCPU
+ import EfficientNGram
++#endif
+ public import Foundation
+ import SwiftUtils
++
++#if Zenzai || ZenzaiCPU
++typealias ZenzaiPersonalization = (mode: ConvertRequestOptions.ZenzaiMode.PersonalizationMode, base: EfficientNGram, personal: EfficientNGram)
++#else
++typealias ZenzaiPersonalization = Never
++#endif
+ 
+ /// かな漢字変換の管理を受け持つクラス
+ public final class KanaKanjiConverter {
+@@ -46,7 +54,7 @@
+     /// Zenzaiのためのzenzモデル
+     private var zenz: Zenz?
+     private var zenzaiCache: Kana2Kanji.ZenzaiCache?
+-    private var zenzaiPersonalization: (mode: ConvertRequestOptions.ZenzaiMode.PersonalizationMode, base: EfficientNGram, personal: EfficientNGram)?
++    private var zenzaiPersonalization: ZenzaiPersonalization?
+     public private(set) var zenzStatus: String = ""
+     private var dicdataStoreState: DicdataStoreState
+ 
+@@ -61,7 +69,8 @@
+         self.lastData = nil
+     }
+ 
+-    private func getZenzaiPersonalization(mode: ConvertRequestOptions.ZenzaiMode.PersonalizationMode?) -> (mode: ConvertRequestOptions.ZenzaiMode.PersonalizationMode, base: EfficientNGram, personal: EfficientNGram)? {
++    private func getZenzaiPersonalization(mode: ConvertRequestOptions.ZenzaiMode.PersonalizationMode?) -> ZenzaiPersonalization? {
++        #if Zenzai || ZenzaiCPU
+         guard let mode else {
+             return nil
+         }
+@@ -73,6 +82,9 @@
+         let personalModel = EfficientNGram(baseFilename: mode.personalNgramLanguageModel, n: mode.n, d: mode.d, tokenizer: tokenizer)
+         self.zenzaiPersonalization = (mode, baseModel, personalModel)
+         return (mode, baseModel, personalModel)
++        #else
++        return nil
++        #endif
+     }
+ 
+     package func getModel(modelURL: URL) -> Zenz? {
+--- a/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/zenzai.swift
++++ b/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/zenzai.swift
+@@ -1,5 +1,7 @@
+ import Algorithms
++#if Zenzai || ZenzaiCPU
+ import EfficientNGram
++#endif
+ import Foundation
+ import SwiftUtils
+ 
+@@ -83,7 +85,7 @@
+         zenzaiCache: ZenzaiCache?,
+         inferenceLimit: Int,
+         requestRichCandidates: Bool,
+-        personalizationMode: (mode: ConvertRequestOptions.ZenzaiMode.PersonalizationMode, base: EfficientNGram, personal: EfficientNGram)?,
++        personalizationMode: ZenzaiPersonalization?,
+         versionDependentConfig: ConvertRequestOptions.ZenzaiVersionDependentMode,
+         dicdataStoreState: DicdataStoreState
+     ) -> (result: LatticeNode, lattice: Lattice, cache: ZenzaiCache) {
+--- a/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/Zenz.swift
++++ b/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/Zenz.swift
+@@ -1,4 +1,6 @@
++#if Zenzai || ZenzaiCPU
+ import EfficientNGram
++#endif
+ package import Foundation
+ import SwiftUtils
+ 
+@@ -34,7 +36,7 @@
+         candidates: [Candidate],
+         requestRichCandidates: Bool,
+         prefixConstraint: Kana2Kanji.PrefixConstraint,
+-        personalizationMode: (mode: ConvertRequestOptions.ZenzaiMode.PersonalizationMode, base: EfficientNGram, personal: EfficientNGram)?,
++        personalizationMode: ZenzaiPersonalization?,
+         versionDependentConfig: ConvertRequestOptions.ZenzaiVersionDependentMode
+     ) -> ZenzContext.CandidateEvaluationResult {
+         guard let zenzContext else {
+--- a/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/ZenzContext.swift
++++ b/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/ZenzContext.swift
+@@ -4,7 +4,9 @@
+ #endif
+ 
+ import Algorithms
++#if Zenzai || ZenzaiCPU
+ import EfficientNGram
++#endif
+ import Foundation
+ import HeapModule
+ import SwiftUtils
+@@ -328,7 +330,7 @@
+         candidate: Candidate,
+         requestRichCandidates: Bool,
+         prefixConstraint: Kana2Kanji.PrefixConstraint,
+-        personalizationMode: (mode: ConvertRequestOptions.ZenzaiMode.PersonalizationMode, base: EfficientNGram, personal: EfficientNGram)?,
++        personalizationMode: ZenzaiPersonalization?,
+         versionDependentConfig: ConvertRequestOptions.ZenzaiVersionDependentMode
+     ) -> CandidateEvaluationResult {
+         debug("Evaluate", candidate)
+@@ -489,6 +491,7 @@
+             }
+             let logsumexp = logf(sumexp)
+ 
++            #if Zenzai || ZenzaiCPU
+             if let (mode, baseLM, personalLM) = personalizationMode, mode.alpha > 0 {
+                 let prefix = tokens[..<i].dropFirst(prompt_tokens.count).map(Int.init)
+                 let baseProb: [Float]
+@@ -515,6 +518,13 @@
+                     tokenHeap.insertIfPossible(TokenAndLogprob(token: llama_token(i - startIndex), logprob: logp))
+                 }
+             }
++            #else
++            // p = probabilityBuffer / exp_sum
++            for i in startIndex ..< endIndex {
++                let logp = logits[i] - logsumexp
++                tokenHeap.insertIfPossible(TokenAndLogprob(token: llama_token(i - startIndex), logprob: logp))
++            }
++            #endif
+ 
+             guard let maxItem = tokenHeap.max else {
+                 debug("Max Item could not be found for unknown reason")

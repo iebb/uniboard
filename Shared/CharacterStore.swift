@@ -149,12 +149,10 @@ final class CharacterStore: ObservableObject {
         defaults.set(recentEmojiIDs, forKey: "recentEmojiSequences")
     }
     func favoriteEmojiEntries(in catalog: EmojiCatalog) -> [UnicodeEmojiEntry] {
-        let entries = Dictionary(uniqueKeysWithValues: catalog.entries.map { ($0.id, $0) })
-        return favoriteEmojiIDs.compactMap { entries[$0] }
+        favoriteEmojiIDs.compactMap { catalog.entry(id: $0) }
     }
     func recentEmojiEntries(in catalog: EmojiCatalog) -> [UnicodeEmojiEntry] {
-        let entries = Dictionary(uniqueKeysWithValues: catalog.entries.map { ($0.id, $0) })
-        return recentEmojiIDs.compactMap { entries[$0] }
+        recentEmojiIDs.compactMap { catalog.entry(id: $0) }
     }
 
     func reset() {

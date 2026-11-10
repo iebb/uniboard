@@ -24,7 +24,7 @@ struct ConfigurationProblems: Error, Equatable, Sendable {
 
 /// The TOML exchange format (docs/configuration-format.md). App only.
 enum ConfigurationCodec {
-    static let formatVersion = 1
+    static let formatVersion = 3
     static let maximumBytes = TOMLLimits.standard.maximumBytes
     /// Validation stops collecting after this many problems.
     static let maximumProblems = 1000
@@ -44,6 +44,12 @@ enum ConfigurationCodec {
     /// Deterministic UTF-8 TOML; nil (never truncated) over the import limit.
     /// `inLibrary` adds the informational `in_library` flag to each face.
     static func encode(_ configuration: UniboardConfiguration, inLibrary: ((FontFaceReference) -> Bool)? = nil) -> Data? {
+        guard configuration.languageInput.isValid,
+              LanguageInputSettings.encode(configuration.languageInput) != nil,
+              configuration.pages.allSatisfy({ $0.isLegacy || SymbolPageRules.validBoard($0) }),
+              configuration.keys.arrangements.allSatisfy({ id, arrangement in
+                  arrangement.isLegacy || KeyboardAlphabet.alphabet(id: id).map { arrangement.isValid(for: $0) } == true
+              }) else { return nil }
         let data = Data(TOMLDocument.write(document(configuration, inLibrary: inLibrary)).utf8)
         return data.count <= maximumBytes ? data : nil
     }
@@ -51,7 +57,8 @@ enum ConfigurationCodec {
     static func document(_ configuration: UniboardConfiguration, inLibrary: ((FontFaceReference) -> Bool)? = nil) -> TOMLTable {
         let c = configuration
         var root = TOMLTable()
-        root["schema_version"] = .integer(Int64(formatVersion))
+        let hasExplicitRows = c.pages.contains { !$0.isLegacy } || c.keys.arrangements.values.contains { !$0.isLegacy }
+        root["schema_version"] = .integer(c.languageInput != .defaults ? 3 : hasExplicitRows ? 2 : 1)
         var settings = TOMLTable()
         settings["unicode_edition"] = .string(c.settings.edition.selectionIdentifier)
         settings["extra_unicode_fonts"] = .boolean(c.settings.useUnicodeFonts)
@@ -63,6 +70,19 @@ enum ConfigurationCodec {
         settings["ipad_landscape_layout"] = .string(c.settings.padLayout.rawValue)
         settings["ipad_symbol_mapping"] = .string(c.settings.padSymbolMapping.rawValue)
         settings["auto_capitalization"] = .string(c.autoCapitalization.rawValue)
+        if c.languageInput != .defaults {
+            var language = TOMLTable()
+            language["enabled_modes"] = strings(c.languageInput.enabledModes.map(\.rawValue))
+            language["english_suggestions"] = .boolean(c.languageInput.englishSuggestions)
+            language["english_autocorrection"] = .boolean(c.languageInput.englishAutocorrection)
+            if !c.languageInput.packReferences.isEmpty {
+                language["pack_references"] = .array(c.languageInput.packReferences.map { pin in
+                    .table(TOMLTable(["mode": .string(pin.mode.rawValue), "pack_id": .string(pin.packID),
+                                      "version": .string(pin.version), "archive_sha256": .string(pin.archiveSHA256)]))
+                })
+            }
+            settings["language_input"] = .table(language)
+        }
         var browse = TOMLTable()
         browse["explore_grid_density"] = .integer(Int64(c.browse.exploreGridDensity))
         browse["block_grid_density"] = .integer(Int64(c.browse.blockGridDensity))
@@ -70,6 +90,9 @@ enum ConfigurationCodec {
         browse["explore_plane"] = .integer(Int64(c.browse.explorePlane))
         browse["explore_descending"] = .boolean(c.browse.exploreDescending)
         browse["emoji_sort_order"] = .string(c.browse.emojiSortOrder.rawValue)
+        browse["hidden_emoji_categories"] = strings(EmojiCategorySetting.ordered(c.hiddenEmojiCategories))
+        browse["emoji_columns"] = .integer(Int64(c.browse.emojiColumns))
+        browse["blocks_descending"] = .boolean(c.browse.blocksDescending)
         settings["browse"] = .table(browse)
         root["settings"] = .table(settings)
 
@@ -86,6 +109,9 @@ enum ConfigurationCodec {
         if !keys.isEmpty { keyboard["key"] = .array(keys) }
         let arrangements = c.keys.arrangements.keys.sorted().map { id -> TOMLValue in
             let arrangement = c.keys.arrangements[id]!
+            if let rows = arrangement.explicitRows {
+                return .table(TOMLTable(["layout": .string(id), "row": rowValues(rows) { .string($0) }]))
+            }
             return .table(TOMLTable(["layout": .string(id), "keys": strings(arrangement.keys), "places": .string(arrangement.layout)]))
         }
         if !arrangements.isEmpty { keyboard["arrangement"] = .array(arrangements) }
@@ -97,14 +123,12 @@ enum ConfigurationCodec {
             var entry = TOMLTable()
             entry["id"] = .string(page.id)
             entry["name"] = .string(page.name)
-            if let layout = page.layout { entry["layout"] = .string(layout) }
-            let keys = page.keys.map { key -> TOMLValue in
-                var item = TOMLTable(["id": .string(key.id), "text": .string(key.text), "variants": strings(key.variants)])
-                if let up = key.up { item["up"] = strings(up) }
-                if let down = key.down { item["down"] = strings(down) }
-                return .table(item)
+            if let rows = page.explicitRows { entry["row"] = rowValues(rows, payload: pageKeyValue) }
+            else {
+                if let layout = page.layout { entry["layout"] = .string(layout) }
+                let keys = page.keys.map(pageKeyValue)
+                if !keys.isEmpty { entry["key"] = .array(keys) }
             }
-            if !keys.isEmpty { entry["key"] = .array(keys) }
             return .table(entry)
         })
         root["pages"] = .table(pages)
@@ -165,6 +189,24 @@ enum ConfigurationCodec {
         ("tap", .tap), ("shifted_tap", .shiftedTap), ("long_press", .longPress), ("swipe_up", .swipeUp), ("swipe_down", .swipeDown),
     ]
 
+    private static func pageKeyValue(_ key: SymbolBoardKey) -> TOMLValue {
+        var item = TOMLTable(["id": .string(key.id), "text": .string(key.text), "variants": strings(key.variants)])
+        if let up = key.up { item["up"] = strings(up) }
+        if let down = key.down { item["down"] = strings(down) }
+        return .table(item)
+    }
+    private static func rowValues<Key>(_ rows: [KeyboardRow<Key>], payload: (Key) -> TOMLValue) -> TOMLValue {
+        .array(rows.map { row in
+            .table(TOMLTable(["alignment": .string(row.alignment.rawValue), "cell": .array(row.cells.map { cell in
+                switch cell {
+                case .key(let key): return .table(TOMLTable(["key": payload(key)]))
+                case .halfGap: return .table(TOMLTable(["gap": .string("half")]))
+                case .gap: return .table(TOMLTable(["gap": .string("full")]))
+                }
+            })]))
+        })
+    }
+
     private static func strings(_ values: [String]) -> TOMLValue { .array(values.map { .string($0) }) }
 
     private static func reference(_ index: Int) -> String { "font-\(index + 1)" }
@@ -186,13 +228,13 @@ enum ConfigurationCodec {
             return .failure(ConfigurationProblems(messages: [String(describing: error)]))
         }
         guard let version = root["schema_version"] else { return .failure(ConfigurationProblems(messages: [missingVersion])) }
-        guard version.integerValue == Int64(formatVersion) else { return .failure(ConfigurationProblems(messages: [unsupportedVersion])) }
-        let reader = ConfigurationReader()
+        guard version.integerValue == 1 || version.integerValue == 2 || version.integerValue == 3 else { return .failure(ConfigurationProblems(messages: [unsupportedVersion])) }
+        let reader = ConfigurationReader(version: Int(version.integerValue!))
         let configuration = reader.read(root)
         guard reader.problems.isEmpty else { return .failure(ConfigurationProblems(messages: reader.problems)) }
         return .success(DecodedConfiguration(configuration: configuration,
             missingSections: ConfigurationSection.allCases.filter { root[$0.rawValue] == nil },
-            byteCount: data.count, formatVersion: formatVersion, faces: uniqueFaces(configuration.fontRules),
+            byteCount: data.count, formatVersion: Int(version.integerValue!), faces: uniqueFaces(configuration.fontRules),
             ignoredSettings: reader.ignored))
     }
 
@@ -238,6 +280,8 @@ enum ConfigurationCodec {
 
 /// Walks a parsed file. Every problem is collected, in file order.
 private final class ConfigurationReader {
+    let version: Int
+    init(version: Int) { self.version = version }
     private(set) var problems: [String] = []
     private(set) var ignored: [ConfigurationIgnoredSetting] = []
 
@@ -356,6 +400,7 @@ private final class ConfigurationReader {
         }
         allow(t, p, Set(["unicode_edition", "extra_unicode_fonts", "private_use_area", "conscript", "prefer_conscript", "text_preview",
                          "hide_keyboard_key", "ipad_landscape_layout", "ipad_symbol_mapping", "auto_capitalization", "browse"])
+                     .union(version >= 3 ? ["language_input"] : [])
                      .union(ConfigurationIgnoredSetting.retiredSettings.keys))
         let editions = [UnicodeEdition.latest, .draft, .previous, .older].map { ($0.selectionIdentifier, $0) }
             .filter { UnicodeEdition.resolve(selectionIdentifier: $0.0) == $0.1 }
@@ -369,9 +414,11 @@ private final class ConfigurationReader {
         c.settings.padLayout = choice(t, "ipad_landscape_layout", p, .ansiNumbers, KeyboardPadLayout.allCases.map { ($0.rawValue, $0) })
         c.settings.padSymbolMapping = choice(t, "ipad_symbol_mapping", p, .standard, KeyboardPadSymbolMapping.allCases.map { ($0.rawValue, $0) })
         c.autoCapitalization = choice(t, "auto_capitalization", p, .followApp, AutoCapitalizationMode.allCases.map { ($0.rawValue, $0) })
+        if version >= 3, let language = table(t, "language_input", p) { readLanguageInput(language, into: &c) }
         guard let browse = table(t, "browse", p) else { return }
         let b = "settings.browse"
-        allow(browse, b, ["explore_grid_density", "block_grid_density", "tile_columns", "explore_plane", "explore_descending", "emoji_sort_order"])
+        allow(browse, b, ["explore_grid_density", "block_grid_density", "tile_columns", "explore_plane", "explore_descending", "emoji_sort_order",
+                          "hidden_emoji_categories", "emoji_columns", "blocks_descending"])
         let density = "3, 8, 16 or 32"
         c.browse.exploreGridDensity = integer(browse, "explore_grid_density", b, 3, ConfigurationBrowse.densities.contains, density)
         c.browse.blockGridDensity = integer(browse, "block_grid_density", b, 3, ConfigurationBrowse.densities.contains, density)
@@ -379,6 +426,61 @@ private final class ConfigurationReader {
         c.browse.explorePlane = integer(browse, "explore_plane", b, -1, ConfigurationBrowse.planeRange.contains, "-1 for all planes, or 0 to 16")
         c.browse.exploreDescending = bool(browse, "explore_descending", b, false)
         c.browse.emojiSortOrder = choice(browse, "emoji_sort_order", b, .codePoint, UnicodeSortOrder.allCases.map { ($0.rawValue, $0) })
+        // Names this catalog doesn't list (perhaps from a newer version) are kept: they hide nothing here.
+        let categories = path(b, "hidden_emoji_categories")
+        if let value = browse["hidden_emoji_categories"],
+           let names = texts(value, categories, maximum: EmojiCategorySetting.maximumGroups, scalars: EmojiCategorySetting.maximumNameBytes) {
+            if let index = names.firstIndex(where: { !EmojiCategorySetting.isValidName($0) }) {
+                check("\(categories)[\(index + 1)]", "a category name such as \"Flags\"")
+            } else { c.hiddenEmojiCategories = Set(names) }
+        }
+        c.browse.emojiColumns = integer(browse, "emoji_columns", b, 0, ConfigurationBrowse.validEmojiColumns, "0 for Automatic, or a whole number from 2 to 256")
+        c.browse.blocksDescending = bool(browse, "blocks_descending", b, false)
+    }
+
+    /// Schema 3 adds preferences only. Pins may name disabled modes; importing
+    /// these identities does not install, enable or select any resource.
+    private func readLanguageInput(_ t: TOMLTable, into c: inout UniboardConfiguration) {
+        let p = "settings.language_input"
+        let before = problems.count
+        allow(t, p, ["enabled_modes", "english_suggestions", "english_autocorrection", "pack_references"])
+        var value = LanguageInputSettings.defaultValue
+        if let modes = t["enabled_modes"], let names = strings(modes, path(p, "enabled_modes")) {
+            let parsed = names.compactMap(LanguageInputMode.init(rawValue:))
+            if parsed.count != names.count {
+                check(path(p, "enabled_modes"), "only direct, japaneseRomaji, mandarinPinyin, koreanRomaja or koreanTwoSetHangul")
+            } else { value.enabledModes = parsed }
+        }
+        value.englishSuggestions = bool(t, "english_suggestions", p, false)
+        value.englishAutocorrection = bool(t, "english_autocorrection", p, false)
+        let entries = tables(t, "pack_references", p) ?? []
+        guard entries.count <= LanguageInputSettings.maximumPackReferences else {
+            check(path(p, "pack_references"), "at most 8 pinned pack identities"); return
+        }
+        for (index, entry) in entries.enumerated() {
+            let e = path(p, "pack_references") + "[\(index + 1)]"
+            allow(entry, e, ["mode", "pack_id", "version", "archive_sha256"])
+            let modeName = required(entry, "mode", e)
+            let mode = modeName.flatMap(LanguageInputMode.init(rawValue:))
+            if modeName != nil, mode == nil { check(path(e, "mode"), "direct, japaneseRomaji, mandarinPinyin, koreanRomaja or koreanTwoSetHangul") }
+            let id = required(entry, "pack_id", e)
+            let version = required(entry, "version", e)
+            let hash = required(entry, "archive_sha256", e)
+            if let id, !LanguageInputSettings.isCanonicalIdentifier(id) { check(path(e, "pack_id"), "a canonical ASCII identifier of 1 to 128 bytes") }
+            if let version, !LanguageInputSettings.isCanonicalIdentifier(version) { check(path(e, "version"), "a canonical ASCII identifier of 1 to 128 bytes") }
+            if let hash, !SharedConfigurationLocation.isDigest(hash) { check(path(e, "archive_sha256"), "64 lowercase hexadecimal digits") }
+            if let mode, let id, let version, let hash {
+                value.packReferences.append(.init(mode: mode, packID: id, version: version, archiveSHA256: hash))
+            }
+        }
+        if problems.count == before {
+            guard value.isValid else {
+                check(p, "unique enabled modes in direct/Japanese/Mandarin/Korean order with direct always enabled, and unique pack IDs with one mode/version/hash each")
+                return
+            }
+            guard LanguageInputSettings.encode(value) != nil else { check(p, "a snapshot no larger than 8 KB"); return }
+            c.languageInput = value
+        }
     }
 
     private func readKeyboard(_ t: TOMLTable, into c: inout UniboardConfiguration) {
@@ -418,15 +520,26 @@ private final class ConfigurationReader {
         var arranged = Set<String>()
         for (index, entry) in (tables(t, "arrangement", p) ?? []).enumerated() {
             let e = "keyboard.arrangement[\(index + 1)]"
-            allow(entry, e, ["layout", "keys", "places"])
-            let keys = entry["keys"].flatMap { strings($0, path(e, "keys")) }
-            let places = required(entry, "places", e)
-            if entry["keys"] == nil { check(path(e, "keys"), "a value; it’s missing") }
+            allow(entry, e, version >= 2 ? ["layout", "keys", "places", "row"] : ["layout", "keys", "places"])
+            // Keep legacy diagnostics in their original order too.
+            let legacyKeys = entry["keys"].flatMap { strings($0, path(e, "keys")) }
+            let legacyPlaces = entry["row"] == nil ? required(entry, "places", e) : nil
+            if entry["row"] == nil, entry["keys"] == nil { check(path(e, "keys"), "a value; it’s missing") }
             guard let id = required(entry, "layout", e) else { continue }
             guard let alphabet = KeyboardAlphabet.alphabet(id: id) else { check(path(e, "layout"), "a layout id such as \"en\""); continue }
             guard arranged.insert(id).inserted else { problem("The arrangement for \(id) appears more than once."); continue }
-            guard let keys, let places else { continue }
-            let arrangement = MainKeyboardArrangement(keys: keys, layout: places)
+            let arrangement: MainKeyboardArrangement
+            if entry["row"] != nil {
+                if entry["keys"] != nil || entry["places"] != nil { check(e, "rows or legacy keys/places, not both") }
+                let rows: [MainKeyboardArrangement.Row] = readRows(entry, e, label: alphabet.nativeName) { value, field in
+                    guard let key = value.stringValue else { self.check(field, "a main-key token in quotes"); return nil }
+                    return key
+                }
+                arrangement = MainKeyboardArrangement(rows: rows)
+            } else {
+                guard let legacyKeys, let legacyPlaces else { continue }
+                arrangement = MainKeyboardArrangement(keys: legacyKeys, layout: legacyPlaces)
+            }
             guard arrangement.isValid(for: alphabet) else {
                 check(e, "every letter of the layout once, Shift and Delete once, Tab, Caps Lock and each digit at most once, and one place for each key in up to 4 rows")
                 continue
@@ -464,12 +577,24 @@ private final class ConfigurationReader {
     }
 
     private func readPage(_ entry: TOMLTable, _ e: String) -> SymbolBoard? {
-        allow(entry, e, ["id", "name", "layout", "key"])
+        allow(entry, e, version >= 2 ? ["id", "name", "layout", "key", "row"] : ["id", "name", "layout", "key"])
         let before = problems.count
         let id = required(entry, "id", e)
         if let id, !SymbolPageRules.validID(id) { check(path(e, "id"), "1 to 80 letters, digits, “.”, “-” or “_”") }
         let name = required(entry, "name", e)
         if let name, SymbolPageRules.validName(name) != name { check(path(e, "name"), "a name of 1 to 32 characters without spaces at either end") }
+        if entry["row"] != nil {
+            if entry["layout"] != nil || entry["key"] != nil { check(e, "rows or legacy key/layout, not both") }
+            if id == SymbolPageRules.favoritesID { check(path(e, "row"), "no explicit rows: Favorites stays dynamic") }
+            let rows: [SymbolBoard.Row] = readRows(entry, e, label: name ?? "Page") { value, field in
+                guard let item = value.tableValue else { self.check(field, "a complete page key table"); return nil }
+                return self.readKey(item, field)
+            }
+            guard problems.count == before, let id, let name else { return nil }
+            let board = SymbolBoard(id: id, name: name, rows: rows)
+            guard SymbolPageRules.validBoard(board) else { check(e, "valid rows with unique key IDs and exact texts within page limits"); return nil }
+            return board
+        }
         let layout = text(entry, "layout", e)
         if let layout, SymbolPageLayout(layout) == nil { check(path(e, "layout"), "rows of k (key), h (half gap) and g (gap) separated by /") }
         var keys: [SymbolBoardKey] = []
@@ -488,6 +613,42 @@ private final class ConfigurationReader {
         }
         guard problems.count == before, let id, let name else { return nil }
         return SymbolBoard(id: id, name: name, keys: keys, layout: layout)
+    }
+
+    private func readRows<Key>(_ entry: TOMLTable, _ e: String, label: String,
+                               payload: (TOMLValue, String) -> Key?) -> [KeyboardRow<Key>] {
+        var result: [KeyboardRow<Key>] = []
+        // Both callers enter only after finding a row field; malformed fields
+        // return an empty list with a diagnostic, never nil.
+        for (index, row) in tables(entry, "row", e)!.enumerated() {
+            let r = path(e, "row") + "[\(index + 1)]"
+            allow(row, r, ["alignment", "cell"])
+            let alignment = required(row, "alignment", r).flatMap(KeyboardRowAlignment.init(rawValue:))
+            if row["alignment"] != nil, alignment == nil { check(path(r, "alignment"), "left, right, center or spaced") }
+            if row["cell"] == nil { check(path(r, "cell"), "a list of cells; it’s missing") }
+            var cells: [KeyboardRowCell<Key>] = []
+            for (index, cell) in (tables(row, "cell", r) ?? []).enumerated() {
+                let c = path(r, "cell") + "[\(index + 1)]"
+                allow(cell, c, ["key", "gap"])
+                guard (cell["key"] != nil) != (cell["gap"] != nil) else { check(c, "exactly one key or gap"); continue }
+                if let value = cell["key"] {
+                    if let key = payload(value, path(c, "key")) { cells.append(.key(key)) }
+                } else {
+                    switch text(cell, "gap", c) {
+                    case "half": cells.append(.halfGap)
+                    case "full": cells.append(.gap)
+                    default: check(path(c, "gap"), "half or full")
+                    }
+                }
+            }
+            let parsed = KeyboardRow(alignment: alignment ?? .left, cells: cells)
+            if parsed.units > KeyboardRow<Key>.maximumRowUnits {
+                problem(ExplicitRowCoding.widthMessage(label: ConfigurationCodec.displayed(label), row: index + 1, field: r))
+            } else if !KeyboardRow<Key>.valid([parsed]) { check(r, "a nonempty row containing a key") }
+            result.append(parsed)
+        }
+        if result.count > SymbolPageLayout.maximumRows { check(path(e, "row"), "up to 64 rows") }
+        return result
     }
 
     private func readKey(_ item: TOMLTable, _ k: String) -> SymbolBoardKey? {

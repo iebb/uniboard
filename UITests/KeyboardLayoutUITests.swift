@@ -32,7 +32,10 @@ final class KeyboardLayoutUITests: UniboardUITestCase {
         let alpha = app.buttons["mainKeyboard.key.letter.03B1"].firstMatch
         XCTAssertTrue(alpha.waitForExistence(timeout: 5), "Main Keyboard shows the first layout's letters")
         XCTAssertFalse(app.buttons["mainKeyboard.key.letter.q"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["mainKeyboard.layout"].firstMatch.waitForExistence(timeout: 5))
+        let layout = app.buttons["mainKeyboard.layout"].firstMatch
+        XCTAssertTrue(layout.waitForExistence(timeout: 5))
+        // A menu: it shows the layout's native name and lists the others.
+        layout.tap()
         let russian = app.buttons["Русский"].firstMatch
         XCTAssertTrue(russian.waitForExistence(timeout: 5))
         russian.tap()
@@ -112,25 +115,41 @@ final class KeyboardLayoutUITests: UniboardUITestCase {
         app.navigationBars.buttons.firstMatch.tap()
     }
 
+    /// 1.4: 1.3's Symbol Keys screen is Main Keyboard's 123 and #+= sections,
+    /// with the same layer editors, per-key restore, Find a key and Restore All.
     func testSymbolKeysSaveExactChoicesPersistAndRestoreDefaults() {
-        openSymbolKeys()
-        XCTAssertFalse(app.buttons["keySettings.key.letter.q"].exists, "Letters are edited in Main Keyboard")
-        XCTAssertFalse(app.buttons["keySettings.key.digit.1"].exists, "Numbers are edited in Main Keyboard")
-        XCTAssertFalse(app.descendants(matching: .any)["keySettings.layout"].exists, "Symbol keys are the same in every layout")
-        let period = app.buttons["keySettings.key.symbol.002E"].firstMatch
+        openAppPages()
+        let mainKeyboard = app.buttons["pages.keyboard"].firstMatch
+        XCTAssertTrue(mainKeyboard.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["pages.symbolKeys"].exists, "Keyboard has no separate Symbol Keys row")
+        XCTAssertTrue(mainKeyboard.label.contains("Letters, numbers and symbol keys"), mainKeyboard.label)
+        attachScreenshot("Keyboard tab: Main Keyboard with its subtitle, no Symbol Keys row")
+        mainKeyboard.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["mainKeyboard.keys"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Letters"].firstMatch.waitUntilSelected(), "Main Keyboard opens on the letters")
+        XCTAssertTrue(app.buttons["Numbers and Symbols"].exists && app.buttons["More Symbols"].exists)
+        XCTAssertTrue(app.buttons["mainKeyboard.left"].exists, "The letters move")
+
+        openMainKeyboardSection("Numbers and Symbols")
+        XCTAssertFalse(app.buttons["mainKeyboard.left"].exists, "123 keys keep their places")
+        XCTAssertFalse(app.buttons["mainKeyboard.key.letter.q"].exists, "123 shows no letters")
+        XCTAssertTrue(app.buttons["mainKeyboard.key.digit.1"].exists, "Digits are on 123")
+        let period = app.buttons["mainKeyboard.key.symbol.002E"].firstMatch
+        let restore = app.buttons["mainKeyboard.resetKey"].firstMatch
+        let gesture = app.buttons["layers.swipeUp"].firstMatch
         func openPeriod() {
-            revealByScrolling(period, in: app)
-            period.tap()
-            XCTAssertTrue(app.descendants(matching: .any)["keySettings.detail.symbol.002E"].firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(period.waitForExistence(timeout: 5))
+            if !gesture.exists { period.tap() }
+            XCTAssertTrue(gesture.waitForExistence(timeout: 5), "The period shows its layers")
+            revealByScrolling(restore, in: app)
         }
-        let restore = app.buttons["keySettings.resetKey"].firstMatch
-        let gesture = app.buttons["keySettings.gesture.swipeUp"].firstMatch
         openPeriod()
         if restore.isEnabled {
             restore.tap()
             app.buttons["Restore defaults"].tap()
         }
-        XCTAssertTrue(gesture.waitUntilValueEquals("Default"))
+        XCTAssertTrue(restore.waitUntilEnabled(false), "Nothing saved: restoring the key is disabled")
+        XCTAssertEqual(period.value as? String ?? "", "", "An unchanged key has no value")
         gesture.tap()
         XCTAssertTrue(app.buttons["keySettings.save"].firstMatch.waitForExistence(timeout: 5))
         let removeAll = app.buttons["keySettings.removeAll"].firstMatch
@@ -144,49 +163,72 @@ final class KeyboardLayoutUITests: UniboardUITestCase {
         XCTAssertTrue(choice.waitUntilValueEquals("xy"))
         app.buttons["keySettings.save"].tap()
         XCTAssertTrue(gesture.waitUntilValueEquals("xy"), "Saving returns to the key with its exact choice")
-        attachScreenshot("Symbol Keys saves a literal swipe-up choice on the period key")
+        XCTAssertTrue(period.waitUntilValueEquals("Customized"), "A saved choice marks the key")
+        XCTAssertTrue(restore.waitUntilEnabled(true))
+        attachScreenshot("Main Keyboard 123 saves a literal swipe-up choice on the period key")
 
         app.terminate()
         app.launchArguments = []
         app.launch()
-        openSymbolKeys()
+        openMainKeyboardSection("More Symbols")
+        XCTAssertTrue(period.waitUntilValueEquals("Customized"), ". is one key on 123 and #+=")
 
-        // Restore All shows its full scope before asking; dismissing the confirmation keeps every choice.
-        let restoreAll = app.buttons["keySettings.resetAll"].firstMatch
-        revealByScrolling(restoreAll, in: app)
-        XCTAssertEqual(restoreAll.label, "Restore All Key Defaults")
+        // Restore All: in ⋯ on every section, with its full scope before asking;
+        // dismissing the confirmation keeps every choice.
+        let more = app.buttons["mainKeyboard.more"].firstMatch
+        XCTAssertEqual(more.label, "More")
+        more.tap()
+        let restoreAll = app.buttons["mainKeyboard.resetAll"].firstMatch
+        XCTAssertTrue(restoreAll.waitForExistence(timeout: 5))
+        XCTAssertTrue(restoreAll.label.hasPrefix("Restore All Key Defaults"), restoreAll.label)
         XCTAssertTrue(restoreAll.isEnabled, "A saved symbol choice enables Restore All")
-        let scope = app.staticTexts["keySettings.resetAll.scope"].firstMatch
-        XCTAssertTrue(scope.exists)
-        XCTAssertEqual(scope.label, "Resets letters, numbers and symbols, and every layout’s arrangement.")
+        XCTAssertFalse(app.buttons["mainKeyboard.reset"].exists, "Standard Layout is for the letters only")
         restoreAll.tap()
         let confirmTitle = app.staticTexts["Restore all key defaults?"].firstMatch
         XCTAssertTrue(confirmTitle.waitForExistence(timeout: 5))
-        XCTAssertEqual(app.buttons["keySettings.resetAll.confirm"].firstMatch.label, "Restore All Key Defaults")
+        XCTAssertTrue(app.staticTexts["This resets all letter, number and symbol key actions, including taps, and restores the standard key arrangement and number row for every layout. Your symbol pages, favorites, enabled layouts and other settings are kept."].firstMatch.exists)
+        XCTAssertEqual(app.buttons["mainKeyboard.resetAll.confirm"].firstMatch.label, "Restore All Key Defaults")
         attachScreenshot("Restore All asks before resetting every key")
-        scope.tap()
+        // A popover has no Cancel button; tapping outside it cancels.
+        let cancel = app.buttons["Cancel"].firstMatch
+        if cancel.exists && cancel.isHittable { cancel.tap() }
+        else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)).tap() }
         XCTAssertTrue(confirmTitle.waitForNonExistence(timeout: 5))
 
         openPeriod()
-        XCTAssertTrue(gesture.waitUntilValueEquals("xy"), "Symbol key choices survive an ordinary app relaunch and a dismissed Restore All")
+        XCTAssertTrue(gesture.waitUntilValueEquals("xy"),
+                      "Symbol key choices survive an ordinary app relaunch and a dismissed Restore All")
         XCTAssertTrue(restore.isEnabled)
         restore.tap()
         app.buttons["Restore defaults"].tap()
-        XCTAssertTrue(gesture.waitUntilValueEquals("Default"))
-        XCTAssertFalse(restore.isEnabled)
+        XCTAssertTrue(restore.waitUntilEnabled(false))
+        XCTAssertTrue(period.waitUntilValueEquals(""), "Restoring clears the mark")
         attachScreenshot("Restoring the period key's defaults")
 
-        // Find a key narrows the symbol grid.
-        app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(app.navigationBars["Symbol Keys"].waitForExistence(timeout: 5))
+        // Find a key searches every section: € is one result, under #+=.
         let search = app.searchFields["Find a key"].firstMatch
-        if !(search.waitForExistence(timeout: 2) && search.isHittable) { app.collectionViews.firstMatch.swipeDown() }
-        XCTAssertTrue(search.waitForExistence(timeout: 5))
-        search.tap()
-        search.typeText("§")
-        XCTAssertTrue(app.buttons["keySettings.key.symbol.00A7"].firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["keySettings.key.symbol.002E"].firstMatch.waitForNonExistence(timeout: 5), "Search hides other symbol keys")
-        attachScreenshot("Find a key filters Symbol Keys")
+        func find(_ text: String) {
+            if !(search.waitForExistence(timeout: 2) && search.isHittable) { app.scrollViews.firstMatch.swipeDown() }
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            search.tap()
+            search.typeText(text)
+        }
+        find("€")
+        let euro = app.buttons["mainKeyboard.result.symbol.20AC"].firstMatch
+        XCTAssertTrue(euro.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["mainKeyboard.results.symbols"].firstMatch.exists, "Listed under #+=")
+        XCTAssertFalse(app.descendants(matching: .any)["mainKeyboard.results.numbers"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["mainKeyboard.result.symbol.002E"].exists, "Search hides other keys")
+        attachScreenshot("Find a key: € under #+=")
+        euro.tap()
+        XCTAssertTrue(app.buttons["More Symbols"].firstMatch.waitUntilSelected(), "The key's section opens")
+        XCTAssertTrue(app.buttons["mainKeyboard.key.symbol.20AC"].firstMatch.waitUntilSelected(), "€ is selected")
+        XCTAssertTrue(gesture.waitForExistence(timeout: 5))
+        XCTAssertTrue(euro.waitUntilAbsent(), "The search ends")
+        attachScreenshot("Find a key opens #+= with € selected")
+        find("no such key")
+        XCTAssertTrue(app.staticTexts["No matching keys"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Try another search."].firstMatch.exists)
     }
 
     func testSystemKeyboardWidePadHasStockFunctionsAndExactTypingAcrossRotation() throws {

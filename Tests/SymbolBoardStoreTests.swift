@@ -681,7 +681,7 @@ final class SymbolBoardStoreTests: XCTestCase {
             defaults.removeObject(forKey: SymbolBoardStore.storageKey)
             _ = SymbolBoardStore(defaults: defaults)
             var unknown = try payload(defaults)
-            unknown["version"] = 3
+            unknown["version"] = 4
             let original = try replace(unknown, in: defaults)
             XCTAssertEqual(SymbolBoardStore(defaults: defaults).loadIssue, .unsupportedVersion)
             XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), original)
@@ -719,6 +719,458 @@ final class SymbolBoardStoreTests: XCTestCase {
                 XCTAssertEqual(SymbolBoardStore(defaults: defaults).loadIssue, .unreadable)
                 XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), data)
             }
+        }
+    }
+}
+
+extension SymbolBoardStoreTests {
+    func testExplicitStaticPagesPersistLocallyShareAndExchangeWithoutFavoriteCopies() throws {
+        try withDefaults { defaults in
+            let pages = try sharedPages().settings
+            let store = SymbolBoardStore(defaults: defaults, pages: pages)
+            let id = try XCTUnwrap(store.createBoard(named: "Explicit"))
+            let a = SymbolBoardKey(id: "a", text: "e\u{301}", variants: ["é"], up: ["👩‍💻"], down: nil)
+            let b = SymbolBoardKey(id: "b", text: "é", variants: [])
+            let rows: [SymbolBoard.Row] = [.init(alignment: .right, cells: [.key(a), .halfGap]),
+                                           .init(alignment: .spaced, cells: [.gap, .key(b)])]
+            XCTAssertTrue(store.setExplicitRows(boardID: id, rows: rows))
+            XCTAssertFalse(store.setExplicitRows(boardID: SymbolBoardStore.favoritesID, rows: rows))
+            XCTAssertFalse(store.setExplicitRows(boardID: "missing", rows: rows))
+            XCTAssertFalse(store.setExplicitRows(boardID: id, rows: [.init(cells: [.gap])]))
+            XCTAssertEqual(try payload(defaults)["version"] as? Int, 3)
+            let localData = try XCTUnwrap(defaults.data(forKey: SymbolBoardStore.storageKey))
+            let reloaded = SymbolBoardStore(defaults: defaults, pages: pages)
+            XCTAssertEqual(reloaded.customPages.first?.explicitRows, rows)
+            XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), localData, "Reading never rewrites")
+            let shared = try XCTUnwrap(pages.load())
+            XCTAssertEqual(shared.pages.last?.explicitRows, rows)
+            let sharedData = try XCTUnwrap(SymbolPageSettings.encode(shared))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: sharedData) as? [String: Any])
+            XCTAssertEqual(object["schemaVersion"] as? Int, 2)
+            XCTAssertNil(SymbolPageSettings.decode(Data(String(decoding: sharedData, as: UTF8.self).replacingOccurrences(of: "\"schemaVersion\":2", with: "\"schemaVersion\":1").utf8)))
+            let file = try XCTUnwrap(store.exportedPages())
+            let fileObject = try XCTUnwrap(JSONSerialization.jsonObject(with: file) as? [String: Any])
+            XCTAssertEqual(fileObject["schemaVersion"] as? Int, 2)
+            XCTAssertEqual(store.importPages(file), 1)
+            XCTAssertEqual(store.customPages.last?.explicitRows, rows, "Nested payload retains stable key IDs and exact text")
+            XCTAssertTrue(store.setVariants(boardID: id, keyID: "a", variants: ["x"]))
+            XCTAssertEqual(store.key(boardID: id, keyID: "a")?.variants, ["x"])
+            XCTAssertEqual(store.customPages.first?.explicitRows?.first?.alignment, .right)
+            XCTAssertNotNil(store.add(text: "★", to: SymbolBoardStore.favoritesID))
+            XCTAssertTrue(store.boards.first { $0.id == SymbolBoardStore.favoritesID }?.isLegacy == true)
+            XCTAssertTrue(try XCTUnwrap(pages.load()).pages.first { $0.id == SymbolBoardStore.favoritesID }?.keys.isEmpty == true)
+            XCTAssertNotNil(store.add(text: "c", to: id))
+            XCTAssertTrue(store.moveKey(boardID: id, keyID: "a", by: 1))
+            XCTAssertTrue(store.removeKey(boardID: id, keyID: "b"))
+            XCTAssertEqual(store.customPages.first?.explicitRows?.last?.alignment, .spaced,
+                           "Removing the only key in the first row drops that row, not the surviving row's alignment")
+        }
+    }
+
+    func testLegacyConversionFitsOldUnderflowOverflowAndIsOptIn() throws {
+        let keys = (0..<13).map { SymbolBoardKey(id: "k\($0)", text: String($0), variants: []) }
+        for layout: String? in [nil, "hk/gkk", "kkkkkkkkkkkkkkkk/ggk"] {
+            var board = SymbolBoard(id: "p", name: "Page", keys: keys, layout: layout)
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(board)
+            let resolved = board.resolvedRows
+            XCTAssertTrue(board.isLegacy)
+            XCTAssertEqual(board.layout, layout)
+            XCTAssertEqual(try encoder.encode(board), data)
+            if resolved.contains(where: { $0.units > SymbolBoard.Row.maximumRowUnits }) {
+                XCTAssertFalse(board.convertToExplicitRows())
+                XCTAssertTrue(board.isLegacy, "An overlong old page stays legacy until repaired")
+                continue
+            }
+            XCTAssertTrue(board.convertToExplicitRows())
+            XCTAssertEqual(board.explicitRows, resolved)
+            XCTAssertEqual(board.keys, keys)
+            XCTAssertEqual(try JSONDecoder().decode(SymbolBoard.self, from: JSONEncoder().encode(board)), board)
+            board.keys.reverse()
+            XCTAssertFalse(board.isLegacy)
+            board.layout = "k/kkkkkkkkkkkk"
+            XCTAssertFalse(board.isLegacy)
+        }
+        var favorites = SymbolBoard(id: SymbolBoardStore.favoritesID, name: "Favorites", keys: keys)
+        XCTAssertFalse(favorites.convertToExplicitRows())
+        let empty = SymbolBoard(id: "empty", name: "Empty", rows: [])
+        XCTAssertEqual(try JSONDecoder().decode(SymbolBoard.self, from: JSONEncoder().encode(empty)), empty)
+    }
+}
+
+extension SymbolBoardStoreTests {
+    func testExplicitPageListMutationsRetainCellsAndOverflowAlignmentAndRejectAmbiguity() throws {
+        let a = SymbolBoardKey(id: "a", text: "a", variants: []), b = SymbolBoardKey(id: "b", text: "b", variants: [])
+        var page = SymbolBoard(id: "p", name: "Page", rows: [.init(alignment: .right, cells: [.key(a), .halfGap]),
+                                                          .init(alignment: .center, cells: [.key(b), .gap])])
+        page.keys.removeFirst()
+        XCTAssertEqual(page.explicitRows, [.init(alignment: .center, cells: [.key(b), .gap])])
+        let keys = (0..<11).map { SymbolBoardKey(id: "x\($0)", text: String($0), variants: []) }
+        page.keys = keys
+        XCTAssertEqual(page.explicitRows?.last?.alignment, .center)
+        XCTAssertEqual(page.keys, keys)
+        XCTAssertEqual(page.explicitRows?.count, 2)
+        page.layout = "k/kkkkkkkkkk"
+        XCTAssertEqual(page.explicitRows?.map(\.alignment), [.center, .center])
+        page.keys = []
+        XCTAssertEqual(page.explicitRows, [])
+        XCTAssertNil(page.layout)
+        page.keys.append(a)
+        XCTAssertEqual(page.explicitRows, [.init(alignment: .left, cells: [.key(a)])],
+                       "An empty explicit page gets its physical default alignment on its first new row")
+        var legacy = SymbolBoard(id: "legacy", name: "Legacy", keys: [a])
+        XCTAssertTrue(legacy.convertToExplicitRows())
+        XCTAssertFalse(legacy.setExplicitRows([.init(cells: [.key(a), .key(a)])]))
+        XCTAssertFalse(legacy.setExplicitRows(Array(repeating: .init(cells: [.key(a)]), count: 65)))
+        for bad in [
+            #"{"id":"p","name":"P","rows":[],"keys":[]}"#,
+            #"{"id":"migrated-favorites","name":"Favorites","rows":[]}"#,
+            #"{"id":"p","name":"P","rows":[{"alignment":"left","cells":[{"key":{"id":"a","text":"a","variants":[],"future":[]}}]}]}"#,
+            #"{"id":"p","name":"P","rows":[{"alignment":"left","cells":[{"key":{"id":"a","text":"a","variants":[]}},{"key":{"id":"a","text":"b","variants":[]}}]}]}"#,
+        ] { XCTAssertThrowsError(try JSONDecoder().decode(SymbolBoard.self, from: Data(bad.utf8))) }
+        try withDefaults { defaults in
+            let store = SymbolBoardStore(defaults: defaults)
+            let original = try XCTUnwrap(defaults.data(forKey: SymbolBoardStore.storageKey))
+            for page in [
+                #"{"name":"Mixed","keys":[],"rows":[]}"#,
+                #"{"name":"Mixed","layout":"k","rows":[]}"#,
+                #"{"name":"Null","keys":null,"rows":[]}"#,
+                #"{"name":"Long","rows":[{"alignment":"left","cells":[{"key":{"id":"a","text":"a","variants":[]}}]}]}"#,
+            ] {
+                let schema = page.contains("Long") ? 1 : 2
+                XCTAssertNil(store.importPages(Data("{\"schemaVersion\":\(schema),\"pages\":[\(page)]}".utf8)))
+                XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), original)
+            }
+        }
+    }
+}
+
+extension SymbolBoardStoreTests {
+    func testNewJSONPageImportReportsTheNamedOverlongRowAndKeepsPriorBytes() throws {
+        try withDefaults { defaults in
+            let store = SymbolBoardStore(defaults: defaults)
+            let original = defaults.data(forKey: SymbolBoardStore.storageKey)
+            let cells = (0..<13).map { "{\"key\":{\"id\":\"k\($0)\",\"text\":\"\($0)\",\"variants\":[]}}" }.joined(separator: ",")
+            let file = "{\"schemaVersion\":2,\"pages\":[{\"name\":\"Math\",\"rows\":[{\"alignment\":\"right\",\"cells\":[\(cells)]}]}]}"
+            XCTAssertNil(store.importPages(Data(file.utf8)))
+            XCTAssertEqual(store.pageImportIssue, "Math, row 1: This row exceeds the limit of 12 standard-key widths. Move keys or remove gaps before applying. (pages[1].rows[1])")
+            XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), original)
+            XCTAssertNil(store.importPages(Data(count: SymbolBoardStore.maximumPayloadBytes + 1)))
+            XCTAssertNotNil(store.pageImportIssue)
+            let oldCells = (0..<13).map { "{\"text\":\"\($0)\",\"variants\":[]}" }.joined(separator: ",")
+            let old = "{\"schemaVersion\":1,\"pages\":[{\"name\":\"Old\",\"layout\":\"kkkkkkkkkkkkk\",\"keys\":[\(oldCells)]}]}"
+            XCTAssertEqual(store.importPages(Data(old.utf8)), 1)
+            XCTAssertNil(store.pageImportIssue)
+            XCTAssertTrue(store.customPages[0].isLegacy)
+            XCTAssertEqual(store.customPages[0].layout, "kkkkkkkkkkkkk")
+        }
+    }
+}
+
+// Shared publication commits page edits; local-cache rejection is a warning.
+// The historical false-after-publication reproduction is preserved in notes.
+extension SymbolBoardStoreTests {
+    private func withPageCommitFixture(_ body: (UserDefaults, SymbolPageSettings, URL, String) throws -> Void) throws {
+        let shared = try sharedPages()
+        try withDefaults { defaults in
+            let seed = SymbolBoardStore(defaults: defaults, pages: shared.settings)
+            let id = try XCTUnwrap(seed.createBoard(named: "Commit ordering"))
+            for text in ["e\u{301}", "👩‍💻"] { XCTAssertNotNil(seed.add(text: text, to: id)) }
+            XCTAssertTrue(seed.setPreferredStarBoard(id))
+            XCTAssertTrue(seed.selectBoard(SymbolBoardStore.stockID))
+            try body(defaults, shared.settings, shared.directory, id)
+        }
+    }
+
+    func testExplicitRowLocalRejectionAcceptsSharedPublicationThenNewerEditRepairsCache() throws {
+        try assertRowLocalRejectionAfterSharedPublication(explicit: true)
+    }
+
+    func testLegacyRowLocalRejectionAcceptsSharedPublication() throws {
+        try assertRowLocalRejectionAfterSharedPublication(explicit: false)
+    }
+
+    private func assertRowLocalRejectionAfterSharedPublication(explicit: Bool) throws {
+        try withPageCommitFixture { defaults, pages, directory, id in
+            try withDefaults { keyboardDefaults in
+                let sharedURL = directory.appendingPathComponent(SymbolPageSettings.filename)
+                let localBefore = try XCTUnwrap(defaults.data(forKey: SymbolBoardStore.storageKey))
+                let sharedBefore = try Data(contentsOf: sharedURL)
+                let before = try XCTUnwrap(pages.load())
+                var expected = before
+                let index = try XCTUnwrap(expected.pages.firstIndex { $0.id == id })
+                let keys = expected.pages[index].keys
+                var rows: [SymbolBoard.Row] = [.init(alignment: .right, cells: [.key(keys[1]), .halfGap, .key(keys[0])])]
+                if explicit { XCTAssertTrue(expected.pages[index].setExplicitRows(rows)) }
+                else { expected.pages[index].keys.reverse(); expected.pages[index].layout = "hk/k" }
+                let keyboard = SymbolBoardStore(defaults: keyboardDefaults, pages: pages, configuresPages: false)
+                XCTAssertEqual(keyboard.boards, before.pages)
+                var rejectLocal = true
+                var localAttempts = 0
+                let store = SymbolBoardStore(defaults: defaults, persist: { data in
+                    localAttempts += 1
+                    XCTAssertEqual(pages.load(), expected, "Real shared file is already replaced when local persistence starts")
+                    guard !rejectLocal else { return false }
+                    defaults.set(data, forKey: SymbolBoardStore.storageKey)
+                    return defaults.data(forKey: SymbolBoardStore.storageKey) == data
+                }, pages: pages)
+                let boardsBefore = store.boards
+                var publications = 0
+                let subscription = store.objectWillChange.sink { publications += 1 }
+                defer { subscription.cancel() }
+                let save = {
+                    explicit ? store.setExplicitRows(boardID: id, rows: rows)
+                        : store.setLayout(boardID: id, layout: SymbolPageLayout("hk/k"), keyMove: .init(from: 1, to: 0))
+                }
+                let returned = save()
+                XCTAssertTrue(returned, "PageArrangeView must not show its rejected-edit error after publication")
+                XCTAssertEqual(localAttempts, 1)
+                XCTAssertEqual(store.boards, expected.pages)
+                XCTAssertEqual(store.activeBoardID, SymbolBoardStore.stockID)
+                XCTAssertEqual(store.preferredStarBoardID, id)
+                XCTAssertNil(store.loadIssue, "Commit failure does not lock the editor")
+                XCTAssertGreaterThan(publications, 0, "The app renders the committed arrangement")
+                XCTAssertTrue(store.localCopyWarning)
+                XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), localBefore)
+                XCTAssertEqual(SymbolBoardStore(defaults: defaults).boards, boardsBefore, "Local-only reload retains old data")
+                XCTAssertNotEqual(try Data(contentsOf: sharedURL), sharedBefore)
+                XCTAssertEqual(pages.load(), expected)
+                XCTAssertEqual(keyboard.boards, before.pages, "An existing keyboard has not refreshed yet")
+                keyboard.refreshPages()
+                XCTAssertEqual(keyboard.boards, expected.pages, "Keyboard refresh adopts the rejected row edit")
+                let reopened = SymbolBoardStore(defaults: defaults, pages: pages)
+                XCTAssertEqual(reopened.boards, expected.pages, "App reopening adopts shared data despite prior false result")
+                XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), localBefore, "Shared refresh does not repair the local cache")
+                print("SAVE-FIX \(explicit ? "explicit" : "legacy"): return=true, localBytes=unchanged, warning=true, appAndKeyboard=newRows")
+                if explicit {
+                    rejectLocal = false
+                    XCTAssertTrue(save(), "An accepted edit is now a no-op, not an old snapshot retry")
+                    XCTAssertEqual(localAttempts, 1)
+                    XCTAssertTrue(store.localCopyWarning)
+                    XCTAssertNotNil(store.localCopyWarningID)
+                    store.dismissLocalCopyWarning()
+                    XCTAssertNil(store.localCopyWarningID)
+                    XCTAssertTrue(store.localCopyWarning, "Leaving a screen dismisses presentation, not pending persistence")
+                    XCTAssertTrue(save())
+                    XCTAssertEqual(localAttempts, 1)
+                    XCTAssertNil(store.localCopyWarningID, "Reentering or a no-op must not reshow a dismissed warning")
+                    rows[0].alignment = .center
+                    XCTAssertTrue(expected.pages[index].setExplicitRows(rows))
+                    XCTAssertTrue(save(), "A newer current edit repairs only its latest snapshot")
+                    XCTAssertEqual(localAttempts, 2)
+                    XCTAssertFalse(store.localCopyWarning)
+                    XCTAssertEqual(store.boards, expected.pages)
+                    XCTAssertEqual(SymbolBoardStore(defaults: defaults).boards, expected.pages)
+                    XCTAssertEqual(pages.load(), expected)
+                    XCTAssertGreaterThan(publications, 0)
+                }
+            }
+        }
+    }
+
+    /// Exercise the production default writer, including defaults.set followed
+    /// by a failed readback, rather than only the existing persist closure seam.
+    private final class ReadbackMismatchDefaults: UserDefaults {
+        var rejectStorageReadback = false
+        var rejectedReadbacks = 0
+        var interceptedStorageKey: String?
+        override func data(forKey defaultName: String) -> Data? {
+            if rejectStorageReadback && defaultName == interceptedStorageKey {
+                rejectedReadbacks += 1
+                return nil
+            }
+            return super.data(forKey: defaultName)
+        }
+    }
+
+    func testDefaultWriterReadbackMismatchAcceptsSharedPublicationAndWarns() throws {
+        let name = "Uniboard.SymbolBoards.Readback.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(ReadbackMismatchDefaults(suiteName: name))
+        defaults.interceptedStorageKey = SymbolBoardStore.storageKey
+        defer { defaults.removePersistentDomain(forName: name) }
+        let pages = try sharedPages().settings
+        let seed = SymbolBoardStore(defaults: defaults, pages: pages)
+        let id = try XCTUnwrap(seed.createBoard(named: "Readback"))
+        let keyID = try XCTUnwrap(seed.add(text: "★", to: id))
+        let localBefore = try XCTUnwrap(defaults.data(forKey: SymbolBoardStore.storageKey))
+        let store = SymbolBoardStore(defaults: defaults, pages: pages) // No injected persist closure.
+        let rows: [SymbolBoard.Row] = [.init(alignment: .center, cells: [.key(try XCTUnwrap(store.key(boardID: id, keyID: keyID))), .gap])]
+        defaults.rejectStorageReadback = true
+        XCTAssertTrue(store.setExplicitRows(boardID: id, rows: rows))
+        XCTAssertEqual(defaults.rejectedReadbacks, 1)
+        defaults.rejectStorageReadback = false
+        XCTAssertEqual(store.customPages.first?.explicitRows, rows)
+        XCTAssertTrue(store.localCopyWarning)
+        XCTAssertNil(store.loadIssue)
+        XCTAssertNotEqual(defaults.data(forKey: SymbolBoardStore.storageKey), localBefore,
+                          "set already changed UserDefaults even though acknowledgement failed")
+        XCTAssertEqual(SymbolBoardStore(defaults: defaults).customPages.first?.explicitRows, rows)
+        XCTAssertEqual(pages.load()?.pages.first { $0.id == id }?.explicitRows, rows)
+        print("SAVE-FIX default-readback: return=true, warning=true, appAndShared=newRows; durable disk status is not observable")
+    }
+
+    func testSharedRowWriteRejectionPreventsLocalAttemptAndKeepsBothDestinations() throws {
+        try withPageCommitFixture { defaults, pages, directory, id in
+            let sharedURL = directory.appendingPathComponent(SymbolPageSettings.filename)
+            let localBefore = try XCTUnwrap(defaults.data(forKey: SymbolBoardStore.storageKey))
+            let sharedBefore = try Data(contentsOf: sharedURL)
+            var sharedAttempts = 0
+            var localAttempts = 0
+            let rejectingPages = SymbolPageSettings(containerURL: { directory }, writeAtomically: { _, _ in
+                sharedAttempts += 1
+                throw CocoaError(.fileWriteNoPermission)
+            })
+            let store = SymbolBoardStore(defaults: defaults, persist: { _ in localAttempts += 1; return true }, pages: rejectingPages)
+            let boardsBefore = store.boards
+            var rows = try XCTUnwrap(store.customPages.first).resolvedRows
+            rows[0].alignment = .right
+            XCTAssertFalse(store.setExplicitRows(boardID: id, rows: rows))
+            XCTAssertEqual(sharedAttempts, 1)
+            XCTAssertEqual(localAttempts, 0)
+            XCTAssertEqual(store.boards, boardsBefore)
+            XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), localBefore)
+            XCTAssertEqual(try Data(contentsOf: sharedURL), sharedBefore)
+            XCTAssertEqual(pages.load()?.pages, boardsBefore)
+        }
+    }
+
+    func testSuccessfulRowCommitOrdersSharedThenLocalAndNoOpOrSelectionAvoidsSharedWrite() throws {
+        try withPageCommitFixture { defaults, pages, directory, id in
+            var order: [String] = []
+            let observedPages = SymbolPageSettings(containerURL: { directory }, writeAtomically: { data, url in
+                order.append("shared")
+                try data.write(to: url, options: [.atomic])
+            })
+            let store = SymbolBoardStore(defaults: defaults, persist: { data in
+                order.append("local")
+                defaults.set(data, forKey: SymbolBoardStore.storageKey)
+                return defaults.data(forKey: SymbolBoardStore.storageKey) == data
+            }, pages: observedPages)
+            var rows = try XCTUnwrap(store.customPages.first).resolvedRows
+            rows[0].alignment = .spaced
+            XCTAssertTrue(store.setExplicitRows(boardID: id, rows: rows))
+            XCTAssertEqual(order, ["shared", "local"])
+            XCTAssertEqual(store.customPages.first?.explicitRows, rows)
+            XCTAssertEqual(SymbolBoardStore(defaults: defaults).boards, store.boards)
+            XCTAssertEqual(pages.load()?.pages, store.boards)
+            order.removeAll()
+            XCTAssertTrue(store.setExplicitRows(boardID: id, rows: rows))
+            XCTAssertTrue(order.isEmpty, "Exact row no-op does not test persistence")
+            let sharedBefore = try Data(contentsOf: directory.appendingPathComponent(SymbolPageSettings.filename))
+            XCTAssertTrue(store.selectBoard(id))
+            XCTAssertEqual(order, ["local"], "Open-page selection is local, not a shared edit")
+            XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent(SymbolPageSettings.filename)), sharedBefore)
+            XCTAssertEqual(SymbolBoardStore(defaults: defaults).activeBoardID, id)
+        }
+    }
+}
+
+extension SymbolBoardStoreTests {
+    func testAcceptedCreateDeleteAndStarChangesSurviveStaleLocalReopenWithoutReplayingOldPages() throws {
+        try withPageCommitFixture { defaults, pages, _, id in
+            let before = try XCTUnwrap(defaults.data(forKey: SymbolBoardStore.storageKey))
+            var reject = true
+            let store = SymbolBoardStore(defaults: defaults, persist: { data in
+                guard !reject else { return false }
+                defaults.set(data, forKey: SymbolBoardStore.storageKey); return true
+            }, pages: pages)
+            let created = try XCTUnwrap(store.createBoard(named: "Published"))
+            XCTAssertTrue(store.localCopyWarning)
+            XCTAssertEqual(store.activeBoardID, created)
+            XCTAssertTrue(store.setPreferredStarBoard(created))
+            XCTAssertTrue(store.deleteBoard(id))
+            XCTAssertTrue(store.renameBoard(created, to: "Latest"))
+            let reopened = SymbolBoardStore(defaults: defaults, pages: pages)
+            XCTAssertEqual(reopened.customPages.map(\.name), ["Latest"])
+            XCTAssertEqual(reopened.preferredStarBoardID, created)
+            XCTAssertEqual(reopened.activeBoardID, SymbolBoardStore.stockID, "Deleted stale active references fall back safely")
+            XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), before)
+            let latestShared = pages.load()
+            reject = false
+            XCTAssertTrue(store.selectBoard(SymbolBoardStore.stockID), "Local-only repair writes the current in-memory snapshot")
+            XCTAssertFalse(store.localCopyWarning)
+            XCTAssertEqual(pages.load(), latestShared, "Cache repair never republishes an old shared snapshot")
+            XCTAssertEqual(SymbolBoardStore(defaults: defaults).customPages.map(\.name), ["Latest"])
+            XCTAssertTrue(store.deleteBoard(created))
+            XCTAssertEqual(store.preferredStarBoardID, SymbolBoardStore.favoritesID)
+        }
+    }
+
+    func testUnreadableLocalPayloadRetainsItsLockAndUnknownFavoritesBytes() throws {
+        try withPageCommitFixture { defaults, pages, _, id in
+            let corrupt = Data("{unreadable local Favorites".utf8)
+            defaults.set(corrupt, forKey: SymbolBoardStore.storageKey)
+            var localAttempts = 0
+            let store = SymbolBoardStore(defaults: defaults, persist: { _ in localAttempts += 1; return true }, pages: pages)
+            XCTAssertEqual(store.loadIssue, .unreadable)
+            XCTAssertFalse(store.canEdit, "Unreadable local Favorites keep their edit lock")
+            XCTAssertTrue(store.customPages.isEmpty)
+            XCTAssertFalse(store.renameBoard(id, to: "Recovered shared page"))
+            XCTAssertFalse(store.localCopyWarning)
+            XCTAssertFalse(store.selectBoard(id), "Local-only edits cannot overwrite unknown Favorites")
+            XCTAssertNil(store.add(text: "★", to: SymbolBoardStore.favoritesID))
+            XCTAssertEqual(localAttempts, 0)
+            XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), corrupt)
+            XCTAssertTrue(SymbolBoardStore(defaults: defaults, pages: pages).customPages.isEmpty)
+        }
+    }
+
+    func testLocalOnlyFailureRemainsRejectedAndDoesNotClearOutstandingSharedWarning() throws {
+        try withPageCommitFixture { defaults, pages, _, id in
+            let store = SymbolBoardStore(defaults: defaults, persist: { _ in false }, pages: pages)
+            XCTAssertFalse(store.selectBoard(id))
+            XCTAssertFalse(store.localCopyWarning)
+            XCTAssertTrue(store.renameBoard(id, to: "Saved"))
+            XCTAssertTrue(store.localCopyWarning)
+            let shared = pages.load()
+            XCTAssertNil(store.add(text: "★", to: SymbolBoardStore.favoritesID))
+            XCTAssertTrue(store.favoriteTexts.isEmpty)
+            XCTAssertTrue(store.localCopyWarning)
+            XCTAssertEqual(pages.load(), shared)
+        }
+    }
+}
+
+extension SymbolBoardStoreTests {
+    func testMixedFavoritesLayoutAndPermutationAcceptsOnlySharedLayoutWithoutClaimingContentSync() throws {
+        try withPageCommitFixture { defaults, pages, _, _ in
+            let seed = SymbolBoardStore(defaults: defaults, pages: pages)
+            for text in ["★", "∑"] { XCTAssertNotNil(seed.add(text: text, to: SymbolBoardStore.favoritesID)) }
+            let before = try XCTUnwrap(defaults.data(forKey: SymbolBoardStore.storageKey))
+            let store = SymbolBoardStore(defaults: defaults, persist: { _ in false }, pages: pages)
+            XCTAssertTrue(store.setLayout(boardID: SymbolBoardStore.favoritesID, layout: SymbolPageLayout("k/k"), keyMove: .init(from: 1, to: 0)))
+            XCTAssertTrue(store.localCopyWarning)
+            XCTAssertEqual(store.favoriteTexts, ["∑", "★"], "Current app rendering adopts the accepted edit")
+            let favoritePage = try XCTUnwrap(pages.load()?.pages.first { $0.id == SymbolBoardStore.favoritesID })
+            XCTAssertEqual(favoritePage.layout, "k/k")
+            XCTAssertTrue(favoritePage.keys.isEmpty, "Published static pages never claim Favorites contents were synced")
+            XCTAssertEqual(defaults.data(forKey: SymbolBoardStore.storageKey), before)
+            let reopened = SymbolBoardStore(defaults: defaults, pages: pages)
+            XCTAssertEqual(reopened.favoriteTexts, ["★", "∑"], "Unacknowledged local-only permutation is not durably promised")
+            XCTAssertEqual(reopened.boards.first { $0.id == SymbolBoardStore.favoritesID }?.layout, "k/k")
+        }
+    }
+}
+
+extension SymbolBoardStoreTests {
+    func testCurrentFavoriteRefreshClearsCacheWarningWithoutRewritingSharedPages() throws {
+        try withPageCommitFixture { defaults, pages, directory, id in
+            var reject = false
+            let store = SymbolBoardStore(defaults: defaults, persist: { data in
+                guard !reject else { return false }
+                defaults.set(data, forKey: SymbolBoardStore.storageKey); return true
+            }, sync: FavoriteSync(container: { directory }), pages: pages, sharedWriteAllowed: true)
+            reject = true
+            XCTAssertTrue(store.renameBoard(id, to: "Latest shared"))
+            XCTAssertTrue(store.localCopyWarning)
+            let sharedBefore = pages.load()
+            store.refreshFavorites()
+            XCTAssertTrue(store.localCopyWarning, "Rejected favorite cache acknowledgement keeps warning")
+            reject = false
+            store.refreshFavorites()
+            XCTAssertFalse(store.localCopyWarning)
+            XCTAssertEqual(SymbolBoardStore(defaults: defaults).customPages.first?.name, "Latest shared")
+            XCTAssertEqual(pages.load(), sharedBefore)
         }
     }
 }

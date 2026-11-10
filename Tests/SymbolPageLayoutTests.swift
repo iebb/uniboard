@@ -118,3 +118,43 @@ final class SymbolPageLayoutTests: XCTestCase {
         XCTAssertNil(try XCTUnwrap(Layout("hk")).keyIndex(at: .init(row: 0, index: 0)))
     }
 }
+
+extension SymbolPageLayoutTests {
+    func testExplicitRowCellsAreStrictAndExactlyRoundTrip() throws {
+        typealias Row = KeyboardRow<String>
+        let rows = KeyboardRowAlignment.allCases.map { Row(alignment: $0, cells: [.halfGap, .key("e\u{301}"), .gap]) }
+        let data = try JSONEncoder().encode(rows)
+        XCTAssertEqual(try JSONDecoder().decode([Row].self, from: data), rows)
+        XCTAssertNotEqual(KeyboardRowCell<String>.key("é"), .key("e\u{301}"))
+        XCTAssertNotEqual(KeyboardRowCell<String>.gap, .halfGap)
+        XCTAssertFalse(Row.valid([Row(cells: [])]))
+        XCTAssertFalse(Row.valid([Row(cells: [.halfGap, .gap])]))
+        XCTAssertFalse(Row.valid([Row(cells: Array(repeating: .key("a"), count: 17))]))
+        XCTAssertFalse(Row.valid(Array(repeating: Row(cells: [.key("a")]), count: 65)))
+        for bad in [
+            #"{"alignment":"leading","cells":[{"key":"a"}]}"#,
+            #"{"cells":[{"key":"a"}]}"#,
+            #"{"alignment":"left","cells":[]}"#,
+            #"{"alignment":"left","cells":[{"gap":"half"}]}"#,
+            #"{"alignment":"left","cells":[{"key":"a","gap":"full"}]}"#,
+            #"{"alignment":"left","cells":[{"gap":"wide"}]}"#,
+            #"{"alignment":"left","cells":[{}]}"#,
+            #"{"alignment":"left","cells":[{"key":"a","unknown":1}]}"#,
+            #"{"alignment":"left","cells":[{"key":"a"}],"unknown":1}"#,
+        ] { XCTAssertThrowsError(try JSONDecoder().decode(Row.self, from: Data(bad.utf8)), bad) }
+    }
+}
+
+extension SymbolPageLayoutTests {
+    func testExplicitLayoutAdapterPreservesTrailingGapsWithoutChangingLegacyFitting() throws {
+        typealias Row = KeyboardRow<String>
+        let rows: [Row] = [.init(alignment: .right, cells: [.halfGap, .key("a"), .gap, .halfGap])]
+        XCTAssertEqual(Row.replacingLayout(rows, with: "hkgh", alignment: .left), rows)
+        XCTAssertEqual(Row.legacy(keys: ["a"], layout: "hkgh", alignment: .right),
+                       [.init(alignment: .right, cells: [.halfGap, .key("a")])])
+        XCTAssertEqual(Row.replacingLayout(rows, with: nil, alignment: .left),
+                       [.init(alignment: .right, cells: [.key("a")])])
+        XCTAssertEqual(Row.replacingLayout(rows, with: "kk", alignment: .left),
+                       [.init(alignment: .right, cells: [.key("a")])])
+    }
+}

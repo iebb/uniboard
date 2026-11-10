@@ -34,9 +34,9 @@ final class FontPickerCatalogTests: XCTestCase {
         XCTAssertEqual(FontPickerCopy.systemFonts, "System Fonts")
         XCTAssertEqual(FontPickerCopy.otherDeviceFonts, "Other Device Fonts")
         XCTAssertEqual(FontPickerCopy.appOnly, "App Only")
-        XCTAssertEqual(FontPickerCopy.keyboardUnverified, "Keyboard Unverified")
+        XCTAssertEqual(FontPickerCopy.keyboardNotChecked, "Not Checked Yet")
         XCTAssertEqual(FontPickerCopy.appOnlyFooter, "These fonts are available in the app, but not the keyboard. The keyboard uses the next matching rule or its default fonts.")
-        XCTAssertEqual(FontPickerCopy.keyboardUnverifiedFooter, "Available in the app. Keyboard availability hasn’t been confirmed.")
+        XCTAssertEqual(FontPickerCopy.keyboardNotCheckedFooter, "Uniboard checks this font when its keyboard opens with Full Access. It already works here in the app.")
         XCTAssertEqual(FontPickerCopy.cannotDisplayCharacter, "Can’t display this character")
         XCTAssertEqual(FontPickerCopy.unsupportedCharacterFooter, "These fonts can’t display this character.")
         XCTAssertEqual(FontPickerCopy.unsupportedRangeFooter, "These fonts can’t display any of these characters.")
@@ -83,12 +83,67 @@ final class FontPickerCatalogTests: XCTestCase {
         XCTAssertNil(KeyboardFontStatus.available.tag)
         XCTAssertNil(KeyboardFontStatus.available.accessibilityText)
         XCTAssertNil(KeyboardFontStatus.available.footer)
-        XCTAssertEqual(KeyboardFontStatus.unverified.tag, "Keyboard Unverified")
-        XCTAssertEqual(KeyboardFontStatus.unverified.accessibilityText, "Keyboard unverified")
-        XCTAssertEqual(KeyboardFontStatus.unverified.footer, FontPickerCopy.keyboardUnverifiedFooter)
+        XCTAssertNil(KeyboardFontStatus.unverified.tag)
+        XCTAssertNil(KeyboardFontStatus.unverified.accessibilityText)
+        XCTAssertNil(KeyboardFontStatus.unverified.footer)
         XCTAssertEqual(KeyboardFontStatus.appOnly.tag, "App Only")
         XCTAssertEqual(KeyboardFontStatus.appOnly.accessibilityText, "App only, not on the keyboard")
         XCTAssertEqual(KeyboardFontStatus.appOnly.footer, FontPickerCopy.appOnlyFooter)
+    }
+
+    func testDetailKeyboardCopyAndAccessibilityFollowStatus() {
+        XCTAssertNil(KeyboardFontStatus.available.detailValue)
+        XCTAssertNil(KeyboardFontStatus.available.detailAccessibilityValue)
+        XCTAssertNil(KeyboardFontStatus.available.detailFooter)
+        XCTAssertEqual(KeyboardFontStatus.unverified.detailValue, "Not Checked Yet")
+        XCTAssertEqual(KeyboardFontStatus.unverified.detailAccessibilityValue, "Not checked yet")
+        XCTAssertEqual(KeyboardFontStatus.unverified.detailFooter, FontPickerCopy.keyboardNotCheckedFooter)
+        XCTAssertEqual(KeyboardFontStatus.appOnly.detailValue, "App Only")
+        XCTAssertEqual(KeyboardFontStatus.appOnly.detailAccessibilityValue, "App only, not on the keyboard")
+        XCTAssertEqual(KeyboardFontStatus.appOnly.detailFooter, FontPickerCopy.appOnlyFooter)
+    }
+
+    private func managedEntry(source: FontSource, names: [String] = ["Example-Regular"]) -> FontManagedEntry {
+        let isFile = source == .imported || source == .downloaded
+        let faces = names.enumerated().map { index, name in
+            FontFaceRecord(id: FontFaceID(rawValue: name), family: "Example", style: name,
+                           postScriptName: name, source: source,
+                           locator: isFile ? .file(relativePath: "internal.ttf", sha256: "hash", faceIndex: index, variations: [:])
+                               : .process(postScriptName: name, variations: [:]), assetID: nil)
+        }
+        return FontManagedEntry(filename: "internal.ttf", sha256: "hash", displayName: "Example",
+                                installed: !isFile, faces: faces, verifiedBytes: isFile ? 100 : nil)
+    }
+
+    func testManagedFilesNeverShowUnverifiedOrAppOnlyRegardlessOfEvidence() {
+        let missingName = KeyboardFontEvidence(systemVersion: "26", postScriptNames: [])
+        for source in [FontSource.imported, .downloaded] {
+            let entry = managedEntry(source: source, names: ["Example-Regular", "Example-Bold"])
+            for evidence in [nil, missingName] {
+                let status = entry.keyboardStatus(evidence: evidence, systemVersion: "26")
+                XCTAssertEqual(status, .available)
+                XCTAssertNil(status?.tag)
+                XCTAssertNil(status?.detailValue)
+                XCTAssertNil(status?.detailFooter)
+            }
+        }
+    }
+
+    func testManagedInstalledStatusUsesCurrentKeyboardEvidence() {
+        let entry = managedEntry(source: .installed)
+        let found = KeyboardFontEvidence(systemVersion: "26", postScriptNames: ["Example-Regular"])
+        let absent = KeyboardFontEvidence(systemVersion: "26", postScriptNames: [])
+        XCTAssertEqual(entry.keyboardStatus(evidence: nil, systemVersion: "26"), .unverified)
+        XCTAssertEqual(entry.keyboardStatus(evidence: found, systemVersion: "27"), .unverified)
+        XCTAssertEqual(entry.keyboardStatus(evidence: found, systemVersion: "26"), .available)
+        XCTAssertEqual(entry.keyboardStatus(evidence: absent, systemVersion: "26"), .appOnly)
+    }
+
+    func testManagedEntryDoesNotInventStatusForEmptyOrMixedFaces() {
+        let found = KeyboardFontEvidence(systemVersion: "26", postScriptNames: ["Example-Regular"])
+        XCTAssertNil(managedEntry(source: .installed, names: []).keyboardStatus(evidence: found, systemVersion: "26"))
+        XCTAssertNil(managedEntry(source: .installed, names: ["Example-Regular", "Example-Bold"])
+            .keyboardStatus(evidence: found, systemVersion: "26"))
     }
 
     func testFilesAndSystemFontsAreAlwaysAvailable() {
@@ -155,6 +210,63 @@ final class FontPickerCatalogTests: XCTestCase {
         XCTAssertNil(KeyboardFontEvidenceStore(root: { nil }).load())
         _ = KeyboardFontEvidenceStore.appGroup.root()
         XCTAssertFalse(KeyboardFontEvidenceStore(root: { URL(string: "https://example.com")! }).record(evidence))
+    }
+
+    func testStoreConfirmsEvidenceWrittenNowOrAlreadyCurrent() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = KeyboardFontEvidenceStore(root: { directory })
+        let evidence = KeyboardFontEvidence(systemVersion: "26.0", postScriptNames: ["A"])
+        XCTAssertTrue(store.recordAndConfirm(evidence), "Written")
+        XCTAssertTrue(store.recordAndConfirm(evidence), "Unchanged, already current")
+        XCTAssertEqual(store.load(), evidence)
+
+        struct Refused: Error {}
+        var failing = KeyboardFontEvidenceStore(root: { directory })
+        failing.write = { _, _ in throw Refused() }
+        XCTAssertTrue(failing.recordAndConfirm(evidence), "Nothing to write")
+        XCTAssertFalse(failing.recordAndConfirm(KeyboardFontEvidence(systemVersion: "26.1", postScriptNames: ["A"])))
+        XCTAssertFalse(KeyboardFontEvidenceStore(root: { nil }).recordAndConfirm(evidence))
+    }
+
+    func testFontEvidenceThrottleWaitsAMinuteAfterSuccessAndRetriesFailures() {
+        var clock: TimeInterval = 1000
+        let throttle = KeyboardFontEvidenceThrottle(now: { clock })
+        XCTAssertEqual(throttle.interval, 60)
+        XCTAssertTrue(throttle.begin())
+        XCTAssertFalse(throttle.begin(), "One run in flight at a time")
+        clock += 120
+        XCTAssertFalse(throttle.begin(), "Still in flight, however long it takes")
+        throttle.finish(succeeded: false)
+        XCTAssertTrue(throttle.begin(), "A failed run is retried on the next appearance")
+        throttle.finish(succeeded: true)
+        XCTAssertFalse(throttle.begin(), "Just recorded")
+        clock += 59
+        XCTAssertFalse(throttle.begin(), "Within 60 seconds of the success")
+        clock += 1
+        XCTAssertTrue(throttle.begin(), "60 seconds after the success: a font installed since is noticed")
+        XCTAssertFalse(throttle.begin(), "One run in flight at a time")
+        clock += 30
+        throttle.finish(succeeded: true)
+        clock += 59
+        XCTAssertFalse(throttle.begin(), "The interval counts from when the run finished")
+        clock += 1
+        XCTAssertTrue(throttle.begin())
+        throttle.finish(succeeded: false)
+        XCTAssertTrue(throttle.begin(), "A failure doesn't restart the interval")
+        throttle.finish(succeeded: true)
+
+        let racing = KeyboardFontEvidenceThrottle(now: { 0 })
+        let lock = NSLock()
+        var started = 0
+        DispatchQueue.concurrentPerform(iterations: 64) { _ in
+            guard racing.begin() else { return }
+            lock.lock(); started += 1; lock.unlock()
+            racing.finish(succeeded: true)
+        }
+        XCTAssertEqual(started, 1)
+        XCTAssertFalse(racing.begin())
     }
 
     // MARK: Traits and style order
@@ -343,16 +455,17 @@ final class FontPickerCatalogTests: XCTestCase {
         XCTAssertEqual(unfinished.sections.flatMap(\.rows).map(\.id), ["3|Arial"], "Unsupported only once every style is checked")
     }
 
-    func testFootersFollowTheTagsInEachSectionAppOnlyFirst() {
+    func testPickerFootersRetainAppOnlyButHideUnverified() {
         let families = FontPickerFamily.grouping([
             face("Kaiti", "Regular", section: .other, keyboard: .unverified), face("Yu", "Regular", section: .other, keyboard: .appOnly),
             face("Fira", "Regular", section: .yours, keyboard: .unverified), face("Arial", "Regular", section: .system),
         ])
         let content = FontPickerContent.build(families, query: FontPickerQuery(""), support: [:], ranked: false)
-        XCTAssertEqual(content.sections.map(\.keyboardFooters), [[FontPickerCopy.keyboardUnverifiedFooter], [],
-                                                               [FontPickerCopy.appOnlyFooter, FontPickerCopy.keyboardUnverifiedFooter]])
+        XCTAssertEqual(content.sections.map(\.keyboardFooters), [[], [], [FontPickerCopy.appOnlyFooter]])
         let searched = FontPickerContent.build(families, query: FontPickerQuery("kaiti"), support: [:], ranked: false)
-        XCTAssertEqual(searched.sections.map(\.keyboardFooters), [[FontPickerCopy.keyboardUnverifiedFooter]])
+        XCTAssertEqual(searched.sections.map(\.keyboardFooters), [[]])
+        let appOnly = FontPickerContent.build(families, query: FontPickerQuery("yu"), support: [:], ranked: false)
+        XCTAssertEqual(appOnly.sections.map(\.keyboardFooters), [[FontPickerCopy.appOnlyFooter]])
     }
 
     func testCheckOrderIsSelectedThenMatchesThenTheRest() {

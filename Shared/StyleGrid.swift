@@ -1,50 +1,94 @@
 import Foundation
 
-// The Google font page's styles grid (design/styles-grid/design.md), kept
+// The Google font page's styles grid (design/styles-grid-1.4/design.md), kept
 // apart from SwiftUI so it can be tested: the copy, sorting catalog styles
-// into (set, weight, italic) cells (§1), the Width / Variant menu (§2), which
-// cells each file covers (§4) and the derived style names (§6). The catalog
-// has no weight or italic fields and some names are wrong, so everything here
-// is derived from the style name, PostScript name and instance coordinates.
-// Nothing here loads a font.
+// into (set, width column, weight, italic) cells (§1–§3), the Variant menu,
+// which cells each file covers (§5), own vs shared files (§6) and the derived
+// style names. The catalog has no weight or italic fields and some names are
+// wrong, so everything here is derived from the style name, PostScript name
+// and instance coordinates. Nothing here loads a font.
 
-/// The grid's copy (§10, final): each string defined once here.
+/// The grid's copy (1.4 §11, Camo msg674 + msg794): each string defined once here.
 enum StyleGridCopy {
-    static let width = "Width"
     static let variant = "Variant"
     static let normal = "Normal"
     static let italic = "Italic"
+    /// wdth 100's column name.
+    static let standard = "Standard"
     static let noItalics = "No italic styles in this family."
     static let noStyles = "No styles available."
-    static let downloadStyle = "Download Style"
     static let normalStylesFile = "Normal styles file"
     static let italicStylesFile = "Italic styles file"
     static let sharedStylesFile = "Shared styles file"
+    static let removeDownload = "Remove Download"
+    static let existingKept = " Existing downloads are kept."
 
+    /// A verified single-style file (or a static family's own file).
+    static func downloadStyle(_ name: String) -> String { "Download \(name)" }
     static func downloadFile(_ count: Int) -> String { "Download File (\(count) Styles)" }
+    /// Case G: removing the shared file while the style's own file stays (Camo approved).
+    static func removeFile(_ count: Int) -> String { "Remove File (\(count) Styles)" }
 
-    /// The strip over a container covering both columns.
+    /// The strip over a container covering both groups.
     static func fileLine(_ count: Int, size: String) -> String { "1 file · \(count) styles · \(size)" }
+    /// The AX file line.
+    static func groupFileLine(_ group: String, count: Int, size: String) -> String { "\(group) styles: 1 file · \(count) styles · \(size)" }
 
-    /// Under the selected style, when its file holds more than one style.
-    static func sharedFile(_ count: Int, across sets: [String]) -> String {
-        let across = sets.count > 1 ? " across " + list(sets) : ""
-        return "This file contains \(count) styles\(across). Downloading or removing it affects them all."
+    /// Under "Download File": what one file includes.
+    static func includes(_ count: Int) -> String { "Includes \(count) styles in one file." }
+    /// "Normal styles in Standard and Condensed widths."
+    static func coverage(groups: [String], widths: [String]) -> String {
+        "\(list(groups)) styles in \(list(widths)) widths."
+    }
+
+    /// Selected style with no own file.
+    static func sharedOnly(_ count: Int) -> String {
+        "This style is available here in a file containing \(count) styles. Downloading or removing the file affects them all."
     }
 
     /// The Remove dialog's message for a file holding more than one style.
     static func removeShared(_ count: Int) -> String {
         "This removes all \(count) styles in this file from Uniboard. You can download it again later."
     }
+    /// A single-style file nothing else supplies.
+    static let removeSingle = "This removes the downloaded font from Uniboard. You can download it again later."
+    /// Another kept file still supplies some of the styles (Camo).
+    static let removeKeepsOthers = "Uniboard will stop using this download. Styles available from other files will stay available. The file may remain stored on this device."
 
-    /// VoiceOver, after a cell's file state.
+    static func downloadingStyle(_ name: String, percent: Int) -> String { "Downloading \(name)… \(percent)%" }
+    static func downloadingFile(_ count: Int, percent: Int) -> String { "Downloading file (\(count) styles)… \(percent)%" }
+
+    /// §7 footer: the existing 16-file check, then the 1.3 per-file limit.
+    static func capacity(free: Int, limit: Int) -> String {
+        let room: String
+        switch free {
+        case ...0: room = "All \(limit) font-file spaces are in use. Remove a font file here or in Font Downloads to make room."
+        case 1: room = "Room for 1 more font file. Each file counts once, whether it contains one style or several."
+        default: room = "Room for \(free) more font files. Each file counts once, whether it contains one style or several."
+        }
+        return room + " 40 MiB maximum per file."
+    }
+
+    /// VoiceOver, after a cell's state.
     static func fileContains(_ count: Int) -> String { "File contains \(count) styles" }
+    static func separateFile(_ size: String) -> String { "Separate file, \(size)" }
+    /// "{group} styles, 1 file, {n} styles, {size}".
+    static func fileElement(_ group: String, count: Int, size: String) -> String { "\(group) styles, 1 file, \(count) styles, \(size)" }
 
     /// "A", "A and B", "A, B and C".
     static func list(_ items: [String]) -> String {
         guard items.count > 1 else { return items.first ?? "" }
         return items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
     }
+}
+
+/// A style's own single-style file (option B): a pinned gstatic instance.
+struct StyleGridInstance: Equatable, Hashable, Sendable {
+    /// The download id ("gstatic:s/…").
+    let id: String
+    let postScriptName: String
+    let bytes: Int64
+    let sha256: String
 }
 
 /// One catalog style, as the grid needs it.
@@ -54,10 +98,12 @@ struct StyleGridStyle: Equatable, Sendable {
     let fileID: String
     let postScriptName: String
     let variationInstance: [String: Double]?
+    let instance: StyleGridInstance?
 
-    init(id: String, name: String, fileID: String, postScriptName: String, variationInstance: [String: Double]? = nil) {
+    init(id: String, name: String, fileID: String, postScriptName: String, variationInstance: [String: Double]? = nil,
+         instance: StyleGridInstance? = nil) {
         self.id = id; self.name = name; self.fileID = fileID
-        self.postScriptName = postScriptName; self.variationInstance = variationInstance
+        self.postScriptName = postScriptName; self.variationInstance = variationInstance; self.instance = instance
     }
 
     var isVariable: Bool { variationInstance != nil }
@@ -68,6 +114,18 @@ struct StyleGridFile: Equatable, Sendable {
     let id: String
     let path: String
     let bytes: Int64
+}
+
+/// A downloadable file as the selected-style block shows it.
+struct StyleGridDownload: Equatable, Sendable {
+    /// Coordinator id: a repository file id or a gstatic instance id.
+    let id: String
+    /// "{file name}" in §6 line 2.
+    let filename: String
+    let bytes: Int64
+    /// Distinct cells it fills; 1 for an own file.
+    let styleCount: Int
+    let isInstance: Bool
 }
 
 /// Weight, slope and width derived from one style's names and coordinates (§1).
@@ -182,26 +240,32 @@ enum StyleNameRules {
     }
 }
 
-/// A family's styles sorted into sets (menu options), rows (weights) and
-/// Normal / Italic cells.
+/// A family's styles sorted into sets (Variant options), width columns
+/// inside the Normal and Italic groups, and weight rows.
 struct StyleGrid: Equatable, Sendable {
     struct Axis: Hashable, Sendable {
         let tag: String
         let value: Double
     }
 
-    /// Width, the axes that tell sets apart (variable files) and the leftover
-    /// name words (static files).
+    /// The axes that tell sets apart (variable files) and the leftover name
+    /// words (static files). Width is a column, never a set (1.4 §2).
     struct SetKey: Hashable, Sendable {
-        let width: Double
         let axes: [Axis]
         let words: [String]
     }
 
+    /// One width inside one group.
+    struct Column: Hashable, Sendable {
+        let width: Double
+        let italic: Bool
+    }
+
     struct CellKey: Hashable, Sendable {
         let set: SetKey
+        let column: Column
         let weight: Int
-        let italic: Bool
+        var italic: Bool { column.italic }
     }
 
     struct Cell: Equatable, Sendable, Identifiable {
@@ -212,65 +276,77 @@ struct StyleGrid: Equatable, Sendable {
         /// The same face in other files; never shown.
         let hidden: [StyleGridStyle]
         var id: String { style.id }
+        var column: Column { key.column }
     }
 
     struct Row: Equatable, Sendable, Identifiable {
         let weight: Int
         let name: String
-        let normal: Cell?
-        let italic: Cell?
+        let byColumn: [Column: Cell]
         var id: Int { weight }
-        var cells: [Cell] { [normal, italic].compactMap { $0 } }
+        func cell(in column: Column) -> Cell? { byColumn[column] }
     }
 
     struct StyleSet: Equatable, Sendable, Identifiable {
         let id: Int
         let key: SetKey
-        /// The menu option ("Normal", "Condensed", "Mono Linear", "Optical Size 14").
+        /// The Variant option ("Mono Linear", "Optical Size 14"); "Normal" without a menu.
         let option: String
         let rows: [Row]
-        var cells: [Cell] { rows.flatMap(\.cells) }
-        var hasNormal: Bool { rows.contains { $0.normal != nil } }
-        var hasItalic: Bool { rows.contains { $0.italic != nil } }
-        func cell(weight: Int, italic: Bool) -> Cell? {
-            rows.first { $0.weight == weight }.flatMap { italic ? $0.italic : $0.normal }
+        /// Each group's widths: Standard (100) first, then narrowest to widest.
+        let normalWidths: [Double]
+        let italicWidths: [Double]
+        var hasNormal: Bool { !normalWidths.isEmpty }
+        var hasItalic: Bool { !italicWidths.isEmpty }
+        /// Normal columns, then Italic columns.
+        var columns: [Column] {
+            normalWidths.map { Column(width: $0, italic: false) } + italicWidths.map { Column(width: $0, italic: true) }
+        }
+        func columns(italic: Bool) -> [Column] { (italic ? italicWidths : normalWidths).map { Column(width: $0, italic: italic) } }
+        /// Row C (width names) only when more than one width is visible.
+        var showsWidths: Bool { Set(normalWidths + italicWidths).count > 1 }
+        /// Row by row, columns in order (VoiceOver order).
+        var cells: [Cell] { rows.flatMap { row in columns.compactMap { row.cell(in: $0) } } }
+        func cell(width: Double = 100, weight: Int, italic: Bool) -> Cell? {
+            rows.first { $0.weight == weight }?.cell(in: Column(width: width, italic: italic))
         }
     }
 
-    /// The cells one file covers in one set (§4).
+    /// The cells one file covers in one set (§5).
     enum Coverage: Equatable, Sendable {
-        /// One cell: its own tile with a corner badge.
+        /// One cell.
         case single
-        /// Every cell of one column: one column container.
-        case column(italic: Bool)
-        /// Every cell of both columns: one container across both.
+        /// Every cell of one group, across all its width columns: one container.
+        case group(italic: Bool)
+        /// Every cell of both groups: one container across both.
         case both
-        /// Anything else: every cell its own tile and badge.
+        /// Anything else (legacy VF files): no container.
         case scattered
     }
 
     let sets: [StyleSet]
-    /// "Width" or "Variant"; nil when the family has one set and so no menu.
+    /// "Variant" when sets differ by something other than width; else nil (no menu).
     let menuTitle: String?
     let familyHasItalic: Bool
     private let styleCounts: [String: Int]
     private let cellKeys: [String: CellKey]
+    private let files: [String: StyleGridFile]
 
-    /// `files` gives each file's path, for the `/static/` preference; a missing
-    /// file counts as not static.
+    /// `files` gives each file's path, for the `/static/` preference and
+    /// sizes; a missing file counts as not static.
     static func make(styles: [StyleGridStyle], files: [String: StyleGridFile], downloadedFileIDs: Set<String>) -> StyleGrid {
-        var styleCounts: [String: Int] = [:]
         var kept: [StyleGridStyle] = []
         var keptByInstance: [String: String] = [:]
         var aliases: [String: String] = [:]
         for style in styles {
-            styleCounts[style.fileID, default: 0] += 1
             let instance = style.fileID + "|" + (style.variationInstance ?? [:]).sorted { $0.key < $1.key }
                 .map { "\($0.key)=\($0.value)" }.joined(separator: ",")
             if let first = keptByInstance[instance] { aliases[style.id] = first; continue }
             keptByInstance[instance] = style.id
             kept.append(style)
         }
+        // {n} = distinct cells a file fills (same file + same coordinates = one), 1.4 §1.
+        let styleCounts = Dictionary(grouping: kept, by: \.fileID).mapValues(\.count)
         let traits = kept.map(StyleNameRules.traits)
 
         // Axes whose value only follows upright vs italic don't make sets.
@@ -291,17 +367,17 @@ struct StyleGrid: Equatable, Sendable {
         for (style, trait) in zip(kept, traits) {
             let axes = (style.variationInstance ?? [:]).filter { tags.contains($0.key) && !following.contains($0.key) }
                 .map { Axis(tag: $0.key, value: $0.value) }.sorted { $0.tag < $1.tag }
-            let set = SetKey(width: trait.width, axes: axes, words: style.isVariable ? [] : trait.otherWords)
+            let set = SetKey(axes: axes, words: style.isVariable ? [] : trait.otherWords)
             if firstOthers[set] == nil { firstOthers[set] = trait.otherWords; order.append(set) }
-            let key = CellKey(set: set, weight: trait.weight, italic: trait.italic)
+            let key = CellKey(set: set, column: Column(width: trait.width, italic: trait.italic), weight: trait.weight)
             if candidates[key] == nil { cellOrder.append(key) }
             candidates[key, default: []].append((style, trait))
         }
 
         // One style per cell: downloaded, then variable, then not under /static/.
         func rank(_ style: StyleGridStyle) -> Int {
-            (downloadedFileIDs.contains(style.fileID) ? 0 : 4) + (style.isVariable ? 0 : 2)
-                + ((files[style.fileID]?.path.contains("/static/") ?? false) ? 1 : 0)
+            let downloaded = downloadedFileIDs.contains(style.fileID) || style.instance.map { downloadedFileIDs.contains($0.id) } == true
+            return (downloaded ? 0 : 4) + (style.isVariable ? 0 : 2) + ((files[style.fileID]?.path.contains("/static/") ?? false) ? 1 : 0)
         }
         var cells: [CellKey: Cell] = [:]
         var cellKeys: [String: CellKey] = [:]
@@ -314,47 +390,40 @@ struct StyleGrid: Equatable, Sendable {
         }
         for (alias, original) in aliases { cellKeys[alias] = cellKeys[original] }
 
-        // Normal width first, then narrower to wider, then catalog order.
-        let index = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($0.element, $0.offset) })
-        let sorted = order.sorted { ($0.width == 100 ? 0 : 1, $0.width, index[$0]!) < ($1.width == 100 ? 0 : 1, $1.width, index[$1]!) }
-        let (title, options) = Self.options(for: sorted, otherWords: firstOthers)
-        let sets = sorted.enumerated().map { offset, set -> StyleSet in
-            let weights = Set(cells.keys.filter { $0.set == set }.map(\.weight)).sorted()
-            let rows = weights.map { weight -> Row in
-                let normal = cells[CellKey(set: set, weight: weight, italic: false)]
-                let italic = cells[CellKey(set: set, weight: weight, italic: true)]
-                return Row(weight: weight, name: (normal ?? italic)!.traits.weightName, normal: normal, italic: italic)
+        let options = Self.options(for: order, otherWords: firstOthers)
+        let sets = order.enumerated().map { offset, set -> StyleSet in
+            let mine = cells.filter { $0.key.set == set }
+            func widths(_ italic: Bool) -> [Double] {
+                Set(mine.keys.filter { $0.italic == italic }.map(\.column.width)).sorted { (($0 == 100 ? 0 : 1), $0) < (($1 == 100 ? 0 : 1), $1) }
             }
-            return StyleSet(id: offset, key: set, option: options[offset], rows: rows)
+            let weights = Set(mine.keys.map(\.weight)).sorted()
+            let rows = weights.map { weight -> Row in
+                let byColumn = Dictionary(uniqueKeysWithValues: mine.filter { $0.key.weight == weight }.map { ($0.key.column, $0.value) })
+                // The weight word of the Standard upright cell, else of the first cell in column order.
+                let name = byColumn.sorted { ($0.key.italic ? 1 : 0, $0.key.width == 100 ? 0 : 1, $0.key.width)
+                    < ($1.key.italic ? 1 : 0, $1.key.width == 100 ? 0 : 1, $1.key.width) }[0].value.traits.weightName
+                return Row(weight: weight, name: name, byColumn: byColumn)
+            }
+            return StyleSet(id: offset, key: set, option: options[offset], rows: rows, normalWidths: widths(false), italicWidths: widths(true))
         }
-        return StyleGrid(sets: sets, menuTitle: sets.count > 1 ? title : nil,
-                         familyHasItalic: sets.contains { $0.hasItalic }, styleCounts: styleCounts, cellKeys: cellKeys)
+        return StyleGrid(sets: sets, menuTitle: sets.count > 1 ? StyleGridCopy.variant : nil,
+                         familyHasItalic: sets.contains { $0.hasItalic }, styleCounts: styleCounts, cellKeys: cellKeys, files: files)
     }
 
-    /// §2: "Width" when the sets differ only in width, otherwise "Variant".
-    private static func options(for sets: [SetKey], otherWords: [SetKey: [String]]) -> (String, [String]) {
-        if Set(sets.map { [$0.axes.map { "\($0.tag)=\($0.value)" }, $0.words] }).count == 1 {
-            return (StyleGridCopy.width, sets.map { $0.width == 100 ? StyleGridCopy.normal : widthName($0.width) })
-        }
+    /// Variant options: never width words (1.4 §2).
+    private static func options(for sets: [SetKey], otherWords: [SetKey: [String]]) -> [String] {
+        guard sets.count > 1 else { return sets.map { _ in StyleGridCopy.normal } }
         let words = sets.map { otherWords[$0]!.joined(separator: " ") }
-        let labels: [String]
-        if !words.contains(""), Set(words).count == words.count {
-            labels = words
-        } else {
-            let tags = Set(sets.flatMap { $0.axes.map(\.tag) }).sorted()
-            let differing = tags.filter { tag in Set(sets.map { set in set.axes.first { $0.tag == tag }?.value }).count > 1 }
-            labels = zip(sets, words).map { set, words in
-                let axes = set.axes.filter { differing.contains($0.tag) }.map { axis in
-                    (axis.tag == "opsz" ? "Optical Size" : axis.tag) + " " + number(axis.value)
-                }
-                return axes.isEmpty ? words : axes.joined(separator: " ")
+        if !words.contains(""), Set(words).count == words.count { return words }
+        let tags = Set(sets.flatMap { $0.axes.map(\.tag) }).sorted()
+        let differing = tags.filter { tag in Set(sets.map { set in set.axes.first { $0.tag == tag }?.value }).count > 1 }
+        return zip(sets, words).map { set, words in
+            let axes = set.axes.filter { differing.contains($0.tag) }.map { axis in
+                (axis.tag == "opsz" ? "Optical Size" : axis.tag) + " " + number(axis.value)
             }
+            let label = axes.isEmpty ? words : axes.joined(separator: " ")
+            return label.isEmpty ? StyleGridCopy.normal : label
         }
-        let widthsDiffer = Set(sets.map(\.width)).count > 1
-        return (StyleGridCopy.variant, zip(sets, labels).map { set, label in
-            let parts = [widthsDiffer && set.width != 100 ? widthName(set.width) : "", label].filter { !$0.isEmpty }
-            return parts.isEmpty ? StyleGridCopy.normal : parts.joined(separator: " ")
-        })
     }
 
     /// "Semi Condensed" for 87.5; an unnamed width reads "wdth 80".
@@ -366,55 +435,130 @@ struct StyleGrid: Equatable, Sendable {
         }
     }
 
+    /// Row C's column name: "Standard" for wdth 100.
+    static func columnName(_ width: Double) -> String { width == 100 ? StyleGridCopy.standard : widthName(width) }
+
+    /// Row C's two-line form: the break before the last word ("Semi\nCondensed").
+    static func columnTitle(_ width: Double) -> String {
+        let name = columnName(width)
+        guard let space = name.lastIndex(of: " ") else { return name }
+        return name[..<space] + "\n" + name[name.index(after: space)...]
+    }
+
     /// Whole values without decimals; negative values with a real minus sign.
     static func number(_ value: Double) -> String {
         let text = value == value.rounded() ? String(Int(value)) : String(value)
         return text.replacingOccurrences(of: "-", with: "\u{2212}")
     }
 
-    /// The number of catalog styles in a file, across all sets.
+    /// The number of distinct cells a file fills, across all sets (1.4 §1).
     func styleCount(fileID: String) -> Int { styleCounts[fileID] ?? 0 }
 
     /// The set and cell showing a style, or the cell that hides it as a duplicate.
     func location(of styleID: String) -> (set: StyleSet, cell: Cell)? {
-        guard let key = cellKeys[styleID], let set = sets.first(where: { $0.key == key.set }) else { return nil }
-        return (set, set.cell(weight: key.weight, italic: key.italic)!)
+        guard let key = cellKeys[styleID], let set = sets.first(where: { $0.key == key.set }),
+              let cell = set.rows.first(where: { $0.weight == key.weight })?.cell(in: key.column) else { return nil }
+        return (set, cell)
     }
 
-    /// The first set's Regular upright cell, else the first set with one, else
-    /// the first cell.
+    /// The first set's Standard Regular upright cell, else any width's
+    /// Regular upright, else the first set with one, else the first cell.
     var defaultCell: (set: StyleSet, cell: Cell)? {
         for set in sets { if let cell = set.cell(weight: 400, italic: false) { return (set, cell) } }
+        for set in sets {
+            for width in set.normalWidths { if let cell = set.cell(width: width, weight: 400, italic: false) { return (set, cell) } }
+        }
         return sets.first.map { (set: $0, cell: $0.cells[0]) }
     }
 
-    /// §2: switching sets keeps the weight and slope when the new set has
-    /// them, else its 400 upright cell, else its first cell.
+    /// Switching Variant keeps the width, weight and slope when the new set
+    /// has them, else its Standard 400 upright cell, else its first cell.
     func cell(switchingFrom cell: Cell, to set: StyleSet) -> Cell {
-        set.cell(weight: cell.key.weight, italic: cell.key.italic) ?? set.cell(weight: 400, italic: false) ?? set.cells[0]
+        set.cell(width: cell.column.width, weight: cell.key.weight, italic: cell.key.italic)
+            ?? set.cell(weight: 400, italic: false) ?? set.cells[0]
     }
 
-    /// §4: the shape of the cells a file covers in one set.
+    /// §5: the shape of the cells a file covers in one set.
     func coverage(of fileID: String, in set: StyleSet) -> Coverage {
-        let covered = set.cells.filter { $0.style.fileID == fileID }
+        let all = set.cells
+        let covered = all.filter { $0.style.fileID == fileID }
         guard covered.count > 1 else { return .single }
-        if covered.count == set.cells.count { return set.hasNormal && set.hasItalic ? .both : .column(italic: set.hasItalic) }
+        if covered.count == all.count { return set.hasNormal && set.hasItalic ? .both : .group(italic: set.hasItalic) }
         let italic = covered[0].key.italic
-        let column = set.cells.filter { $0.key.italic == italic }
-        return covered.allSatisfy({ $0.key.italic == italic }) && covered.count == column.count ? .column(italic: italic) : .scattered
+        let group = all.filter { $0.key.italic == italic }
+        return covered.allSatisfy({ $0.key.italic == italic }) && covered.count == group.count ? .group(italic: italic) : .scattered
     }
 
-    /// The menu options of every set showing a cell from this file.
-    func options(coveredBy fileID: String) -> [String] {
-        sets.filter { $0.cells.contains { $0.style.fileID == fileID } }.map(\.option)
+    /// The shared file drawn as a container over a group, if any.
+    func containerFile(italic: Bool, in set: StyleSet) -> String? {
+        let ids = Set(set.cells.filter { $0.key.italic == italic }.map(\.style.fileID))
+        guard ids.count == 1, let id = ids.first, styleCount(fileID: id) > 1 else { return nil }
+        switch coverage(of: id, in: set) {
+        case .group(let covered) where covered == italic: return id
+        case .both: return id
+        default: return nil
+        }
     }
 
-    /// §6: the set option when the family has a menu and it isn't "Normal",
-    /// the weight name, then " Italic"; "Regular Italic" reads "Italic".
+    /// The shared file drawn as one container over both groups, if any.
+    func bothGroupsFile(in set: StyleSet) -> String? {
+        let ids = Set(set.cells.map(\.style.fileID))
+        guard set.hasNormal, set.hasItalic, ids.count == 1, let id = ids.first, coverage(of: id, in: set) == .both else { return nil }
+        return id
+    }
+
+    /// The style's own single-style file: its verified gstatic instance, else
+    /// its catalog file when that file holds only this style (static families).
+    func ownFile(of cell: Cell) -> StyleGridDownload? {
+        if let instance = cell.style.instance {
+            return StyleGridDownload(id: instance.id, filename: instance.postScriptName + ".ttf", bytes: instance.bytes,
+                                     styleCount: 1, isInstance: true)
+        }
+        guard styleCount(fileID: cell.style.fileID) == 1, let file = files[cell.style.fileID] else { return nil }
+        return StyleGridDownload(id: file.id, filename: (file.path as NSString).lastPathComponent, bytes: file.bytes,
+                                 styleCount: 1, isInstance: false)
+    }
+
+    /// The file holding this style and others, if any.
+    func sharedFile(of cell: Cell) -> StyleGridDownload? {
+        let count = styleCount(fileID: cell.style.fileID)
+        guard count > 1, let file = files[cell.style.fileID] else { return nil }
+        return StyleGridDownload(id: file.id, filename: (file.path as NSString).lastPathComponent, bytes: file.bytes,
+                                 styleCount: count, isInstance: false)
+    }
+
+    /// Every shown cell, in every set, filled by a file.
+    func cells(coveredBy fileID: String) -> [Cell] {
+        sets.flatMap { $0.cells.filter { $0.style.fileID == fileID } }
+    }
+
+    /// The caption's second line, when the file spans more than one width:
+    /// "Normal styles in Standard and Condensed widths."
+    func coverageLine(fileID: String) -> String? {
+        let covered = cells(coveredBy: fileID)
+        let widths = Set(covered.map(\.column.width)).sorted { (($0 == 100 ? 0 : 1), $0) < (($1 == 100 ? 0 : 1), $1) }
+        guard widths.count > 1 else { return nil }
+        let groups = [false, true].filter { italic in covered.contains { $0.key.italic == italic } }
+            .map { $0 ? StyleGridCopy.italic : StyleGridCopy.normal }
+        return StyleGridCopy.coverage(groups: groups, widths: widths.map(Self.columnName))
+    }
+
+    /// The selected style's name (1.4 §6): Variant option when there is a
+    /// menu, width (not Standard), weight, " Italic"; "Regular Italic" reads "Italic".
     func displayName(of cell: Cell, in set: StyleSet) -> String {
         var parts = menuTitle != nil && set.option != StyleGridCopy.normal ? [set.option] : []
+        if cell.column.width != 100 { parts.append(Self.widthName(cell.column.width)) }
         if !(cell.key.italic && cell.traits.weightName == "Regular") { parts.append(cell.traits.weightName) }
         if cell.key.italic { parts.append(StyleGridCopy.italic) }
         return parts.joined(separator: " ")
+    }
+}
+
+
+extension StyleGrid {
+    /// §4–5: group headings and the cross-group file strip share this clamp.
+    /// The 10 pt inset remains visible; stop at the container's trailing edge.
+    static func pinnedHeaderOffset(minX: CGFloat, width: CGFloat, contentWidth: CGFloat, inset: CGFloat = 10) -> CGFloat {
+        min(max(-minX, 0), max(0, width - contentWidth - inset))
     }
 }

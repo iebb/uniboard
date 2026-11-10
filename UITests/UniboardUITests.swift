@@ -862,13 +862,17 @@ class UniboardUITestCase: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["mainKeyboard.keys"].firstMatch.waitForExistence(timeout: 5))
     }
 
-    /// Keyboard › Symbol Keys: the symbol keys' own swipe and hold choices.
-    func openSymbolKeys() {
-        openAppPages()
-        let symbolKeys = app.buttons["pages.symbolKeys"].firstMatch
-        XCTAssertTrue(symbolKeys.waitForExistence(timeout: 5))
-        symbolKeys.tap()
-        XCTAssertTrue(app.navigationBars["Symbol Keys"].waitForExistence(timeout: 5))
+    /// Keyboard › Main Keyboard on one section, by its VoiceOver label:
+    /// "Letters", "Numbers and Symbols" (123) or "More Symbols" (#+=), where
+    /// 1.3's Symbol Keys edited the symbol keys.
+    func openMainKeyboardSection(_ label: String) {
+        openMainKeyboardEditor()
+        // A segmented control may keep the visible title as the segment's label.
+        let title = ["Letters": "ABC", "Numbers and Symbols": "123", "More Symbols": "#+="][label] ?? label
+        let segment = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", label, title)).firstMatch
+        XCTAssertTrue(segment.waitForExistence(timeout: 5), "Section \(label)")
+        segment.tap()
+        XCTAssertTrue(segment.waitUntilSelected(), "Section \(label) is selected")
     }
 
     /// Standard Layout: the number row and the layout's own rows.
@@ -878,8 +882,9 @@ class UniboardUITestCase: XCTestCase {
         let reset = app.buttons["mainKeyboard.reset"].firstMatch
         XCTAssertTrue(reset.waitForExistence(timeout: 5))
         // Already standard: Standard Layout is disabled, so close the menu instead.
+        // Tapped below the keys: the navigation bar now holds Find a key.
         if reset.isEnabled { reset.tap() } else {
-            app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap()
         }
     }
 
@@ -1888,6 +1893,11 @@ extension XCUIElement {
 
     func waitUntilSelected(timeout: TimeInterval = 5) -> Bool {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: self)
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    func waitUntilEnabled(_ enabled: Bool, timeout: TimeInterval = 5) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == %@", NSNumber(value: enabled)), object: self)
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 }

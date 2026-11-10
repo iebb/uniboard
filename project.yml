@@ -8,12 +8,19 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.3"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "1.5"
+    CURRENT_PROJECT_VERSION: "54"
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: 7P8CLHDH5G
     ENABLE_USER_SCRIPT_SANDBOXING: YES
+# Vendored v0.11.2 at 80b8204f1cdfb364bb2ed355cf52c7ebb2519a0c + approved1217.
+# Keep defaults and neural Zenzai/ZenzaiCPU traits disabled. The dependency uses Swift 6.
+# Source, retained notices, hashes and patch: Vendor/AzooKeyKanaKanjiConverter.provenance.
+packages:
+  AzooKeyKanaKanjiConverter:
+    path: Vendor/AzooKeyKanaKanjiConverter
+    traits: []
 targets:
   Uniboard:
     type: application
@@ -22,10 +29,17 @@ targets:
       - path: App
         excludes:
           - Resources/GoogleFonts
+          - Resources/LanguagePacks
       - path: App/Resources/GoogleFonts
         type: folder
         buildPhase: resources
+      - path: App/Resources/LanguagePacks
+        type: folder
+        buildPhase: resources
       - path: Shared
+        excludes:
+          - Resources/LanguageData
+          - PrivacyInfo.xcprivacy
       - path: Fonts
         type: folder
         buildPhase: resources
@@ -67,6 +81,8 @@ targets:
     dependencies:
       - target: UniboardKeyboard
         embed: true
+      - sdk: libsqlite3.tbd
+      - sdk: libz.tbd
   UniboardKeyboard:
     type: app-extension
     platform: iOS
@@ -79,6 +95,11 @@ targets:
           - ConfigurationModel.swift
           - ConfigurationCodec.swift
           - ConfigurationDiff.swift
+          - LanguagePackArchive.swift
+          - MandarinDictionaryCompiler.swift
+          - LanguageSuggestionPolicy.swift
+          - MyWordsPresentation.swift
+          - Resources/LanguageData
       - path: Fonts
         type: folder
         buildPhase: resources
@@ -89,6 +110,10 @@ targets:
         INFOPLIST_FILE: Keyboard/Info.plist
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
+    dependencies:
+      - package: AzooKeyKanaKanjiConverter
+        product: KanaKanjiConverterModule
+      - sdk: libsqlite3.tbd
   UniboardTests:
     type: bundle.unit-test
     platform: iOS

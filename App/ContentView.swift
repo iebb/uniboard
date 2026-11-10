@@ -210,7 +210,7 @@ struct ExploreView: View {
         .background { Color.groupedBackground.ignoresSafeArea() }
         .navigationTitle("Explore")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(item: $openedBlock) { BlockDetailView(block: $0, select: select) }
+        .navigationDestination(item: $openedBlock) { BlockDetailView(block: $0, descending: descending, select: select) }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showNavigator = true } label: { Image(systemName: "list.bullet.indent") }
@@ -248,7 +248,7 @@ struct ExploreView: View {
             if let block = pendingJump { chart.jump(to: block) }
             pendingJump = nil
         }) {
-            BlockNavigator(blocks: catalog.blocks.filter(scope.includes), current: usesChart ? chart.topBlock : nil) { block in
+            BlockNavigator(blocks: BlockOrder.blocks(catalog.blocks.filter(scope.includes), descending: descending), current: usesChart ? chart.topBlock : nil) { block in
                 if usesChart { pendingJump = block.start } else { openedBlock = block }
             }
         }

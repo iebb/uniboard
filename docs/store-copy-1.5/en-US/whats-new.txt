@@ -1,0 +1,10 @@
+• Type Korean with the standard two-set Hangul layout, using an optional download.
+• Suggested Languages recommends input modes from the keyboards and languages on your iPhone. That check stays on your device.
+• Language downloads check storage first, show Mandarin's progress while it's prepared, and can be retried or removed if something goes wrong.
+• My Words: search every dictionary at once, sort entries, duplicate an entry, inspect an output's code points, and review a whole import file with search and pages.
+• Emoji: Automatic size, and Fewer Variants to hide repeated skin tones while browsing.
+• Keyboard editing: Undo Arrangement, pick a row directly to align it, and a note when symbol pages merge or split.
+• Fonts: see each file's styles and size, which font rules use it, and how much of the 16-font capacity is used.
+• In landscape, Mandarin and Japanese now leave room to see your text, and the conversion bar stays blank until you type.
+
+Downloaded languages need Full Access for local file sharing. Conversion runs on-device; nothing downloads automatically.

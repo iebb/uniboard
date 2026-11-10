@@ -327,21 +327,56 @@ struct CharacterDetailView: View {
 struct ScratchpadView: View {
     @Binding var text: String
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var copied = false
     @State private var confirmClear = false
+    @State private var helperHeight: CGFloat = 0
+
+    private struct HelperHeightKey: PreferenceKey {
+        static var defaultValue: CGFloat { 0 }
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = max(value, nextValue())
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 10) {
-                TextEditor(text: $text)
-                    .font(.title2).padding(8).scrollContentBackground(.hidden)
-                    .background(Color.groupedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .accessibilityIdentifier("scratchpadInput")
-                Text("Add characters from their detail pages, or type here with Uniboard.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
+            GeometryReader { viewport in
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        TextEditor(text: $text)
+                            .font(.title2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, verticalSizeClass == .compact ? 4 : 8)
+                            .scrollContentBackground(.hidden)
+                            .frame(height: verticalSizeClass == .compact
+                                   ? max(44, viewport.size.height)
+                                   : max(120, viewport.size.height - helperHeight - 10))
+                            .background(Color.groupedSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .accessibilityIdentifier("scratchpadInput")
+                        Text("Add characters from their detail pages, or type here with Uniboard.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 4)
+                            // Only the wrapped helper is measured; it does not depend on editor height.
+                            .background {
+                                GeometryReader { helper in
+                                    Color.clear.preference(key: HelperHeightKey.self, value: helper.size.height)
+                                }
+                            }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .defaultScrollAnchor(.top)
+                .onPreferenceChange(HelperHeightKey.self) { height in
+                    if helperHeight != height { helperHeight = height }
+                }
             }
-            .padding(16).background { Color.groupedBackground.ignoresSafeArea() } // also behind the keyboard's corners
+            .padding(EdgeInsets(top: verticalSizeClass == .compact ? 8 : 16,
+                                leading: 16,
+                                bottom: verticalSizeClass == .compact ? 4 : 16,
+                                trailing: 16))
+            .background { Color.groupedBackground.ignoresSafeArea() } // also behind the keyboard's corners
             .navigationTitle("Scratchpad").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }

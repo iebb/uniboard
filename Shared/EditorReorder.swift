@@ -241,3 +241,136 @@ struct EditorTileIdentities: Equatable {
         return true
     }
 }
+
+// MARK: - Explicit row editing and shared physical geometry
+
+/// New edits never reflow existing cells. Row identity is retained by editing
+/// nested rows, not by assigning alignment to a flattened row index afterward.
+enum ExplicitRowEditing {
+    static let limit = 12.0
+    enum Action {
+        case halfGap(SymbolPageLayout.Position), gap(SymbolPageLayout.Position)
+        case split(SymbolPageLayout.Position), join(Int), remove(SymbolPageLayout.Position)
+    }
+    static func units<K>(_ row: KeyboardRow<K>, keyUnits: (K) -> Double) -> Double {
+        row.cells.reduce(0) { $0 + ($1.key.map(keyUnits) ?? ($1 == .halfGap ? 0.5 : 1)) }
+    }
+    static func fits<K>(_ rows: [KeyboardRow<K>], keyUnits: (K) -> Double) -> Bool {
+        rows.allSatisfy { units($0, keyUnits: keyUnits) <= limit }
+    }
+    /// Existing overlong rows may only keep or reduce their width during repair.
+    static func allowed<K>(_ next: [KeyboardRow<K>], previous: [KeyboardRow<K>], keyUnits: (K) -> Double) -> Bool {
+        let oldOver = previous.map { units($0, keyUnits: keyUnits) }.filter { $0 > limit }.sorted(by: >)
+        let newOver = next.map { units($0, keyUnits: keyUnits) }.filter { $0 > limit }.sorted(by: >)
+        return newOver.count <= oldOver.count && zip(newOver, oldOver).allSatisfy { $0 <= $1 }
+    }
+    static func move<K>(_ rows: [KeyboardRow<K>], from source: SymbolPageLayout.Position,
+                        to destination: SymbolPageLayout.Position, keyUnits: (K) -> Double) -> [KeyboardRow<K>]? {
+        guard EditorReorder.isItem(source, in: rows.map { $0.cells.count }),
+              EditorReorder.isPlace(destination, in: rows.map { $0.cells.count }) else { return nil }
+        if source.row != destination.row {
+            let cell = rows[source.row].cells[source.index]
+            let extra = cell.key.map(keyUnits) ?? (cell == .halfGap ? 0.5 : 1)
+            guard units(rows[destination.row], keyUnits: keyUnits) + extra <= limit else { return nil }
+        }
+        var next = rows
+        let cell = next[source.row].cells.remove(at: source.index)
+        let target = EditorReorder.landing(from: source, to: destination, rowCounts: rows.map { $0.cells.count }, removesEmptyRows: false)
+        next[target.row].cells.insert(cell, at: target.index)
+        if next[source.row].cells.isEmpty { next.remove(at: source.row) }
+        guard next.allSatisfy({ $0.cells.contains { $0.key != nil } }) else { return nil }
+        return next
+    }
+    static func applying<K>(_ action: Action, to rows: [KeyboardRow<K>], maximumRows: Int,
+                            keyUnits: (K) -> Double) -> [KeyboardRow<K>]? {
+        var next = rows
+        switch action {
+        case .halfGap(let p), .gap(let p):
+            guard EditorReorder.isItem(p, in: rows.map { $0.cells.count }) else { return nil }
+            let half: Bool
+            if case .halfGap = action { half = true } else { half = false }
+            guard units(rows[p.row], keyUnits: keyUnits) + (half ? 0.5 : 1) <= limit else { return nil }
+            next[p.row].cells.insert(half ? .halfGap : .gap, at: p.index)
+        case .split(let p):
+            guard EditorReorder.isItem(p, in: rows.map { $0.cells.count }), p.index > 0, rows.count < maximumRows else { return nil }
+            let tail = Array(next[p.row].cells[p.index...])
+            next[p.row].cells.removeSubrange(p.index...)
+            next.insert(KeyboardRow(alignment: rows[p.row].alignment, cells: tail), at: p.row + 1)
+        case .join(let row):
+            guard row > 0, rows.indices.contains(row), units(rows[row - 1], keyUnits: keyUnits) + units(rows[row], keyUnits: keyUnits) <= limit else { return nil }
+            let lower = next.remove(at: row)
+            next[row - 1].cells += lower.cells
+        case .remove(let p):
+            guard EditorReorder.isItem(p, in: rows.map { $0.cells.count }) else { return nil }
+            next[p.row].cells.remove(at: p.index)
+            if !next[p.row].cells.contains(where: { $0.key != nil }) { next.remove(at: p.row) }
+        }
+        guard next.allSatisfy({ $0.cells.contains { $0.key != nil } }), allowed(next, previous: rows, keyUnits: keyUnits) else { return nil }
+        return next
+    }
+    static func mainUnits(_ key: String) -> Double { MainKeyboardArrangement.isFunction(key) ? 1.5 : 1 }
+    static func page(_ board: SymbolBoard, rows: [SymbolBoard.Row]) -> SymbolBoard {
+        // Until repaired, use the old representation so its keyboard drawing is
+        // unchanged. No overlong new-format data is ever emitted.
+        if board.id == SymbolPageRules.favoritesID || board.isLegacy && !fits(rows, keyUnits: { _ in 1 }) {
+            return SymbolBoard(id: board.id, name: board.name, keys: rows.flatMap { $0.cells.compactMap(\.key) }, layout: SymbolBoard.Row.layout(rows))
+        }
+        return SymbolBoard(id: board.id, name: board.name, rows: rows)
+    }
+    static func main(_ current: MainKeyboardArrangement, rows: [MainKeyboardArrangement.Row]) -> MainKeyboardArrangement {
+        if current.isLegacy && !fits(rows, keyUnits: mainUnits) {
+            return MainKeyboardArrangement(keys: rows.flatMap { $0.cells.compactMap(\.key) }, layout: MainKeyboardArrangement.Row.layout(rows))
+        }
+        return MainKeyboardArrangement(rows: rows)
+    }
+}
+
+extension EditorReorder {
+    static func explicitPage(_ board: SymbolBoard, from source: Position, to destination: Position) -> Move<SymbolBoard>? {
+        let rows = board.resolvedRows
+        guard let next = ExplicitRowEditing.move(rows, from: source, to: destination, keyUnits: { _ in 1 }) else { return nil }
+        let value = ExplicitRowEditing.page(board, rows: next)
+        if value.isLegacy {
+            let layout = SymbolPageLayout.resolved(value.layout, keyCount: value.keys.count)
+            guard isStable(layout, keyCount: value.keys.count) else { return nil }
+        }
+        return Move(value: value, source: source, destination: destination,
+                    landing: landing(from: source, to: destination, rowCounts: rows.map { $0.cells.count }, removesEmptyRows: true),
+                    changesValue: next != rows)
+    }
+    static func explicitMainKeyboard(_ arrangement: MainKeyboardArrangement, from source: Position, to destination: Position,
+                                     alphabet: KeyboardAlphabet) -> Move<MainKeyboardArrangement>? {
+        let rows = arrangement.resolvedRows
+        guard let next = ExplicitRowEditing.move(rows, from: source, to: destination, keyUnits: ExplicitRowEditing.mainUnits) else { return nil }
+        let value = ExplicitRowEditing.main(arrangement, rows: next)
+        guard value.isValid(for: alphabet) else { return nil }
+        if value.isLegacy {
+            guard let places = value.places, isStable(places, keyCount: value.keys.count) else { return nil }
+        }
+        return Move(value: value, source: source, destination: destination,
+                    landing: landing(from: source, to: destination, rowCounts: rows.map { $0.cells.count }, removesEmptyRows: true), changesValue: next != rows)
+    }
+}
+
+/// Shared editor/keyboard row placement. Physical x coordinates deliberately
+/// ignore layout direction. Widths stay unchanged; only origins are pixel rounded.
+enum ExplicitRowGeometry {
+    static func origins(widths: [CGFloat], available: CGFloat, spacing: CGFloat,
+                        alignment: KeyboardRowAlignment, scale: CGFloat) -> [CGFloat] {
+        guard !widths.isEmpty else { return [] }
+        let spare = max(0, available - widths.reduce(0, +) - spacing * CGFloat(widths.count - 1))
+        var x: CGFloat
+        switch alignment {
+        case .left: x = 0
+        case .right: x = spare
+        case .center: x = spare / 2
+        case .spaced: x = widths.count == 1 ? spare / 2 : 0
+        }
+        let between = spacing + (alignment == .spaced && widths.count > 1 ? spare / CGFloat(widths.count - 1) : 0)
+        let pixelScale = scale > 0 && scale.isFinite ? scale : 1
+        return widths.map { width in
+            defer { x += width + between }
+            return (x * pixelScale).rounded() / pixelScale
+        }
+    }
+}

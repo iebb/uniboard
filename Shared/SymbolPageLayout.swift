@@ -231,3 +231,180 @@ struct SymbolPageLayout: Equatable {
         }
     }
 }
+
+// MARK: - Versioned explicit rows (not legacy slot templates)
+
+/// Physical alignment. `spaced` keeps widths and distributes free space
+/// between cells; a singleton is centered. Geometry belongs to the renderer.
+enum KeyboardRowAlignment: String, Codable, CaseIterable, Sendable {
+    case left, right, center, spaced
+}
+
+/// Exactly one semantic key payload or one typed gap. There are no key indices
+/// in explicit data: moving a cell moves its complete payload.
+enum KeyboardRowCell<Key: Codable & Equatable>: Codable, Equatable {
+    case key(Key), halfGap, gap
+
+    private enum CodingKeys: String, CodingKey { case key, gap }
+    init(from decoder: Decoder) throws {
+        try ExplicitRowCoding.allow(decoder, ["key", "gap"])
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard c.contains(.key) != c.contains(.gap) else { throw ExplicitRowCoding.invalid }
+        if c.contains(.key) {
+            if Key.self == SymbolBoardKey.self {
+                let payload = try c.superDecoder(forKey: .key)
+                try ExplicitRowCoding.allow(payload, ["id", "text", "variants", "up", "down"])
+                self = .key(try Key(from: payload))
+            } else { self = .key(try c.decode(Key.self, forKey: .key)) }
+        } else {
+            switch try c.decode(String.self, forKey: .gap) {
+            case "half": self = .halfGap
+            case "full": self = .gap
+            default: throw ExplicitRowCoding.invalid
+            }
+        }
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .key(let key): try c.encode(key, forKey: .key)
+        case .halfGap: try c.encode("half", forKey: .gap)
+        case .gap: try c.encode("full", forKey: .gap)
+        }
+    }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case let (.key(a), .key(b)):
+            if let a = a as? String, let b = b as? String { return a.utf16.elementsEqual(b.utf16) }
+            return a == b
+        case (.halfGap, .halfGap), (.gap, .gap): return true
+        default: return false
+        }
+    }
+    var key: Key? { if case .key(let key) = self { return key }; return nil }
+    var units: Double {
+        switch self {
+        case .halfGap: return 0.5
+        case .gap: return 1
+        case .key(let key):
+            return (key as? String).map(MainKeyboardArrangement.isFunction) == true ? 1.5 : 1
+        }
+    }
+}
+extension KeyboardRowCell: Sendable where Key: Sendable {}
+
+struct KeyboardRow<Key: Codable & Equatable>: Codable, Equatable {
+    var alignment: KeyboardRowAlignment
+    var cells: [KeyboardRowCell<Key>]
+    init(alignment: KeyboardRowAlignment = .left, cells: [KeyboardRowCell<Key>]) {
+        self.alignment = alignment; self.cells = cells
+    }
+    private enum CodingKeys: String, CodingKey { case alignment, cells }
+    init(from decoder: Decoder) throws {
+        try ExplicitRowCoding.allow(decoder, ["alignment", "cells"])
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        alignment = try c.decode(KeyboardRowAlignment.self, forKey: .alignment)
+        cells = try c.decode([KeyboardRowCell<Key>].self, forKey: .cells)
+        if units > Self.maximumRowUnits {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                debugDescription: ExplicitRowCoding.widthProblem))
+        }
+        guard Self.valid([self]) else { throw ExplicitRowCoding.invalid }
+    }
+    /// Explicit edits/imports use the narrow-device storage limit. The old
+    /// SymbolPageLayout parser deliberately retains its 16-unit limit.
+    static var maximumRowUnits: Double { 12 }
+    var units: Double { cells.reduce(0) { $0 + $1.units } }
+    /// Limits are storage limits, not a responsive wrapping/overflow policy.
+    static func valid(_ rows: [Self], maximumRows: Int = SymbolPageLayout.maximumRows) -> Bool {
+        rows.count <= maximumRows && rows.allSatisfy {
+            !$0.cells.isEmpty && $0.cells.contains(where: { $0.key != nil })
+                && $0.units <= Self.maximumRowUnits
+        }
+    }
+    static func legacy(keys: [Key], layout: String?, alignment: KeyboardRowAlignment) -> [Self] {
+        SymbolPageLayout.resolved(layout, keyCount: keys.count).cells(keyCount: keys.count).map { row in
+            Self(alignment: alignment, cells: row.map {
+                switch $0 { case .key(let i): return .key(keys[i]); case .halfGap: return .halfGap; case .gap: return .gap }
+            })
+        }
+    }
+    static func layout(_ rows: [Self]) -> String {
+        rows.map { row in String(row.cells.map { cell -> Character in
+            switch cell { case .key: return "k"; case .halfGap: return "h"; case .gap: return "g" }
+        }) }.joined(separator: "/")
+    }
+    /// Legacy list mutation adapter. Surviving row alignment stays attached
+    /// to that row; new keys overflow in automatic rows, never a second order.
+    static func replacingKeys(_ rows: [Self], with keys: [Key], alignment: KeyboardRowAlignment) -> [Self] {
+        var next = 0
+        var result: [Self] = []
+        let removing = keys.count < rows.reduce(0) { $0 + $1.cells.compactMap(\.key).count }
+        func sameIdentity(_ a: Key, _ b: Key) -> Bool {
+            if let a = a as? SymbolBoardKey, let b = b as? SymbolBoardKey { return a.id == b.id }
+            return KeyboardRowCell<Key>.key(a) == .key(b)
+        }
+        for row in rows {
+            let cells = row.cells.compactMap { cell -> KeyboardRowCell<Key>? in
+                guard case .key(let original) = cell else { return cell }
+                if removing, !keys.contains(where: { sameIdentity(original, $0) }) { return nil }
+                guard next < keys.count else { return nil }
+                defer { next += 1 }; return .key(keys[next])
+            }
+            if cells.contains(where: { $0.key != nil }) { result.append(Self(alignment: row.alignment, cells: cells)) }
+        }
+        for key in keys.dropFirst(next) {
+            let cell = KeyboardRowCell<Key>.key(key)
+            if let last = result.indices.last, result[last].units + cell.units <= Double(SymbolPageLayout.automaticColumns) {
+                result[last].cells.append(cell)
+            } else { result.append(Self(alignment: result.last?.alignment ?? alignment, cells: [cell])) }
+        }
+        return result
+    }
+    /// An exact slot projection, unlike legacy fitting, retains trailing gaps.
+    /// Callers supply one payload for every key slot.
+    static func slots(keys: [Key], layout: SymbolPageLayout, alignment: KeyboardRowAlignment) -> [Self] {
+        var next = 0
+        return layout.rows.map { row in
+            Self(alignment: alignment, cells: row.map { item in
+                switch item {
+                case .key: defer { next += 1 }; return .key(keys[next])
+                case .halfGap: return .halfGap
+                case .gap: return .gap
+                }
+            })
+        }
+    }
+    static func replacingLayout(_ rows: [Self], with layout: String?, alignment: KeyboardRowAlignment) -> [Self] {
+        let keys = rows.flatMap { $0.cells.compactMap(\.key) }
+        let projected: [Self]
+        if let places = layout.flatMap(SymbolPageLayout.init), places.keySlots == keys.count {
+            projected = slots(keys: keys, layout: places, alignment: alignment)
+        } else { projected = legacy(keys: keys, layout: layout, alignment: alignment) }
+        return projected.enumerated().map { index, row in
+            var row = row
+            if rows.indices.contains(index) { row.alignment = rows[index].alignment }
+            return row
+        }
+    }
+}
+extension KeyboardRow: Sendable where Key: Sendable {}
+
+/// Reject ambiguous or future cell/model fields rather than silently dropping
+/// semantics. Envelope decoders separately gate the version carrying rows.
+enum ExplicitRowCoding {
+    enum Invalid: Error { case data }
+    static let invalid = Invalid.data
+    static let widthProblem = "Explicit row exceeds 12 standard-key widths."
+    struct RowWidthProblem: Error { let message: String }
+    static func widthMessage(label: String, row: Int, field: String) -> String {
+        "\(label), row \(row): This row exceeds the limit of 12 standard-key widths. Move keys or remove gaps before applying. (\(field))"
+    }
+    private struct FieldPresence: Decodable {
+        init(from decoder: Decoder) {}
+    }
+    static func allow(_ decoder: Decoder, _ allowed: Set<String>) throws {
+        let fields = try [String: FieldPresence](from: decoder)
+        guard Set(fields.keys).isSubset(of: allowed) else { throw invalid }
+    }
+}

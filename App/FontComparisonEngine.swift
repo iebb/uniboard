@@ -212,7 +212,8 @@ struct PublicFontInventory: FontInventoryProviding {
                 records[id] = FontFaceRecord(id: id, family: CTFontDescriptorCopyAttribute(descriptor, kCTFontFamilyNameAttribute) as? String ?? ps, style: CTFontDescriptorCopyAttribute(descriptor, kCTFontStyleNameAttribute) as? String ?? "Regular", postScriptName: ps, source: source, locator: locator, assetID: nil)
             }
         }
-        let faces = records.values.sorted { ($0.family, $0.style, $0.id.rawValue) < ($1.family, $1.style, $1.id.rawValue) }
+        // A face supplied by two downloaded files is listed once (design §8).
+        let faces = FontFaceRecord.collapsingEquivalents(records.values.sorted { ($0.family, $0.style, $0.id.rawValue) < ($1.family, $1.style, $1.id.rawValue) })
         let generation = local.generation + "|" + UnicodeFontDownloadStore.shared.revision + "|" + faces.map(\.id.rawValue).joined(separator: "|")
         return FontLibrarySnapshot(generation: generation, faces: faces, customEntryCount: local.customEntryCount)
     }

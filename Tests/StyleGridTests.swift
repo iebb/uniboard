@@ -5,9 +5,9 @@ import XCTest
 @testable import Uniboard
 #endif
 
-/// design/styles-grid §1's fixtures, the menu (§2), file coverage (§4),
-/// derived names (§6) and the copy (§10), then every style in the bundled
-/// catalog run through the same rules.
+/// design/styles-grid §1's fixtures, 1.4's width columns (§2–§3), file
+/// coverage (§5), own and shared files (§6), derived names and the copy
+/// (§11), then every style in the bundled catalog run through the same rules.
 final class StyleGridTests: XCTestCase {
     private typealias Style = StyleGridStyle
 
@@ -21,15 +21,20 @@ final class StyleGridTests: XCTestCase {
         return StyleGrid.make(styles: styles, files: files, downloadedFileIDs: downloaded)
     }
 
-    private func s(_ name: String, _ ps: String, _ file: String, _ axes: [String: Double]? = nil, id: String? = nil) -> Style {
-        let instance = (axes ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
-        return Style(id: id ?? "\(file)#\(name)#\(instance)",
-              name: name, fileID: file, postScriptName: ps, variationInstance: axes)
+    private func s(_ name: String, _ ps: String, _ file: String, _ axes: [String: Double]? = nil, id: String? = nil,
+                   instance: StyleGridInstance? = nil) -> Style {
+        let coordinates = (axes ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
+        return Style(id: id ?? "\(file)#\(name)#\(coordinates)",
+              name: name, fileID: file, postScriptName: ps, variationInstance: axes, instance: instance)
     }
 
-    /// (weight, normal style name?, italic style name?) per row.
+    /// (weight, name, a cell in any Normal column?, in any Italic column?) per row.
     private func shape(_ set: StyleGrid.StyleSet) -> [String] {
-        set.rows.map { row in "\(row.weight) \(row.name) \(row.normal != nil ? "N" : "-")\(row.italic != nil ? "I" : "-")" }
+        set.rows.map { row in
+            let normal = set.columns(italic: false).contains { row.cell(in: $0) != nil }
+            let italic = set.columns(italic: true).contains { row.cell(in: $0) != nil }
+            return "\(row.weight) \(row.name) \(normal ? "N" : "-")\(italic ? "I" : "-")"
+        }
     }
 
     private func lato() -> [Style] {
@@ -47,10 +52,14 @@ final class StyleGridTests: XCTestCase {
             standard.flatMap { weight, name -> [Style] in
                 let upright = prefix + name
                 let italic = weight == 400 ? prefix + "Italic" : prefix + name + " Italic"
+                func instance(_ name: String) -> StyleGridInstance {
+                    let ps = (width == 75 ? "RobotoCondensed-" : "Roboto-") + name.replacingOccurrences(of: "Condensed ", with: "").replacingOccurrences(of: " ", with: "")
+                    return StyleGridInstance(id: "gstatic:s/roboto/v51/\(ps).ttf", postScriptName: ps, bytes: 124_000, sha256: String(repeating: "b", count: 64))
+                }
                 return [s(italic, "Roboto-" + italic.replacingOccurrences(of: " ", with: ""), "ofl/roboto/Roboto-Italic[wdth,wght].ttf",
-                          ["wght": Double(weight), "wdth": width]),
+                          ["wght": Double(weight), "wdth": width], instance: instance(italic)),
                         s(upright, "Roboto-" + upright.replacingOccurrences(of: " ", with: ""), "ofl/roboto/Roboto[wdth,wght].ttf",
-                          ["wght": Double(weight), "wdth": width])]
+                          ["wght": Double(weight), "wdth": width], instance: instance(upright))]
             }
         }
     }
@@ -84,31 +93,66 @@ final class StyleGridTests: XCTestCase {
         return styles
     }
 
+    func testPinnedGroupAndCrossGroupStripClampToTheirMeasuredContainer() {
+        // A wide shared container stays pinned at the visible leading edge.
+        XCTAssertEqual(StyleGrid.pinnedHeaderOffset(minX: 0, width: 1088, contentWidth: 180), 0)
+        XCTAssertEqual(StyleGrid.pinnedHeaderOffset(minX: -120, width: 1088, contentWidth: 180), 120)
+        XCTAssertEqual(StyleGrid.pinnedHeaderOffset(minX: -600, width: 1088, contentWidth: 180), 600)
+        XCTAssertEqual(StyleGrid.pinnedHeaderOffset(minX: -1000, width: 1088, contentWidth: 180), 898)
+        // A group not yet at the leading edge doesn't move, nor does an
+        // over-wide label get a negative offset. Remeasuring updates the clamp.
+        XCTAssertEqual(StyleGrid.pinnedHeaderOffset(minX: 80, width: 540, contentWidth: 80), 0)
+        XCTAssertEqual(StyleGrid.pinnedHeaderOffset(minX: -500, width: 540, contentWidth: 100), 430)
+        XCTAssertEqual(StyleGrid.pinnedHeaderOffset(minX: -500, width: 540, contentWidth: 200), 330)
+        XCTAssertEqual(StyleGrid.pinnedHeaderOffset(minX: -60, width: 120, contentWidth: 180), 0)
+    }
+
     // MARK: §10 copy
 
     func testCopyIsExact() {
-        XCTAssertEqual(StyleGridCopy.width, "Width")
         XCTAssertEqual(StyleGridCopy.variant, "Variant")
         XCTAssertEqual(StyleGridCopy.normal, "Normal")
         XCTAssertEqual(StyleGridCopy.italic, "Italic")
+        XCTAssertEqual(StyleGridCopy.standard, "Standard")
         XCTAssertEqual(StyleGridCopy.noItalics, "No italic styles in this family.")
         XCTAssertEqual(StyleGridCopy.noStyles, "No styles available.")
-        XCTAssertEqual(StyleGridCopy.downloadStyle, "Download Style")
+        XCTAssertEqual(StyleGridCopy.downloadStyle("Condensed Bold"), "Download Condensed Bold")
         XCTAssertEqual(StyleGridCopy.downloadFile(18), "Download File (18 Styles)")
+        XCTAssertEqual(StyleGridCopy.removeFile(18), "Remove File (18 Styles)")
+        XCTAssertEqual(StyleGridCopy.removeDownload, "Remove Download")
         XCTAssertEqual(StyleGridCopy.fileLine(18, size: "742 KB"), "1 file · 18 styles · 742 KB")
-        XCTAssertEqual(StyleGridCopy.sharedFile(6, across: ["Normal"]),
-                       "This file contains 6 styles. Downloading or removing it affects them all.")
-        XCTAssertEqual(StyleGridCopy.sharedFile(18, across: ["Normal", "Condensed"]),
-                       "This file contains 18 styles across Normal and Condensed. Downloading or removing it affects them all.")
+        XCTAssertEqual(StyleGridCopy.groupFileLine("Normal", count: 18, size: "489 KB"), "Normal styles: 1 file · 18 styles · 489 KB")
+        XCTAssertEqual(StyleGridCopy.includes(72) + StyleGridCopy.existingKept, "Includes 72 styles in one file. Existing downloads are kept.")
+        XCTAssertEqual(StyleGridCopy.coverage(groups: ["Normal"], widths: ["Standard", "Condensed"]),
+                       "Normal styles in Standard and Condensed widths.")
+        XCTAssertEqual(StyleGridCopy.sharedOnly(36),
+                       "This style is available here in a file containing 36 styles. Downloading or removing the file affects them all.")
         XCTAssertEqual(StyleGridCopy.removeShared(18),
                        "This removes all 18 styles in this file from Uniboard. You can download it again later.")
+        XCTAssertEqual(StyleGridCopy.removeKeepsOthers,
+                       "Uniboard will stop using this download. Styles available from other files will stay available. The file may remain stored on this device.")
+        XCTAssertEqual(StyleGridCopy.removeSingle, "This removes the downloaded font from Uniboard. You can download it again later.")
+        XCTAssertEqual(StyleGridCopy.downloadingStyle("Condensed Bold", percent: 64), "Downloading Condensed Bold… 64%")
+        XCTAssertEqual(StyleGridCopy.downloadingFile(72, percent: 64), "Downloading file (72 styles)… 64%")
+        XCTAssertEqual(StyleGridCopy.capacity(free: 12, limit: 16),
+                       "Room for 12 more font files. Each file counts once, whether it contains one style or several. 40 MiB maximum per file.")
+        XCTAssertEqual(StyleGridCopy.capacity(free: 1, limit: 16),
+                       "Room for 1 more font file. Each file counts once, whether it contains one style or several. 40 MiB maximum per file.")
+        XCTAssertEqual(StyleGridCopy.capacity(free: 0, limit: 16),
+                       "All 16 font-file spaces are in use. Remove a font file here or in Font Downloads to make room. 40 MiB maximum per file.")
         XCTAssertEqual(StyleGridCopy.fileContains(18), "File contains 18 styles")
+        XCTAssertEqual(StyleGridCopy.separateFile("128 KB"), "Separate file, 128 KB")
+        XCTAssertEqual(StyleGridCopy.fileElement("Normal", count: 18, size: "489 KB"), "Normal styles, 1 file, 18 styles, 489 KB")
         XCTAssertEqual(StyleGridCopy.normalStylesFile, "Normal styles file")
         XCTAssertEqual(StyleGridCopy.italicStylesFile, "Italic styles file")
         XCTAssertEqual(StyleGridCopy.sharedStylesFile, "Shared styles file")
         XCTAssertEqual(StyleGridCopy.list([]), "")
         XCTAssertEqual(StyleGridCopy.list(["A"]), "A")
         XCTAssertEqual(StyleGridCopy.list(["A", "B", "C"]), "A, B and C")
+        // No replacement wording anywhere (Camo msg794).
+        for text in [StyleGridCopy.removeKeepsOthers, StyleGridCopy.includes(2) + StyleGridCopy.existingKept, StyleGridCopy.capacity(free: 0, limit: 16)] {
+            XCTAssertFalse(text.contains("Replace") || text.contains("frees") || text.contains("Download All"), text)
+        }
     }
 
     // MARK: §1 word rules
@@ -193,31 +237,72 @@ final class StyleGridTests: XCTestCase {
         XCTAssertEqual(grid.displayName(of: grid.sets[0].cell(weight: 400, italic: false)!, in: grid.sets[0]), "Regular")
         XCTAssertEqual(grid.styleCount(fileID: boldItalic.style.fileID), 1)
         XCTAssertEqual(grid.styleCount(fileID: "absent"), 0)
+        // One width: no row C, no container; every style has its own static file (case A2).
+        XCTAssertFalse(grid.sets[0].showsWidths)
+        XCTAssertEqual(grid.ownFile(of: boldItalic), StyleGridDownload(id: boldItalic.style.fileID, filename: "Lato-BoldItalic.ttf",
+                                                                        bytes: 1000, styleCount: 1, isInstance: false))
+        XCTAssertNil(grid.sharedFile(of: boldItalic))
+        XCTAssertNil(grid.containerFile(italic: false, in: grid.sets[0]))
     }
 
-    func testRoboto() {
+    func testRobotoWidthsAreColumns() {
         let grid = makeGrid(roboto())
         let upright = "ofl/roboto/Roboto[wdth,wght].ttf", italic = "ofl/roboto/Roboto-Italic[wdth,wght].ttf"
-        XCTAssertEqual(grid.menuTitle, "Width")
-        XCTAssertEqual(grid.sets.map(\.option), ["Normal", "Condensed"])
-        XCTAssertEqual(grid.sets.map(\.key.width), [100, 75])
-        for set in grid.sets {
-            XCTAssertEqual(shape(set), standard.map { "\($0.0) \($0.1) NI" })
-            XCTAssertEqual(grid.coverage(of: upright, in: set), .column(italic: false))
-            XCTAssertEqual(grid.coverage(of: italic, in: set), .column(italic: true))
-        }
+        XCTAssertNil(grid.menuTitle, "Width is no longer a menu")
+        XCTAssertEqual(grid.sets.count, 1)
+        let set = grid.sets[0]
+        XCTAssertEqual(set.normalWidths, [100, 75])
+        XCTAssertEqual(set.italicWidths, [100, 75])
+        XCTAssertTrue(set.showsWidths)
+        XCTAssertEqual(set.columns.map { StyleGrid.columnName($0.width) + ($0.italic ? " I" : "") }, ["Standard", "Condensed", "Standard I", "Condensed I"])
+        XCTAssertEqual(shape(set), standard.map { "\($0.0) \($0.1) NI" })
+        XCTAssertEqual(grid.coverage(of: upright, in: set), .group(italic: false))
+        XCTAssertEqual(grid.coverage(of: italic, in: set), .group(italic: true))
+        XCTAssertEqual(grid.containerFile(italic: false, in: set), upright)
+        XCTAssertEqual(grid.containerFile(italic: true, in: set), italic)
+        XCTAssertNil(grid.bothGroupsFile(in: set))
         XCTAssertEqual(grid.styleCount(fileID: upright), 18)
-        XCTAssertEqual(grid.options(coveredBy: italic), ["Normal", "Condensed"])
-        // Switching sets keeps the cell; names lead with a non-Normal option.
-        let medium = grid.sets[0].cell(weight: 500, italic: true)!
-        let condensed = grid.cell(switchingFrom: medium, to: grid.sets[1])
-        XCTAssertEqual(condensed.style.name, "Condensed Medium Italic")
-        XCTAssertEqual(grid.displayName(of: condensed, in: grid.sets[1]), "Condensed Medium Italic")
-        XCTAssertEqual(grid.displayName(of: medium, in: grid.sets[0]), "Medium Italic")
-        XCTAssertEqual(grid.displayName(of: grid.sets[1].cell(weight: 400, italic: false)!, in: grid.sets[1]), "Condensed Regular")
-        XCTAssertEqual(grid.location(of: condensed.style.id)?.set.option, "Condensed")
+        XCTAssertEqual(grid.coverageLine(fileID: upright), "Normal styles in Standard and Condensed widths.")
+        XCTAssertEqual(grid.coverageLine(fileID: italic), "Italic styles in Standard and Condensed widths.")
+        // Names: width (not Standard), weight, Italic.
+        let condensedBold = set.cell(width: 75, weight: 700, italic: false)!
+        XCTAssertEqual(grid.displayName(of: condensedBold, in: set), "Condensed Bold")
+        XCTAssertEqual(grid.displayName(of: set.cell(width: 75, weight: 500, italic: true)!, in: set), "Condensed Medium Italic")
+        XCTAssertEqual(grid.displayName(of: set.cell(width: 75, weight: 400, italic: true)!, in: set), "Condensed Italic")
+        XCTAssertEqual(grid.displayName(of: set.cell(weight: 500, italic: true)!, in: set), "Medium Italic")
+        XCTAssertEqual(grid.displayName(of: set.cell(width: 75, weight: 400, italic: false)!, in: set), "Condensed Regular")
+        // Option B: own file first, the shared file second (case A).
+        XCTAssertEqual(grid.ownFile(of: condensedBold)?.filename, "RobotoCondensed-Bold.ttf")
+        XCTAssertEqual(grid.ownFile(of: condensedBold)?.isInstance, true)
+        XCTAssertEqual(grid.ownFile(of: condensedBold)?.styleCount, 1)
+        XCTAssertEqual(grid.sharedFile(of: condensedBold), StyleGridDownload(id: upright, filename: "Roboto[wdth,wght].ttf", bytes: 1000,
+                                                                              styleCount: 18, isInstance: false))
+        XCTAssertEqual(grid.cells(coveredBy: upright).count, 18)
+        XCTAssertEqual(grid.location(of: condensedBold.style.id)?.cell, condensedBold)
         XCTAssertNil(grid.location(of: "absent"))
         XCTAssertEqual(grid.defaultCell?.cell.style.name, "Regular")
+        // A downloaded instance doesn't move the cell or change the container.
+        let downloaded = makeGrid(roboto(), downloaded: [condensedBold.style.instance!.id])
+        XCTAssertEqual(downloaded.containerFile(italic: false, in: downloaded.sets[0]), upright)
+    }
+
+    func testColumnTitlesBreakBeforeTheLastWord() {
+        XCTAssertEqual(StyleGrid.columnName(100), "Standard")
+        XCTAssertEqual(StyleGrid.columnTitle(100), "Standard")
+        XCTAssertEqual(StyleGrid.columnTitle(75), "Condensed")
+        XCTAssertEqual(StyleGrid.columnTitle(87.5), "Semi\nCondensed")
+        XCTAssertEqual(StyleGrid.columnTitle(200), "Ultra\nExpanded")
+        XCTAssertEqual(StyleGrid.columnTitle(80), "wdth\n80")
+    }
+
+    func testWeightOnlyInOneWidthStillGetsARow() {
+        let grid = makeGrid([s("Regular", "X-Regular", "v.ttf", ["wght": 400, "wdth": 100]),
+                             s("Condensed Black", "X-CondensedBlack", "v.ttf", ["wght": 900, "wdth": 75])])
+        let set = grid.sets[0]
+        XCTAssertEqual(set.rows.map(\.weight), [400, 900])
+        XCTAssertNil(set.cell(weight: 900, italic: false), "Its Standard slot stays empty")
+        XCTAssertEqual(set.rows[1].name, "Black")
+        XCTAssertEqual(set.cells.map(\.style.name), ["Regular", "Condensed Black"])
     }
 
     func testCommissionerFileCoversBothColumns() {
@@ -226,6 +311,11 @@ final class StyleGridTests: XCTestCase {
         XCTAssertEqual(grid.coverage(of: "ofl/commissioner/Commissioner[FLAR,VOLM,slnt,wght].ttf", in: grid.sets[0]), .both)
         XCTAssertEqual(grid.styleCount(fileID: "ofl/commissioner/Commissioner[FLAR,VOLM,slnt,wght].ttf"), 18)
         XCTAssertNil(grid.menuTitle, "Constant FLAR and VOLM make one set")
+        XCTAssertEqual(grid.bothGroupsFile(in: grid.sets[0]), "ofl/commissioner/Commissioner[FLAR,VOLM,slnt,wght].ttf")
+        XCTAssertNil(grid.coverageLine(fileID: "ofl/commissioner/Commissioner[FLAR,VOLM,slnt,wght].ttf"), "One width")
+        // No instance: shared file only (case B).
+        XCTAssertNil(grid.ownFile(of: grid.sets[0].cells[0]))
+        XCTAssertEqual(grid.sharedFile(of: grid.sets[0].cells[0])?.styleCount, 18)
     }
 
     func testOswaldIsOneColumnWithoutItalics() {
@@ -234,7 +324,7 @@ final class StyleGridTests: XCTestCase {
         XCTAssertEqual(shape(grid.sets[0]), ["200 ExtraLight N-", "300 Light N-", "400 Regular N-", "500 Medium N-", "600 SemiBold N-", "700 Bold N-"])
         XCTAssertFalse(grid.familyHasItalic)
         XCTAssertFalse(grid.sets[0].hasItalic)
-        XCTAssertEqual(grid.coverage(of: "ofl/oswald/Oswald[wght].ttf", in: grid.sets[0]), .column(italic: false))
+        XCTAssertEqual(grid.coverage(of: "ofl/oswald/Oswald[wght].ttf", in: grid.sets[0]), .group(italic: false))
     }
 
     func testAbhayaLibreNamesAreFixedByPostScriptNames() {
@@ -276,19 +366,23 @@ final class StyleGridTests: XCTestCase {
         styles.append(s("Bold", "Inconsolata-Bold", "ofl/inconsolata/static/Inconsolata-Bold.ttf"))
         styles.append(s("Bold", "Ligconsolata-Bold", "ofl/inconsolata/static/Ligconsolata-Bold.ttf"))
         let grid = makeGrid(styles)
-        XCTAssertEqual(grid.menuTitle, "Width")
-        XCTAssertEqual(grid.sets.map(\.option), ["Normal", "Ultra Condensed", "Extra Condensed", "Condensed", "Semi Condensed",
-                                                 "Semi Expanded", "Expanded", "Extra Expanded", "Ultra Expanded"])
-        for set in grid.sets {
-            XCTAssertEqual(set.rows.count, 8)
-            XCTAssertTrue(set.cells.allSatisfy { $0.style.fileID == variable })
-            XCTAssertEqual(grid.coverage(of: variable, in: set), .column(italic: false))
-        }
+        XCTAssertNil(grid.menuTitle)
+        XCTAssertEqual(grid.sets.count, 1)
+        let set = grid.sets[0]
+        XCTAssertEqual(set.normalWidths.map(StyleGrid.columnName), ["Standard", "Ultra Condensed", "Extra Condensed", "Condensed", "Semi Condensed",
+                                                                    "Semi Expanded", "Expanded", "Extra Expanded", "Ultra Expanded"])
+        XCTAssertTrue(set.italicWidths.isEmpty)
+        XCTAssertFalse(grid.familyHasItalic)
+        XCTAssertEqual(set.rows.count, 8)
+        XCTAssertEqual(set.cells.count, 72)
+        XCTAssertTrue(set.cells.allSatisfy { $0.style.fileID == variable })
+        XCTAssertEqual(grid.coverage(of: variable, in: set), .group(italic: false))
         let bold = grid.sets[0].cell(weight: 700, italic: false)!
         XCTAssertEqual(bold.hidden.map(\.postScriptName), ["Inconsolata-Bold", "Ligconsolata-Bold"])
         XCTAssertEqual(grid.location(of: "duplicate")?.cell.style.name, "Regular")
         XCTAssertEqual(grid.location(of: bold.hidden[1].id)?.cell, bold)
-        XCTAssertEqual(grid.styleCount(fileID: variable), 73)
+        XCTAssertEqual(grid.styleCount(fileID: variable), 72, "Distinct cells: the repeated Regular counts once (1.4 §1)")
+        XCTAssertEqual(grid.coverageLine(fileID: variable), "Normal styles in Standard, Ultra Condensed, Extra Condensed, Condensed, Semi Condensed, Semi Expanded, Expanded, Extra Expanded and Ultra Expanded widths.")
         // A downloaded static copy is the one shown, and then its file is a single tile.
         let downloaded = makeGrid(styles, downloaded: ["ofl/inconsolata/static/Inconsolata-Bold.ttf"])
         let shown = downloaded.sets[0].cell(weight: 700, italic: false)!
@@ -312,14 +406,14 @@ final class StyleGridTests: XCTestCase {
         XCTAssertEqual(grid.sets.map(\.option), ["Mono Linear", "Mono Casual", "Sans Linear", "Sans Casual"])
         for set in grid.sets {
             XCTAssertEqual(set.rows.map(\.weight), [300, 400, 500, 600, 700, 800, 900, 1000])
-            XCTAssertTrue(set.rows.allSatisfy { $0.normal != nil && $0.italic != nil })
+            XCTAssertTrue(set.rows.allSatisfy { set.cell(weight: $0.weight, italic: false) != nil && set.cell(weight: $0.weight, italic: true) != nil })
             XCTAssertEqual(grid.coverage(of: "ofl/recursive/Recursive.ttf", in: set), .both)
         }
         XCTAssertEqual(grid.sets[0].rows.map(\.name), ["Light", "Regular", "Medium", "SemiBold", "Bold", "ExtraBold", "Black", "ExtraBlack"])
         let italic = grid.sets[1].cell(weight: 400, italic: true)!
         XCTAssertEqual(grid.displayName(of: italic, in: grid.sets[1]), "Mono Casual Italic")
         XCTAssertEqual(grid.displayName(of: grid.sets[1].cell(weight: 700, italic: false)!, in: grid.sets[1]), "Mono Casual Bold")
-        XCTAssertEqual(grid.options(coveredBy: "ofl/recursive/Recursive.ttf").count, 4)
+        XCTAssertEqual(grid.styleCount(fileID: "ofl/recursive/Recursive.ttf"), 64)
     }
 
     func testJaroOpticalSizes() {
@@ -352,7 +446,7 @@ final class StyleGridTests: XCTestCase {
         XCTAssertTrue(grid.sets[0].hasItalic)
         XCTAssertEqual(grid.defaultCell?.cell.style.name, "Regular", "The first set has no Regular, so the next one's opens")
         XCTAssertEqual(grid.coverage(of: italic, in: grid.sets[1]), .single)
-        XCTAssertEqual(grid.coverage(of: upright, in: grid.sets[1]), .column(italic: false), "Every Normal cell, beside another file's italic")
+        XCTAssertEqual(grid.coverage(of: upright, in: grid.sets[1]), .group(italic: false), "Every Normal cell, beside another file's italic")
         // Switching to a set without the cell falls back to Regular, then to the first cell.
         let bold = grid.sets[1].cell(weight: 700, italic: false)!
         XCTAssertEqual(grid.cell(switchingFrom: bold, to: grid.sets[0]).style.name, "Thin Italic")
@@ -363,15 +457,17 @@ final class StyleGridTests: XCTestCase {
     func testVariantLabelsWithWidthsNegativeValuesAndFallbacks() {
         let nega = makeGrid([s("Regular", "S-Regular", "v.ttf", ["wght": 400, "NEGA": 0]), s("Regular", "S-Regular", "v.ttf", ["wght": 400, "NEGA": -1])])
         XCTAssertEqual(nega.sets.map(\.option), ["NEGA 0", "NEGA \u{2212}1"])
-        // Static sets: duplicate words fall back to words when there are no axes;
-        // widths lead, and an empty label reads Normal.
+        // Widths are columns, never options: a width-80 variable style joins the plain set.
         let mixed = makeGrid([s("Regular", "X-Regular", "a.ttf"), s("Display Regular", "XDisplay-Regular", "b.ttf"),
                           s("Condensed Display", "XDisplay-Condensed", "c.ttf"), s("Ultra", "XUltra", "d.ttf", ["wdth": 80, "wght": 400])])
         XCTAssertEqual(mixed.menuTitle, "Variant")
-        XCTAssertEqual(mixed.sets.map(\.option), ["Normal", "Display", "Condensed Display", "wdth 80 Ultra"])
-        // Distinct words win over axes, with the width in front.
+        XCTAssertEqual(mixed.sets.map(\.option), ["Normal", "Display"])
+        XCTAssertEqual(mixed.sets[0].normalWidths, [100, 80])
+        XCTAssertEqual(mixed.sets[1].normalWidths, [100, 75])
+        XCTAssertEqual(mixed.displayName(of: mixed.sets[1].cell(width: 75, weight: 400, italic: false)!, in: mixed.sets[1]), "Display Condensed Regular")
+        // Distinct words win over axes, without width words.
         let words = makeGrid([s("Mono", "A", "v.ttf", ["wght": 400, "MONO": 1]), s("Sans Condensed", "B", "v.ttf", ["wght": 400, "MONO": 0, "wdth": 75])])
-        XCTAssertEqual(words.sets.map(\.option), ["Mono", "Condensed Sans"])
+        XCTAssertEqual(words.sets.map(\.option), ["Mono", "Sans"])
         XCTAssertEqual(StyleGrid.widthName(87.5), "Semi Condensed")
         XCTAssertEqual(StyleGrid.number(62.5), "62.5")
     }
@@ -379,7 +475,7 @@ final class StyleGridTests: XCTestCase {
     func testCoverageColumnInsideALargerSetAndEmptyGrid() {
         let grid = makeGrid([s("Regular", "X-Regular", "u.ttf", ["wght": 400]), s("Bold", "X-Bold", "u.ttf", ["wght": 700]),
                          s("Italic", "X-Italic", "i.ttf"), s("Bold Italic", "X-BoldItalic", "bi.ttf")])
-        XCTAssertEqual(grid.coverage(of: "u.ttf", in: grid.sets[0]), .column(italic: false))
+        XCTAssertEqual(grid.coverage(of: "u.ttf", in: grid.sets[0]), .group(italic: false))
         XCTAssertEqual(grid.coverage(of: "i.ttf", in: grid.sets[0]), .single)
         let partial = makeGrid([s("Regular", "X-Regular", "u.ttf", ["wght": 400]), s("Bold", "X-Bold", "u.ttf", ["wght": 700]),
                                  s("Black", "X-Black", "k.ttf")])
@@ -405,7 +501,11 @@ final class StyleGridTests: XCTestCase {
 
     private struct Catalog: Decodable {
         struct Family: Decodable { let id: String; let name: String; let styles: [CatalogStyle] }
-        struct CatalogStyle: Decodable { let id: String; let name: String; let fileID: String; let postScriptName: String; let variationInstance: [String: Double]? }
+        struct Instance: Decodable { let path: String; let bytes: Int64; let sha256: String; let postScriptName: String }
+        struct CatalogStyle: Decodable {
+            let id: String; let name: String; let fileID: String; let postScriptName: String; let variationInstance: [String: Double]?
+            let instance: Instance?
+        }
         struct File: Decodable { let id: String; let repositoryPath: String; let bytes: Int64 }
         let snapshotDate: String
         let families: [Family]
@@ -426,7 +526,10 @@ final class StyleGridTests: XCTestCase {
         var single = 0, multi: [String: Int] = [:], mostRows = (0, ""), columns = 0, both = 0, other = 0
         var grids: [String: StyleGrid] = [:]
         for family in catalog.families {
-            let styles = family.styles.map { Style(id: $0.id, name: $0.name, fileID: $0.fileID, postScriptName: $0.postScriptName, variationInstance: $0.variationInstance) }
+            let styles = family.styles.map { style in
+                Style(id: style.id, name: style.name, fileID: style.fileID, postScriptName: style.postScriptName, variationInstance: style.variationInstance,
+                      instance: style.instance.map { StyleGridInstance(id: "gstatic:" + $0.path, postScriptName: $0.postScriptName, bytes: $0.bytes, sha256: $0.sha256) })
+            }
             let grid = StyleGrid.make(styles: styles, files: files, downloadedFileIDs: [])
             grids[family.id] = grid
             for style in styles {
@@ -445,7 +548,7 @@ final class StyleGridTests: XCTestCase {
                 if set.rows.count > mostRows.0 { mostRows = (set.rows.count, family.name) }
                 for fileID in Set(set.cells.map(\.style.fileID)) where set.cells.filter({ $0.style.fileID == fileID }).count > 1 {
                     switch grid.coverage(of: fileID, in: set) {
-                    case .column: columns += 1
+                    case .group: columns += 1
                     case .both: both += 1
                     default: other += 1
                     }
@@ -454,13 +557,17 @@ final class StyleGridTests: XCTestCase {
             if grid.sets.count == 1 { single += 1 } else { multi[family.name] = grid.sets.count }
             XCTAssertEqual(Set(grid.sets.map(\.option)).count, grid.sets.count, "\(family.name) repeats a menu option")
         }
-        XCTAssertEqual(single, 2032)
-        XCTAssertEqual(multi.count, 33)
+        // 1.4 §2: widths are columns, not sets, so width-only families have one set.
+        let widthOnly = ["Encode Sans", "Encode Sans SC", "Hubot Sans", "Inconsolata", "Noto Sans Display", "Noto Serif Display", "Open Sans", "Roboto", "Ubuntu Sans"]
+            + ["Arabic", "Bengali", "Gurmukhi", "Kannada", "Khmer", "Lao", "Malayalam", "Sinhala", "Tamil", "Telugu", "Thai"].map { "Noto Sans \($0) UI" }
+        XCTAssertEqual(widthOnly.filter { multi[$0] != nil }, [], "Width families that still have a Variant menu")
+        XCTAssertEqual(single, 2051)
+        XCTAssertEqual(multi.count, 14)
         XCTAssertEqual(multi.max { $0.value < $1.value }?.key, "Decovar Alpha")
         XCTAssertEqual(multi["Decovar Alpha"], 17)
         XCTAssertEqual(mostRows.0, 10)
         XCTAssertEqual(mostRows.1, "Hepta Slab")
-        XCTAssertEqual(columns, 817)
+        XCTAssertEqual(columns, 753)
         XCTAssertEqual(both, 23)
         XCTAssertEqual(other, 0)
 
@@ -468,8 +575,18 @@ final class StyleGridTests: XCTestCase {
         func rows(_ id: String) -> [[Int]] { grids[id]!.sets.map { $0.rows.map(\.weight) } }
         XCTAssertEqual(rows("ofl/abeezee"), [[400]])
         XCTAssertEqual(grids["ofl/lato"]!.sets[0].cells.count, 18)
-        XCTAssertEqual(grids["ofl/roboto"]!.sets.map(\.option), ["Normal", "Condensed"])
-        XCTAssertEqual(grids["ofl/roboto"]!.coverage(of: "ofl/roboto/Roboto-Italic[wdth,wght].ttf", in: grids["ofl/roboto"]!.sets[1]), .column(italic: true))
+        let roboto = grids["ofl/roboto"]!
+        XCTAssertNil(roboto.menuTitle)
+        XCTAssertEqual(roboto.sets[0].normalWidths, [100, 75])
+        XCTAssertEqual(roboto.sets[0].italicWidths, [100, 75])
+        XCTAssertEqual(roboto.coverage(of: "ofl/roboto/Roboto-Italic[wdth,wght].ttf", in: roboto.sets[0]), .group(italic: true))
+        // §10 check 5: Roboto Condensed Bold has its own verified file; the static name differs from the variable instance's.
+        let condensedBold = roboto.sets[0].cell(width: 75, weight: 700, italic: false)!
+        XCTAssertEqual(roboto.displayName(of: condensedBold, in: roboto.sets[0]), "Condensed Bold")
+        XCTAssertEqual(condensedBold.style.postScriptName, "Roboto-CondensedBold")
+        XCTAssertEqual(roboto.ownFile(of: condensedBold)?.filename, "RobotoCondensed-Bold.ttf")
+        XCTAssertEqual(roboto.sharedFile(of: condensedBold)?.styleCount, 18)
+        XCTAssertEqual(roboto.ownFile(of: roboto.sets[0].cell(weight: 700, italic: false)!)?.bytes, 124_292)
         XCTAssertEqual(grids["ofl/commissioner"]!.coverage(of: "ofl/commissioner/Commissioner[FLAR,VOLM,slnt,wght].ttf", in: grids["ofl/commissioner"]!.sets[0]), .both)
         XCTAssertEqual(rows("ofl/oswald"), [[200, 300, 400, 500, 600, 700]])
         XCTAssertFalse(grids["ofl/oswald"]!.familyHasItalic)
@@ -477,8 +594,18 @@ final class StyleGridTests: XCTestCase {
         XCTAssertFalse(grids["ofl/abhayalibre"]!.familyHasItalic)
         XCTAssertEqual(grids["ofl/tuffy"]!.sets[0].cell(weight: 400, italic: false)?.style.postScriptName, "Tuffy-Regular")
         XCTAssertEqual(grids["apache/opensanshebrew"]!.sets[0].cell(weight: 800, italic: false)?.style.name, "Extra Bold")
-        XCTAssertEqual(grids["ofl/inconsolata"]!.sets.count, 9)
-        XCTAssertTrue(grids["ofl/inconsolata"]!.sets.allSatisfy { $0.cells.allSatisfy { $0.style.isVariable } })
+        let inconsolata = grids["ofl/inconsolata"]!
+        XCTAssertEqual(inconsolata.sets.count, 1)
+        XCTAssertEqual(inconsolata.sets[0].normalWidths, [100, 50, 62.5, 75, 87.5, 112.5, 125, 150, 200])
+        XCTAssertTrue(inconsolata.sets[0].cells.allSatisfy { $0.style.isVariable })
+        XCTAssertEqual(inconsolata.styleCount(fileID: "ofl/inconsolata/Inconsolata[wdth,wght].ttf"), 72, "§10 check 6")
+        XCTAssertTrue(inconsolata.sets[0].cells.allSatisfy { inconsolata.ownFile(of: $0)?.isInstance == true })
+        let display = grids["ofl/notosansdisplay"]!
+        XCTAssertEqual(display.sets[0].columns.count, 8)
+        // A width family with no verified instances: every style is shared-only (case B).
+        let telugu = grids.values.first { $0.sets.first?.cells.first?.style.fileID.contains("NotoSansTeluguUI") == true }!
+        XCTAssertTrue(telugu.sets[0].showsWidths)
+        XCTAssertTrue(telugu.sets[0].cells.allSatisfy { telugu.ownFile(of: $0) == nil && telugu.sharedFile(of: $0) != nil })
         XCTAssertEqual(grids["ofl/recursive"]!.sets.map(\.option), ["Mono Linear", "Mono Casual", "Sans Linear", "Sans Casual"])
         XCTAssertTrue(grids["ofl/recursive"]!.sets.allSatisfy { $0.cells.count == 16 })
         XCTAssertEqual(grids["ofl/jaro"]!.sets.map(\.option), ["Optical Size 6", "Optical Size 14", "Optical Size 24", "Optical Size 48", "Optical Size 72"])

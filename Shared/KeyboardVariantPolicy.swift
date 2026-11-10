@@ -40,6 +40,9 @@ enum KeyboardVariantPolicy {
                 return (list(uppercase ? [] : cyrillicModifiers[key] ?? []), list(related))
             case .latin:
                 return ([], list(key == "ı" && !uppercase ? ["𝚤"] : []))
+            case .hebrew, .arabic:
+                // No modifier or styled forms are encoded for these letters.
+                return ([], [])
             }
         }
         if (0x30...0x39).contains(value) {
@@ -262,9 +265,14 @@ enum KeyboardVariantPolicy {
     }
 
     /// Long-press choices: the layout's own letters first, then, on Latin
-    /// layouts, the familiar English accents; symbols keep their families.
+    /// layouts, the familiar English accents; symbols keep their families,
+    /// after any punctuation mark the active layout adds to a shared key.
     static func holdVariants(for key: String, state: KeyboardTypingState) -> [String] {
-        let alphabet = state.alphabet, uppercase = state.shift != .lowercase
+        let alphabet = state.alphabet
+        // A caseless layout's choices stay as they are under Shift or Caps Lock.
+        let uppercase = state.shift != .lowercase && !alphabet.isCaseless
+        let isLetter = state.layout == .letters && alphabet.keys.contains(key)
+        let added = isLetter ? [] : alphabet.punctuationHoldChoice(for: key).map { [$0.text] } ?? []
         let own = state.layout == .letters ? (alphabet.variants[key] ?? []).compactMap { variant -> String? in
             guard uppercase else { return variant }
             // ΐ and ΰ have no single capital; ß has its own.
@@ -274,7 +282,7 @@ enum KeyboardVariantPolicy {
         let shared = alphabet.script == .latin || state.layout != .letters || !alphabet.keys.contains(key)
             ? englishVariants(for: key, uppercase: uppercase) : []
         var seen = Set<String>()
-        return (own + shared).filter { seen.insert($0).inserted }
+        return (added + own + shared).filter { seen.insert($0).inserted }
     }
 
     /// Familiar English diacritics; these are literal choices, not corrections.

@@ -100,12 +100,50 @@ struct ConfigurationDiff: Equatable, Sendable {
         result += line("iPad Landscape Layout", a.padLayout, b.padLayout) { $0.title }
         result += line("iPad Symbol Mapping", a.padSymbolMapping, b.padSymbolMapping) { $0.title }
         if old.autoCapitalization != new.autoCapitalization { result.append(AutoCapitalizationCopy.change(from: old.autoCapitalization, to: new.autoCapitalization)) }
+        result += languageInputLines(old.languageInput, new.languageInput)
         result += line("Explore Grid", x.exploreGridDensity, y.exploreGridDensity, density)
         result += line("Blocks Grid", x.blockGridDensity, y.blockGridDensity, density)
         result += line("Tile Columns", x.tileColumns, y.tileColumns) { "\($0)" }
         result += line("Explore Plane", x.explorePlane, y.explorePlane, plane)
         result += line("Explore Order", x.exploreDescending, y.exploreDescending) { $0 ? "Descending" : "Ascending" }
         result += line("Emoji Order", x.emojiSortOrder, y.emojiSortOrder) { $0.title }
+        result += line("Hidden Emoji Categories", old.hiddenEmojiCategories, new.hiddenEmojiCategories) {
+            $0.isEmpty ? "None" : EmojiCategorySetting.ordered($0).joined(separator: ", ")
+        }
+        result += line("Emoji Size", x.emojiColumns, y.emojiColumns) { $0 == 0 ? "Automatic" : "\($0) per Row" }
+        result += line("Blocks Order", x.blocksDescending, y.blocksDescending) { $0 ? "Code Point: High to Low" : "Code Point: Low to High" }
+        return result
+    }
+
+    private static func languageModeName(_ mode: LanguageInputMode) -> String {
+        switch mode {
+        case .direct: return "Direct Typing"
+        case .japaneseRomaji: return "Japanese — Romaji"
+        case .mandarinPinyin: return "Mandarin Chinese — Pinyin"
+        case .koreanRomaja: return "Korean — Romaja"
+        case .koreanTwoSetHangul: return "Korean — Two-Set Hangul"
+        }
+    }
+
+    private static func languageInputLines(_ old: LanguageInputSettings.Value, _ new: LanguageInputSettings.Value) -> [String] {
+        var result = line("Enabled Language Modes", old.enabledModes, new.enabledModes) { $0.map(languageModeName).joined(separator: ", ") }
+        result += line("English Suggestions", old.englishSuggestions, new.englishSuggestions, onOff)
+        result += line("English Autocorrection", old.englishAutocorrection, new.englishAutocorrection, onOff)
+        func identity(_ pin: LanguageInputSettings.PackReference) -> String {
+            "\(languageModeName(pin.mode)), \(pin.packID) @ \(pin.version), SHA-256 \(pin.archiveSHA256)"
+        }
+        for pin in old.packReferences {
+            if let next = new.packReferences.first(where: { $0.packID == pin.packID }) {
+                if next != pin { result.append("Language Pack Reference: \(identity(pin)) → \(identity(next))") }
+            } else { result.append("Removes Language Pack Reference: \(identity(pin))") }
+        }
+        for pin in new.packReferences where !old.packReferences.contains(where: { $0.packID == pin.packID }) {
+            result.append("Adds Language Pack Reference: \(identity(pin))")
+        }
+        let common = Set(old.packReferences.map(\.packID)).intersection(new.packReferences.map(\.packID))
+        let oldOrder = old.packReferences.map(\.packID).filter(common.contains)
+        let newOrder = new.packReferences.map(\.packID).filter(common.contains)
+        if oldOrder != newOrder { result.append("Language Pack Reference Order: \(oldOrder.joined(separator: ", ")) → \(newOrder.joined(separator: ", "))") }
         return result
     }
 
@@ -124,6 +162,14 @@ struct ConfigurationDiff: Equatable, Sendable {
     }
 
     private static func pageLines(_ old: UniboardConfiguration, _ new: UniboardConfiguration) -> [String] {
+        // A payload-only edit is a key change, not a row/alignment change.
+        func rows(_ page: SymbolBoard) -> [KeyboardRow<String>]? {
+            page.explicitRows?.map { row in
+                KeyboardRow(alignment: row.alignment, cells: row.cells.map { cell in
+                    switch cell { case .key(let key): return .key(key.id); case .halfGap: return .halfGap; case .gap: return .gap }
+                })
+            }
+        }
         func name(_ id: String, _ pages: [SymbolBoard]) -> String { pages.first { $0.id == id }?.name ?? id }
         let a = old.pages, b = new.pages
         var result: [String] = []
@@ -136,7 +182,7 @@ struct ConfigurationDiff: Equatable, Sendable {
                 result.append(page.keys.count == next.keys.count ? "Changes keys on page \(next.name)"
                               : "Page \(next.name): \(keyCount(page.keys.count)) → \(keyCount(next.keys.count))")
             }
-            if page.layout != next.layout { result.append("Changes the rows of page \(next.name)") }
+            if page.layout != next.layout || rows(page) != rows(next) { result.append("Changes the rows of page \(next.name)") }
         }
         let common = Set(a.map(\.id)).intersection(b.map(\.id))
         if a.map(\.id).filter(common.contains) != b.map(\.id).filter(common.contains) { result.append("Reorders pages") }

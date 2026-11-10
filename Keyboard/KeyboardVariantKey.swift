@@ -28,6 +28,10 @@ struct KeyboardVariantKey: UIViewRepresentable {
     var displayText: ((String) -> String)? = nil
     /// Names a hold choice for VoiceOver instead of its text and code points.
     var actionName: ((String) -> String)? = nil
+    /// A named accessibility action that does what activating the key does.
+    var primaryActionName: String? = nil
+    /// Asked on each update; true once moves VoiceOver focus to this key.
+    var focusRequest: (@MainActor () -> Bool)? = nil
     let factory: KeyboardVariantInteraction.Factory
 
     func makeUIView(context: Context) -> KeyboardVariantButton { KeyboardVariantButton() }
@@ -39,11 +43,17 @@ struct KeyboardVariantKey: UIViewRepresentable {
             longPressOptions: longPressOptions, swipeUp: swipeUp, swipeDown: swipeDown, secondaryText: secondaryText, contentPosition: contentPosition,
             showsInspection: showsInspection, showsEditing: showsEditing, holdLabel: holdLabel,
             popupFont: { UnicodeFontSupport.font(for: symbolBoardPreview($0), size: fontSize, enabled: useUnicodeFonts, anchor: symbolBoardFontAnchor($0)) },
-            displayText: displayText ?? symbolBoardPreview, actionName: actionName, factory: factory)
+            displayText: displayText ?? symbolBoardPreview, actionName: actionName,
+            primaryActionName: primaryActionName, factory: factory)
         view.tintColor = KeyboardPalette.accentUI
         view.accessibilityIdentifier = identifier
         view.accessibilityLabel = label ?? text
         view.accessibilityValue = value
         view.accessibilityHint = hint ?? "Tap to insert. Hold, slide to a choice, then lift your finger."
+        if focusRequest?() == true, UIAccessibility.isVoiceOverRunning {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak view] in
+                UIAccessibility.post(notification: .layoutChanged, argument: view)
+            }
+        }
     }
 }

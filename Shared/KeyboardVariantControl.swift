@@ -445,6 +445,7 @@ final class KeyboardVariantButton: UIControl {
                    popupFont: ((String) -> UIFont)? = nil,
                    displayText: @escaping (String) -> String = { $0 },
                    actionName: ((String) -> String)? = nil,
+                   primaryActionName: String? = nil,
                    factory: @escaping KeyboardVariantInteraction.Factory) {
         let oldToken = interaction.token
         interaction.configure(context: context, key: key, text: text, variants: variants, enabled: enabled,
@@ -479,6 +480,13 @@ final class KeyboardVariantButton: UIControl {
         accessibilityCustomActions = longChoices.map { value in
             let points = value.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
             return UIAccessibilityCustomAction(name: actionName?(value) ?? "\(displayText(value)), \(points)") { [weak self] _ in self?.interaction.activateGesture(.longPress, text: value) ?? false }
+        }
+        // The key's own activation as a named action, first, for Switch
+        // Control and Voice Control menus, such as "Choose Arabic Diacritic".
+        if let primaryActionName {
+            accessibilityCustomActions?.insert(UIAccessibilityCustomAction(name: primaryActionName) { [weak self] _ in
+                self?.interaction.activate() ?? false
+            }, at: 0)
         }
         let swipeActions: [(KeyboardKeySettings.Gesture, [String]?)] = [(.swipeUp, swipeUp), (.swipeDown, swipeDown)]
         for (gesture, values) in swipeActions {

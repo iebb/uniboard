@@ -81,6 +81,8 @@ final class SharedConfigurationLocationTests: XCTestCase {
             ImageColorSettings.filename: try XCTUnwrap(ImageColorSettings.encode(.init(value: .init(preset: "custom", customText: "#FF3B30",
                                                                                          customBackground: "transparent"), revision: "colors-1"))),
             AutoCapitalizationSetting.filename: AutoCapitalizationSetting.encode(mode),
+            LanguageInputSettings.filename: try XCTUnwrap(LanguageInputSettings.encode(.defaults)),
+            EmojiCategorySetting.filename: try XCTUnwrap(EmojiCategorySetting.encode(["Flags"])),
             AppPresentationSettings.filename: AppPresentationSettings.encode(app),
         ]
     }
@@ -876,7 +878,7 @@ final class SharedConfigurationLocationTests: XCTestCase {
         let pages = SymbolPageSettings.Snapshot(pages: [], starPageID: "p")
         XCTAssertEqual(SymbolPageSettings.decode(try XCTUnwrap(SymbolPageSettings.encode(pages))), pages)
         XCTAssertNil(SymbolPageSettings.decode(Data()))
-        XCTAssertNil(SymbolPageSettings.decode(Data(#"{"schemaVersion":2,"pages":[],"starPageID":"p"}"#.utf8)))
+        XCTAssertNil(SymbolPageSettings.decode(Data(#"{"schemaVersion":3,"pages":[],"starPageID":"p"}"#.utf8)))
         XCTAssertEqual(KeyboardKeySettings.decode(try XCTUnwrap(KeyboardKeySettings.encode(.defaults))), .defaults)
         XCTAssertNil(KeyboardKeySettings.decode(Data()))
         let edition = UnicodeEditionSettings.Snapshot(edition: .latest)
@@ -887,5 +889,52 @@ final class SharedConfigurationLocationTests: XCTestCase {
         withoutNumbers.showsNumberRow = !numberRowOff.showsNumberRow
         let encoded = try XCTUnwrap(UnicodeEditionSettings.encode(withoutNumbers))
         XCTAssertEqual(UnicodeEditionSettings.decode(encoded)?.showsNumberRow, withoutNumbers.showsNumberRow, "The Number Row choice is kept as it is")
+    }
+}
+
+extension SharedConfigurationLocationTests {
+    func testExplicitRowsApplyFailureStaleConflictCaptureAndUndoPreserveOriginalBytes() throws {
+        let root = try makeRoot()
+        var legacy = UniboardConfiguration.factoryDefaults
+        legacy.pages[0].layout = "kkkkkkkkkkkkkk/kkkkkkkkkk"
+        let oldFiles = try XCTUnwrap(legacy.compile(replacementID: "old", revision: "old"))
+        // Deliberately noncanonical JSON bytes must survive Apply + Undo.
+        let oldPages = Data((" \n" + String(decoding: oldFiles[SymbolPageSettings.filename]!, as: UTF8.self) + "\n").utf8)
+        try put(oldPages, SymbolPageSettings.filename, in: root)
+        let oldKeys = Data("{ \"schemaVersion\" : 4, \"overrides\" : [] }\n".utf8)
+        try put(oldKeys, KeyboardKeySettings.filename, in: root)
+        var (location, _) = try migrated(root)
+        let originalFingerprint = try XCTUnwrap(location.currentFingerprint(presentation: presentation))
+        let originalPageFile = generation(root, 1).appendingPathComponent(SymbolPageSettings.filename)
+        let captured = UniboardConfiguration.capture(directory: location.currentDirectory(), presentation: .init(), favorites: [])
+        XCTAssertTrue(captured.pages[0].isLegacy)
+        XCTAssertEqual(bytes(originalPageFile), oldPages)
+
+        var explicit = captured
+        explicit.pages[0] = SymbolBoard(id: SymbolPageRules.stockID, name: "Symbols", rows: [
+            .init(alignment: .spaced, cells: [.key(.init(id: "new", text: "e\u{301}", variants: ["é"], up: ["↑"], down: ["↓"]))]),
+        ])
+        var mainRows = MainKeyboardArrangement.standard(for: .english).resolvedRows
+        mainRows[2].alignment = .right
+        explicit.keys = .init(arrangements: ["en": MainKeyboardArrangement(rows: mainRows)])
+        let files = try XCTUnwrap(explicit.compile(replacementID: "new", revision: "new"))
+        let importedPresentation = try XCTUnwrap(files[AppPresentationSettings.filename])
+        for step in [ConfigurationStep.stage, .verify, .publish, .pointer] {
+            location.fault = { if $0 == step { throw Interrupted() } }
+            XCTAssertEqual(location.apply(files, expecting: originalFingerprint, currentPresentation: presentation), .failed(step))
+            XCTAssertEqual(location.currentGeneration(), 1)
+            XCTAssertEqual(bytes(originalPageFile), oldPages)
+        }
+        location.fault = { _ in }
+        XCTAssertEqual(location.apply(files, expecting: String(repeating: "0", count: 64), currentPresentation: presentation), .conflict)
+        guard case let .applied(pointer) = location.apply(files, expecting: originalFingerprint, currentPresentation: presentation) else { return XCTFail("explicit Apply failed") }
+        let loaded = UniboardConfiguration.capture(directory: location.currentDirectory(), presentation: explicit.browse.values, favorites: [])
+        XCTAssertEqual(loaded, explicit)
+        XCTAssertEqual(bytes(generation(root, 2).appendingPathComponent(SymbolPageSettings.filename)), files[SymbolPageSettings.filename])
+        XCTAssertEqual(location.undoLastImport(expecting: try XCTUnwrap(pointer.importFingerprint), currentPresentation: importedPresentation),
+                       .applied(.init(generation: 3, directory: "g-000003")))
+        XCTAssertEqual(bytes(generation(root, 3).appendingPathComponent(SymbolPageSettings.filename)), oldPages)
+        XCTAssertEqual(bytes(generation(root, 3).appendingPathComponent(KeyboardKeySettings.filename)), oldKeys)
+        XCTAssertTrue(UniboardConfiguration.capture(directory: location.currentDirectory(), presentation: .init(), favorites: []).pages[0].isLegacy)
     }
 }

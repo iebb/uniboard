@@ -166,7 +166,7 @@ struct KeyboardKeySettings {
             try KeyboardKeySettings.allowKeys(decoder, ["schemaVersion", "overrides", "arrangements"])
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let schema = try c.decode(Int.self, forKey: .schemaVersion)
-            guard (1...4).contains(schema), schema >= 3 || !c.contains(.arrangements) else { throw Invalid.settings }
+            guard (1...5).contains(schema), schema >= 3 || !c.contains(.arrangements) else { throw Invalid.settings }
             let entries = try c.decode([Entry].self, forKey: .overrides)
             guard entries.count <= KeyboardKeySettings.descriptors.count + KeyboardKeySettings.legacyFunctionKeyIDs.count else { throw Invalid.settings }
             var seen = Set<String>()
@@ -183,14 +183,16 @@ struct KeyboardKeySettings {
                 }
             }
             self.init(overrides: result, arrangements: try c.decodeIfPresent([String: MainKeyboardArrangement].self, forKey: .arrangements) ?? [:],
-                      arrangesNumberRow: schema == 4)
+                      arrangesNumberRow: schema >= 4)
+            guard schema >= 5 || arrangements.values.allSatisfy(\.isLegacy) else { throw Invalid.settings }
             try KeyboardKeySettings.validate(self)
         }
         func encode(to encoder: Encoder) throws {
             try KeyboardKeySettings.validate(self)
             var c = encoder.container(keyedBy: CodingKeys.self)
             // An earlier file that was never migrated keeps its own meaning.
-            try c.encode(arrangesNumberRow ? 4 : 3, forKey: .schemaVersion)
+            guard arrangesNumberRow || arrangements.values.allSatisfy(\.isLegacy) else { throw Invalid.settings }
+            try c.encode(arrangements.values.contains { !$0.isLegacy } ? 5 : (arrangesNumberRow ? 4 : 3), forKey: .schemaVersion)
             let entries = overrides.sorted { $0.key < $1.key }.map { Entry(keyID: $0.key, values: $0.value) }
             try c.encode(entries, forKey: .overrides)
             if !arrangements.isEmpty { try c.encode(arrangements, forKey: .arrangements) }
@@ -244,10 +246,13 @@ struct KeyboardKeySettings {
         let ascii = Array("abcdefghijklmnopqrstuvwxyz").map { Descriptor(id: "letter.\($0)", title: String($0).uppercased(), text: String($0), kind: .letter) }
         // Letters of the other layouts. ASCII letters keep their original IDs;
         // the rest are named by their lowercase scalar, such as letter.03B1.
+        // Letters of caseless layouts, such as Hebrew, are named the same way
+        // by their only form; keys that are not letters keep symbol IDs.
         var seen = Set(ascii.compactMap(\.text))
         let international = KeyboardAlphabet.catalog.flatMap { alphabet in
             alphabet.keys.compactMap { key -> Descriptor? in
-                guard alphabet.isCasedLetter(key), key.unicodeScalars.count == 1, let scalar = key.unicodeScalars.first,
+                guard key.unicodeScalars.count == 1, let scalar = key.unicodeScalars.first,
+                      alphabet.isCasedLetter(key) || alphabet.isCaseless && scalar.properties.generalCategory == .otherLetter,
                       seen.insert(key).inserted else { return nil }
                 return Descriptor(id: String(format: "letter.%04X", scalar.value), title: alphabet.uppercase(key), text: key, kind: .letter)
             }
@@ -393,6 +398,7 @@ struct KeyboardKeySettings {
         }
     }
     private static func validate(_ snapshot: Snapshot) throws {
+        guard snapshot.arrangesNumberRow || snapshot.arrangements.values.allSatisfy(\.isLegacy) else { throw Invalid.settings }
         guard snapshot.overrides.count <= descriptors.count else { throw Invalid.settings }
         for (alphabetID, arrangement) in snapshot.arrangements {
             guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID), arrangement.isValid(for: alphabet),

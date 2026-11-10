@@ -63,11 +63,16 @@ private struct AddLayoutView: View {
     let add: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var languageHints = LanguageSuggestionPolicy.Snapshot.empty
+    @State private var isVisible = false
 
     /// Layouts for the device's preferred languages come first.
     private var suggested: [KeyboardAlphabet] {
-        let languages = Locale.preferredLanguages.map { Locale(identifier: $0).language.languageCode?.identifier ?? $0 }
-        return available.filter { alphabet in languages.contains(alphabet.languageCode) }
+        let active = Set(languageHints.activeLanguages.map(\.languageCode))
+        let preferred = Set(languageHints.preferredLanguages.map(\.languageCode))
+        return available.filter { active.contains($0.languageCode) }
+            + available.filter { !active.contains($0.languageCode) && preferred.contains($0.languageCode) }
     }
     private var available: [KeyboardAlphabet] {
         KeyboardAlphabet.catalog.filter { !enabled.contains($0.id) && matches($0) }
@@ -95,6 +100,11 @@ private struct AddLayoutView: View {
                 }
             }
             .navigationTitle("Add Layout").navigationBarTitleDisplayMode(.inline)
+            .onAppear { isVisible = true; languageHints = LanguageSuggestionReader().refresh() }
+            .onDisappear { isVisible = false; languageHints = .empty }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active && isVisible { languageHints = LanguageSuggestionReader().refresh() }
+            }
             .searchable(text: $query, prompt: "Language")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
@@ -115,6 +125,9 @@ private struct AddLayoutView: View {
 
 private extension KeyboardAlphabet.Script {
     var title: String {
-        switch self { case .latin: return "Latin"; case .greek: return "Greek"; case .cyrillic: return "Cyrillic" }
+        switch self {
+        case .latin: return "Latin"; case .greek: return "Greek"; case .cyrillic: return "Cyrillic"
+        case .hebrew: return "Hebrew"; case .arabic: return "Arabic"
+        }
     }
 }

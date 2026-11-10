@@ -94,8 +94,24 @@ struct FontRuleFaceLoader {
     }
 
     func load(_ reference: FontFaceReference) -> Result<LoadedRuleFont, Unavailable> {
-        guard reference.isValid, let location = locate(reference) else { return .failure(.missingFile) }
-        return load(reference, at: location)
+        guard reference.isValid else { return .failure(.missingFile) }
+        // The same face in another kept file (1.4 single-style instances), best
+        // first; the saved reference itself is never changed.
+        var attempts = [reference]
+        if case .file = reference.identity {
+            let equivalents = reference.candidates(in: library.localLibrary.faces)
+            attempts = equivalents.filter { $0.identityKey != reference.identityKey && $0.identity.isStatic }
+                + [reference] + equivalents.filter { $0.identityKey != reference.identityKey && !$0.identity.isStatic }
+        }
+        var failure = Unavailable.missingFile
+        for attempt in attempts {
+            guard let location = locate(attempt) else { continue }
+            switch load(attempt, at: location) {
+            case let .success(loaded): return .success(loaded)
+            case let .failure(reason): failure = reason
+            }
+        }
+        return .failure(failure)
     }
 
     func load(_ reference: FontFaceReference, at location: Location) -> Result<LoadedRuleFont, Unavailable> {
@@ -184,6 +200,14 @@ struct FontRuleFaceLoader {
             for (axis, value) in overrides where value.doubleValue.isFinite { result[axis] = value }
         }
         return result
+    }
+}
+
+extension FontFaceReference.Identity {
+    /// A file face without variation coordinates: a single-style file.
+    var isStatic: Bool {
+        if case let .file(_, _, axes) = self { return axes.isEmpty }
+        return false
     }
 }
 

@@ -237,6 +237,83 @@ struct FontFaceReference: Hashable, Codable, Sendable {
     }
 }
 
+/// 1.4: one face can live in two downloaded files (a pinned single-style
+/// instance and its named instance in the variable file). They are the same
+/// face (the catalog generator checked cmap and font revision), so a saved
+/// reference to either file resolves to whichever is kept. References are
+/// never rewritten.
+extension FontFaceRecord {
+    /// This record's own identity key, then its equivalents'.
+    var identityKeys: [String] {
+        var locators = [locator] + (equivalents ?? [])
+        if case .file = locator { locators += FontCatalogEquivalenceIndex.bundled.equivalents(for: locator) }
+        return locators.compactMap { FontFaceReference.identityKey(of: $0) }
+    }
+
+    /// Enrich a snapshot only. In particular, reading a 1.3 manifest never
+    /// rewrites its generation, IDs, receipts, binaries or saved rules.
+    func catalogEnriched(using index: FontCatalogEquivalenceIndex) -> FontFaceRecord {
+        var face = self
+        let derived = index.equivalents(for: locator)
+        if !derived.isEmpty {
+            // Drop unportable aliases before sorting instead of inventing a
+            // fallback identity for them. Valid aliases retain stable ordering.
+            face.equivalents = Array(Set((equivalents ?? []) + derived)).compactMap { locator in
+                FontFaceReference.identityKey(of: locator).map { (key: $0, locator: locator) }
+            }.sorted { $0.key < $1.key }.map(\.locator)
+        }
+        return face
+    }
+
+    /// True for a single-style file face (no variation coordinates).
+    var isStaticFile: Bool {
+        if case let .file(_, _, _, axes) = locator { return axes.isEmpty }
+        return false
+    }
+
+    /// Shown once (design §8): drops a variable-file face whose static
+    /// equivalent is also present. Order is kept; nothing is deleted.
+    static func collapsingEquivalents(_ faces: [FontFaceRecord]) -> [FontFaceRecord] {
+        // Either record can declare the relationship (old shared records did
+        // not). Also works for imported, hash-identical pinned own files.
+        let staticKeys = Set(faces.filter(\.isStaticFile).flatMap(\.identityKeys))
+        return faces.filter { face in
+            face.isStaticFile || staticKeys.isDisjoint(with: face.identityKeys)
+        }
+    }
+}
+
+extension FontFaceReference {
+    /// The identity key a library locator would have as a reference.
+    static func identityKey(of locator: FontLocator) -> String? {
+        switch locator {
+        case let .file(_, sha256, faceIndex, axes):
+            return tags(axes).map { FontFaceReference.Identity.file(sha256: sha256, faceIndex: faceIndex, variations: $0).key }
+        case let .process(name, axes):
+            return tags(axes).map { FontFaceReference.Identity.process(postScriptName: name, variations: $0).key }
+        }
+    }
+
+    /// This face itself or an equivalent of it.
+    func isSameFace(as record: FontFaceRecord) -> Bool { record.identityKeys.contains(identityKey) }
+
+    /// Library records that draw this face, best first: a static single-style
+    /// file, then the referenced file itself, then any other equivalent.
+    func candidates(in faces: [FontFaceRecord]) -> [FontFaceReference] {
+        let key = identityKey
+        let same = faces.filter { $0.identityKeys.contains(key) }
+        let ordered = same.filter(\.isStaticFile) + same.filter { !$0.isStaticFile }
+        var seen = Set<String>()
+        return ordered.compactMap(FontFaceReference.init(record:)).filter { seen.insert($0.identityKey).inserted }
+    }
+}
+
+extension FontFaceReference.Identity {
+    fileprivate var key: String {
+        FontFaceReference(source: .downloaded, family: "x", style: "x", postScriptName: "x", identity: self).identityKey
+    }
+}
+
 struct FontRule: Hashable, Identifiable, Sendable {
     /// Local UI identity; not exported.
     var id: String

@@ -23,6 +23,7 @@ final class LanguagePackStoreTests: XCTestCase {
         sandbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
         try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: false)
         store = LanguagePackStore(root: sandbox.appendingPathComponent("packs"))
+        PayloadVerificationCache.shared.removeAll()
     }
 
     override func tearDownWithError() throws {
@@ -682,5 +683,361 @@ final class LanguagePackStoreTests: XCTestCase {
         guard case .corrupt = store.resolve(modeID: mode, engineABI: abi) else { return XCTFail("unsafe pointer") }
         XCTAssertThrowsError(try store.reclaimUnusedVersions(), "must not reclaim around untrusted active pointer")
         XCTAssertTrue(FileManager.default.fileExists(atPath: original.path.path))
+    }
+
+    // MARK: - In-process payload verification cache
+
+    private typealias Identity = PayloadVerificationCache.FileIdentity
+
+    /// Mutable injected clock for the racy-timestamp guard. Scripted values are
+    /// returned first (one per call), then the fixed value, then "an hour ahead"
+    /// so that every fixture file counts as settled (not racy).
+    private final class TestClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: TimeInterval?
+        private var scripted: [TimeInterval] = []
+        func set(_ newValue: TimeInterval?) { lock.lock(); value = newValue; lock.unlock() }
+        func script(_ values: [TimeInterval]) { lock.lock(); scripted = values; lock.unlock() }
+        func now() -> TimeInterval {
+            lock.lock(); defer { lock.unlock() }
+            if !scripted.isEmpty { return scripted.removeFirst() }
+            return value ?? Date().timeIntervalSince1970 + 3_600
+        }
+    }
+
+    private func settledCache(_ clock: TestClock = TestClock()) -> PayloadVerificationCache {
+        PayloadVerificationCache(now: { clock.now() })
+    }
+
+    private func cachedStore(_ cache: PayloadVerificationCache) -> LanguagePackStore {
+        LanguagePackStore(root: store.root, verificationCache: cache)
+    }
+
+    private enum Outcome: Equatable { case available(String), corrupt, other }
+
+    private func resolveOnce(_ target: LanguagePackStore) -> Outcome {
+        switch target.resolve(modeID: mode, engineABI: abi) {
+        case .available(let lease): defer { lease.release() }; return .available(lease.pack.revision)
+        case .corrupt: return .corrupt
+        default: return .other
+        }
+    }
+
+    private func wordsURL(_ pack: ValidatedInstalledLanguagePack) -> URL {
+        pack.path.appendingPathComponent("Dictionary/words.dat")
+    }
+
+    private func identity(_ url: URL) throws -> Identity {
+        var value = stat()
+        guard lstat(url.path, &value) == 0 else { throw LanguagePackError.filesystem(operation: "test stat", code: errno) }
+        return Identity(value)
+    }
+
+    private func setTimes(_ fd: Int32, seconds: Int64, nanoseconds: Int64) throws {
+        let time = timespec(tv_sec: Int(seconds), tv_nsec: Int(nanoseconds))
+        var times = [time, time]
+        guard futimens(fd, &times) == 0 else { throw LanguagePackError.filesystem(operation: "test futimens", code: errno) }
+    }
+
+    /// Same inode, same size, new bytes; optionally forces a chosen mtime afterwards.
+    private func overwriteInPlace(_ url: URL, with data: Data, mtime: (seconds: Int64, nanoseconds: Int64)? = nil) throws {
+        let fd = open(url.path, O_WRONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else { throw LanguagePackError.filesystem(operation: "test open", code: errno) }
+        defer { close(fd) }
+        let written = data.withUnsafeBytes { pwrite(fd, $0.baseAddress, $0.count, 0) }
+        guard written == data.count else { throw LanguagePackError.filesystem(operation: "test pwrite", code: errno) }
+        if let mtime { try setTimes(fd, seconds: mtime.seconds, nanoseconds: mtime.nanoseconds) }
+    }
+
+    /// New inode atomically renamed over `url`, carrying the given mtime.
+    private func replaceViaRename(_ url: URL, with data: Data, mtime: (seconds: Int64, nanoseconds: Int64)) throws {
+        let temporary = url.deletingLastPathComponent().appendingPathComponent(".replacement-" + UUID().uuidString)
+        let fd = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))
+        guard fd >= 0 else { throw LanguagePackError.filesystem(operation: "test create", code: errno) }
+        let written = data.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        do {
+            guard written == data.count else { throw LanguagePackError.filesystem(operation: "test write", code: errno) }
+            try setTimes(fd, seconds: mtime.seconds, nanoseconds: mtime.nanoseconds)
+        } catch { close(fd); throw error }
+        close(fd)
+        #if canImport(Darwin)
+        let result = Darwin.rename(temporary.path, url.path)
+        #else
+        let result = Glibc.rename(temporary.path, url.path)
+        #endif
+        guard result == 0 else { throw LanguagePackError.filesystem(operation: "test rename", code: errno) }
+    }
+
+    func testDefaultStoresShareOneProcessWideVerificationCache() {
+        XCTAssertTrue(LanguagePackStore(root: store.root).verificationCache === PayloadVerificationCache.shared)
+        XCTAssertTrue(store.verificationCache === LanguagePackStore(root: sandbox).verificationCache)
+    }
+
+    func testRepeatedResolveOfUnchangedVerifiedFileSkipsRehash() throws {
+        let pack = try install()
+        let cache = settledCache()
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics, .init(hashes: 1, hits: 0, records: 1))
+        // Fresh store values (as the keyboard creates per activation) share the cache.
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics, .init(hashes: 1, hits: 2, records: 1))
+        XCTAssertEqual(cache.count, 1)
+        // A new revision of identical bytes is a different key: hashed again.
+        let next = try install(expected: pack.revision)
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(next.revision))
+        XCTAssertEqual(cache.statistics.hashes, 2)
+    }
+
+    func testSameSizeInPlaceRewriteWithBumpedMtimeInvalidatesCache() throws {
+        let pack = try install()
+        let url = wordsURL(pack)
+        let cache = settledCache()
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        let original = try identity(url)
+        usleep(50_000) // Test clock bypasses the racy guard; let coarse ctime clocks tick.
+        try overwriteInPlace(url, with: Data(repeating: 120, count: bytes.count),
+                             mtime: (original.modificationSeconds + 60, original.modificationNanoseconds))
+        let mutated = try identity(url)
+        XCTAssertEqual(mutated.inode, original.inode, "simulation must keep the inode")
+        XCTAssertEqual(mutated.size, original.size, "simulation must keep the size")
+        XCTAssertNotEqual(mutated.modificationSeconds, original.modificationSeconds)
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .corrupt)
+        XCTAssertEqual(cache.statistics.hashes, 2)
+        XCTAssertEqual(cache.statistics.hits, 0)
+        // Putting the right bytes back is re-verified from scratch, then cached again.
+        try overwriteInPlace(url, with: bytes)
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics, .init(hashes: 3, hits: 1, records: 2))
+    }
+
+    func testInPlaceRewriteThatRestoresMtimeIsStillCaughtByCtime() throws {
+        let pack = try install()
+        let url = wordsURL(pack)
+        let cache = settledCache()
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        let original = try identity(url)
+        usleep(50_000) // Let coarse-grained filesystem clocks tick before the rewrite.
+        try overwriteInPlace(url, with: Data(repeating: 120, count: bytes.count),
+                             mtime: (original.modificationSeconds, original.modificationNanoseconds))
+        let mutated = try identity(url)
+        XCTAssertEqual(mutated.inode, original.inode)
+        XCTAssertEqual(mutated.size, original.size)
+        XCTAssertEqual(mutated.modificationSeconds, original.modificationSeconds, "userland can forge mtime")
+        XCTAssertEqual(mutated.modificationNanoseconds, original.modificationNanoseconds)
+        XCTAssertNotEqual(mutated, original, "but not ctime")
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .corrupt)
+        XCTAssertEqual(cache.statistics.hashes, 2)
+    }
+
+    func testReplacementViaRenameHasNewInodeAndIsRehashed() throws {
+        let pack = try install()
+        let url = wordsURL(pack)
+        let cache = settledCache()
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        let original = try identity(url)
+        let mtime: (seconds: Int64, nanoseconds: Int64) = (original.modificationSeconds, original.modificationNanoseconds)
+        try replaceViaRename(url, with: bytes, mtime: mtime) // identical bytes, size and mtime
+        let replaced = try identity(url)
+        XCTAssertNotEqual(replaced.inode, original.inode)
+        XCTAssertEqual(replaced.size, original.size)
+        XCTAssertEqual(replaced.modificationSeconds, original.modificationSeconds)
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics.hashes, 2, "new inode must be hashed, not trusted")
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics.hashes, 2)
+        try replaceViaRename(url, with: Data(repeating: 120, count: bytes.count), mtime: mtime)
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .corrupt)
+        XCTAssertEqual(cache.statistics.hashes, 3)
+    }
+
+    func testFailedVerificationIsNeverCached() throws {
+        let pack = try install()
+        let cache = settledCache()
+        try overwriteInPlace(wordsURL(pack), with: Data(repeating: 120, count: bytes.count))
+        for attempt in 1...3 {
+            XCTAssertEqual(resolveOnce(cachedStore(cache)), .corrupt)
+            XCTAssertEqual(cache.statistics, .init(hashes: attempt, hits: 0, records: 0))
+            XCTAssertEqual(cache.count, 0)
+        }
+        // A cached success is dropped as soon as a mismatching identity forces a hash.
+        try overwriteInPlace(wordsURL(pack), with: bytes)
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.count, 1)
+        usleep(50_000) // Test clock bypasses the racy guard; let coarse ctime clocks tick.
+        try overwriteInPlace(wordsURL(pack), with: Data(repeating: 121, count: bytes.count))
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .corrupt)
+        XCTAssertEqual(cache.count, 0)
+    }
+
+    func testRecentlyChangedOrFutureDatedFilesAreNotTrustedFromTimestamps() throws {
+        let pack = try install()
+        let changed = try identity(wordsURL(pack)).changeTime
+        let clock = TestClock()
+        let cache = settledCache(clock)
+        clock.set(changed + 1) // within the racy window
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics, .init(hashes: 2, hits: 0, records: 0))
+        clock.set(changed - 100) // clock behind the file: never trusted
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics, .init(hashes: 3, hits: 0, records: 0))
+        clock.set(changed + PayloadVerificationCache.defaultRacyWindow + 1)
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics, .init(hashes: 4, hits: 1, records: 1))
+    }
+
+    func testRacyGuardUsesTimeVerificationStartedNotFinished() throws {
+        let pack = try install()
+        let changed = try identity(wordsURL(pack)).changeTime
+        let clock = TestClock()
+        let cache = settledCache(clock)
+        // Verification starts 1 s after the last inode change (inside the 2 s
+        // window); any later reading of the clock -- as if hashing took 100 s --
+        // would be outside it. The start time must win: nothing is recorded.
+        clock.script([changed + 1])
+        clock.set(changed + 100)
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics, .init(hashes: 1, hits: 0, records: 0))
+        XCTAssertEqual(cache.count, 0)
+        // Next verification starts at +100 s: settled, so recorded, then reused.
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics, .init(hashes: 2, hits: 1, records: 1))
+
+        // Same rule at the cache API: start time inside the window or before the
+        // ctime (future-dated) is refused even though `now()` is far later.
+        let direct = settledCache()
+        let key = PayloadVerificationCache.PackKey(payloadPath: "/r/versions/a/payload", packID: "p", version: "1",
+                                                   archiveSHA256: String(repeating: "a", count: 64))
+        let file = PayloadVerificationCache.FileKey(relativePath: "f", byteCount: 1, sha256: String(repeating: "b", count: 64))
+        let stamp = Identity(device: 1, inode: 2, size: 1, mode: 0o100600, modificationSeconds: 100,
+                             modificationNanoseconds: 0, changeSeconds: 100, changeNanoseconds: 0)
+        for start in [101.0, 102.0 - 0.000_001, 99.0] {
+            direct.recordVerified(file, in: key, identity: stamp, startedAt: start)
+            XCTAssertFalse(direct.isVerified(file, in: key, identity: stamp), "start \(start)")
+        }
+        direct.recordVerified(file, in: key, identity: stamp, startedAt: 102)
+        XCTAssertTrue(direct.isVerified(file, in: key, identity: stamp))
+    }
+
+    func testRemoveAllResetsEntriesAndCounters() throws {
+        let pack = try install()
+        let cache = settledCache()
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics, .init(hashes: 1, hits: 1, records: 1))
+        cache.removeAll()
+        XCTAssertEqual(cache.statistics, .init())
+        XCTAssertEqual(cache.count, 0)
+        XCTAssertEqual(resolveOnce(cachedStore(cache)), .available(pack.revision))
+        XCTAssertEqual(cache.statistics, .init(hashes: 1, hits: 0, records: 1))
+    }
+
+    func testReclaimingRevisionForgetsItsCacheEntries() throws {
+        let first = try install()
+        let cache = settledCache()
+        let target = cachedStore(cache)
+        XCTAssertEqual(resolveOnce(target), .available(first.revision))
+        let second = try install(expected: first.revision)
+        XCTAssertEqual(resolveOnce(target), .available(second.revision))
+        XCTAssertEqual(cache.count, 2)
+        try target.reclaimUnusedVersions() // first is inactive and unleased
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.path.path))
+        XCTAssertEqual(cache.count, 1, "only the reclaimed revision is forgotten")
+        XCTAssertEqual(resolveOnce(target), .available(second.revision))
+        XCTAssertEqual(cache.statistics.hits, 1)
+        cache.forget(payloadPath: second.path.path)
+        XCTAssertEqual(cache.count, 0)
+    }
+
+    func testVerificationCacheRequiresEveryKeyAndIdentityFieldToMatch() {
+        let cache = settledCache()
+        let pack = PayloadVerificationCache.PackKey(payloadPath: "/r/versions/a/payload", packID: "p", version: "1",
+                                                    archiveSHA256: String(repeating: "a", count: 64))
+        let file = PayloadVerificationCache.FileKey(relativePath: "d/f", byteCount: 10, sha256: String(repeating: "b", count: 64))
+        let base = Identity(device: 1, inode: 2, size: 10, mode: 0o100600, modificationSeconds: 100,
+                            modificationNanoseconds: 5, changeSeconds: 100, changeNanoseconds: 6)
+        cache.recordVerified(file, in: pack, identity: base, startedAt: cache.now())
+        XCTAssertTrue(cache.isVerified(file, in: pack, identity: base))
+        func variant(device: Int64 = 1, inode: UInt64 = 2, size: Int64 = 10, mode: UInt32 = 0o100600,
+                     ms: Int64 = 100, mns: Int64 = 5, cs: Int64 = 100, cns: Int64 = 6) -> Identity {
+            Identity(device: device, inode: inode, size: size, mode: mode, modificationSeconds: ms,
+                     modificationNanoseconds: mns, changeSeconds: cs, changeNanoseconds: cns)
+        }
+        for changed in [variant(device: 9), variant(inode: 9), variant(size: 11), variant(mode: 0o100400),
+                        variant(ms: 101), variant(mns: 7), variant(cs: 101), variant(cns: 7)] {
+            XCTAssertFalse(cache.isVerified(file, in: pack, identity: changed), "\(changed)")
+        }
+        let otherPacks = [
+            PayloadVerificationCache.PackKey(payloadPath: "/r/versions/b/payload", packID: "p", version: "1", archiveSHA256: pack.archiveSHA256),
+            PayloadVerificationCache.PackKey(payloadPath: pack.payloadPath, packID: "q", version: "1", archiveSHA256: pack.archiveSHA256),
+            PayloadVerificationCache.PackKey(payloadPath: pack.payloadPath, packID: "p", version: "2", archiveSHA256: pack.archiveSHA256),
+            PayloadVerificationCache.PackKey(payloadPath: pack.payloadPath, packID: "p", version: "1", archiveSHA256: String(repeating: "c", count: 64))
+        ]
+        for other in otherPacks { XCTAssertFalse(cache.isVerified(file, in: other, identity: base)) }
+        for other in [PayloadVerificationCache.FileKey(relativePath: "d/g", byteCount: 10, sha256: file.sha256),
+                      PayloadVerificationCache.FileKey(relativePath: "d/f", byteCount: 11, sha256: file.sha256),
+                      PayloadVerificationCache.FileKey(relativePath: "d/f", byteCount: 10, sha256: String(repeating: "c", count: 64))] {
+            XCTAssertFalse(cache.isVerified(other, in: pack, identity: base))
+        }
+        cache.beginHash(file, in: pack)
+        XCTAssertFalse(cache.isVerified(file, in: pack, identity: base), "a started re-hash drops the old success")
+        XCTAssertEqual(cache.count, 0)
+    }
+
+    func testVerificationCacheIsBounded() {
+        let cache = settledCache()
+        let stamp = Identity(device: 1, inode: 2, size: 1, mode: 0o100600, modificationSeconds: 1,
+                             modificationNanoseconds: 0, changeSeconds: 1, changeNanoseconds: 0)
+        let file = PayloadVerificationCache.FileKey(relativePath: "f", byteCount: 1, sha256: String(repeating: "b", count: 64))
+        let packs = (0..<(PayloadVerificationCache.maximumPacks + 2)).map {
+            PayloadVerificationCache.PackKey(payloadPath: "/r/versions/\($0)/payload", packID: "p", version: "1",
+                                            archiveSHA256: String(repeating: "a", count: 64))
+        }
+        for pack in packs { cache.recordVerified(file, in: pack, identity: stamp, startedAt: 1_000) }
+        XCTAssertEqual(cache.count, PayloadVerificationCache.maximumPacks)
+        XCTAssertFalse(cache.isVerified(file, in: packs[0], identity: stamp), "least recently used revision evicted")
+        XCTAssertFalse(cache.isVerified(file, in: packs[1], identity: stamp))
+        XCTAssertTrue(cache.isVerified(file, in: packs.last!, identity: stamp))
+        cache.removeAll()
+        let big = packs[0]
+        for index in 0...LanguagePackDescriptor.maximumFileCount {
+            cache.recordVerified(.init(relativePath: "f\(index)", byteCount: 1, sha256: file.sha256), in: big, identity: stamp, startedAt: 1_000)
+        }
+        XCTAssertLessThanOrEqual(cache.count, LanguagePackDescriptor.maximumFileCount)
+        XCTAssertLessThanOrEqual(cache.count, PayloadVerificationCache.maximumEntries)
+    }
+
+    func testConcurrentResolvesAreSafeAndConverge() throws {
+        let pack = try install()
+        let cache = settledCache()
+        let target = cachedStore(cache)
+        let iterations = 32
+        let lock = NSLock()
+        var outcomes: [Outcome] = []
+        DispatchQueue.concurrentPerform(iterations: iterations) { _ in
+            let outcome = resolveOnce(target)
+            lock.lock(); outcomes.append(outcome); lock.unlock()
+        }
+        XCTAssertEqual(outcomes, [Outcome](repeating: .available(pack.revision), count: iterations))
+        let stats = cache.statistics
+        XCTAssertGreaterThanOrEqual(stats.hashes, 1)
+        XCTAssertEqual(stats.hashes + stats.hits, iterations, "one file: each resolve either hits or hashes once")
+        XCTAssertEqual(cache.count, 1)
+        XCTAssertEqual(resolveOnce(target), .available(pack.revision))
+        XCTAssertEqual(cache.statistics.hashes, stats.hashes, "converged: no further hashing")
+        // Concurrent resolves after an in-place corruption never report the bad bytes as verified.
+        usleep(50_000) // Test clock bypasses the racy guard; let coarse ctime clocks tick.
+        try overwriteInPlace(wordsURL(pack), with: Data(repeating: 120, count: bytes.count))
+        outcomes.removeAll()
+        DispatchQueue.concurrentPerform(iterations: iterations) { _ in
+            let outcome = resolveOnce(target)
+            lock.lock(); outcomes.append(outcome); lock.unlock()
+        }
+        XCTAssertEqual(outcomes, [Outcome](repeating: .corrupt, count: iterations))
+        XCTAssertEqual(cache.count, 0)
     }
 }

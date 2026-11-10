@@ -617,4 +617,192 @@ final class LanguageInputSettingsTests: XCTestCase {
         XCTAssertEqual(location.lastGoodGeneration(), "g-000003")
         XCTAssertNil(location.undoStatus(presentation: presentation))
     }
+
+    // MARK: 1.5.1 — shared last-chosen mode (not configuration)
+
+    func testLastChosenModeRoundTripsAndStaysOutOfExportedConfiguration() throws {
+        let directory = try temporaryDirectory()
+        let store = LanguageInputLastMode(directory: { directory })
+        XCTAssertEqual(store.load(), .direct, "No file yet is Direct Typing, not unreadable")
+        for mode in [LanguageInputMode.japaneseRomaji, .mandarinPinyin, .koreanTwoSetHangul, .direct] {
+            XCTAssertTrue(store.save(mode))
+            XCTAssertEqual(store.load(), mode)
+        }
+        XCTAssertTrue(store.save(.koreanRomaja))
+        XCTAssertEqual(store.load(), .direct, "Romaja is never a chosen mode")
+        let bytes = try Data(contentsOf: directory.appendingPathComponent(LanguageInputLastMode.filename))
+        XCTAssertLessThanOrEqual(bytes.count, LanguageInputLastMode.maximumPayloadBytes)
+        // A separate value: never a configuration snapshot file, never in the settings schema.
+        XCTAssertNil(SharedConfigurationLocation.fileLimits[LanguageInputLastMode.filename])
+        XCTAssertFalse(SharedConfigurationLocation.snapshotFiles.contains(LanguageInputLastMode.filename))
+        XCTAssertNotEqual(LanguageInputLastMode.filename, LanguageInputSettings.filename)
+        let exported = try snapshot(preferences())
+        XCTAssertEqual(Set(try XCTUnwrap(exported["value"] as? [String: Any]).keys),
+                       ["enabledModes", "englishSuggestions", "englishAutocorrection", "packReferences"])
+        XCTAssertFalse(String(decoding: try XCTUnwrap(LanguageInputSettings.encode(preferences())), as: UTF8.self).contains("lastMode"))
+    }
+
+    func testLastChosenModeDecodeIsTolerantAndBounded() throws {
+        func decode(_ text: String) -> LanguageInputMode { LanguageInputLastMode.decode(Data(text.utf8)) }
+        XCTAssertEqual(decode(#"{"mode":"mandarinPinyin","schemaVersion":1}"#), .mandarinPinyin)
+        XCTAssertEqual(decode(#"{"mode":"klingon","schemaVersion":1}"#), .direct)
+        XCTAssertEqual(decode(#"{"mode":"koreanRomaja","schemaVersion":1}"#), .direct)
+        XCTAssertEqual(decode(#"{"mode":"japaneseRomaji","schemaVersion":2}"#), .direct)
+        XCTAssertEqual(decode(#"{"mode":7,"schemaVersion":1}"#), .direct)
+        XCTAssertEqual(decode("not json"), .direct)
+        XCTAssertEqual(decode(""), .direct)
+        let padded = #"{"mode":"japaneseRomaji","schemaVersion":1}"# + String(repeating: " ", count: LanguageInputLastMode.maximumPayloadBytes)
+        XCTAssertEqual(decode(padded), .direct, "Oversized payloads are rejected before decoding")
+        XCTAssertEqual(LanguageInputLastMode.decode(try XCTUnwrap(LanguageInputLastMode.encode(.koreanTwoSetHangul))), .koreanTwoSetHangul)
+
+        let directory = try temporaryDirectory()
+        try Data(padded.utf8).write(to: directory.appendingPathComponent(LanguageInputLastMode.filename))
+        XCTAssertEqual(LanguageInputLastMode(directory: { directory }).load(), .direct)
+        // Unreachable storage is "unknown" (nil), so a caller keeps what it has.
+        XCTAssertNil(LanguageInputLastMode(directory: { nil }).load())
+        XCTAssertFalse(LanguageInputLastMode(directory: { nil }).save(.japaneseRomaji))
+        let missing = directory.appendingPathComponent("absent", isDirectory: true)
+        XCTAssertFalse(LanguageInputLastMode(directory: { missing }).save(.japaneseRomaji), "A failed write is reported, never thrown")
+    }
+
+    func testRememberedModeSwitchesOnRefreshOnlyWithoutCompositionOrConversion() {
+        typealias Policy = LanguageInputChoicePolicy
+        let choices: [LanguageInputMode] = [.direct, .japaneseRomaji]
+        func decide(_ stored: LanguageInputMode?, lastSeen: LanguageInputMode? = nil, current: LanguageInputMode = .direct,
+                    composing: Bool = false, busy: Bool = false) -> Policy.RememberedDecision {
+            Policy.rememberedDecision(stored: stored, lastSeen: lastSeen, current: current, choices: choices,
+                                      hasComposition: composing, isBusy: busy)
+        }
+        XCTAssertEqual(decide(.japaneseRomaji), .switchTo(.japaneseRomaji), "Opens in the last-chosen language")
+        XCTAssertEqual(decide(.japaneseRomaji, composing: true), .wait, "Never interrupts unfinished text")
+        XCTAssertEqual(decide(.japaneseRomaji, busy: true), .wait, "Never interrupts a conversion in progress")
+        XCTAssertEqual(decide(.direct, current: .japaneseRomaji), .switchTo(.direct), "Direct chosen in the app is followed")
+        XCTAssertEqual(decide(.direct, current: .japaneseRomaji, composing: true), .wait)
+        XCTAssertEqual(decide(.mandarinPinyin), .wait, "Not offered: stay, and don't overwrite the stored value")
+        XCTAssertEqual(decide(.koreanRomaja), .wait)
+        XCTAssertEqual(decide(.japaneseRomaji, current: .japaneseRomaji), .adopt)
+        XCTAssertEqual(decide(.japaneseRomaji, lastSeen: .japaneseRomaji, current: .direct), .none,
+                       "A keyboard choice that couldn't be saved isn't undone by the older stored value")
+        XCTAssertEqual(decide(nil, current: .japaneseRomaji), .none, "Unreadable storage changes nothing")
+    }
+
+    func testRememberedLanguageNeverOpensWithoutFullAccessSoThereIsNoNagOnEveryOpening() {
+        typealias Policy = LanguageInputChoicePolicy
+        let choices: [LanguageInputMode] = [.direct, .japaneseRomaji] // Japanese stays listed (unreadable).
+        // The app chose Japanese; Full Access is off. Simulate several openings of a
+        // fresh keyboard process: it never switches in, so no Full Access panel appears.
+        for _ in 0..<3 {
+            XCTAssertEqual(Policy.rememberedDecision(stored: .japaneseRomaji, lastSeen: nil, current: .direct, choices: choices,
+                                                     hasComposition: false, isBusy: false, hasFullAccess: false), .wait)
+        }
+        XCTAssertEqual(Policy.rememberedDecision(stored: .direct, lastSeen: nil, current: .japaneseRomaji, choices: choices,
+                                                 hasComposition: false, isBusy: false, hasFullAccess: false), .switchTo(.direct),
+                       "Direct Typing is always fine to open in")
+        XCTAssertEqual(Policy.rememberedDecision(stored: .japaneseRomaji, lastSeen: nil, current: .japaneseRomaji, choices: choices,
+                                                 hasComposition: false, isBusy: false, hasFullAccess: false), .adopt,
+                       "A deliberate space-bar choice is left alone")
+        XCTAssertEqual(Policy.rememberedDecision(stored: .japaneseRomaji, lastSeen: nil, current: .direct, choices: choices,
+                                                 hasComposition: false, isBusy: false, hasFullAccess: true), .switchTo(.japaneseRomaji),
+                       "With Full Access it opens in the language (and shows Couldn't load if it still can't be read)")
+    }
+
+    func testRememberedModeWaitsOnceThePersonHasTypedSinceTheKeyboardAppeared() {
+        typealias Policy = LanguageInputChoicePolicy
+        XCTAssertEqual(Policy.rememberedDecision(stored: .japaneseRomaji, lastSeen: nil, current: .direct, choices: [.direct, .japaneseRomaji],
+                                                 hasComposition: false, isBusy: false, hasTypedSinceAppear: true), .wait)
+        XCTAssertEqual(Policy.rememberedDecision(stored: .japaneseRomaji, lastSeen: nil, current: .direct, choices: [.direct, .japaneseRomaji],
+                                                 hasComposition: false, isBusy: false, hasTypedSinceAppear: false), .switchTo(.japaneseRomaji))
+        XCTAssertEqual(Policy.rememberedDecision(stored: .direct, lastSeen: .japaneseRomaji, current: .japaneseRomaji, choices: [.direct, .japaneseRomaji],
+                                                 hasComposition: false, isBusy: false, hasTypedSinceAppear: true), .wait,
+                       "Not even back to Direct Typing mid-typing; the next opening applies it")
+    }
+
+    func testFailedKeyboardSaveKeepsThePersonsInSessionChoice() {
+        typealias Policy = LanguageInputChoicePolicy
+        // Stored Mandarin (from the app), never seen by this keyboard; the person picks Japanese.
+        let failed = Policy.lastSeenAfterChoice(.japaneseRomaji, saved: false, storedBefore: .mandarinPinyin, previous: nil)
+        XCTAssertEqual(failed, .mandarinPinyin)
+        XCTAssertEqual(Policy.rememberedDecision(stored: .mandarinPinyin, lastSeen: failed, current: .japaneseRomaji,
+                                                 choices: [.direct, .japaneseRomaji, .mandarinPinyin],
+                                                 hasComposition: false, isBusy: false), .none,
+                       "The next refresh doesn't switch back to the older stored value")
+        // The app later picks Direct Typing: that newer value is followed.
+        XCTAssertEqual(Policy.rememberedDecision(stored: .direct, lastSeen: failed, current: .japaneseRomaji,
+                                                 choices: [.direct, .japaneseRomaji, .mandarinPinyin],
+                                                 hasComposition: false, isBusy: false), .switchTo(.direct))
+        XCTAssertEqual(Policy.lastSeenAfterChoice(.japaneseRomaji, saved: false, storedBefore: nil, previous: .direct), .direct)
+        XCTAssertEqual(Policy.lastSeenAfterChoice(.japaneseRomaji, saved: true, storedBefore: .mandarinPinyin, previous: nil), .japaneseRomaji)
+        XCTAssertEqual(Policy.rememberedDecision(stored: .japaneseRomaji, lastSeen: nil, current: .direct, choices: [.direct, .japaneseRomaji],
+                                                 hasComposition: false, isBusy: true), .wait, "No restore while a write is pending")
+    }
+
+    func testOnlyRealModeChangesAreStoredAndAppResetsKeepNewerKeyboardChoices() {
+        typealias Policy = LanguageInputChoicePolicy
+        XCTAssertFalse(Policy.choiceShouldBeStored(.direct, previous: .direct),
+                       "Another alphabet within Direct Typing never overwrites a pending app choice")
+        XCTAssertTrue(Policy.choiceShouldBeStored(.direct, previous: .japaneseRomaji))
+        XCTAssertTrue(Policy.choiceShouldBeStored(.japaneseRomaji, previous: .direct))
+        XCTAssertFalse(Policy.choiceShouldBeStored(.japaneseRomaji, previous: .japaneseRomaji))
+        XCTAssertFalse(Policy.choiceShouldBeStored(.koreanRomaja, previous: .direct))
+
+        XCTAssertTrue(Policy.appShouldStoreDirect(stored: .japaneseRomaji, dropped: .japaneseRomaji))
+        XCTAssertFalse(Policy.appShouldStoreDirect(stored: .mandarinPinyin, dropped: .japaneseRomaji),
+                       "A newer keyboard choice of another mode is kept")
+        XCTAssertFalse(Policy.appShouldStoreDirect(stored: .direct, dropped: .japaneseRomaji))
+        XCTAssertFalse(Policy.appShouldStoreDirect(stored: nil, dropped: .japaneseRomaji))
+        XCTAssertFalse(Policy.appShouldStoreDirect(stored: .direct, dropped: .direct))
+    }
+
+    // MARK: 1.5.1 — an enabled language the keyboard can't read
+
+    func testUnreadableEnabledModesStayInChoicesWithReason() {
+        var enabled = LanguageInputSettings.Value()
+        for mode in [LanguageInputMode.japaneseRomaji, .mandarinPinyin, .koreanRomaja, .koreanTwoSetHangul] {
+            enabled.setEnabled(true, for: mode)
+        }
+        let unavailable: [LanguageInputMode: LanguageModeUnavailability] = [
+            .mandarinPinyin: .unreadable, .koreanTwoSetHangul: .damaged, .koreanRomaja: .unreadable]
+        XCTAssertEqual(LanguageInputChoicePolicy.choices(enabled: enabled, ready: [.direct, .japaneseRomaji], unavailable: unavailable),
+                       [.direct, .japaneseRomaji, .mandarinPinyin],
+                       "Unreadable stays; damaged keeps today's handling; Romaja never appears")
+        XCTAssertEqual(LanguageInputChoicePolicy.choices(enabled: enabled, ready: [.direct],
+                                                         unavailable: [.japaneseRomaji: .missing, .mandarinPinyin: .mismatched]),
+                       [.direct], "Not downloaded or a different version: not offered")
+        enabled.setEnabled(false, for: .mandarinPinyin)
+        XCTAssertEqual(LanguageInputChoicePolicy.choices(enabled: enabled, ready: [.direct, .japaneseRomaji], unavailable: unavailable),
+                       [.direct, .japaneseRomaji], "Use in Keyboard off: excluded even when unreadable")
+        XCTAssertEqual(LanguageInputChoicePolicy.choices(enabled: .defaults, ready: [.direct], unavailable: [:]), [.direct],
+                       "No enabled language known (for example unreadable settings): nothing new")
+    }
+
+    func testUnreadablePanelStateFollowsFullAccessAndOnlyUnreadableReasons() {
+        XCTAssertEqual(LanguageUnreadableNotice.state(for: .japaneseRomaji, unavailable: .unreadable, hasFullAccess: false), .fullAccessRequired)
+        XCTAssertEqual(LanguageUnreadableNotice.state(for: .japaneseRomaji, unavailable: .unreadable, hasFullAccess: true), .couldNotLoad)
+        for reason in [LanguageModeUnavailability.missing, .damaged, .mismatched] {
+            XCTAssertNil(LanguageUnreadableNotice.state(for: .mandarinPinyin, unavailable: reason, hasFullAccess: false),
+                         "A missing download keeps Download required…")
+        }
+        XCTAssertNil(LanguageUnreadableNotice.state(for: .mandarinPinyin, unavailable: nil, hasFullAccess: false))
+        XCTAssertNil(LanguageUnreadableNotice.state(for: .direct, unavailable: .unreadable, hasFullAccess: false))
+        XCTAssertNil(LanguageUnreadableNotice.state(for: .koreanRomaja, unavailable: .unreadable, hasFullAccess: false))
+
+        let off = LanguageUnreadableNotice.fullAccessRequired
+        XCTAssertEqual(off.title(language: "日本語"), "Full Access required")
+        XCTAssertEqual(off.body(language: "日本語"), "日本語 needs Full Access. Allow Full Access for Uniboard in your keyboard settings to use it. Direct Typing is still available.")
+        XCTAssertEqual(off.compact(language: "日本語"), "Allow Full Access to use 日本語.")
+        XCTAssertEqual(off.accessibilityValue, "Needs Full Access")
+        let on = LanguageUnreadableNotice.couldNotLoad
+        XCTAssertEqual(on.title(language: "拼音"), "Couldn’t load 拼音")
+        XCTAssertEqual(on.body(language: "拼音"), "The keyboard couldn’t read 拼音 from Uniboard. Open Uniboard to check it in Languages. Direct Typing is still available.")
+        XCTAssertEqual(on.compact(language: "拼音"), "Couldn’t load 拼音. Open Uniboard to check it.")
+        XCTAssertEqual(on.accessibilityValue, "Couldn’t load")
+        for text in [off.body(language: "日本語"), on.body(language: "拼音"), on.compact(language: "拼音")] {
+            for forbidden in ["container", "App Group", "/", "error", "Switch to another keyboard"] {
+                XCTAssertFalse(text.contains(forbidden), text)
+            }
+        }
+        #if canImport(Darwin)
+        XCTAssertEqual(LanguageUnreadableCopy.list(["日本語", "拼音"], locale: Locale(identifier: "en_US")), "日本語 and 拼音")
+        #endif
+    }
 }

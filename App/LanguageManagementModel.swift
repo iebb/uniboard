@@ -47,7 +47,9 @@ final class LanguageManagementModel: ObservableObject {
     @Published private(set) var catalog: LanguagePackCatalog?
     @Published private(set) var mandarinDatabaseBytes: Int64?
     @Published private(set) var preferences = LanguageInputSettings.Value.defaults
-    @Published private(set) var selectedMode: LanguageInputMode = .direct // Session only, never exported.
+    /// The shared last-chosen mode (`LanguageInputLastMode`): the keyboard opens
+    /// in it, and a space-bar choice in the keyboard shows up here. Never exported.
+    @Published private(set) var selectedMode: LanguageInputMode = .direct
     @Published private(set) var installed: [LanguageInputMode: ValidatedInstalledLanguagePack] = [:]
     /// Valid pointer authority for removal, deliberately independent of readiness.
     @Published private(set) var removable: [LanguageInputMode: LanguagePackStore.RemovablePublication] = [:]
@@ -63,6 +65,10 @@ final class LanguageManagementModel: ObservableObject {
     /// Parent may post its cross-process settings notification here. No typed data.
     var onChange: (() -> Void)?
     private let worker: LanguageManagementWorker
+    private let lastMode: LanguageInputLastMode
+    /// Bumped by every write of the shared mode, so a refresh that read the
+    /// stored value before a newer select() can't restore the older value.
+    private var selectionGeneration = 0
     private var transfer: Task<Void, Never>?
     private var generation = UUID()
     private var progressGate = LanguageManagementProgressGate()
@@ -70,10 +76,14 @@ final class LanguageManagementModel: ObservableObject {
     // Default is the measured full-corpus output for the exact pinned compiler,
     // not a guessed generic SQLite size. Installation checks its actual size.
     init(root: URL?, settings: LanguageInputSettings = .shared,
+         lastMode: LanguageInputLastMode = .shared,
          mandarinDatabaseBytes: Int64? = LanguagePackCatalog.measuredMandarinDatabaseBytes,
          capacity: @escaping LanguagePackSpacePlan.CapacityProvider = { LanguagePackSpacePlan.availableCapacity(at: $0) }) {
-        worker = LanguageManagementWorker(root: root, settings: settings, capacity: capacity)
+        worker = LanguageManagementWorker(root: root, settings: settings, lastMode: lastMode, capacity: capacity)
+        self.lastMode = lastMode
         self.mandarinDatabaseBytes = mandarinDatabaseBytes
+        // selectedMode starts at Direct; the first refresh() adopts the stored
+        // mode once it knows that mode is downloaded and enabled (canSelect).
     }
 
     /// Only supply the measured full-corpus SQLite size from the audited compiler
@@ -87,7 +97,36 @@ final class LanguageManagementModel: ObservableObject {
     func isReady(_ mode: LanguageInputMode) -> Bool { mode == .direct || installed[mode] != nil }
     func isEnabled(_ mode: LanguageInputMode) -> Bool { preferences.isEnabled(mode) }
     func canSelect(_ mode: LanguageInputMode) -> Bool { isReady(mode) && isEnabled(mode) && mode != .koreanRomaja }
-    func select(_ mode: LanguageInputMode) { if canSelect(mode) { selectedMode = mode } }
+    /// A choice here is the shared last-chosen mode; the keyboard follows it.
+    func select(_ mode: LanguageInputMode) {
+        guard canSelect(mode) else { return }
+        selectedMode = mode
+        remember(mode)
+    }
+
+    /// Records the shared value and posts the existing payload-free notice.
+    /// A failed write leaves the keyboard's own choice; nothing else changes.
+    private func remember(_ mode: LanguageInputMode) {
+        selectionGeneration += 1
+        lastMode.save(mode)
+        onChange?()
+    }
+
+    /// Every place that drops a mode (no longer selectable, turned off or
+    /// removed) also stores Direct Typing, but only when the dropped mode is
+    /// what's stored: a newer keyboard choice of another mode is kept.
+    private func resetSelectionIfUnselectable(dropping extra: LanguageInputMode? = nil) {
+        var dropped = extra.map { [$0] } ?? []
+        if !canSelect(selectedMode) {
+            if selectedMode != .direct { dropped.append(selectedMode) }
+            selectedMode = .direct
+        }
+        guard !dropped.isEmpty else { return }
+        let stored = lastMode.load()
+        if dropped.contains(where: { LanguageInputChoicePolicy.appShouldStoreDirect(stored: stored, dropped: $0) }) {
+            remember(.direct)
+        }
+    }
 
     func status(_ mode: LanguageInputMode) -> String {
         if mode == .direct { return "Always available" }
@@ -122,6 +161,7 @@ final class LanguageManagementModel: ObservableObject {
     func refresh() {
         guard !hasOperation else { return }
         isChecking = true
+        let generation = selectionGeneration
         Task {
             let result = await worker.snapshot()
             preferences = result.preferences
@@ -130,7 +170,11 @@ final class LanguageManagementModel: ObservableObject {
             resourceProblems = result.problems
             if let value = result.catalog { catalog = value }
             if let problem = result.catalogProblem { errorMessage = problem }
-            if !canSelect(selectedMode) { selectedMode = .direct }
+            // Follow a choice made in the keyboard; a stored mode that isn't
+            // selectable here is left stored (the keyboard also ignores it).
+            // Skipped when select() wrote a newer value while this was reading.
+            if selectionGeneration == generation, let stored = result.lastMode, canSelect(stored) { selectedMode = stored }
+            resetSelectionIfUnselectable()
             isChecking = false
         }
     }
@@ -151,7 +195,8 @@ final class LanguageManagementModel: ObservableObject {
         Task {
             do {
                 preferences = try await worker.save(change)
-                if !canSelect(selectedMode) { selectedMode = .direct }
+                if case .enabled(let mode, false) = change { resetSelectionIfUnselectable(dropping: mode) }
+                else { resetSelectionIfUnselectable() }
                 onChange?()
             } catch { errorMessage = "Couldn’t save language settings. Your change hasn’t been saved. Try again." }
             isSaving = false
@@ -335,7 +380,7 @@ final class LanguageManagementModel: ObservableObject {
                 // Preferences are saved before deactivation. Live keyboard readers
                 // retain their immutable read lease; no files are deleted beneath them.
                 preferences = try await worker.save(.enabled(mode, false))
-                if selectedMode == mode { selectedMode = .direct }
+                resetSelectionIfUnselectable(dropping: mode) // Not selectable once turned off.
                 onChange?()
                 try await worker.remove(publication)
                 installed[mode] = nil; removable[mode] = nil; failures[mode] = nil
@@ -351,7 +396,7 @@ final class LanguageManagementModel: ObservableObject {
                 let current = await worker.snapshot()
                 preferences = current.preferences; installed = current.installed
                 removable = current.removable; resourceProblems = current.problems
-                if !canSelect(selectedMode) { selectedMode = .direct }
+                resetSelectionIfUnselectable()
             }
             operation = .idle; operatingMode = nil
         }
@@ -409,13 +454,16 @@ actor LanguageManagementWorker {
         let problems: [LanguageInputMode: String]
         let catalog: LanguagePackCatalog?
         let catalogProblem: String?
+        /// The shared last-chosen mode; nil when it couldn't be read.
+        var lastMode: LanguageInputMode? = nil
     }
     private let root: URL?
     private let settings: LanguageInputSettings
+    private let lastMode: LanguageInputLastMode
     private let capacity: LanguagePackSpacePlan.CapacityProvider
-    init(root: URL?, settings: LanguageInputSettings,
+    init(root: URL?, settings: LanguageInputSettings, lastMode: LanguageInputLastMode = .shared,
          capacity: @escaping LanguagePackSpacePlan.CapacityProvider = { LanguagePackSpacePlan.availableCapacity(at: $0) }) {
-        self.root = root; self.settings = settings; self.capacity = capacity
+        self.root = root; self.settings = settings; self.lastMode = lastMode; self.capacity = capacity
     }
 
     func snapshot() -> Snapshot {
@@ -461,7 +509,8 @@ actor LanguageManagementWorker {
             problems[.koreanTwoSetHangul] = "Shared language storage unavailable"
         }
         return Snapshot(preferences: settings.load(), installed: installed, removable: removable, problems: problems,
-                        catalog: catalog, catalogProblem: catalog == nil ? "Language-download information couldn’t be loaded. Existing downloads are kept. Try again." : nil)
+                        catalog: catalog, catalogProblem: catalog == nil ? "Language-download information couldn’t be loaded. Existing downloads are kept. Try again." : nil,
+                        lastMode: lastMode.load())
     }
 
     func save(_ change: PreferenceChange) throws -> LanguageInputSettings.Value {

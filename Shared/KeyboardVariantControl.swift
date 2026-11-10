@@ -368,12 +368,15 @@ final class KeyboardVariantButton: UIControl {
     private var popup: UIView?
     private var popupLayout: KeyboardVariantPopupLayout?
     private var popupLabels: [UILabel] = []
+    private var popupValues: [String] = []
     private var originalRect = CGRect.zero
     private var currentOptions: [String] = []
     private var configuredFont: UIFont = .systemFont(ofSize: 23)
     private var contentPosition: KeyboardKeyContentPosition = .center
     private var popupFont: ((String) -> UIFont)?
     private var displayText: (String) -> String = { $0 }
+    /// Optional quieter ink for a hold choice (an unreadable language); nil is `.label`.
+    private var optionInk: ((String) -> UIColor?)?
     private lazy var holdArbitration = UILongPressGestureRecognizer(target: self, action: #selector(arbitrateHold(_:)))
 
     init(interaction suppliedInteraction: KeyboardVariantInteraction? = nil) {
@@ -445,6 +448,7 @@ final class KeyboardVariantButton: UIControl {
                    popupFont: ((String) -> UIFont)? = nil,
                    displayText: @escaping (String) -> String = { $0 },
                    actionName: ((String) -> String)? = nil,
+                   optionInk: ((String) -> UIColor?)? = nil,
                    primaryActionName: String? = nil,
                    factory: @escaping KeyboardVariantInteraction.Factory) {
         let oldToken = interaction.token
@@ -461,6 +465,7 @@ final class KeyboardVariantButton: UIControl {
         isAccessibilityElement = enabled
         accessibilityElementsHidden = !enabled
         self.displayText = displayText
+        self.optionInk = optionInk
         self.contentPosition = contentPosition
         secondaryTitle.text = secondaryText
         secondaryTitle.isHidden = secondaryText?.isEmpty != false || symbol != nil
@@ -655,20 +660,24 @@ final class KeyboardVariantButton: UIControl {
             label.clipsToBounds = true
             label.text = index < values.count ? displayText(values[index]) : (inspect && index == values.count ? "Inspect" : "Edit")
             label.font = index < values.count ? (popupFont?(values[index]) ?? configuredFont) : .systemFont(ofSize: 12)
+            label.textColor = index < values.count ? (optionInk?(values[index]) ?? .label) : .label
             label.accessibilityIdentifier = "keyboard.variant.\(index)"
             popup.addSubview(label)
             return label
         }
         popupLayout = layout
+        popupValues = values
         self.popup = popup
         capturedContainer.addSubview(popup)
         return true
     }
-    private func removePopup() { popup?.removeFromSuperview(); popup = nil; popupLayout = nil; popupLabels = [] }
+    private func removePopup() { popup?.removeFromSuperview(); popup = nil; popupLayout = nil; popupLabels = []; popupValues = [] }
     private func highlight(_ index: Int?) {
+        let values = popupValues
         for (offset, label) in popupLabels.enumerated() {
             label.backgroundColor = offset == index ? tintColor : .clear
-            label.textColor = offset == index ? .white : .label
+            label.textColor = offset == index ? .white
+                : (offset < values.count ? (optionInk?(values[offset]) ?? .label) : .label)
         }
     }
 }

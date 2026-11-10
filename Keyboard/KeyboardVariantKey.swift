@@ -28,6 +28,8 @@ struct KeyboardVariantKey: UIViewRepresentable {
     var displayText: ((String) -> String)? = nil
     /// Names a hold choice for VoiceOver instead of its text and code points.
     var actionName: ((String) -> String)? = nil
+    /// Quieter ink for a hold choice; nil keeps the normal label color.
+    var optionInk: ((String) -> UIColor?)? = nil
     /// A named accessibility action that does what activating the key does.
     var primaryActionName: String? = nil
     /// Asked on each update; true once moves VoiceOver focus to this key.
@@ -43,7 +45,7 @@ struct KeyboardVariantKey: UIViewRepresentable {
             longPressOptions: longPressOptions, swipeUp: swipeUp, swipeDown: swipeDown, secondaryText: secondaryText, contentPosition: contentPosition,
             showsInspection: showsInspection, showsEditing: showsEditing, holdLabel: holdLabel,
             popupFont: { UnicodeFontSupport.font(for: symbolBoardPreview($0), size: fontSize, enabled: useUnicodeFonts, anchor: symbolBoardFontAnchor($0)) },
-            displayText: displayText ?? symbolBoardPreview, actionName: actionName,
+            displayText: displayText ?? symbolBoardPreview, actionName: actionName, optionInk: optionInk,
             primaryActionName: primaryActionName, factory: factory)
         view.tintColor = KeyboardPalette.accentUI
         view.accessibilityIdentifier = identifier

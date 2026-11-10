@@ -23,6 +23,19 @@ final class KeyboardViewController: UIInputViewController {
         let selection: [UInt8]?
     }
     private var compositionAnchor: CompositionAnchor?
+    /// The stored chosen mode (`LanguageInputLastMode`) this keyboard last
+    /// applied, wrote, or found stored when its own write failed. A choice it
+    /// couldn't save isn't undone by an older value.
+    private var lastSeenRememberedMode: LanguageInputMode?
+    /// Writes run off the main thread, in order; no restore while one is pending.
+    private let rememberedModeQueue = DispatchQueue(label: "ad.neko.uniboard.keyboard.last-mode", qos: .utility)
+    private var pendingRememberedWrites = 0
+    /// Any key touch, host edit or delete since viewWillAppear: the person has
+    /// started typing, so the remembered mode no longer switches by itself.
+    private var typedSinceAppear = false
+    /// One VoiceOver announcement of the unreadable-language panel per opening.
+    private var announcesUnreadablePanel = false
+    private var languageRefreshedSinceAppear = false
     /// Only these audited, non-host-writing transitions may continue without a
     /// verified post-write text anchor. Never put an arbitrary closure here.
     private enum InputModeTransition {
@@ -150,7 +163,10 @@ final class KeyboardViewController: UIInputViewController {
             return false
         }
         // Any key press keeps the preview caret solid for a moment (§1a).
-        keyTouchObserver.onKeyActivity = { [weak self] in self?.previewCursorControl?.noteCaretActivity() }
+        keyTouchObserver.onKeyActivity = { [weak self] in
+            self?.typedSinceAppear = true
+            self?.previewCursorControl?.noteCaretActivity()
+        }
         view.addGestureRecognizer(keyTouchObserver)
         model.presentationChanged = { [weak self] in self?.updateKeyboardHeight() }
         model.queryEdited = { [weak self] in
@@ -176,11 +192,13 @@ final class KeyboardViewController: UIInputViewController {
             if self.language.mode != .direct { self.model.synchronizeCapitalization(false) }
             self.applyPrimaryLanguage()
             self.updateKeyboardHeight()
+            self.announceUnreadablePanelIfNeeded()
         }
         language.validateAnchor = { [weak self] in
             guard let self else { return false }
             return self.compositionAnchor == nil || self.compositionAnchor == self.readCompositionAnchor()
         }
+        language.onRefreshed = { [weak self] in self?.languageDidRefresh() }
         applyPrimaryLanguage()
         model.inputModeChanged = { [weak self] in
             guard let self else { return }
@@ -197,6 +215,9 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillAppear(animated)
         model.refreshEditionFromAppSettings()
         invalidateEnglish()
+        announcesUnreadablePanel = true
+        languageRefreshedSinceAppear = false
+        typedSinceAppear = false
         language.refresh()
         synchronizeEnglishOptions()
         SymbolBoardStore.shared.refreshPages()
@@ -801,7 +822,8 @@ final class KeyboardViewController: UIInputViewController {
         switch transition {
         case .target(let id): switchInputTarget(id)
         case .directTyping:
-            language.select(.direct)
+            let previous = language.mode
+            if language.select(.direct) { rememberChosenMode(.direct, previous: previous) }
             model.synchronizeLanguageKeyboard()
         }
     }
@@ -1027,6 +1049,7 @@ final class KeyboardViewController: UIInputViewController {
 
     @discardableResult
     private func insertHostText(_ text: String, literalToken: UUID? = nil, resolvingComposition: Bool = true, onInserted: @escaping () -> Void = {}) -> Bool {
+        typedSinceAppear = true
         if resolvingComposition && !completingConversion && !language.rawInput.isEmpty {
             return finishConversionBefore { [weak self] in
                 guard let self, self.insertHostText(text, resolvingComposition: false, onInserted: onInserted) else { return }
@@ -1078,6 +1101,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func didEditHostText() {
+        typedSinceAppear = true
         doubleSpaceState.reset()
         model.hostDidEdit()
         synchronizeHostTraits()
@@ -1452,16 +1476,115 @@ final class KeyboardViewController: UIInputViewController {
     private func switchInputTarget(_ id: String) {
         invalidateEnglish()
         doubleSpaceState.reset(); expectedHostEdit = nil
+        let previous = language.mode
         if id.hasPrefix("mode:"), let mode = LanguageInputMode(rawValue: String(id.dropFirst(5))),
            mode != .direct, mode != .koreanRomaja {
             guard language.select(mode) else { return }
+            rememberChosenMode(mode, previous: previous)
             model.useConversionKeyboard()
         } else {
-            language.select(.direct)
+            // Another alphabet within Direct Typing stores nothing (see policy).
+            if language.select(.direct) { rememberChosenMode(.direct, previous: previous) }
             _ = model.selectLayout(id)
         }
         compositionAnchor = nil
         applyPrimaryLanguage(); synchronizeHostTraits(); updateKeyboardHeight()
+    }
+
+    // MARK: Remembered language (shared with the app's Languages screen)
+
+    /// A person's choice in the keyboard becomes the shared last-chosen mode.
+    /// Only a real mode change is stored (an alphabet switch within Direct
+    /// Typing never overwrites an app choice that's still pending). The read,
+    /// compare and write run on a utility queue; an unchanged value isn't
+    /// rewritten. Writing needs Full Access; without it, or on any failure, the
+    /// choice isn't remembered, but this keyboard keeps it for the session.
+    private func rememberChosenMode(_ mode: LanguageInputMode, previous: LanguageInputMode) {
+        guard LanguageInputChoicePolicy.choiceShouldBeStored(mode, previous: previous) else { return }
+        let canWrite = hasFullAccess
+        pendingRememberedWrites += 1
+        rememberedModeQueue.async {
+            let store = LanguageInputLastMode.shared
+            let storedBefore = store.load()
+            let saved = storedBefore == mode || (canWrite && store.save(mode))
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.pendingRememberedWrites -= 1
+                self.lastSeenRememberedMode = LanguageInputChoicePolicy.lastSeenAfterChoice(
+                    mode, saved: saved, storedBefore: storedBefore, previous: self.lastSeenRememberedMode)
+            }
+        }
+    }
+
+    /// After every refresh (appearance or the app's notification): open in the
+    /// last-chosen mode when it's offered, never over unfinished text or a
+    /// conversion in progress. An unavailable mode leaves the stored value alone.
+    private func languageDidRefresh() {
+        languageRefreshedSinceAppear = true
+        let decision = LanguageInputChoicePolicy.rememberedDecision(
+            stored: LanguageInputLastMode.shared.load(), lastSeen: lastSeenRememberedMode,
+            current: language.mode, choices: language.enabledModes,
+            hasComposition: language.hasComposition,
+            isBusy: language.isConverting || completingConversion || pendingConversionAction != nil
+                || model.finishingConversion || model.expandedConversion || model.isSearching
+                || pendingRememberedWrites > 0,
+            hasTypedSinceAppear: typedSinceAppear, hasFullAccess: hasFullAccess)
+        switch decision {
+        case .adopt: lastSeenRememberedMode = language.mode
+        case .switchTo(let mode): if restoreRememberedMode(mode) { lastSeenRememberedMode = mode }
+        case .none, .wait: break
+        }
+        announceUnreadablePanelIfNeeded()
+    }
+
+    /// The space-bar path's local steps, without writing the value back.
+    private func restoreRememberedMode(_ mode: LanguageInputMode) -> Bool {
+        guard language.rawInput.isEmpty, !model.finishingConversion else { return false }
+        invalidateEnglish()
+        doubleSpaceState.reset(); expectedHostEdit = nil
+        guard language.select(mode) else { return false }
+        model.synchronizeLanguageKeyboard()
+        compositionAnchor = nil
+        applyPrimaryLanguage(); synchronizeHostTraits(); updateKeyboardHeight()
+        return true
+    }
+
+    /// Why an offered language can't be read, by what this keyboard knows.
+    fileprivate func unreadableNotice(for mode: LanguageInputMode) -> LanguageUnreadableNotice? {
+        LanguageUnreadableNotice.state(for: mode, unavailable: language.unavailableModes[mode], hasFullAccess: hasFullAccess)
+    }
+
+    /// Non-nil while the recovery panel explains an unreadable selected language.
+    fileprivate var unreadablePanelNotice: LanguageUnreadableNotice? {
+        guard language.mode != .direct, !language.isLoading, language.status == .missingResources else { return nil }
+        return unreadableNotice(for: language.mode)
+    }
+
+    /// The recovery panel is the visible content (same branch order as the view):
+    /// not under Unicode/search/symbol pages, a finish/expanded panel, or a cover.
+    private var unreadablePanelIsOnScreen: Bool {
+        unreadablePanelNotice != nil && !model.showsUnicode && !model.isSearching
+            && !model.finishingConversion && !model.expandedConversion
+            && !model.hasKeyboardPanel && !model.hasSymbolBoardOverlay
+    }
+
+    /// Announce the panel's title once per keyboard opening, after the first
+    /// refresh since appearing settles, and only while the panel is on screen.
+    /// Later refreshes never repeat it. Focus is not moved.
+    private func announceUnreadablePanelIfNeeded() {
+        guard announcesUnreadablePanel, languageRefreshedSinceAppear, !language.isLoading else { return }
+        guard let notice = unreadablePanelNotice else { announcesUnreadablePanel = false; return }
+        guard unreadablePanelIsOnScreen else { return } // Still once, when it's first visible.
+        announcesUnreadablePanel = false
+        guard UIAccessibility.isVoiceOverRunning else { return }
+        let mode = language.mode
+        let title = notice.title(language: keyboardModeLabel(mode))
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard let self, self.language.mode == mode, self.unreadablePanelNotice == notice,
+                  self.unreadablePanelIsOnScreen else { return }
+            UIAccessibility.post(notification: .announcement, argument: title)
+        }
     }
 
     private func makeFavoritesActions(renderedMode: UUID) -> KeyboardVariantActions? {
@@ -1579,6 +1702,7 @@ final class KeyboardViewController: UIInputViewController {
                   let document = self.currentDocumentIdentifier else { return nil }
             return KeyboardDeleteContext(modeIdentifier: self.model.inputModeID, isQuery: self.model.isSearching, documentIdentifier: document)
         }, delete: { [weak self] in
+            self?.typedSinceAppear = true
             if isQuery { self?.invalidateEnglish(); self?.model.deleteQueryCharacter() }
             else {
                 if let self, self.language.backspace() {
@@ -3731,7 +3855,7 @@ private struct UnicodeKeyboardView: View {
     private var showsCompositionShelf: Bool {
         !model.showsUnicode && !model.expandedConversion && !model.finishingConversion
             && (language.mode != .direct || LanguageInputSettings.englishAssistanceAvailable)
-            && (language.mode == .koreanTwoSetHangul || (!isConversionLoading && !needsConversionRecovery)) && model.compositionShelfHeight > 0
+            && ((language.mode == .koreanTwoSetHangul && unreadableNotice == nil) || (!isConversionLoading && !needsConversionRecovery)) && model.compositionShelfHeight > 0
     }
     private var showsEnglishShelf: Bool { showsCompositionShelf && language.mode == .direct }
     // English owns the complete 44-point band. Keep baseline insets when absent,
@@ -3778,7 +3902,7 @@ private struct UnicodeKeyboardView: View {
                     } else if isConversionLoading && language.mode != .koreanTwoSetHangul {
                         // Unmount normal keys (including AX) until activation can retain input.
                         conversionLoadingPanel
-                    } else if needsConversionRecovery && language.mode != .koreanTwoSetHangul {
+                    } else if needsConversionRecovery && (language.mode != .koreanTwoSetHangul || unreadableNotice != nil) {
                         conversionRecoveryPanel
                     } else {
                         typingContent
@@ -3972,17 +4096,38 @@ private struct UnicodeKeyboardView: View {
         .accessibilityIdentifier("keyboard.conversion.loading")
     }
 
+    /// An enabled language the keyboard can't read (LanguageUnreadableNotice).
+    private var unreadableNotice: LanguageUnreadableNotice? {
+        needsConversionRecovery ? controller?.unreadablePanelNotice : nil
+    }
+
     private var conversionRecoveryPanel: some View {
         let token = language.state.token
+        let unreadable = unreadableNotice
         return ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                Label(language.name, systemImage: "exclamationmark.triangle").font(.headline)
-                    .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
-                Text(conversionStatusText ?? "Conversion unavailable.")
-                    .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let unreadable {
+                    // Title, body, Switch, then unfinished-text controls (VoiceOver order).
+                    Label(unreadable.title(language: keyboardModeLabel(language.mode)), systemImage: "exclamationmark.triangle")
+                        .font(.headline)
+                        .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("keyboard.conversion.unreadable.title")
+                    Text(unreadable.body(language: keyboardModeLabel(language.mode)))
+                        .font(.body)
+                        .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("keyboard.conversion.unreadable.body")
+                } else {
+                    Label(language.name, systemImage: "exclamationmark.triangle").font(.headline)
+                        .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                    Text(conversionStatusText ?? "Conversion unavailable.")
+                        .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                // The unreadable panel replaces this general Full Access help.
                 if language.status == .missingResources,
-                   language.mode.conversionEngineABI != nil {
+                   language.mode.conversionEngineABI != nil, unreadable == nil {
                     Text("Full Access required").font(.subheadline.weight(.semibold))
                         .foregroundStyle(KeyboardLanguageInformativeInk.secondary)
                     Text("Allow Full Access to use downloaded languages. Direct Typing is still available.")
@@ -5115,10 +5260,21 @@ private struct UnicodeKeyboardView: View {
                     displayText: { keyboardInputTargetLabel($0) },
                     actionName: { id in
                         if id.hasPrefix("mode:"), let mode = LanguageInputMode(rawValue: String(id.dropFirst(5))) {
+                            // A custom action has no value/hint: an unreadable
+                            // language appends both ("Needs Full Access. Allow…").
+                            if let notice = controller?.unreadableNotice(for: mode) {
+                                return "Switch to \(KeyboardLanguageCoordinator.name(for: mode)), \(notice.accessibilityValue). \(notice.compact(language: keyboardModeLabel(mode)))"
+                            }
                             return "Switch to \(KeyboardLanguageCoordinator.name(for: mode))"
                         }
                         return id == "english-undo" ? "Undo Correction" : id.hasPrefix("english-suggestion:")
                             ? "Use \(keyboardInputTargetLabel(id))" : "Switch to \(keyboardInputTargetLabel(id))"
+                    },
+                    optionInk: { id in
+                        // Same label, quieter informative ink; still selectable.
+                        guard id.hasPrefix("mode:"), let mode = LanguageInputMode(rawValue: String(id.dropFirst(5))),
+                              controller?.unreadableNotice(for: mode) != nil else { return nil }
+                        return KeyboardLanguageInformativeInk.secondaryUI
                     },
                     factory: { [mode = model.inputModeID] in layoutActions(mode) })
                     .frame(width: plan.spaceWidth, height: controlHeight).keyboardKeySurface()

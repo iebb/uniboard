@@ -111,7 +111,9 @@ final class KeyboardConversionViewsSourceTests: XCTestCase {
         XCTAssertFalse(text.contains("Downloaded-file access with Full Access off and on still needs device verification."))
         XCTAssertTrue(text.contains("Japanese and Mandarin downloaded language files require Full Access in the keyboard."))
         XCTAssertTrue(text.contains("Conversion uses local data; the containing app contacts the named source hosts only to download resources. The keyboard doesn’t download resources."))
-        XCTAssertTrue(text.contains("Downloading and enabling are separate choices. Selecting here is session-only; the keyboard’s own mode selection is independent."))
+        XCTAssertTrue(text.contains("Downloading and turning on are separate choices. The keyboard opens in the input mode you select here or with the space bar, and the two stay in sync. Without Full Access, it opens in Direct Typing."))
+        XCTAssertTrue(text.contains("Label(\"Keyboard Opens in This Mode\", systemImage: \"checkmark\")"))
+        XCTAssertFalse(text.contains("session-only"), "The selected mode is remembered and shared with the keyboard")
     }
 
     func testFullAccessRecoveryHelpIsMissingResourceCJKOnlyAndKeepsActualErrorAndDirectEscape() throws {
@@ -641,6 +643,104 @@ final class KeyboardConversionViewsSourceTests: XCTestCase {
         XCTAssertFalse(text.contains("minimumScaleFactor"))
         XCTAssertTrue(text.contains(".frame(height: 30)"))
         XCTAssertTrue(text.contains(".frame(height: compact ? 44 : 74)"))
+    }
+
+    // MARK: 1.5.1 — unreadable enabled language and the shared last-chosen mode
+
+    func testUnreadableLanguagePanelReplacesFullAccessFootnotesAndKeepsEscapes() throws {
+        let text = try source("Keyboard/KeyboardViewController.swift")
+        let panel = try block(in: text, startingAt: "    private var conversionRecoveryPanel: some View {")
+        let unreadable = try block(in: panel, startingAt: "                if let unreadable {")
+        XCTAssertTrue(unreadable.contains("Label(unreadable.title(language: keyboardModeLabel(language.mode)), systemImage: \"exclamationmark.triangle\")"))
+        XCTAssertTrue(unreadable.contains(".font(.headline)"))
+        XCTAssertTrue(unreadable.contains("Text(unreadable.body(language: keyboardModeLabel(language.mode)))"))
+        XCTAssertTrue(unreadable.contains(".fixedSize(horizontal: false, vertical: true)"))
+        XCTAssertTrue(unreadable.contains("KeyboardLanguageInformativeInk.secondary"))
+        XCTAssertFalse(unreadable.contains("Button("), "No Open Uniboard button; the panel never changes settings")
+        XCTAssertFalse(unreadable.contains(".accessibilityHidden("), "VoiceOver reads the visible title and body")
+        // Today's general Full Access subheadline and footnotes are suppressed in the new state.
+        XCTAssertTrue(panel.contains("if language.status == .missingResources,\n                   language.mode.conversionEngineABI != nil, unreadable == nil {"))
+        // Order: title, body, Switch to Direct Typing, then unfinished-text controls.
+        let title = try XCTUnwrap(panel.range(of: "unreadable.title("))
+        let body = try XCTUnwrap(panel.range(of: "unreadable.body("))
+        let escape = try XCTUnwrap(panel.range(of: "Button(\"Switch to Direct Typing\") { controller?.switchToDirectTyping() }"))
+        let keep = try XCTUnwrap(panel.range(of: "Button(\"Keep Typed Text\")"))
+        XCTAssertLessThan(title.lowerBound, body.lowerBound)
+        XCTAssertLessThan(body.lowerBound, escape.lowerBound)
+        XCTAssertLessThan(escape.lowerBound, keep.lowerBound)
+        XCTAssertTrue(panel.contains("ScrollView {"), "Scrollable at large text and in landscape")
+        // The existing Download required state is unchanged.
+        XCTAssertTrue(text.contains("case .missingResources: return \"Download required. Open Uniboard to manage languages.\""))
+        // Two-Set Hangul also gets the panel (instead of its shelf) only in this state.
+        XCTAssertTrue(text.contains("} else if needsConversionRecovery && (language.mode != .koreanTwoSetHangul || unreadableNotice != nil) {"))
+        XCTAssertTrue(text.contains("((language.mode == .koreanTwoSetHangul && unreadableNotice == nil) || (!isConversionLoading && !needsConversionRecovery))"))
+        // Panel state chosen by the keyboard's own Full Access state.
+        let state = try block(in: text, startingAt: "    fileprivate func unreadableNotice(for mode: LanguageInputMode)")
+        XCTAssertTrue(state.contains("LanguageUnreadableNotice.state(for: mode, unavailable: language.unavailableModes[mode], hasFullAccess: hasFullAccess)"))
+        // One announcement of the title per opening, never on later refreshes; focus never moves.
+        let announce = try block(in: text, startingAt: "    private func announceUnreadablePanelIfNeeded()")
+        XCTAssertTrue(announce.contains("announcesUnreadablePanel = false"))
+        XCTAssertTrue(announce.contains("guard unreadablePanelIsOnScreen else { return }"), "Only while the panel is actually visible")
+        XCTAssertTrue(announce.contains("UIAccessibility.post(notification: .announcement, argument: title)"))
+        XCTAssertFalse(announce.contains(".layoutChanged"))
+        XCTAssertFalse(announce.contains(".screenChanged"))
+        let appear = try block(in: text, startingAt: "    override func viewWillAppear(_ animated: Bool)")
+        XCTAssertLessThan(try XCTUnwrap(appear.range(of: "announcesUnreadablePanel = true")).lowerBound,
+                          try XCTUnwrap(appear.range(of: "language.refresh()")).lowerBound)
+    }
+
+    func testUnreadableModesStayInSpaceBarChoicesWithQuieterInkAndSpokenReason() throws {
+        let text = try source("Keyboard/KeyboardViewController.swift")
+        XCTAssertTrue(text.contains("ids += language.enabledModes.filter { $0 != .direct && $0 != .koreanRomaja }"))
+        XCTAssertTrue(text.contains("return \"Switch to \\(KeyboardLanguageCoordinator.name(for: mode)), \\(notice.accessibilityValue). \\(notice.compact(language: keyboardModeLabel(mode)))\""))
+        XCTAssertTrue(text.contains("return KeyboardLanguageInformativeInk.secondaryUI"))
+        let coordinator = try source("Keyboard/KeyboardLanguageCoordinator.swift")
+        let refresh = try block(in: coordinator, startingAt: "    func refreshResources() async")
+        XCTAssertTrue(refresh.contains("root = rootProvider()"), "The store root is re-resolved on every refresh")
+        XCTAssertTrue(refresh.contains("enabledModes = LanguageInputChoicePolicy.choices(enabled: preferences, ready: ready, unavailable: unavailableModes)"))
+        XCTAssertFalse(refresh.contains("enabledModes = ready.filter"), "Unreadable enabled languages must not silently vanish")
+        let worker = try block(in: coordinator, startingAt: "    func availableModes(")
+        for reason in ["case .unreadable: result.unavailable[mode] = .unreadable",
+                       "case .absent, .missing: result.unavailable[mode] = .missing",
+                       "case .corrupt, .incompatible: result.unavailable[mode] = .damaged",
+                       "} else { result.unavailable[mode] = .mismatched }"] {
+            XCTAssertTrue(worker.contains(reason), reason)
+        }
+        let activate = try block(in: coordinator, startingAt: "    func activate(mode:")
+        XCTAssertTrue(activate.contains("case .unreadable:\n            return .init(lease: nil, scratch: nil, status: .missingResources, unreadable: true)"))
+    }
+
+    func testSwitchToDirectTypingAndSpaceBarChoicesWriteTheRememberedMode() throws {
+        let text = try source("Keyboard/KeyboardViewController.swift")
+        let transition = try block(in: text, startingAt: "    private func performInputModeTransition(")
+        XCTAssertTrue(transition.contains("if language.select(.direct) { rememberChosenMode(.direct, previous: previous) }"),
+                      "Switch to Direct Typing in the panel stores Direct as the remembered language")
+        let target = try block(in: text, startingAt: "    private func switchInputTarget(")
+        XCTAssertTrue(target.contains("guard language.select(mode) else { return }\n            rememberChosenMode(mode, previous: previous)"))
+        XCTAssertTrue(target.contains("if language.select(.direct) { rememberChosenMode(.direct, previous: previous) }"))
+        let remember = try block(in: text, startingAt: "    private func rememberChosenMode(")
+        XCTAssertTrue(remember.contains("LanguageInputChoicePolicy.choiceShouldBeStored(mode, previous: previous)"))
+        XCTAssertTrue(remember.contains("rememberedModeQueue.async {"), "No file write or fsync on the main thread")
+        XCTAssertTrue(remember.contains("storedBefore == mode || (canWrite && store.save(mode))"), "An unchanged value isn't rewritten")
+        XCTAssertTrue(remember.contains("LanguageInputChoicePolicy.lastSeenAfterChoice("))
+        let refreshed = try block(in: text, startingAt: "    private func languageDidRefresh()")
+        XCTAssertTrue(refreshed.contains("LanguageInputChoicePolicy.rememberedDecision("))
+        XCTAssertTrue(refreshed.contains("hasComposition: language.hasComposition"))
+        XCTAssertTrue(refreshed.contains("language.isConverting"))
+        XCTAssertTrue(refreshed.contains("hasTypedSinceAppear: typedSinceAppear, hasFullAccess: hasFullAccess"))
+        XCTAssertTrue(refreshed.contains("pendingRememberedWrites > 0"))
+        XCTAssertFalse(refreshed.contains(".save("), "Restoring never writes the stored value back")
+        let restore = try block(in: text, startingAt: "    private func restoreRememberedMode(")
+        XCTAssertTrue(restore.contains("guard language.select(mode) else { return false }"))
+
+        let app = try source("App/LanguageManagementModel.swift")
+        let select = try block(in: app, startingAt: "    func select(_ mode: LanguageInputMode) {")
+        XCTAssertTrue(select.contains("remember(mode)"))
+        let remembered = try block(in: app, startingAt: "    private func remember(_ mode: LanguageInputMode) {")
+        XCTAssertTrue(remembered.contains("lastMode.save(mode)"))
+        XCTAssertTrue(remembered.contains("onChange?()"), "Posts the existing payload-free Darwin notification")
+        XCTAssertFalse(app.contains("if !canSelect(selectedMode) { selectedMode = .direct }"),
+                       "Every reset also stores Direct Typing")
     }
 }
 #endif

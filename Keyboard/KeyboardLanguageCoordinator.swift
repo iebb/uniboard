@@ -3,6 +3,8 @@ import Combine
 
 /// Session-only language input. This object never owns a textDocumentProxy and
 /// never persists a selected mode, an anchor, raw input, or candidate output.
+/// (The controller alone records the person's chosen mode in
+/// `LanguageInputLastMode`; this object only selects.)
 /// The controller resolves deliberate transitions BEFORE calling select(_:), and
 /// applies returned effects synchronously, without yielding to another document.
 @MainActor
@@ -13,9 +15,16 @@ final class KeyboardLanguageCoordinator: ObservableObject {
     @Published private(set) var resourceStatus: LanguageConversionStatus = .ready
     @Published private(set) var isLoading = false
     @Published private(set) var isConverting = false
+    /// Why each enabled-but-not-ready mode isn't ready, from the latest refresh
+    /// or activation. `.unreadable` modes stay in `enabledModes` (the space-bar
+    /// list) so choosing one can explain itself instead of silently vanishing.
+    @Published private(set) var unavailableModes: [LanguageInputMode: LanguageModeUnavailability] = [:]
 
     /// Called AFTER publication; the controller can invalidate intrinsic height.
     var onChange: (() -> Void)?
+    /// Called once a refresh has published its choices (appearance or the app's
+    /// notification). The controller applies the remembered mode from here.
+    var onRefreshed: (() -> Void)?
     /// Required for accepting results or returning any host-write effect. Capture
     /// the original field/cursor context before the FIRST append. This closure
     /// must validate that captured anchor, not merely report the current field.
@@ -43,7 +52,10 @@ final class KeyboardLanguageCoordinator: ObservableObject {
         }
     }
 
-    private let root: URL?
+    /// Re-resolved on every refresh (a cheap path lookup), so a container that
+    /// was unavailable at launch is picked up without restarting the keyboard.
+    private let rootProvider: () -> URL?
+    private var root: URL?
     private let settings: LanguageInputSettings
     private let indexDirectory: () -> URL?
     private let worker = KeyboardLanguageResourceWorker()
@@ -61,12 +73,15 @@ final class KeyboardLanguageCoordinator: ObservableObject {
     /// root MUST be the same dedicated pack-store root used by the containing
     /// app. nil means inaccessible storage; it never guesses a different store.
     /// Custom words are read ONLY from the compiled SQLite index, never JSON.
-    init(root: URL? = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: UnicodeEditionSettings.groupIdentifier)?.appendingPathComponent("LanguagePacks", isDirectory: true),
+    init(root: @escaping () -> URL? = {
+             FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: UnicodeEditionSettings.groupIdentifier)?.appendingPathComponent("LanguagePacks", isDirectory: true)
+         },
          settings: LanguageInputSettings = .shared,
          indexDirectory: @escaping () -> URL? = {
              FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: UnicodeEditionSettings.groupIdentifier)?.appendingPathComponent("MyWords", isDirectory: true)
          }) {
-        self.root = root
+        self.rootProvider = root
+        self.root = root()
         self.settings = settings
         self.indexDirectory = indexDirectory
     }
@@ -81,15 +96,24 @@ final class KeyboardLanguageCoordinator: ObservableObject {
     /// Chooser metadata and active-only index opening run on the worker. A refresh
     /// never enables a mode, silently switches an unfinished buffer, or writes.
     func refresh() {
-        Task { [weak self] in await self?.refreshResources() }
+        // Claim the refresh now, so an older refresh that finishes before this
+        // Task starts can't publish (or report `onRefreshed`) as the current one.
+        let ticket = UUID()
+        refreshID = ticket
+        Task { [weak self] in
+            guard let self, self.refreshID == ticket else { return }
+            await self.refreshResources()
+        }
     }
 
     func refreshResources() async {
         let id = UUID()
         refreshID = id
+        root = rootProvider()
         preferences = settings.load()
         let requested = preferences.enabledModes.filter { $0 != .koreanRomaja }
-        let ready = await worker.availableModes(root: root, requested: requested, references: preferences.packReferences)
+        let availability = await worker.availableModes(root: root, requested: requested, references: preferences.packReferences)
+        let ready = availability.ready
         guard refreshID == id, !Task.isCancelled else { return }
         // Only the selected conversion mode may open My Words. Readers are
         // operation-local; a switch cancels queued work and rejects late results.
@@ -109,8 +133,9 @@ final class KeyboardLanguageCoordinator: ObservableObject {
         }
         // Preferences could have changed during metadata/index inspection.
         preferences = settings.load()
-        enabledModes = ready.filter { preferences.isEnabled($0) && $0 != .koreanRomaja }
-        if !enabledModes.contains(.direct) { enabledModes.insert(.direct, at: 0) }
+        unavailableModes = availability.unavailable.filter { preferences.isEnabled($0.key) }
+        // Ready modes AND enabled modes that can't be read; never disabled or Romaja.
+        enabledModes = LanguageInputChoicePolicy.choices(enabled: preferences, ready: ready, unavailable: unavailableModes)
         _ = revalidateResources(checkDictionary: false)
         if mode != .direct {
             if !preferences.isEnabled(mode), !hasComposition {
@@ -123,6 +148,7 @@ final class KeyboardLanguageCoordinator: ObservableObject {
             }
         }
         changed()
+        onRefreshed?()
     }
 
     /// false means unavailable OR unfinished text requires the controller's
@@ -299,8 +325,11 @@ final class KeyboardLanguageCoordinator: ObservableObject {
             guard self.activationID == id, self.mode == selected,
                   !Task.isCancelled else { return }
             self.preferences = self.settings.load()
+            // Every outcome below re-derives why this mode is unavailable, so a
+            // stale "unreadable" never outlives a missing/damaged/ready result.
             guard self.preferences.isEnabled(selected) else {
                 self.isLoading = false
+                self.unavailableModes[selected] = nil
                 self.revokeActiveResource(status: .missingResources)
                 self.finishUnavailableCompositionIfNeeded()
                 self.changed()
@@ -309,6 +338,8 @@ final class KeyboardLanguageCoordinator: ObservableObject {
             do {
                 guard let lease = activation.lease else {
                     self.isLoading = false
+                    self.unavailableModes[selected] = activation.unreadable ? .unreadable
+                        : activation.status == .failed ? .damaged : .missing
                     self.resourceStatus = activation.status
                     self.changed()
                     return
@@ -317,6 +348,7 @@ final class KeyboardLanguageCoordinator: ObservableObject {
                 // a lease whose publication was removed/replaced while resolving.
                 guard let root, try LanguagePackStore(root: root).activeRevision(modeID: selected.rawValue) == lease.pack.revision else {
                     self.isLoading = false
+                    self.unavailableModes[selected] = .missing
                     self.resourceStatus = .missingResources
                     self.changed()
                     return
@@ -324,6 +356,7 @@ final class KeyboardLanguageCoordinator: ObservableObject {
                 guard self.preferences.isEnabled(selected),
                       Self.matchesReference(lease.pack.descriptor, references: self.preferences.packReferences) else {
                     self.isLoading = false
+                    self.unavailableModes[selected] = .mismatched
                     self.revokeActiveResource(status: .missingResources)
                     self.changed()
                     return
@@ -351,6 +384,7 @@ final class KeyboardLanguageCoordinator: ObservableObject {
                     throw KeyboardLanguageResourceError.unavailable
                 }
                 self.owner = KeyboardLanguageEngineOwner(engine: engine, descriptor: lease.pack.descriptor, scratch: activation.scratch)
+                self.unavailableModes[selected] = nil
                 self.state.changeResources(packRevision: lease.pack.revision, dictionaryRevision: selected.supportsConversionMyWords ? self.dictionaryRevision : 0)
                 self.resourceStatus = status
                 self.isLoading = false
@@ -358,6 +392,7 @@ final class KeyboardLanguageCoordinator: ObservableObject {
                 self.changed()
             } catch {
                 self.isLoading = false
+                self.unavailableModes[selected] = .damaged
                 self.resourceStatus = .failed
                 self.changed()
             }
@@ -592,27 +627,47 @@ private actor KeyboardLanguageResourceWorker {
         let scratch: KeyboardLanguageScratch?
         let status: LanguageConversionStatus
         var mapping: KoreanHangulComposer.KeyMapping? = nil
+        /// The files (or the shared container) couldn't be read at all.
+        var unreadable = false
+    }
+    struct Availability: Sendable {
+        var ready: [LanguageInputMode] = [.direct]
+        /// One reason per requested mode that isn't ready.
+        var unavailable: [LanguageInputMode: LanguageModeUnavailability] = [:]
     }
     func availableModes(root: URL?, requested: [LanguageInputMode],
-                        references: [LanguageInputSettings.PackReference]) -> [LanguageInputMode] {
-        guard let root else { return [.direct] }
+                        references: [LanguageInputSettings.PackReference]) -> Availability {
+        var result = Availability()
+        let modes = requested.filter { $0 != .direct && $0 != .koreanRomaja && $0.conversionEngineABI != nil }
+        // No container: an enabled language can't be read, not "not downloaded".
+        guard let root else {
+            for mode in modes { result.unavailable[mode] = .unreadable }
+            return result
+        }
         let store = LanguagePackStore(root: root)
-        var ready: [LanguageInputMode] = [.direct]
-        for mode in requested where mode != .direct && mode != .koreanRomaja {
+        for mode in modes {
             guard let abi = mode.conversionEngineABI else { continue }
-            if case .available(let metadata) = store.publishedMetadata(modeID: mode.rawValue, engineABI: abi),
-               KeyboardLanguageCoordinator.matchesReference(metadata.descriptor, references: references) {
-                ready.append(mode)
+            switch store.publishedMetadata(modeID: mode.rawValue, engineABI: abi) {
+            case .available(let metadata):
+                if KeyboardLanguageCoordinator.matchesReference(metadata.descriptor, references: references) {
+                    result.ready.append(mode)
+                } else { result.unavailable[mode] = .mismatched }
+            case .unreadable: result.unavailable[mode] = .unreadable
+            case .absent, .missing: result.unavailable[mode] = .missing
+            case .corrupt, .incompatible: result.unavailable[mode] = .damaged
             }
         }
-        return ready
+        return result
     }
 
     /// Fresh region transfer: this actor NEVER retains the lease or scratch.
     /// No unchecked Sendable escape is needed for a mutable converter's lease.
     func activate(mode: LanguageInputMode, root: URL?) -> sending Activation {
-        guard !Task.isCancelled, let root, let abi = mode.conversionEngineABI else {
+        guard !Task.isCancelled, let abi = mode.conversionEngineABI else {
             return .init(lease: nil, scratch: nil, status: .missingResources)
+        }
+        guard let root else {
+            return .init(lease: nil, scratch: nil, status: .missingResources, unreadable: true)
         }
         switch LanguagePackStore(root: root).resolve(modeID: mode.rawValue, engineABI: abi) {
         case .available(let lease):
@@ -630,7 +685,9 @@ private actor KeyboardLanguageResourceWorker {
                 try Task.checkCancellation()
                 return .init(lease: lease, scratch: scratch, status: .ready, mapping: mapping)
             } catch { return .init(lease: nil, scratch: nil, status: .failed) }
-        case .absent, .missing, .unreadable:
+        case .unreadable:
+            return .init(lease: nil, scratch: nil, status: .missingResources, unreadable: true)
+        case .absent, .missing:
             return .init(lease: nil, scratch: nil, status: .missingResources)
         case .incompatible, .corrupt:
             return .init(lease: nil, scratch: nil, status: .failed)

@@ -203,7 +203,8 @@ private struct LanguageModeDetailView: View {
                 } else {
                     Text(mode.summary)
                     Text(model.status(mode)).font(.subheadline)
-                    if model.selectedMode == mode { Label("Selected in this session", systemImage: "checkmark") }
+                    // COPY: Camo — the shared last-chosen mode (LanguageInputLastMode).
+                    if model.selectedMode == mode { Label("Keyboard Opens in This Mode", systemImage: "checkmark") }
                     if mode != .direct {
                         Toggle("Use in Keyboard", isOn: Binding(get: { model.isEnabled(mode) }, set: { model.setEnabled($0, for: mode) }))
                             .disabled(!model.isReady(mode) || model.hasOperation)
@@ -214,7 +215,8 @@ private struct LanguageModeDetailView: View {
                 }
             } footer: {
                 if mode != .direct && mode != .koreanRomaja {
-                    Text("Downloading and enabling are separate choices. Selecting here is session-only; the keyboard’s own mode selection is independent.")
+                    // COPY: Camo
+                    Text("Downloading and turning on are separate choices. The keyboard opens in the input mode you select here or with the space bar, and the two stay in sync. Without Full Access, it opens in Direct Typing.")
                 }
             }
             if mode == .japaneseRomaji { japaneseDownload }

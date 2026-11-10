@@ -5,11 +5,17 @@ import UIKit.UIGestureRecognizerSubclass
 /// Solid informative ink, shared by language shelves and conversion panels.
 /// Do not apply opacity: these labels must remain readable on the keyboard tray.
 enum KeyboardLanguageInformativeInk {
-    static let secondary = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 177.0 / 255, green: 177.0 / 255, blue: 186.0 / 255, alpha: 1) // #B1B1BA
-            : UIColor(red: 98.0 / 255, green: 98.0 / 255, blue: 107.0 / 255, alpha: 1) // #62626B
-    })
+    /// UIKit form, also used for an unreadable language in the space-bar list.
+    /// Increase Contrast gets a stronger variant of the same ink (no glyph).
+    static let secondaryUI = UIColor { traits in
+        let high = traits.accessibilityContrast == .high
+        return traits.userInterfaceStyle == .dark
+            ? (high ? UIColor(red: 210.0 / 255, green: 210.0 / 255, blue: 217.0 / 255, alpha: 1) // #D2D2D9
+                : UIColor(red: 177.0 / 255, green: 177.0 / 255, blue: 186.0 / 255, alpha: 1)) // #B1B1BA
+            : (high ? UIColor(red: 64.0 / 255, green: 64.0 / 255, blue: 72.0 / 255, alpha: 1) // #404048
+                : UIColor(red: 98.0 / 255, green: 98.0 / 255, blue: 107.0 / 255, alpha: 1)) // #62626B
+    }
+    static let secondary = Color(uiColor: secondaryUI)
 }
 
 /// The controller measures the same short caption and scaled font rendered by

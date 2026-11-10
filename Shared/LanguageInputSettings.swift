@@ -181,6 +181,79 @@ public struct LanguageInputSettings {
     }
 }
 
+/// The one input mode the person last chose, in Uniboard's Languages screen or
+/// with the keyboard's space-bar list. Both processes read and write it, so the
+/// keyboard opens in that mode and the app shows it as Selected.
+///
+/// Deliberately NOT part of the configuration: it lives at the App Group root
+/// (beside LanguagePacks and MyWords), never in a generation directory, so it
+/// isn't exported, imported, undone or listed in `SharedConfigurationLocation`.
+/// It holds a mode identifier only, never typed text.
+struct LanguageInputLastMode {
+    static let filename = "language-input-last-mode-v1.json"
+    static let schemaVersion = 1
+    static let maximumPayloadBytes = 256
+    static let shared = LanguageInputLastMode()
+
+    let directory: () -> URL?
+
+    init(directory: @escaping () -> URL?) { self.directory = directory }
+
+    init() {
+        self.init(directory: {
+            FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: UnicodeEditionSettings.groupIdentifier)
+        })
+    }
+
+    private struct File: Codable {
+        var schemaVersion = LanguageInputLastMode.schemaVersion
+        var mode: String
+    }
+
+    /// nil only when the App Group can't be resolved or the file can't be
+    /// opened or read (an I/O error): callers then keep what they have. The
+    /// keyboard CAN read the App Group without Full Access, so nil is not a
+    /// Full Access signal (only writing needs it). A missing, damaged,
+    /// oversized or unknown value reads as Direct Typing.
+    func load() -> LanguageInputMode? {
+        guard let directory = directory() else { return nil }
+        do {
+            guard let data = try SharedConfigurationLocation.readRegularFile(
+                directory.appendingPathComponent(Self.filename), limit: Self.maximumPayloadBytes + 1) else { return .direct }
+            return Self.decode(data)
+        } catch SharedConfigurationLocation.Failure.invalid {
+            return .direct // Not a regular file: treat as damaged, not unreadable.
+        } catch { return nil }
+    }
+
+    /// Failure is reported but harmless: the keyboard ignores it (no Full Access).
+    @discardableResult func save(_ mode: LanguageInputMode) -> Bool {
+        guard let directory = directory(), let data = Self.encode(mode) else { return false }
+        do {
+            try SharedConfigurationLocation.replaceFile(data, at: directory.appendingPathComponent(Self.filename))
+            return true
+        } catch { return false }
+    }
+
+    /// Romaja is never a choosable mode, so it's stored as Direct Typing.
+    static func encode(_ mode: LanguageInputMode) -> Data? {
+        let stored = mode == .koreanRomaja ? LanguageInputMode.direct : mode
+        guard let data = try? SharedConfigurationLocation.encoder.encode(File(mode: stored.rawValue)),
+              data.count <= maximumPayloadBytes else { return nil }
+        return data
+    }
+
+    /// Tolerant: anything unexpected is Direct Typing, never an error.
+    static func decode(_ data: Data) -> LanguageInputMode {
+        guard data.count <= maximumPayloadBytes,
+              let file = try? JSONDecoder().decode(File.self, from: data),
+              file.schemaVersion == schemaVersion,
+              let mode = LanguageInputMode(rawValue: file.mode),
+              mode != .koreanRomaja else { return .direct }
+        return mode
+    }
+}
+
 private struct LanguageInputSnapshotKey: CodingKey {
     let stringValue: String
     var intValue: Int? { nil }

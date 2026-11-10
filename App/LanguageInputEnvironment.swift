@@ -2,7 +2,8 @@ import Foundation
 
 /// App-owned models shared by Settings, Languages and My Words. Resource files
 /// and explicit custom words live beside configuration generations, never in
-/// them. No active keyboard mode or unfinished input is persisted here.
+/// them. No unfinished input is persisted here; the last-chosen mode is a
+/// separate App Group value (`LanguageInputLastMode`), never in configuration.
 @MainActor
 final class LanguageInputEnvironment {
     static let shared = LanguageInputEnvironment()

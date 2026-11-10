@@ -78,6 +78,9 @@ public struct LanguagePackSpacePlan: Equatable, Sendable {
 /// No network, extraction, engine initialization, or typed/user data is involved.
 public struct LanguagePackStore: Sendable {
     public let root: URL
+    /// Process-wide by default so that every `LanguagePackStore(root:)` value the
+    /// keyboard creates per activation shares one in-memory verification memo.
+    let verificationCache: PayloadVerificationCache
     private static let fm = FileManager.default
     private static let metadataName = "descriptor.json"
     private static let payloadName = "payload"
@@ -86,7 +89,13 @@ public struct LanguagePackStore: Sendable {
     /// Canonicalize the trusted injected location once (e.g. Darwin's /var alias).
     /// Foundation may leave /var unresolved when the final child does not exist.
     /// Payload and store-created child paths are still checked without following links.
-    public init(root: URL) { self.root = Self.canonicalTrustedLocation(root) }
+    public init(root: URL) { self.init(root: root, verificationCache: .shared) }
+
+    /// Test seam: an isolated cache (and clock) instead of the process-wide one.
+    init(root: URL, verificationCache: PayloadVerificationCache) {
+        self.root = Self.canonicalTrustedLocation(root)
+        self.verificationCache = verificationCache
+    }
 
     /// Verifies a downloaded archive without reading it all into memory. The caller
     /// must also enforce this size limit DURING download and safely bound extraction.
@@ -218,6 +227,13 @@ public struct LanguagePackStore: Sendable {
     /// lock, then acquires a per-version shared lease before releasing coordination.
     /// All files are verified with bounded streaming reads. Keep/reuse the returned
     /// lease rather than calling this on every keystroke.
+    ///
+    /// Every resolve still re-reads the pointer/descriptor, re-walks the payload
+    /// (unexpected/missing entries, links, types) and opens + fstats every declared
+    /// file. Only the SHA-256 pass over a file may be skipped, and only when that
+    /// opened file's stat identity equals one this process already hashed
+    /// successfully for the same revision path and expected digest. See
+    /// `PayloadVerificationCache` for the threat model and residual risk.
     public func resolve(modeID: String, engineABI: String) -> LanguagePackResolution {
         guard LanguagePackDescriptor.isIdentifier(modeID) else { return .corrupt("invalid mode identifier") }
         do {
@@ -242,7 +258,7 @@ public struct LanguagePackStore: Sendable {
             }
             try Self.checkVersionContents(directory)
             let payload = directory.appendingPathComponent(Self.payloadName)
-            try Self.verifyPayload(payload, descriptor: descriptor)
+            try Self.verifyPayload(payload, descriptor: descriptor, cache: verificationCache)
             let pack = ValidatedInstalledLanguagePack(revision: active.revision, path: payload, descriptor: descriptor)
             transferred = true
             return .available(LanguagePackReadLease(pack: pack, release: { close(fd) }))
@@ -364,6 +380,7 @@ public struct LanguagePackStore: Sendable {
             try Self.checkVersionContents(directory)
             guard let fd = try Self.tryExclusiveLock(directory.appendingPathComponent(Self.leaseName)) else { continue }
             defer { close(fd) }
+            verificationCache.forget(payloadPath: directory.appendingPathComponent(Self.payloadName).path)
             try Self.fm.removeItem(at: directory)
         }
         // All writers hold coordination throughout populate/verification/publication.
@@ -435,8 +452,14 @@ public struct LanguagePackStore: Sendable {
         try Self.checkRegular(fd)
     }
 
-    private static func verifyPayload(_ payload: URL, descriptor: LanguagePackDescriptor) throws {
+    /// `cache == nil` (install/staging, archives) always hashes every byte.
+    private static func verifyPayload(_ payload: URL, descriptor: LanguagePackDescriptor,
+                                      cache: PayloadVerificationCache? = nil) throws {
         try checkDirectory(payload)
+        // `payload` is root (realpath-canonicalized at init) + fixed store names +
+        // a validated revision UUID; checkAncestors/lstat reject any link on the way.
+        let packKey = PayloadVerificationCache.PackKey(payloadPath: payload.path, packID: descriptor.packID,
+                                                      version: descriptor.version, archiveSHA256: descriptor.archiveSHA256)
         let expected = Dictionary(uniqueKeysWithValues: descriptor.files.map { ($0.path, $0) })
         var directories = Set<String>()
         for file in descriptor.files {
@@ -460,7 +483,11 @@ public struct LanguagePackStore: Sendable {
                     guard let file = expected[path], seen.insert(path).inserted else {
                         throw LanguagePackError.invalidPayload("unexpected file")
                     }
-                    try verifyFile(url, byteCount: file.byteCount, sha256: file.sha256)
+                    let memo = cache.map {
+                        CachedVerification(cache: $0, pack: packKey,
+                                           file: .init(relativePath: file.path, byteCount: file.byteCount, sha256: file.sha256))
+                    }
+                    try verifyFile(url, byteCount: file.byteCount, sha256: file.sha256, memo: memo)
                 }
             }
         }
@@ -468,14 +495,33 @@ public struct LanguagePackStore: Sendable {
         guard seen.count == expected.count else { throw LanguagePackError.invalidPayload("missing files") }
     }
 
-    private static func verifyFile(_ url: URL, byteCount: Int64, sha256: String) throws {
+    private struct CachedVerification {
+        let cache: PayloadVerificationCache
+        let pack: PayloadVerificationCache.PackKey
+        let file: PayloadVerificationCache.FileKey
+    }
+
+    private static func verifyFile(_ url: URL, byteCount: Int64, sha256: String,
+                                   memo: CachedVerification? = nil) throws {
         try checkAncestors(url.deletingLastPathComponent())
+        // Racy-ctime reference: taken BEFORE the file is opened/stat'ed/read, so a
+        // long hash cannot age a just-written file past the window.
+        let started = memo?.cache.now()
         let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         guard fd >= 0 else { throw io("open payload") }
         defer { close(fd) }
         let before = try checkRegular(fd)
         guard Int64(before.st_size) == byteCount, before.st_mode & mode_t(0o111) == 0 else {
             throw LanguagePackError.invalidPayload("file size or executable permission")
+        }
+        // Identity comes from fstat on THIS open descriptor (not a separate path
+        // lookup), so it describes exactly the inode that would otherwise be hashed.
+        let identity = PayloadVerificationCache.FileIdentity(before)
+        if let memo {
+            if memo.cache.isVerified(memo.file, in: memo.pack, identity: identity) { return }
+            // Miss/mismatch: forget any older success before hashing; only a fresh
+            // successful hash below may record a new one.
+            memo.cache.beginHash(memo.file, in: memo.pack)
         }
         var hasher = SHA256()
         var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
@@ -492,6 +538,11 @@ public struct LanguagePackStore: Sendable {
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
         guard total == byteCount, after.st_size == before.st_size, digest == sha256 else {
             throw LanguagePackError.invalidPayload("file hash or size mismatch")
+        }
+        // Record only if nothing observable changed while hashing; otherwise the
+        // result stands for this resolve (as before) but is not reused.
+        if let memo, let started, PayloadVerificationCache.FileIdentity(after) == identity {
+            memo.cache.recordVerified(memo.file, in: memo.pack, identity: identity, startedAt: started)
         }
     }
 
@@ -648,5 +699,208 @@ public struct LanguagePackStore: Sendable {
 
     private static func io(_ operation: String) -> LanguagePackError {
         .filesystem(operation: operation, code: errno)
+    }
+}
+
+/// Process-local memo of payload files whose SHA-256 already matched the
+/// descriptor, so re-activating a mode (e.g. ~155 MB Mandarin) need not re-hash.
+///
+/// What the per-file hash protects against (non-adversarial integrity):
+/// - partial/interrupted writes (crash during extraction/copy, short files);
+/// - storage corruption that changes bytes visible through the filesystem;
+/// - a mismatched or replaced file from a different revision/upstream version;
+/// - accidental modification of a published (immutable-by-convention) version.
+/// Out of scope: anyone able to write the App Group container. They already own
+/// the app's data (pointers, descriptors, custom words) and could simply publish
+/// a descriptor matching their bytes, so the hash was never a defence against them.
+///
+/// Published versions are never mutated by the store: files are created 0600 in a
+/// 0700 per-revision UUID stage, verified, renamed into `versions/`, and only ever
+/// deleted (after an exclusive lease lock). A legitimate change is therefore always
+/// a NEW revision path. Anything else that touches a file -- write, truncate,
+/// chmod, utimes, rename-over/replacement -- changes st_ino, st_size, st_mtime or
+/// st_ctime. st_ctime is set by the kernel to the current clock on every inode
+/// change and has no setter API. Users can move the clock (e.g. iOS Settings >
+/// Date & Time), but a stale hit would still need the new ctime to equal the
+/// recorded one to the nanosecond, alongside same inode/size/mtime, so the
+/// practical impact is nil. A hit means "the same inode this process hashed,
+/// untouched since". Keys bind the revision path, packID/version/archiveSHA256,
+/// relative path, byte count and the expected per-file SHA-256.
+///
+/// Rules: only successful hashes whose fstat identity was identical before and
+/// after reading are recorded; any miss/mismatch removes the old entry and hashes
+/// in full; failures are never recorded. Files whose ctime is within
+/// `racyWindow` before the moment verification STARTED (or later) are not
+/// recorded, so coarse-timestamp filesystems cannot hide a same-size rewrite in
+/// the same tick ("racy git"), however long the hash itself took.
+/// Nothing is persisted: each process hashes at least once.
+///
+/// Not a pin on the bytes: the lease only pins version LIFETIME (flock on
+/// `.lease`); consumers (SQLite, dictionaries, mapping.json) reopen files BY PATH
+/// after resolve. So neither the cache nor the per-resolve hash it replaces
+/// guarantees what the engine later reads; both only attest the state at resolve.
+///
+/// Residual risk / what this change gives up: per-resolve detection of changes
+/// that do not touch inode metadata -- e.g. silent media/flash bit rot below
+/// APFS (no user-data checksums) or a foreign writer's shared-mmap store whose
+/// mtime update is still lazy -- is lost for the rest of this process; such
+/// damage is caught by the next process's full hash.
+final class PayloadVerificationCache: @unchecked Sendable {
+    static let shared = PayloadVerificationCache()
+    /// Distinct payload revisions retained (LRU); old revisions age out.
+    static let maximumPacks = 8
+    /// Total file entries across packs (a Japanese pack is ~3.4k files).
+    static let maximumEntries = 2 * LanguagePackDescriptor.maximumFileCount
+    static let defaultRacyWindow: TimeInterval = 2
+
+    struct PackKey: Hashable {
+        /// Canonical `<root>/versions/<revision>/payload`; embeds the unique revision.
+        let payloadPath: String
+        let packID: String
+        let version: String
+        let archiveSHA256: String
+    }
+
+    struct FileKey: Hashable {
+        let relativePath: String
+        let byteCount: Int64
+        let sha256: String
+    }
+
+    /// Stat identity from fstat on the opened descriptor. atime is excluded
+    /// (reads update it); nlink/type are re-enforced on every resolve anyway.
+    struct FileIdentity: Hashable {
+        let device: Int64
+        let inode: UInt64
+        let size: Int64
+        let mode: UInt32
+        let modificationSeconds: Int64
+        let modificationNanoseconds: Int64
+        let changeSeconds: Int64
+        let changeNanoseconds: Int64
+
+        init(device: Int64, inode: UInt64, size: Int64, mode: UInt32,
+             modificationSeconds: Int64, modificationNanoseconds: Int64,
+             changeSeconds: Int64, changeNanoseconds: Int64) {
+            self.device = device
+            self.inode = inode
+            self.size = size
+            self.mode = mode
+            self.modificationSeconds = modificationSeconds
+            self.modificationNanoseconds = modificationNanoseconds
+            self.changeSeconds = changeSeconds
+            self.changeNanoseconds = changeNanoseconds
+        }
+
+        init(_ value: stat) {
+            #if canImport(Darwin)
+            let modified = value.st_mtimespec, changed = value.st_ctimespec
+            #else
+            let modified = value.st_mtim, changed = value.st_ctim
+            #endif
+            self.init(device: Int64(truncatingIfNeeded: value.st_dev), inode: UInt64(truncatingIfNeeded: value.st_ino),
+                      size: Int64(value.st_size), mode: UInt32(truncatingIfNeeded: value.st_mode),
+                      modificationSeconds: Int64(modified.tv_sec), modificationNanoseconds: Int64(modified.tv_nsec),
+                      changeSeconds: Int64(changed.tv_sec), changeNanoseconds: Int64(changed.tv_nsec))
+        }
+
+        var changeTime: TimeInterval { TimeInterval(changeSeconds) + TimeInterval(changeNanoseconds) / 1_000_000_000 }
+    }
+
+    struct Statistics: Equatable {
+        var hashes = 0
+        var hits = 0
+        var records = 0
+    }
+
+    private let lock = NSLock()
+    private let racyWindow: TimeInterval
+    private let clock: @Sendable () -> TimeInterval
+    private var packs: [PackKey: [FileKey: FileIdentity]] = [:]
+    private var recency: [PackKey] = [] // least recent first
+    private var entryCount = 0
+    private var counters = Statistics()
+
+    init(racyWindow: TimeInterval = PayloadVerificationCache.defaultRacyWindow,
+         now: @escaping @Sendable () -> TimeInterval = { Date().timeIntervalSince1970 }) {
+        self.racyWindow = max(0, racyWindow)
+        self.clock = now
+    }
+
+    /// Wall-clock seconds since 1970 (same base as st_ctime); injectable for tests.
+    func now() -> TimeInterval { clock() }
+
+    var statistics: Statistics {
+        lock.lock(); defer { lock.unlock() }
+        return counters
+    }
+
+    var count: Int {
+        lock.lock(); defer { lock.unlock() }
+        return entryCount
+    }
+
+    func isVerified(_ file: FileKey, in pack: PackKey, identity: FileIdentity) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let cached = packs[pack]?[file], cached == identity else { return false }
+        touch(pack)
+        counters.hits += 1
+        return true
+    }
+
+    /// Called immediately before a full hash: drops any prior success for this file.
+    func beginHash(_ file: FileKey, in pack: PackKey) {
+        lock.lock(); defer { lock.unlock() }
+        counters.hashes += 1
+        if packs[pack]?.removeValue(forKey: file) != nil { entryCount -= 1 }
+    }
+
+    /// Only call after a successful hash whose fstat identity did not change while
+    /// reading. `startedAt` is `now()` captured before the file was opened.
+    func recordVerified(_ file: FileKey, in pack: PackKey, identity: FileIdentity, startedAt: TimeInterval) {
+        // Changed within `racyWindow` before verification STARTED, or after it
+        // (future-dated relative to start): timestamps alone can't prove a later
+        // same-size rewrite in the same tick, so keep hashing those inodes.
+        guard identity.changeTime <= startedAt - racyWindow else { return }
+        lock.lock(); defer { lock.unlock() }
+        if packs[pack]?[file] == nil {
+            if let existing = packs[pack]?.count, existing >= LanguagePackDescriptor.maximumFileCount {
+                entryCount -= existing
+                packs[pack] = [:]
+            }
+            entryCount += 1
+        }
+        packs[pack, default: [:]][file] = identity
+        counters.records += 1
+        touch(pack)
+        while recency.count > 1, recency.count > Self.maximumPacks || entryCount > Self.maximumEntries {
+            let evicted = recency.removeFirst()
+            entryCount -= packs.removeValue(forKey: evicted)?.count ?? 0
+        }
+    }
+
+    /// Drops every entry and resets the statistics counters.
+    func removeAll() {
+        lock.lock(); defer { lock.unlock() }
+        packs.removeAll()
+        recency.removeAll()
+        entryCount = 0
+        counters = Statistics()
+    }
+
+    /// Memory hygiene when a revision directory is reclaimed. Not a safety
+    /// mechanism: revision paths are never reused and identity is always rechecked.
+    func forget(payloadPath: String) {
+        lock.lock(); defer { lock.unlock() }
+        for key in packs.keys.filter({ $0.payloadPath == payloadPath }) {
+            entryCount -= packs.removeValue(forKey: key)?.count ?? 0
+        }
+        recency.removeAll { $0.payloadPath == payloadPath }
+    }
+
+    private func touch(_ pack: PackKey) {
+        if recency.last == pack { return }
+        if let index = recency.firstIndex(of: pack) { recency.remove(at: index) }
+        recency.append(pack)
     }
 }

@@ -294,8 +294,8 @@ struct KeyboardABCRendering {
 
 /// Presentation only: no key settings, identifiers or arrangements are changed.
 enum KeyboardMergedSymbolsPolicy {
-    static let rows = [KeyboardTypingLayout.symbols.rows[0], KeyboardTypingLayout.symbols.rows[1],
-                       KeyboardTypingLayout.numbers.rows[1], KeyboardTypingLayout.symbols.rows[2]]
+    static let rows: [[String]] = [KeyboardTypingLayout.symbols.rows[0], KeyboardTypingLayout.symbols.rows[1],
+                                   KeyboardTypingLayout.numbers.rows[1], KeyboardTypingLayout.symbols.rows[2]]
 
     enum Eligibility: Equatable {
         case merged, missingDigits, insufficientSpace

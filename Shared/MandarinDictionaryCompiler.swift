@@ -310,7 +310,7 @@ private final class MandarinUTF8Lines {
     private var hasher = SHA256()
     private(set) var byteCount = 0
     private(set) var lineNumber = 0
-    var digest: String { var copy = hasher; return copy.finalize().map { String(format: "%02x", $0) }.joined() }
+    var digest: String { let copy = hasher; return copy.finalize().map { String(format: "%02x", $0) }.joined() }
 
     init(url: URL) throws { handle = try FileHandle(forReadingFrom: url) }
     deinit { try? handle.close() }

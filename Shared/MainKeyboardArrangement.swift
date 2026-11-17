@@ -405,9 +405,11 @@ struct MainKeyboardSymbolLayer: Equatable, Sendable {
     fileprivate init(page section: MainKeyboardSection, arrangement: MainKeyboardArrangement, isPad: Bool,
                      availableWidth: CGFloat = 0, isLandscape: Bool = false, padLayout: KeyboardPadLayout = .stock, mergedSymbols: Bool = false) {
         if mergedSymbols {
+            let mergedRows: [[String]] = KeyboardMergedSymbolsPolicy.rows
+            var rows: [[Cell]] = mergedRows.dropLast().map { $0.map(Cell.key) }
+            rows.append(mergedRows[3].map(Cell.key) + [.delete])
             self.section = .symbols
-            self.rows = KeyboardMergedSymbolsPolicy.rows.dropLast().map { $0.map(Cell.key) }
-                + [KeyboardMergedSymbolsPolicy.rows[3].map(Cell.key) + [.delete]]
+            self.rows = rows
             self.switchKeyTitle = ""
             self.canvasKeyHeight = 44
             return

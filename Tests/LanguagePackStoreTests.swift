@@ -76,7 +76,7 @@ final class LanguagePackStoreTests: XCTestCase {
     func testDiskBudgetIncludesSourcesTransportCopyCompileStageAndSQLiteTemporaries() throws {
         let plan = try LanguagePackSpacePlan(sourceBytes: [100, 20], installedBytes: 510, compiledBytes: 500)
         let manifestBudget = Int64(LanguagePackDescriptor.maximumManifestBytes)
-        let baseBudget: Int64 = 120 + 100 + 2 * 510 + 2 * 500
+        let baseBudget: Int64 = 2240 // 120 + 100 + 2 * 510 + 2 * 500
         let expectedPlanBytes: Int64 = baseBudget + LanguagePackSpacePlan.headroom + manifestBudget
         XCTAssertEqual(plan.requiredBytes, expectedPlanBytes)
         let japanese = try LanguagePackSpacePlan(sourceBytes: [100], installedBytes: 500)

@@ -190,10 +190,15 @@ struct KeyboardPreviewCursorMove: Equatable, Sendable {
         case .grapheme: return move(clusters)
         case nil: break
         }
-        let sign = units > 0 ? 1 : -1
-        let magnitudes = [abs(units), abs(clusters)] + Array(abs(clusters)...abs(units)).sorted {
-            abs(caret + sign * $0 - target) < abs(caret + sign * $1 - target)
+        let sign: Int = units > 0 ? 1 : -1
+        let minMagnitude: Int = abs(clusters)
+        let maxMagnitude: Int = abs(units)
+        let sortedRange: [Int] = Array(minMagnitude...maxMagnitude).sorted { (lhs: Int, rhs: Int) -> Bool in
+            let lhsDistance: Int = abs(caret + sign * lhs - target)
+            let rhsDistance: Int = abs(caret + sign * rhs - target)
+            return lhsDistance < rhsDistance
         }
+        let magnitudes: [Int] = [maxMagnitude, minMagnitude] + sortedRange
         for magnitude in magnitudes {
             let candidate = move(sign * magnitude)
             if let utf16 = candidate.utf16Landing, line.isBoundary(utf16),

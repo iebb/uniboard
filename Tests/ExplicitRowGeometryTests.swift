@@ -28,7 +28,10 @@ final class ExplicitRowGeometryTests: XCTestCase {
     func testSpreadIncludesGapCellsAndCentersSingleton() {
         let widths: [CGFloat] = [30, 12.5, 30, 30]
         let xs = ExplicitRowGeometry.origins(widths: widths, available: 350, spacing: 5, alignment: .spaced, scale: 2)
-        let gaps = (1..<xs.count).map { xs[$0] - xs[$0 - 1] - widths[$0 - 1] }
+        let gaps: [CGFloat] = (1..<xs.count).map { (i: Int) -> CGFloat in
+            let span: CGFloat = xs[i] - xs[i - 1]
+            return span - widths[i - 1]
+        }
         XCTAssertEqual(gaps[0], gaps[1], accuracy: 0.5)
         XCTAssertEqual(gaps[1], gaps[2], accuracy: 0.5)
         XCTAssertEqual(xs.last! + 30, 350, accuracy: 0.5)

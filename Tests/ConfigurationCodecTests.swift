@@ -283,10 +283,15 @@ final class ConfigurationCodecTests: XCTestCase {
                               postScriptName: String(repeating: "P", count: 60) + "\(index)",
                               identity: .file(sha256: Self.hash, faceIndex: index, variations: ["wght": 700.5, "wdth": 75]), googleFaceID: "google:abc:\(index)")
         }
-        c.fontRules = (0..<FontRuleLimits.maximumRules).map { index in
-            index < FontRuleLimits.maximumRangeRules
-                ? FontRule(selector: .range(first: 0x10000 + UInt32(index) * 2, last: 0x10001 + UInt32(index) * 2), face: faces[index % faces.count])
-                : FontRule(selector: .codePoint(0x20000 + UInt32(index)), face: faces[index % faces.count])
+        c.fontRules = (0..<FontRuleLimits.maximumRules).map { (index: Int) -> FontRule in
+            let face = faces[index % faces.count]
+            if index < FontRuleLimits.maximumRangeRules {
+                let first: UInt32 = 0x10000 + UInt32(index) * 2
+                let last: UInt32 = 0x10001 + UInt32(index) * 2
+                return FontRule(selector: .range(first: first, last: last), face: face)
+            }
+            let cp: UInt32 = 0x20000 + UInt32(index)
+            return FontRule(selector: .codePoint(cp), face: face)
         }
         XCTAssertNotNil(FontRuleStore.encode(c.fontRules))
         // 32 names of 64 UTF-8 bytes, each 16 tag characters the writer escapes.

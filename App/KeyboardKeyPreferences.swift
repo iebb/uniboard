@@ -51,7 +51,7 @@ final class KeyboardKeyPreferences: ObservableObject {
         self.settings = settings
         self.location = location
         let loaded = settings.loadForEditing()
-        snapshot = loaded ?? .defaults
+        snapshot = loaded ?? settings.emptySnapshot()
         if loaded == nil { saveError = Self.readError }
     }
 
@@ -137,8 +137,10 @@ final class KeyboardKeyPreferences: ObservableObject {
                 }
                 let before = snapshot
                 let knownBefore = saveError == nil
-                if snapshot != .defaults { snapshot = .defaults }
-                if knownBefore, before != .defaults { successfulEdit = .init(before: before, after: .defaults) }
+                // The install's number row stays: Reset All restores its default keyboard.
+                let reset = settings.emptySnapshot()
+                if snapshot != reset || snapshot.standardNumberRow != reset.standardNumberRow { snapshot = reset }
+                if knownBefore, before != reset { successfulEdit = .init(before: before, after: reset) }
                 invalidateArrangementUndo(); saveError = nil
                 return true
             }

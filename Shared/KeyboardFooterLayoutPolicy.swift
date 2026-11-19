@@ -26,10 +26,17 @@ enum KeyboardFooterLayoutPolicy {
         let spacing: CGFloat
     }
     static func plan(availableWidth: CGFloat, hasGlobe: Bool, showsCollapse: Bool,
-                     showsPage: Bool, isPad: Bool, showsReturn: Bool = true, padTyping: Bool = false) -> Plan? {
+                     showsPage: Bool, isPad: Bool, showsReturn: Bool = true, padTyping: Bool = false, phonePortrait: Bool = false,
+                     alphabet: KeyboardAlphabet = .english) -> Plan? {
         guard availableWidth.isFinite, availableWidth > 0 else { return nil }
         let count = 2 + (hasGlobe ? 1 : 0) + (showsCollapse ? 1 : 0) + (showsPage ? 1 : 0)
         let gaps = CGFloat(count + (showsReturn ? 1 : 0))
+        if phonePortrait && !isPad, let geometry = KeyboardPhonePortraitGeometry(width: availableWidth + 16, alphabet: alphabet) {
+            let row = geometry.bottomRow(smallKeys: count, showsReturn: showsReturn)
+            guard row.space.width >= 44 else { return nil }
+            return Plan(keyWidth: geometry.keyWidth, returnWidth: row.returnKey?.width ?? 0,
+                        spaceWidth: row.space.width, spacing: KeyboardPhonePortraitGeometry.keyGap)
+        }
         func result(key: CGFloat, returnWidth: CGFloat, gap: CGFloat) -> Plan? {
             let returnWidth = showsReturn ? returnWidth : 0
             let space = availableWidth - CGFloat(count) * key - returnWidth - gaps * gap

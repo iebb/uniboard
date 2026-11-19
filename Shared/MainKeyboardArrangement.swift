@@ -83,6 +83,16 @@ struct MainKeyboardArrangement: Codable, Equatable, Sendable {
             layout: [rows[0].count, rows[1].count, rows[2].count + leading.count + 1].map { String(repeating: "k", count: $0) }.joined(separator: "/"))
     }
 
+    /// The stock keyboard these rows type, as `standard` or `letters`, or nil.
+    /// Rows saved by the editor that equal either one, with or without the
+    /// number row, are the stock default too; any other key, gap or
+    /// alignment keeps them custom. Nothing saved is rewritten.
+    func stockEquivalent(for alphabet: KeyboardAlphabet) -> MainKeyboardArrangement? {
+        [Self.standard(for: alphabet), Self.letters(for: alphabet)].first {
+            isLegacy ? self == $0 : resolvedRows == $0.resolvedRows
+        }
+    }
+
     static func isFunction(_ key: String) -> Bool { functionKeys.contains(key) }
     static func isDigit(_ key: String) -> Bool { digits.contains(key) }
 

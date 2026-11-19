@@ -16,7 +16,11 @@ struct KeyboardInputActionContext: Equatable {
 
 /// Single actions snapshot one factory at touch-down; updates never retarget a
 /// held press. Unlike repeated Delete, these keys execute only on touch-up.
-class KeyboardTouchActionButton: UIButton {
+class KeyboardTouchActionButton: KeyboardStockButton {
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        keyboardStockTouchRect.contains(point)
+    }
+
     var contentPosition: KeyboardKeyContentPosition = .center { didSet { setNeedsLayout() } }
     override func titleRect(forContentRect contentRect: CGRect) -> CGRect {
         contentPosition.alignedRect(super.titleRect(forContentRect: contentRect), in: contentRect)
@@ -142,7 +146,7 @@ final class KeyboardShiftTouchButton: KeyboardTouchActionButton {
         guard !slideTracking, isEnabled, isUserInteractionEnabled, let window,
               point.x.isFinite, point.y.isFinite else { return false }
         let anchor = convert(bounds, to: window)
-        guard !anchor.isEmpty, anchor.contains(point) else { return false }
+        guard !anchor.isEmpty, convert(keyboardStockTouchRect, to: window).contains(point) else { return false }
         slideTracking = true; self.owner = owner; originalWindow = window
         originalAnchor = anchor; originalWindowBounds = window.bounds; originalWindowFrame = window.frame
         let id = UUID(); token = id
@@ -156,7 +160,7 @@ final class KeyboardShiftTouchButton: KeyboardTouchActionButton {
     func moveSlide(owner: AnyObject, point: CGPoint) {
         guard slideTracking, self.owner === owner else { return }
         guard geometryIsCurrent, point.x.isFinite, point.y.isFinite else { cancelSlide(); return }
-        if !originalAnchor.contains(point) { leftShift = true }
+        if !convert(keyboardStockTouchRect, to: window).contains(point) { leftShift = true }
         let target = leftShift ? target(at: point) : nil
         if target !== selectedKey {
             selectedKey?.pressFeedback.setPressed(false)
@@ -171,7 +175,7 @@ final class KeyboardShiftTouchButton: KeyboardTouchActionButton {
         guard slideTracking else { return false }
         let key = selectedKey.flatMap { characterKey($0) }
         let action = slideAction
-        let tap = !leftShift && geometryIsCurrent && originalAnchor.contains(point)
+        let tap = !leftShift && geometryIsCurrent && convert(keyboardStockTouchRect, to: window).contains(point)
         let terminal = clearSlide()
         if tap { sendActions(for: .touchUpInside); return true }
         sendActions(for: .touchCancel)

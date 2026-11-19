@@ -5,6 +5,65 @@ import UIKit
 /// UIKit still owns actual remote bounds and required fitting constraints.
 /// This class makes no promise about remote input-coordinate synchronization.
 class KeyboardSelfSizingInputView: UIInputView {
+    /// Enabled only for the iPhone portrait stock typing renderer.
+    var routesStockKeyGaps = false
+
+    private func stockKeys() -> [UIView] {
+        var result: [UIView] = []
+        func visit(_ node: UIView) {
+            guard !node.isHidden, node.alpha > 0.01, node.isUserInteractionEnabled else { return }
+            if let control = node as? UIControl, !control.isEnabled { return }
+            if let id = node.accessibilityIdentifier,
+               id.hasPrefix("keyboard.typing.key.") || id.hasPrefix("keyboard.typing.number.")
+                || ["keyboard.typing.shift", "keyboard.typing.delete", "keyboard.typing.diacritics",
+                    "keyboard.typing.symbols", "keyboard.typing.numbers", "keyboard.typing.letters",
+                    "keyboard.toggleUnicodeToolbar", "keyboard.globe", "keyboard.collapse",
+                    "keyboard.openFavorites", "keyboard.space", "keyboard.return"].contains(id),
+               node is UIControl, node.bounds.width > 0, node.bounds.height > 0 {
+                result.append(node)
+            } else { node.subviews.forEach(visit) }
+        }
+        subviews.forEach(visit)
+        return result
+    }
+
+    private func stockRegions() -> (keys: [[UIView]], regions: [[CGRect]]) {
+        let keys = stockKeys()
+        let frames = keys.map { $0.convert($0.keyboardVisibleBounds, to: self) }
+        let rows = KeyboardKeyHitRegions.rows(of: frames)
+        return (rows.map { $0.map { keys[$0] } },
+                KeyboardKeyHitRegions.regions(rows: rows.map { $0.map { frames[$0] } }, bounds: bounds))
+    }
+
+    func stockTouchRect(for key: UIView) -> CGRect? {
+        guard routesStockKeyGaps else { return nil }
+        let layout = stockRegions()
+        for (r, row) in layout.keys.enumerated() {
+            if let i = row.firstIndex(where: { $0 === key }) {
+                return key.convert(layout.regions[r][i], from: self)
+            }
+        }
+        return nil
+    }
+
+    func stockKey(at point: CGPoint) -> UIView? {
+        guard routesStockKeyGaps else { return nil }
+        let layout = stockRegions()
+        guard let key = KeyboardKeyHitRegions.key(at: point, regions: layout.regions) else { return nil }
+        return layout.keys[key.row][key.index]
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard routesStockKeyGaps, bounds.contains(point), !isHidden, alpha > 0.01, isUserInteractionEnabled else {
+            return super.hitTest(point, with: event)
+        }
+        let layout = stockRegions()
+        if let key = KeyboardKeyHitRegions.key(at: point, regions: layout.regions) {
+            return layout.keys[key.row][key.index]
+        }
+        return super.hitTest(point, with: event)
+    }
+
     private(set) var requestedHeight: CGFloat = KeyboardLayoutPolicy.defaultHeight
     private var requestedHeightConstraint: NSLayoutConstraint!
 #if DEBUG
@@ -101,6 +160,41 @@ class KeyboardSelfSizingInputView: UIInputView {
     private static func validPriority(_ priority: UILayoutPriority) -> UILayoutPriority {
         let value = priority.rawValue
         return value.isFinite && value > 0 && value <= UILayoutPriority.required.rawValue ? priority : .fittingSizeLevel
+    }
+}
+
+/// Native frames may fill the gaps; the cap and accessibility geometry do not.
+@MainActor
+protocol KeyboardStockVisibleControl: AnyObject {
+    var keyboardVisualInsets: UIEdgeInsets { get set }
+}
+
+class KeyboardStockButton: UIButton, KeyboardStockVisibleControl {
+    var keyboardVisualInsets = UIEdgeInsets.zero { didSet { setNeedsLayout() } }
+    override func contentRect(forBounds bounds: CGRect) -> CGRect {
+        super.contentRect(forBounds: bounds.inset(by: keyboardVisualInsets))
+    }
+    override var accessibilityFrame: CGRect {
+        get { keyboardVisualInsets == .zero ? super.accessibilityFrame : UIAccessibility.convertToScreenCoordinates(keyboardVisibleBounds, in: self) }
+        set { super.accessibilityFrame = newValue }
+    }
+}
+
+/// Touch geometry is separate from bounds and accessibility geometry.
+extension UIView {
+    var keyboardVisibleBounds: CGRect {
+        bounds.inset(by: (self as? KeyboardStockVisibleControl)?.keyboardVisualInsets ?? .zero)
+    }
+
+    var keyboardStockTouchRect: CGRect {
+        var ancestor = superview
+        while let node = ancestor {
+            if let input = node as? KeyboardSelfSizingInputView {
+                return input.stockTouchRect(for: self) ?? bounds
+            }
+            ancestor = node.superview
+        }
+        return bounds
     }
 }
 #endif

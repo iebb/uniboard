@@ -83,11 +83,11 @@ final class KeyboardConversionViewsSourceTests: XCTestCase {
         }
         let shelfGuard = try block(in: text, startingAt: "    private var showsCompositionShelf: Bool {")
             .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
-        XCTAssertEqual(shelfGuard, "private var showsCompositionShelf: Bool { !model.showsUnicode && !model.expandedConversion && !model.finishingConversion && (language.mode != .direct || LanguageInputSettings.englishAssistanceAvailable) && !isConversionLoading && !needsConversionRecovery && model.compositionShelfHeight > 0 }",
-                       "Both loading and recovery must exclude the shelf, alongside the existing panel guards")
+        XCTAssertEqual(shelfGuard, "private var showsCompositionShelf: Bool { !model.showsUnicode && !model.expandedConversion && !model.finishingConversion && (language.mode != .direct || LanguageInputSettings.englishAssistanceAvailable) && ((language.mode == .koreanTwoSetHangul && unreadableNotice == nil) || (!isConversionLoading && !needsConversionRecovery)) && model.compositionShelfHeight > 0 }",
+                       "Loading and recovery exclude downloaded-language shelves; local Hangul keeps its existing shelf")
         let shelfBranch = try block(in: text, startingAt: "                if showsCompositionShelf {")
             .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
-        XCTAssertEqual(shelfBranch, "if showsCompositionShelf { if showsEnglishShelf { englishShelf } else { conversionShelf Color.clear.frame(height: 4).accessibilityHidden(true) } }",
+        XCTAssertEqual(shelfBranch, "if showsCompositionShelf { if showsEnglishShelf { englishShelf } else { conversionShelf Color.clear.frame(height: model.usesPhonePortraitGeometry ? 0 : 4).accessibilityHidden(true) } }",
                        "Both shelves must remain inside the shared exclusion guard, not duplicate loading status")
         XCTAssertTrue(text.contains("controls\n                    .allowsHitTesting(!model.finishingConversion && !model.expandedConversion)\n                    .accessibilityHidden(model.finishingConversion || model.expandedConversion)"),
                       "Loading alone must not disable the existing guarded space/language-switching footer")

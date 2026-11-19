@@ -351,7 +351,17 @@ final class KeyboardVariantInteraction {
 /// Owns the real UIKit touch stream; the popup never takes first responder and
 /// never allocates space outside the containing custom keyboard input view.
 @MainActor
-final class KeyboardVariantButton: UIControl {
+final class KeyboardVariantButton: UIControl, KeyboardStockVisibleControl {
+    var keyboardVisualInsets = UIEdgeInsets.zero { didSet { setNeedsLayout() } }
+    override var accessibilityFrame: CGRect {
+        get { keyboardVisualInsets == .zero ? super.accessibilityFrame : UIAccessibility.convertToScreenCoordinates(keyboardVisibleBounds, in: self) }
+        set { super.accessibilityFrame = newValue }
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        keyboardStockTouchRect.contains(point)
+    }
+
     private let title = UILabel()
     private let secondaryTitle = UILabel()
     private let image = UIImageView()
@@ -370,6 +380,7 @@ final class KeyboardVariantButton: UIControl {
     private var popupLabels: [UILabel] = []
     private var popupValues: [String] = []
     private var originalRect = CGRect.zero
+    private var originalTouchRect = CGRect.zero
     private var currentOptions: [String] = []
     private var configuredFont: UIFont = .systemFont(ofSize: 23)
     private var contentPosition: KeyboardKeyContentPosition = .center
@@ -425,16 +436,17 @@ final class KeyboardVariantButton: UIControl {
     }
     override func layoutSubviews() {
         super.layoutSubviews()
-        title.frame = bounds.insetBy(dx: 3, dy: 2)
+        let visual = keyboardVisibleBounds
+        title.frame = visual.insetBy(dx: 3, dy: 2)
         if !secondaryTitle.isHidden {
-            let compact = bounds.height < 44
+            let compact = visual.height < 44
             let size: CGFloat = compact ? 9 : 12
             secondaryTitle.font = secondaryTitle.text.flatMap { popupFont?($0) }?.withSize(size) ?? .systemFont(ofSize: size)
-            secondaryTitle.frame = CGRect(x: 3, y: compact ? 1 : 3, width: max(0, bounds.width - 6), height: compact ? 10 : 15)
-            title.frame = CGRect(x: 3, y: compact ? 11 : 17, width: max(0, bounds.width - 6), height: max(0, bounds.height - (compact ? 12 : 19)))
+            secondaryTitle.frame = CGRect(x: visual.minX + 3, y: visual.minY + (compact ? 1 : 3), width: max(0, visual.width - 6), height: compact ? 10 : 15)
+            title.frame = CGRect(x: visual.minX + 3, y: visual.minY + (compact ? 11 : 17), width: max(0, visual.width - 6), height: max(0, visual.height - (compact ? 12 : 19)))
         }
-        image.frame = contentPosition.alignedRect(CGRect(origin: .zero, size: image.image?.size ?? bounds.size), in: bounds)
-        if contentPosition == .center { image.frame = bounds }
+        image.frame = contentPosition.alignedRect(CGRect(origin: .zero, size: image.image?.size ?? visual.size), in: visual)
+        if contentPosition == .center { image.frame = visual }
         if interaction.hasPhysicalPress, !geometryIsCurrent { interaction.cancel() }
     }
 
@@ -536,7 +548,8 @@ final class KeyboardVariantButton: UIControl {
         capturedWindowFrame = window.frame
         capturedContainerBounds = container.bounds
         initialPoint = point
-        originalRect = convert(bounds, to: container)
+        originalRect = convert(keyboardVisibleBounds, to: container)
+        originalTouchRect = convert(keyboardStockTouchRect, to: container)
         hover.endHover()
         return interaction.begin(owner: owner)
     }
@@ -581,7 +594,7 @@ final class KeyboardVariantButton: UIControl {
                 delta: CGPoint(x: local.x - initialPoint.x, y: local.y - initialPoint.y),
                 directPopupIndex: directPopupIndex(at: point))
             let inside = interaction.swipeSelecting ? capturedContainer.map { contains(point, in: $0.bounds) } == true
-                : interaction.popupVisible ? index != nil : contains(local, in: bounds)
+                : interaction.popupVisible ? index != nil : contains(local, in: keyboardStockTouchRect)
             _ = interaction.end(owner: primary, inside: inside)
         } else { interaction.cancel() }
         self.primary = nil
@@ -619,7 +632,7 @@ final class KeyboardVariantButton: UIControl {
               inputContainer === capturedContainer else { return false }
         return same(capturedWindow.bounds, capturedWindowBounds) && same(capturedWindow.frame, capturedWindowFrame)
             && same(capturedContainer.bounds, capturedContainerBounds)
-            && same(convert(bounds, to: capturedContainer), originalRect)
+            && same(convert(keyboardVisibleBounds, to: capturedContainer), originalRect)
     }
     private func clearGeometry() { capturedWindow = nil; capturedContainer = nil; removePopup() }
     private func same(_ a: CGRect, _ b: CGRect) -> Bool {
@@ -630,8 +643,8 @@ final class KeyboardVariantButton: UIControl {
             && point.y >= rect.minY && point.y <= rect.maxY
     }
     func selectedIndex(at point: CGPoint) -> Int? {
-        guard interaction.popupVisible, let popupLayout else { return contains(point, in: originalRect) ? 0 : nil }
-        if contains(point, in: originalRect) { return 0 }
+        guard interaction.popupVisible, let popupLayout else { return contains(point, in: originalTouchRect) ? 0 : nil }
+        if contains(point, in: originalTouchRect) { return 0 }
         return popupLayout.index(at: CGPoint(x: point.x - popupLayout.frame.minX, y: point.y - popupLayout.frame.minY))
     }
     private func directPopupIndex(at point: CGPoint) -> Int? {

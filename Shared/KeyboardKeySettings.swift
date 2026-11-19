@@ -86,23 +86,44 @@ struct KeyboardKeySettings {
         /// files arranged only the letters, and Settings' Number Row added
         /// the digits above them; `migratingNumberRow` reads such a file once.
         let arrangesNumberRow: Bool
+        /// Whether a layout without its own arrangement types the number row:
+        /// this install's `KeyboardNumberRowDefault`, never stored in the file,
+        /// so imports, Undo and Reset All keep it. Not part of equality.
+        var standardNumberRow = true
         static let defaults = Snapshot()
         init(overrides: [String: Overrides] = [:], arrangements: [String: MainKeyboardArrangement] = [:], arrangesNumberRow: Bool = true) {
             self.overrides = overrides; self.arrangements = arrangements; self.arrangesNumberRow = arrangesNumberRow
         }
-        func arrangement(for alphabetID: String) -> MainKeyboardArrangement? { arrangements[alphabetID] }
-        /// The layout's keyboard as it types: the saved arrangement while it
-        /// is valid, otherwise the standard one with the number row.
-        func effectiveArrangement(for alphabet: KeyboardAlphabet) -> MainKeyboardArrangement {
-            arrangements[alphabet.id].flatMap { $0.isValid(for: alphabet) ? $0 : nil } ?? .standard(for: alphabet)
+        static func == (lhs: Snapshot, rhs: Snapshot) -> Bool {
+            lhs.overrides == rhs.overrides && lhs.arrangements == rhs.arrangements && lhs.arrangesNumberRow == rhs.arrangesNumberRow
         }
-        /// nil, or the standard arrangement, restores the layout's own rows.
+        func arrangement(for alphabetID: String) -> MainKeyboardArrangement? { arrangements[alphabetID] }
+        /// A layout's keyboard when nothing is saved for it: the standard one,
+        /// with or without the number row as this install types it.
+        func defaultArrangement(for alphabet: KeyboardAlphabet) -> MainKeyboardArrangement {
+            standardNumberRow ? .standard(for: alphabet) : .letters(for: alphabet)
+        }
+        /// The layout's keyboard as it types: the saved arrangement while it
+        /// is valid, otherwise the default one.
+        func effectiveArrangement(for alphabet: KeyboardAlphabet) -> MainKeyboardArrangement {
+            arrangements[alphabet.id].flatMap { $0.isValid(for: alphabet) ? $0 : nil } ?? defaultArrangement(for: alphabet)
+        }
+        /// The same install default on other keys and arrangements.
+        private func with(overrides: [String: Overrides]? = nil, arrangements: [String: MainKeyboardArrangement]? = nil) -> Snapshot {
+            var result = Snapshot(overrides: overrides ?? self.overrides, arrangements: arrangements ?? self.arrangements,
+                                  arrangesNumberRow: arrangesNumberRow)
+            result.standardNumberRow = standardNumberRow
+            return result
+        }
+        /// nil, or the default arrangement, restores the layout's own rows.
+        /// Any other choice is saved, so a number row someone added or removed
+        /// stays whatever the install's default is.
         func updatingArrangement(_ arrangement: MainKeyboardArrangement?, for alphabetID: String) -> Snapshot? {
             guard let alphabet = KeyboardAlphabet.alphabet(id: alphabetID) else { return nil }
             var copy = arrangements
-            if let arrangement, arrangement != .standard(for: alphabet) { copy[alphabetID] = arrangement }
+            if let arrangement, arrangement != defaultArrangement(for: alphabet) { copy[alphabetID] = arrangement }
             else { copy.removeValue(forKey: alphabetID) }
-            let result = Snapshot(overrides: overrides, arrangements: copy, arrangesNumberRow: arrangesNumberRow)
+            let result = with(arrangements: copy)
             guard (try? KeyboardKeySettings.validate(result)) != nil else { return nil }
             return result
         }
@@ -128,9 +149,11 @@ struct KeyboardKeySettings {
                 let saved = arrangements[alphabet.id] ?? letters
                 // Earlier files hold no digits in at most three rows, so the number row always fits on top.
                 let next = showsNumberRow ? saved.prependingNumberRow : saved
-                if next != .standard(for: alphabet) { result[alphabet.id] = next }
+                if next != defaultArrangement(for: alphabet) { result[alphabet.id] = next }
             }
-            return Snapshot(overrides: overrides, arrangements: result)
+            var migrated = Snapshot(overrides: overrides, arrangements: result)
+            migrated.standardNumberRow = standardNumberRow
+            return migrated
         }
         func candidates(for keyID: String, gesture: Gesture) -> [String]? {
             guard KeyboardKeySettings.descriptor(for: keyID) != nil else { return nil }
@@ -153,13 +176,13 @@ struct KeyboardKeySettings {
             var copy = overrides
             let value = (copy[keyID] ?? Overrides()).replacing(candidates, for: gesture)
             if value.usesDefaults { copy.removeValue(forKey: keyID) } else { copy[keyID] = value }
-            let result = Snapshot(overrides: copy, arrangements: arrangements, arrangesNumberRow: arrangesNumberRow)
+            let result = with(overrides: copy)
             guard (try? KeyboardKeySettings.validate(result)) != nil else { return nil }
             return result
         }
         func removingOverride(for keyID: String) -> Snapshot {
             var copy = overrides; copy.removeValue(forKey: keyID)
-            return Snapshot(overrides: copy, arrangements: arrangements, arrangesNumberRow: arrangesNumberRow)
+            return with(overrides: copy)
         }
         private enum CodingKeys: String, CodingKey { case schemaVersion, overrides, arrangements }
         init(from decoder: Decoder) throws {
@@ -314,6 +337,9 @@ struct KeyboardKeySettings {
     private let readPrefix: PrefixReader
     private let writeAtomically: AtomicWriter
     private let legacyShowsNumberRow: NumberRowReader
+    /// This install's number row for layouts without an arrangement, for the
+    /// directory this file is in: `KeyboardNumberRowDefault`.
+    private let standardNumberRow: NumberRowReader
     /// The default reads the current shared configuration generation, or
     /// the group root before migration.
     init(containerURL: @escaping ContainerProvider = {
@@ -322,12 +348,19 @@ struct KeyboardKeySettings {
          writeAtomically: @escaping AtomicWriter = KeyboardKeySettings.writeFileAtomically,
          legacyShowsNumberRow: @escaping NumberRowReader = { directory in
         UnicodeEditionSettings(containerURL: { directory }).loadSnapshot().showsNumberRow
-    }) {
+    }, standardNumberRow: @escaping NumberRowReader = { KeyboardNumberRowDefault.standardNumberRow(forContainer: $0) }) {
         self.containerURL = containerURL; self.readPrefix = readPrefix; self.writeAtomically = writeAtomically
         self.legacyShowsNumberRow = legacyShowsNumberRow
+        self.standardNumberRow = standardNumberRow
     }
     func loadSnapshot() -> Snapshot {
-        loadForEditing() ?? .defaults
+        loadForEditing() ?? emptySnapshot()
+    }
+    /// No keys or arrangements saved, with this install's number row.
+    func emptySnapshot() -> Snapshot {
+        var result = Snapshot.defaults
+        if let container = containerURL(), container.isFileURL { result.standardNumberRow = standardNumberRow(container) }
+        return result
     }
     /// A merge requires trustworthy existing state. Only an explicitly missing
     /// file is an editable empty configuration; malformed/unreadable data is
@@ -335,7 +368,16 @@ struct KeyboardKeySettings {
     /// earlier file, or none, is read with the number row it was shown with.
     func loadForEditing() -> Snapshot? {
         guard let container = containerURL(), container.isFileURL, let stored = loadStored(in: container) else { return nil }
-        return stored.arrangesNumberRow ? stored : stored.migratingNumberRow(showsNumberRow: legacyShowsNumberRow(container))
+        return migrated(stored, in: container)
+    }
+    /// With this install's number row; an earlier file once more with the
+    /// number row it was shown with. An install that types without the
+    /// number row by default is a fresh one, with no earlier choice to read.
+    private func migrated(_ stored: Snapshot, in container: URL) -> Snapshot {
+        var stored = stored
+        stored.standardNumberRow = standardNumberRow(container)
+        guard !stored.arrangesNumberRow else { return stored }
+        return stored.migratingNumberRow(showsNumberRow: stored.standardNumberRow && legacyShowsNumberRow(container))
     }
     /// Saves the number row migration once, so the retired Number Row choice
     /// is never read again. True when it saved; false when there was nothing
@@ -343,7 +385,7 @@ struct KeyboardKeySettings {
     @discardableResult func migrateNumberRowIfNeeded() -> Bool {
         guard let container = containerURL(), container.isFileURL, let stored = loadStored(in: container),
               !stored.arrangesNumberRow else { return false }
-        return save(stored.migratingNumberRow(showsNumberRow: legacyShowsNumberRow(container)))
+        return save(migrated(stored, in: container))
     }
     private func loadStored(in container: URL) -> Snapshot? {
         let data: Data
@@ -429,5 +471,66 @@ struct KeyboardKeySettings {
     private static func writeFileAtomically(_ data: Data, to url: URL) throws {
         guard (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil else { throw Invalid.file }
         try data.write(to: url, options: [.atomic])
+    }
+}
+
+/// Whether layouts without their own arrangement type the number row on this
+/// install. Fresh installs type without it; anyone who opened an earlier
+/// Uniboard keeps it. Recorded once in the App Group root, outside the
+/// configuration generations, so imports, Undo and Reset All never change it.
+/// A number row someone adds or removes is an arrangement and always wins.
+enum KeyboardNumberRowDefault {
+    static let filename = "keyboard-number-row.json"
+    private struct Record: Codable, Equatable {
+        var schemaVersion = 1
+        let numberRow: Bool
+    }
+
+    /// The group root holding `directory`, a configuration generation or the root itself.
+    static func root(ofContainer directory: URL) -> URL {
+        let parent = directory.deletingLastPathComponent()
+        return parent.lastPathComponent == SharedConfigurationLocation.folderName ? parent.deletingLastPathComponent() : directory
+    }
+
+    /// The recorded choice, or nil before Uniboard records one.
+    static func recorded(in root: URL) -> Bool? {
+        guard let data = try? SharedConfigurationLocation.readRegularFile(root.appendingPathComponent(filename), limit: 4096),
+              let record = try? JSONDecoder().decode(Record.self, from: data), record.schemaVersion == 1 else { return nil }
+        return record.numberRow
+    }
+
+    /// Anything an earlier Uniboard left in the group: a configuration
+    /// folder or any settings file in the root. `defaults` is the app's own,
+    /// which only the app can read.
+    static func hasEarlierUse(in root: URL, defaults: UserDefaults? = nil) -> Bool {
+        let names = [SharedConfigurationLocation.folderName, filename] + SharedConfigurationLocation.snapshotFiles
+        if names.contains(where: { FileManager.default.fileExists(atPath: root.appendingPathComponent($0).path) }) { return true }
+        guard let defaults, let domain = Bundle.main.bundleIdentifier.flatMap(defaults.persistentDomain(forName:)) else { return false }
+        return domain.keys.contains { !$0.hasPrefix("Apple") && !$0.hasPrefix("NS") && !$0.hasPrefix("com.apple.") }
+    }
+
+    /// The reading for the keys file in `directory`, by the app and the
+    /// keyboard alike. The keyboard may run first after an update, before
+    /// the app records anything: it then decides the same way from the group
+    /// alone, without writing, so an earlier install keeps the number row and
+    /// the app later records the same answer. Only the group itself, empty,
+    /// is a fresh install; any other directory (a test) keeps the number row.
+    static func standardNumberRow(forContainer directory: URL,
+                                  group: URL? = SharedConfigurationLocation.shared.root()) -> Bool {
+        let root = root(ofContainer: directory)
+        if let value = recorded(in: root) { return value }
+        guard let group, group.standardizedFileURL.path == root.standardizedFileURL.path else { return true }
+        return hasEarlierUse(in: root)
+    }
+
+    /// Records the default once: on for an earlier install, off for a fresh
+    /// one. Decide `earlierUse` before anything writes to the group on this
+    /// launch. Returns the value in effect; nil when it can't be saved.
+    @discardableResult
+    static func recordIfNeeded(in root: URL, earlierUse: Bool) -> Bool? {
+        if let value = recorded(in: root) { return value }
+        guard let data = try? JSONEncoder().encode(Record(numberRow: earlierUse)),
+              (try? data.write(to: root.appendingPathComponent(filename), options: [.atomic])) != nil else { return nil }
+        return earlierUse
     }
 }

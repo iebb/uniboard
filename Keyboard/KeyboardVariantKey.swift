@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// Native press/hold/slide selection keeps the original host first responder.
-struct KeyboardVariantKey: UIViewRepresentable {
+struct KeyboardVariantKey: View {
     let text: String
     let variants: [String]
     let identifier: String
@@ -36,6 +36,18 @@ struct KeyboardVariantKey: UIViewRepresentable {
     var focusRequest: (@MainActor () -> Bool)? = nil
     let factory: KeyboardVariantInteraction.Factory
 
+    typealias Context = UIViewRepresentableContext<Native>
+    var body: some View { Native(key: self).modifier(KeyboardNativeTouchExpansion()) }
+    struct Native: UIViewRepresentable {
+        let key: KeyboardVariantKey
+        func makeUIView(context: Context) -> KeyboardVariantButton { key.makeUIView(context: context) }
+        func updateUIView(_ view: KeyboardVariantButton, context: Context) {
+            let inset = context.environment.keyboardStockKeyInsets
+            view.keyboardVisualInsets = UIEdgeInsets(top: inset.top, left: inset.leading, bottom: inset.bottom, right: inset.trailing)
+            key.updateUIView(view, context: context)
+        }
+    }
+
     func makeUIView(context: Context) -> KeyboardVariantButton { KeyboardVariantButton() }
     func updateUIView(_ view: KeyboardVariantButton, context: Context) {
         let font = UnicodeFontSupport.font(for: symbolBoardPreview(text), size: fontSize, enabled: useUnicodeFonts, anchor: symbolBoardFontAnchor(text))
@@ -57,5 +69,21 @@ struct KeyboardVariantKey: UIViewRepresentable {
                 UIAccessibility.post(notification: .layoutChanged, argument: view)
             }
         }
+    }
+}
+
+private struct KeyboardStockKeyInsetsKey: EnvironmentKey {
+    static let defaultValue = EdgeInsets()
+}
+extension EnvironmentValues {
+    var keyboardStockKeyInsets: EdgeInsets {
+        get { self[KeyboardStockKeyInsetsKey.self] }
+        set { self[KeyboardStockKeyInsetsKey.self] = newValue }
+    }
+}
+struct KeyboardNativeTouchExpansion: ViewModifier {
+    @Environment(\.keyboardStockKeyInsets) private var insets
+    func body(content: Content) -> some View {
+        content.padding(EdgeInsets(top: -insets.top, leading: -insets.leading, bottom: -insets.bottom, trailing: -insets.trailing))
     }
 }

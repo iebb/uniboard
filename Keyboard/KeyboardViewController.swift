@@ -1186,23 +1186,28 @@ final class KeyboardViewController: UIInputViewController {
             keyRows: keyRows,
             searching: model.isSearching, browsing: model.showsUnicode && !model.isSearching,
             showsTextPreview: model.showsTextPreview,
-            previewImagePanel: model.hasKeyboardPanel)
+            previewImagePanel: model.hasKeyboardPanel, stockRows: model.usesPhonePortraitGeometry)
         // The existing metrics include preview/footer/gaps; the optional typing
         // toolbar is actual additional chrome, not borrowed key-row space.
-        let toolbarChrome = usesCompositionLayout && model.showsUnicodeToolbar ? metrics.typingKeyHeight : 0
+        let portrait = metrics.usesPhonePortraitGeometry
+        (view as? KeyboardSelfSizingInputView)?.routesStockKeyGaps = portrait
+        let toolbarChrome = usesCompositionLayout && model.showsUnicodeToolbar && !portrait ? metrics.typingKeyHeight : 0
         let compositionPlan = KeyboardCompositionLayoutPolicy.plan(
             baselineHeight: metrics.height + toolbarChrome, baselineKeyHeight: metrics.typingKeyHeight,
             sceneHeight: sceneSize?.height, actualGrantedHeight: view.bounds.height,
             conversionEnabled: conversionVisible, surfaceAvailable: !model.hasKeyboardPanel,
-            baselineKeyRows: keyRows, rowSpacing: pad && view.bounds.width >= 666 ? 6 : 4,
+            baselineKeyRows: keyRows, rowSpacing: portrait ? 11 : pad && view.bounds.width >= 666 ? 6 : 4,
             hostHeightIsSettled: isKeyboardShown && view.window != nil,
-            prefersCompactShelf: prefersCompactShelf, englishSingleRow: language.mode == .direct)
+            prefersCompactShelf: prefersCompactShelf, englishSingleRow: language.mode == .direct,
+            reservedShelfHeight: portrait ? 42 : 0)
         let shelf = conversionVisible ? compositionPlan.shelfHeight : 0
         if model.compositionShelfHeight != shelf { model.compositionShelfHeight = shelf }
         model.updateTypingGeometry(availableWidth: max(0, view.bounds.width - 16),
             normalKeyHeight: usesCompositionLayout ? compositionPlan.mergeNormalKeyHeight : metrics.typingKeyHeight)
         let typingHeight = metrics.typingKeyHeight
         if model.typingKeyHeight != typingHeight { model.typingKeyHeight = typingHeight }
+        let portraitRows = KeyboardPhonePortraitGeometry.Rows(width: view.bounds.width)
+        if model.phonePortraitRows != portraitRows { model.phonePortraitRows = portraitRows }
         applyKeyboardHeight(usesCompositionLayout ? compositionPlan.requestedHeight : metrics.height,
             animated: animated && !UIAccessibility.isReduceMotionEnabled)
     }
@@ -2082,6 +2087,11 @@ private final class KeyboardModel: ObservableObject {
     private var typingNormalKeyHeight = KeyboardTypingLayoutPolicy.regularKeyHeight
 
     private var isPhoneLayout = false
+    var usesPhonePortraitGeometry: Bool {
+        guard isPhoneLayout, !isCompactLayout, !showsUnicode else { return false }
+        let alphabet = KeyboardAlphabet.alphabet(id: typingState.alphabet.id) ?? typingState.alphabet
+        return typingPresentation.widthBasis.stockEquivalent(for: alphabet) != nil
+    }
 
     func updateTypingLayoutContext(isPhone: Bool, isPad: Bool, compact: Bool) {
         let previous = typingPresentation
@@ -2117,6 +2127,8 @@ private final class KeyboardModel: ObservableObject {
     }
 
     @Published var typingKeyHeight: CGFloat = KeyboardTypingLayoutPolicy.regularKeyHeight
+    /// The portrait rows for this keyboard's width; used while `usesPhonePortraitGeometry`.
+    @Published var phonePortraitRows = KeyboardPhonePortraitGeometry.Rows.large
     @Published private(set) var inputModeID = UUID()
     var inputModeChanged: (() -> Void)?
     var typingActivated: (() -> Void)?
@@ -2401,8 +2413,12 @@ private final class KeyboardModel: ObservableObject {
     /// The current layout's main keyboard as it types: the saved
     /// arrangement, or the number row and the layout's own rows.
     var typingPresentation: KeyboardTypingPresentation {
-        let saved = language.mode == .koreanTwoSetHangul ? MainKeyboardArrangement.letters(for: .english)
-            : keySettings.effectiveArrangement(for: KeyboardAlphabet.alphabet(id: typingState.alphabet.id) ?? typingState.alphabet)
+        let alphabet = KeyboardAlphabet.alphabet(id: typingState.alphabet.id) ?? typingState.alphabet
+        var saved = language.mode == .koreanTwoSetHangul ? MainKeyboardArrangement.letters(for: .english)
+            : keySettings.effectiveArrangement(for: alphabet)
+        // Saved rows equal to the stock ones type as the stock default in
+        // phone portrait, so its rows render with Apple's geometry.
+        if isPhoneLayout, !isCompactLayout, !showsUnicode, let stock = saved.stockEquivalent(for: alphabet) { saved = stock }
         return KeyboardTypingPresentation(arrangement: saved, mode: language.mode,
             isPhone: isPhoneLayout, isCompactLayout: isCompactLayout, isTyping: !showsUnicode)
     }
@@ -3871,9 +3887,9 @@ private struct UnicodeKeyboardView: View {
     }
     /// Named keys fit the glyph, the code point and three lines of name.
     private var keyHeight: CGFloat { model.isCompactLayout ? 72 : model.isPadLayout ? 84 : 80 }
-    private var headerHeight: CGFloat { model.usesCompactSearchLayout ? KeyboardLayoutPolicy.compactSearchBarHeight : model.typingKeyHeight }
+    private var headerHeight: CGFloat { model.usesPhonePortraitGeometry ? 42 : model.usesCompactSearchLayout ? KeyboardLayoutPolicy.compactSearchBarHeight : model.typingKeyHeight }
     /// The gap above the content and above the footer.
-    private var contentGap: CGFloat { model.usesCompactSearchLayout ? KeyboardLayoutPolicy.compactSearchRowSpacing : 4 }
+    private var contentGap: CGFloat { model.usesPhonePortraitGeometry ? 11 : model.usesCompactSearchLayout ? KeyboardLayoutPolicy.compactSearchRowSpacing : 4 }
     private var controlHeight: CGFloat { model.typingKeyHeight }
     private var showsCompositionShelf: Bool {
         !model.showsUnicode && !model.expandedConversion && !model.finishingConversion
@@ -3883,8 +3899,8 @@ private struct UnicodeKeyboardView: View {
     private var showsEnglishShelf: Bool { showsCompositionShelf && language.mode == .direct }
     // English owns the complete 44-point band. Keep baseline insets when absent,
     // and keep conversion/preview/footer/key metrics independent of this row.
-    private var typingTopInset: CGFloat { showsEnglishShelf ? 0 : 4 }
-    private var typingContentTopGap: CGFloat { showsEnglishShelf ? 0 : contentGap }
+    private var typingTopInset: CGFloat { model.usesPhonePortraitGeometry ? 4 : showsEnglishShelf ? 0 : 4 }
+    private var typingContentTopGap: CGFloat { model.usesPhonePortraitGeometry ? model.phonePortraitRows.toolbarGap : showsEnglishShelf ? 0 : contentGap }
     private static let englishStatusInk = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor(red: 177.0 / 255, green: 177.0 / 255, blue: 186.0 / 255, alpha: 1) // #B1B1BA
@@ -3900,6 +3916,9 @@ private struct UnicodeKeyboardView: View {
                 }
                 // Hidden native controls must leave the remote AX hierarchy.
                 // The model restores the exact query and caret when shown.
+                if model.usesPhonePortraitGeometry && !showsCompositionShelf && !model.showsUnicodeToolbar {
+                    Color.clear.frame(height: 42).accessibilityHidden(true)
+                }
                 if model.showsUnicodeToolbar {
                     toolbar.frame(height: headerHeight)
                         .allowsHitTesting(!model.finishingConversion && !model.expandedConversion)
@@ -3909,7 +3928,7 @@ private struct UnicodeKeyboardView: View {
                     if showsEnglishShelf { englishShelf }
                     else {
                         conversionShelf
-                        Color.clear.frame(height: 4).accessibilityHidden(true)
+                        Color.clear.frame(height: model.usesPhonePortraitGeometry ? 0 : 4).accessibilityHidden(true)
                     }
                 }
                 // English has no exterior gap; conversion and shelf-free typing
@@ -3940,7 +3959,7 @@ private struct UnicodeKeyboardView: View {
             }
             .padding(.horizontal, 8)
             .padding(.top, typingTopInset)
-            .padding(.bottom, 6)
+            .padding(.bottom, model.usesPhonePortraitGeometry ? model.phonePortraitRows.bottomPadding : 6)
             // Hidden, not dimmed, under a panel that covers them.
             .opacity(model.hasKeyboardPanel ? 0 : 1)
             .allowsHitTesting(!model.hasSymbolBoardOverlay && !model.hasKeyboardPanel)
@@ -5229,7 +5248,8 @@ private struct UnicodeKeyboardView: View {
                 showsReturn: language.mode == .koreanTwoSetHangul || !usesPadFooter && (model.showsUnicode || KeyboardTypingLayoutPolicy.padPlan(availableWidth: geometry.size.width,
                     isPad: model.isPadLayout, layout: model.typingState.layout, isLandscape: model.isLandscapePadLayout, padLayout: model.padLayout,
                     alphabet: model.typingState.alphabet) == nil),
-                padTyping: usesPadFooter) {
+                padTyping: usesPadFooter, phonePortrait: model.usesPhonePortraitGeometry,
+                alphabet: model.typingState.alphabet) {
                 footerControls(plan)
             }
         }
@@ -5247,6 +5267,7 @@ private struct UnicodeKeyboardView: View {
                 // Like Shift: the darker modifier grey while the toolbar is
                 // hidden, and an ordinary key while it shows. Never tinted.
                 .keyboardKeySurface(modifier: !model.showsUnicodeToolbar)
+                .environment(\.keyboardStockKeyInsets, model.usesPhonePortraitGeometry ? EdgeInsets(top: 5.5, leading: 8, bottom: model.phonePortraitRows.bottomPadding, trailing: 4) : EdgeInsets())
             if model.needsInputModeSwitchKey {
                 InputModeSwitchKey(controller: controller, isModifier: model.isPadLayout && !model.showsUnicode,
                     contentPosition: usesPadKeyPositions ? .bottomLeft : .center)
@@ -5320,8 +5341,10 @@ private struct UnicodeKeyboardView: View {
                     factory: { [mode = model.inputModeID] in action(mode, .returnKey) })
                     .frame(width: plan.returnWidth, height: controlHeight)
                     .background(KeyboardPalette.action, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .environment(\.keyboardStockKeyInsets, model.usesPhonePortraitGeometry ? EdgeInsets(top: 5.5, leading: 4, bottom: model.phonePortraitRows.bottomPadding, trailing: 8) : EdgeInsets())
             }
         }
+        .environment(\.keyboardStockKeyInsets, model.usesPhonePortraitGeometry ? EdgeInsets(top: 5.5, leading: 4, bottom: model.phonePortraitRows.bottomPadding, trailing: 4) : EdgeInsets())
     }
     private func footerCollapseKey(_ plan: KeyboardFooterLayoutPolicy.Plan) -> some View {
         KeyboardTouchKey(title: nil, symbol: "keyboard.chevron.compact.down",
@@ -5334,7 +5357,7 @@ private struct UnicodeKeyboardView: View {
         let letters = model.typingState.layout != .letters
         return KeyboardTouchKey(title: letters ? model.typingState.alphabet.lettersKeyTitle : model.mergesSymbols ? "#+=" : "123",
             identifier: letters ? "keyboard.typing.letters" : "keyboard.typing.numbers",
-            label: letters ? "Letters" : model.mergesSymbols ? "Symbols" : "Numbers", value: model.typingLayoutValue, fontSize: 13,
+            label: letters ? "Letters" : model.mergesSymbols ? "Symbols" : "Numbers", value: model.typingLayoutValue, fontSize: model.usesPhonePortraitGeometry && model.mergesSymbols && !letters ? 15 : 13,
             contentPosition: usesPadKeyPositions ? .bottomRight : .center,
             route: model.inputModeID, factory: { [mode = model.inputModeID] in action(mode, .layout(letters ? .letters : .numbers)) })
             .frame(width: plan.keyWidth, height: controlHeight).keyboardKeySurface(modifier: true)
@@ -5394,19 +5417,23 @@ private struct KeyboardTypingView: View {
     var body: some View {
         GeometryReader { geometry in
             let arrangement = arrangement
+            let stockABC = KeyboardABCRendering(alphabet: catalogAlphabet, arrangement: presentation.widthBasis,
+                availableWidth: geometry.size.width, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout)
+            let phonePortrait = !isPad && !compact && !stockABC.arranged
+            let portraitGeometry = phonePortrait ? KeyboardPhonePortraitGeometry(width: geometry.size.width + 16, alphabet: catalogAlphabet) : nil
             let explicitLetters = (koreanTwoSet || !arrangement.isLegacy) && typing.state.layout == .letters
             let arrangedKeyRows = arrangement.keyRows(widePad: isPad && geometry.size.width >= 650)
             let fullANSI = !explicitLetters && KeyboardTypingLayoutPolicy.usesANSI(availableWidth: geometry.size.width,
                 isPad: isPad, isLandscape: isLandscape, padLayout: padLayout) && padLayout == .ansiNumbers
             let keyRows = fullANSI ? max(4, arrangedKeyRows) : arrangedKeyRows
-            let spacing: CGFloat = isPad && geometry.size.width >= 650 ? 6 : 4
-            let normalHeight = KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: geometry.size.width, isPad: isPad)
+            let spacing: CGFloat = phonePortrait ? 11 : isPad && geometry.size.width >= 650 ? 6 : 4
+            let normalHeight = phonePortrait ? KeyboardPhonePortraitGeometry.Rows(width: geometry.size.width + 16).keyHeight : KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: geometry.size.width, isPad: isPad)
             let minimumHeight = CGFloat(keyRows) * normalHeight + CGFloat(max(0, keyRows - 1)) * spacing
             let scrolls = preservesNormalKeySize && geometry.size.height < minimumHeight
             if let plan = KeyboardTypingLayoutPolicy.plan(availableHeight: preservesNormalKeySize ? max(geometry.size.height, minimumHeight) : geometry.size.height,
                 availableWidth: geometry.size.width, compact: compact, layout: typing.state.layout,
                 isPad: isPad, isLandscape: explicitLetters ? false : isLandscape, padLayout: explicitLetters ? .stock : padLayout,
-                keyRows: arrangement.keyRows(widePad: isPad && geometry.size.width >= 650), mergedSymbols: mergedSymbols) {
+                keyRows: arrangement.keyRows(widePad: isPad && geometry.size.width >= 650), mergedSymbols: mergedSymbols, phonePortrait: phonePortrait) {
                 let ansiStyle = !explicitLetters && KeyboardTypingLayoutPolicy.usesANSI(availableWidth: geometry.size.width, isPad: isPad, isLandscape: isLandscape, padLayout: padLayout)
                 let pad = explicitLetters ? nil : KeyboardTypingLayoutPolicy.padPlan(availableWidth: geometry.size.width, isPad: isPad, layout: typing.state.layout, isLandscape: isLandscape, padLayout: padLayout,
                     alphabet: typing.state.alphabet)
@@ -5426,10 +5453,12 @@ private struct KeyboardTypingView: View {
                         KeyboardDiacriticsPanel(marks: typing.state.alphabet.diacritics, isPad: isPad, route: mode, action: action)
                             .frame(height: plan.contentHeight)
                     } else {
-                    if plan.auxiliaryRowCount > 0 && !arranged { auxiliaryRow(height: plan.keyHeight, ansiPad: ansiStyle) }
+                    if plan.auxiliaryRowCount > 0 && !arranged { auxiliaryRow(height: plan.keyHeight, ansiPad: ansiStyle, portrait: portraitGeometry) }
                     if let pad {
                         if pad.isANSI { ansiRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.auxiliaryRowCount > 0) }
                         else { padRows(pad, height: plan.keyHeight, hasAuxiliaryRow: plan.auxiliaryRowCount > 0) }
+                    } else if let portraitGeometry {
+                        portraitRows(portraitGeometry, plan: plan)
                     } else if arranged {
                         arrangedRows(arrangement, width: geometry.size.width, height: plan.keyHeight, hasAuxiliaryRow: plan.auxiliaryRowCount > 0)
                     } else {
@@ -5467,6 +5496,50 @@ private struct KeyboardTypingView: View {
                 .preference(key: KeyboardTypingANSIPadVisible.self, value: ansiStyle)
             }
         }
+    }
+
+    /// Positions are in keyboard coordinates; this subtree is inset 8 points.
+    private func portraitRows(_ geometry: KeyboardPhonePortraitGeometry, plan: KeyboardTypingLayoutPlan) -> some View {
+        let rows = KeyboardTypingLayoutPolicy.rows(for: typing.state.layout, hasAuxiliaryRow: plan.auxiliaryRowCount > 0,
+            alphabet: typing.state.alphabet, mergedSymbols: mergedSymbols)
+        return ForEach(Array(rows.enumerated()), id: \.offset) { index, keys in
+            let last = index == rows.count - 1
+            let letters = typing.state.layout == .letters
+            let letterRow = geometry.lastLetterRow(letters: keys.count, alphabet: typing.state.alphabet)
+            let punctuation = geometry.punctuationRow(count: keys.count, leadingKey: !mergedSymbols)
+            let spans = last ? (letters ? letterRow.letters : punctuation.keys) : geometry.characterRow(count: keys.count)
+            let leading = last ? (letters ? letterRow.leading : punctuation.leading) : nil
+            let trailing = last ? (letters ? letterRow.trailing : punctuation.trailing) : nil
+            let allSpans = ([leading].compactMap { $0 } + spans + [trailing].compactMap { $0 })
+            ZStack(alignment: .topLeading) {
+                if let leading {
+                    typingLeadingKey(height: plan.keyHeight, width: leading.width)
+                        .environment(\.keyboardStockKeyInsets, portraitInsets(leading, in: allSpans, width: geometry.width))
+                        .offset(x: leading.x - 8)
+                }
+                ForEach(Array(keys.enumerated()), id: \.offset) { i, key in
+                    typingCharacterKey(key, hasAuxiliaryRow: plan.auxiliaryRowCount > 0, isAuxiliaryKey: false,
+                        identifier: "keyboard.typing.key.\(key)", fontSize: compact ? 20 : 23)
+                        .frame(width: spans[i].width, height: plan.keyHeight).keyboardKeySurface(radius: 7)
+                        .environment(\.keyboardStockKeyInsets, portraitInsets(spans[i], in: allSpans, width: geometry.width))
+                        .offset(x: spans[i].x - 8)
+                }
+                if let trailing {
+                    RepeatingDeleteKey(action: delete, isQuery: false, route: mode, identifier: "keyboard.typing.delete")
+                        .frame(width: trailing.width, height: plan.keyHeight).keyboardKeySurface(radius: 7, modifier: true)
+                        .environment(\.keyboardStockKeyInsets, portraitInsets(trailing, in: allSpans, width: geometry.width))
+                        .offset(x: trailing.x - 8)
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading).frame(height: plan.keyHeight)
+        }
+    }
+
+    private func portraitInsets(_ span: KeyboardPhonePortraitGeometry.Span,
+                                in spans: [KeyboardPhonePortraitGeometry.Span], width: CGFloat) -> EdgeInsets {
+        let i = spans.firstIndex(of: span) ?? 0
+        let left = i == 0 ? span.x : (span.x - spans[i - 1].maxX) / 2
+        let right = i == spans.count - 1 ? width - span.maxX : (spans[i + 1].x - span.maxX) / 2
+        return EdgeInsets(top: 5.5, leading: left, bottom: 5.5, trailing: right)
     }
 
     private var showsDiacriticsPanel: Bool {
@@ -5622,16 +5695,17 @@ private struct KeyboardTypingView: View {
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(typing.state.shift == .lowercase ? Color.clear : KeyboardPalette.accent.opacity(0.65), lineWidth: 1))
     }
 
-    private func auxiliaryRow(height: CGFloat, ansiPad: Bool) -> some View {
-        HStack(spacing: isPad ? 7 : 5) {
+    private func auxiliaryRow(height: CGFloat, ansiPad: Bool, portrait: KeyboardPhonePortraitGeometry? = nil) -> some View {
+        HStack(spacing: portrait == nil ? (isPad ? 7 : 5) : 8) {
             ForEach(KeyboardTypingLayoutPolicy.auxiliaryRow(for: typing.state.layout, ansiPad: ansiPad), id: \.self) { key in
                 typingCharacterKey(key, hasAuxiliaryRow: true, isAuxiliaryKey: true, ansiPad: ansiPad,
                     identifier: KeyboardTypingLayoutPolicy.numberRowOutput(for: key) != nil ? "keyboard.typing.number.\(key)" : "keyboard.typing.auxiliary.\(key)",
                     fontSize: compact ? 18 : 20)
-                    .frame(maxWidth: .infinity).frame(height: height)
+                    .frame(width: portrait?.keyWidth).frame(maxWidth: portrait == nil ? .infinity : nil).frame(height: height)
                     .keyboardKeySurface(radius: 7)
+                    .environment(\.keyboardStockKeyInsets, portrait == nil ? EdgeInsets() : EdgeInsets(top: 5.5, leading: key == "1" ? 8 : 4, bottom: 5.5, trailing: key == "0" ? 8 : 4))
             }
-        }
+        }.frame(maxWidth: .infinity)
     }
 
     @ViewBuilder private func typingCharacterKey(_ key: String, hasAuxiliaryRow: Bool, isAuxiliaryKey: Bool, widePad: Bool = false, ansiPad: Bool = false,
@@ -5681,7 +5755,7 @@ private struct KeyboardTypingView: View {
             KeyboardTouchKey(title: KeyboardTypingLayoutPolicy.symbolSwitchTitle(to: symbols ? .symbols : .numbers,
                 isPad: isPad, ansiPad: ansiPad, padLayout: padLayout),
                 identifier: symbols ? "keyboard.typing.symbols" : "keyboard.typing.numbers",
-                label: symbols ? "More symbols" : "Numbers", value: layoutValue, fontSize: 13,
+                label: symbols ? "More symbols" : "Numbers", value: layoutValue, fontSize: !isPad && !compact && symbols ? 15 : 13,
                 contentPosition: isPad && height >= 44 ? .bottomLeft : .center,
                 route: mode, factory: { [mode = mode] in action(mode, .layout(symbols ? .symbols : .numbers)) })
                 .frame(width: width ?? (isPad ? 64 : 42), height: height)
@@ -5837,7 +5911,7 @@ extension KeyboardViewController: KeyboardPreviewCursorHost, KeyboardPreviewCurs
     }
 }
 
-private struct KeyboardTouchKey: UIViewRepresentable {
+private struct KeyboardTouchKey: View {
     let title: String?
     var symbol: String? = nil
     let identifier: String
@@ -5860,6 +5934,18 @@ private struct KeyboardTouchKey: UIViewRepresentable {
     var accessibilityHint: String? = nil
     let factory: () -> (() -> Bool)
 
+    typealias Context = UIViewRepresentableContext<Native>
+    var body: some View { Native(key: self).modifier(KeyboardNativeTouchExpansion()) }
+    struct Native: UIViewRepresentable {
+        let key: KeyboardTouchKey
+        func makeUIView(context: Context) -> KeyboardTouchActionButton { key.makeUIView(context: context) }
+        func updateUIView(_ view: KeyboardTouchActionButton, context: Context) {
+            let inset = context.environment.keyboardStockKeyInsets
+            view.keyboardVisualInsets = UIEdgeInsets(top: inset.top, left: inset.leading, bottom: inset.bottom, right: inset.trailing)
+            key.updateUIView(view, context: context)
+        }
+    }
+
     func makeUIView(context: Context) -> KeyboardTouchActionButton {
         if holdFactory != nil { return KeyboardQueryHoldButton() }
         return shiftSlideFactory == nil ? KeyboardTouchActionButton() : KeyboardShiftTouchButton()
@@ -5877,7 +5963,7 @@ private struct KeyboardTouchKey: UIViewRepresentable {
         view.setTitle(title, for: .normal)
         view.setImage(symbol.flatMap { UIImage(systemName: $0) }, for: .normal)
         view.contentPosition = contentPosition
-        view.titleLabel?.font = .systemFont(ofSize: fontSize, weight: isAction && contentPosition == .center ? .semibold : .regular)
+        view.titleLabel?.font = .systemFont(ofSize: fontSize, weight: (isAction && contentPosition == .center) || (title == "#+=" && fontSize == 15) ? .semibold : .regular)
         view.titleLabel?.adjustsFontSizeToFitWidth = true
         view.titleLabel?.minimumScaleFactor = 0.7
         let foreground = isAction ? KeyboardPalette.actionTextUI : tinted ? KeyboardPalette.accentUI : secondary ? UIColor.secondaryLabel : UIColor.label
@@ -6100,10 +6186,29 @@ private final class InspectableKeyButton: UIControl {
 }
 
 /// Preserve Apple's standard press-and-hold input-mode menu.
-private struct InputModeSwitchKey: UIViewRepresentable {
+private struct InputModeSwitchKey: View {
     weak var controller: KeyboardViewController?
     var isModifier = false
     var contentPosition: KeyboardKeyContentPosition = .center
+    @Environment(\.keyboardStockKeyInsets) private var touchInsets
+    typealias Context = UIViewRepresentableContext<Native>
+    @ViewBuilder var body: some View {
+        if touchInsets.top > 0 {
+            Native(key: self).modifier(KeyboardNativeTouchExpansion()).keyboardKeySurface(modifier: isModifier)
+        } else {
+            Native(key: self)
+        }
+    }
+    struct Native: UIViewRepresentable {
+        let key: InputModeSwitchKey
+        func makeUIView(context: Context) -> KeyboardGlobeButton { key.makeUIView(context: context) }
+        func updateUIView(_ view: KeyboardGlobeButton, context: Context) {
+            let inset = context.environment.keyboardStockKeyInsets
+            view.keyboardVisualInsets = UIEdgeInsets(top: inset.top, left: inset.leading, bottom: inset.bottom, right: inset.trailing)
+            key.updateUIView(view, context: context)
+        }
+    }
+
     func makeUIView(context: Context) -> KeyboardGlobeButton {
         let button = KeyboardGlobeButton(type: .system)
         button.setImage(UIImage(systemName: "globe", withConfiguration: UIImage.SymbolConfiguration(pointSize: 19)), for: .normal)
@@ -6124,12 +6229,16 @@ private struct InputModeSwitchKey: UIViewRepresentable {
     }
     func updateUIView(_ uiView: KeyboardGlobeButton, context: Context) {
         uiView.contentPosition = contentPosition
-        uiView.backgroundColor = isModifier ? KeyboardPalette.modifierUI : KeyboardPalette.keyUI
+        uiView.backgroundColor = uiView.keyboardVisualInsets == .zero ? (isModifier ? KeyboardPalette.modifierUI : KeyboardPalette.keyUI) : .clear
+        uiView.layer.borderWidth = uiView.keyboardVisualInsets == .zero ? 0.5 : 0
         uiView.layer.borderColor = KeyboardPalette.borderUI.resolvedColor(with: uiView.traitCollection).cgColor
     }
 }
 
-private final class KeyboardGlobeButton: UIButton {
+private final class KeyboardGlobeButton: KeyboardStockButton {
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        keyboardStockTouchRect.contains(point)
+    }
     private lazy var pressFeedback = KeyboardTouchFeedback.attach(to: self)
     override var isHighlighted: Bool { didSet { pressFeedback.setPressed(isHighlighted) } }
     override func willMove(toWindow newWindow: UIWindow?) {
@@ -6142,13 +6251,25 @@ private final class KeyboardGlobeButton: UIButton {
     }
 }
 
-private struct RepeatingDeleteKey: UIViewRepresentable {
+private struct RepeatingDeleteKey: View {
     let action: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
     let isQuery: Bool
     let route: UUID
     var identifier = "keyboard.delete"
     var enabled = true
     var padStyle = false
+    typealias Context = UIViewRepresentableContext<Native>
+    var body: some View { Native(key: self).modifier(KeyboardNativeTouchExpansion()) }
+    struct Native: UIViewRepresentable {
+        let key: RepeatingDeleteKey
+        func makeUIView(context: Context) -> RepeatingDeleteButton { key.makeUIView(context: context) }
+        func updateUIView(_ view: RepeatingDeleteButton, context: Context) {
+            let inset = context.environment.keyboardStockKeyInsets
+            view.keyboardVisualInsets = UIEdgeInsets(top: inset.top, left: inset.leading, bottom: inset.bottom, right: inset.trailing)
+            key.updateUIView(view, context: context)
+        }
+    }
+
     func makeUIView(context: Context) -> RepeatingDeleteButton { RepeatingDeleteButton() }
     func updateUIView(_ uiView: RepeatingDeleteButton, context: Context) {
         // Capture the scope this key currently displays, even before a model

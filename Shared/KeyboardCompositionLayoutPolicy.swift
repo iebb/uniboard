@@ -76,7 +76,7 @@ public enum KeyboardCompositionLayoutPolicy {
                             baselineKeyRows: Int = 4, rowSpacing: CGFloat = 4,
                             hostHeightIsSettled: Bool = false,
                             prefersCompactShelf: Bool = false,
-                            englishSingleRow: Bool = false) -> KeyboardCompositionLayoutPlan {
+                            englishSingleRow: Bool = false, reservedShelfHeight: CGFloat = 0) -> KeyboardCompositionLayoutPlan {
         guard baselineHeight.isFinite, baselineHeight > 0,
               baselineKeyHeight.isFinite, baselineKeyHeight > 0,
               rowSpacing.isFinite, rowSpacing >= 0, (1...256).contains(baselineKeyRows) else {
@@ -100,6 +100,7 @@ public enum KeyboardCompositionLayoutPolicy {
         let active = conversionEnabled && surfaceAvailable
         func chromeHeight(_ shelf: KeyboardCompositionShelf) -> CGFloat {
             guard shelf != .none else { return 0 }
+            if reservedShelfHeight > 0 { return max(0, shelf.height - reservedShelfHeight) }
             return englishSingleRow ? shelf.height - 8 : shelf.chromeHeight
         }
         func shelfFitting(_ height: CGFloat) -> KeyboardCompositionShelf {

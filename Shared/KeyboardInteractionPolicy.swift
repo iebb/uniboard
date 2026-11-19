@@ -18,15 +18,19 @@ enum KeyboardLayoutPolicy {
         let isCompactLayout: Bool
         let height: CGFloat
         let typingKeyHeight: CGFloat
+        /// The iPhone portrait default layout: KeyboardPhonePortraitGeometry.
+        var usesPhonePortraitGeometry = false
     }
     /// `keyRows` is the typing rows above the footer: the main keyboard
     /// arrangement's, at least three. `previewImagePanel` asks for the extra panel
     /// height, which an iPhone in portrait gets within the same scene cap;
-    /// keys keep the height they type with.
+    /// keys keep the height they type with. `stockRows` says the typing rows
+    /// are the stock (default) ones; on an iPhone in portrait, while typing,
+    /// they then take Apple's geometry (KeyboardPhonePortraitGeometry).
     static func metrics(viewWidth: CGFloat, displaySize: CGSize?, sceneHeight: CGFloat?, isPad: Bool,
                         compactVertical: Bool, keyRows: Int = MainKeyboardArrangement.maximumRows,
                         searching: Bool = false, browsing: Bool = false, showsTextPreview: Bool = false,
-                        previewImagePanel: Bool = false) -> Metrics {
+                        previewImagePanel: Bool = false, stockRows: Bool = false) -> Metrics {
         let size = displaySize.flatMap { value -> CGSize? in
             guard value.width.isFinite, value.height.isFinite, value.width > 0, value.height > 0 else { return nil }
             return value
@@ -44,6 +48,10 @@ enum KeyboardLayoutPolicy {
         let preview = showsTextPreview && !browsing
         let chrome: CGFloat = preview ? 22 : 18
         if searching && compact && !isPad { return compactSearchMetrics(sceneHeight: sceneHeight, preview: preview) }
+        if stockRows && !isPad && !compact && !searching && !browsing {
+            return phonePortraitMetrics(viewWidth: viewWidth, keyRows: keyRows, sceneHeight: sceneHeight, preview: preview,
+                                        previewImagePanel: previewImagePanel)
+        }
         // Search owns four full-height input rows, a result row above them
         // tall enough for a glyph, its code point and a three-line name, its
         // toolbar and footer, instead of shrinking keys.
@@ -63,6 +71,25 @@ enum KeyboardLayoutPolicy {
         let height = min(grown, sceneCap ?? grown)
         let actualKey = max(1, (typing - chrome - rowSpacing * gaps) / rows)
         return Metrics(isCompactLayout: compact, height: height, typingKeyHeight: min(key, actualKey))
+    }
+
+    /// The band, the key rows and the bottom row 11 points apart, and the
+    /// padding under it: 272 points without the number row, 328 with it, on
+    /// 430-point and wider phones; 256.3 and 310.3 on narrower ones. The
+    /// optional text preview is one more row and a 4-point gap.
+    private static func phonePortraitMetrics(viewWidth: CGFloat, keyRows: Int, sceneHeight: CGFloat?, preview: Bool,
+                                             previewImagePanel: Bool) -> Metrics {
+        let geometry = KeyboardPhonePortraitGeometry.Rows(width: viewWidth)
+        let keys = CGFloat(max(1, keyRows))
+        let rows = keys + 1 + (preview ? 1 : 0)
+        let fixed = geometry.height(keyRows: keyRows) - (keys + 1) * geometry.keyHeight + (preview ? 4 : 0)
+        let target = fixed + rows * geometry.keyHeight
+        let sceneCap = sceneHeight.flatMap { $0.isFinite && $0 > fixed + rows ? max(fixed + rows, $0 * 0.85) : nil }
+        let typing = min(target, sceneCap ?? target)
+        let grown = target + (previewImagePanel ? panelExtraHeight : 0)
+        let height = min(grown, sceneCap ?? grown)
+        let key = min(geometry.keyHeight, max(1, (typing - fixed) / rows))
+        return Metrics(isCompactLayout: false, height: height, typingKeyHeight: key, usesPhonePortraitGeometry: true)
     }
 
     /// Four query rows and the footer at `compactSearchKeyHeight`, 6 points

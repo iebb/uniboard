@@ -465,3 +465,193 @@ extension KeyboardTypingLayoutPolicyTests {
         }
     }
 }
+
+
+final class KeyboardPhonePortraitGeometryTests: XCTestCase {
+    func testExactSpecFramesAtAllFourPhoneWidths() throws {
+        let cases: [(CGFloat, CGFloat)] = [(440, 35.2), (402, 31.4), (393, 30.5), (375, 28.7)]
+        for (width, k) in cases {
+            let geometry = try XCTUnwrap(KeyboardPhonePortraitGeometry(width: width))
+            let pitch = k + 8
+            XCTAssertEqual(geometry.keyWidth, k, accuracy: 0.00001)
+            let q = geometry.characterRow(count: 10)
+            let a = geometry.characterRow(count: 9)
+            let z = geometry.lastLetterRow(letters: 7)
+            for i in 0..<10 {
+                XCTAssertEqual(q[i].x, 8 + CGFloat(i) * pitch, accuracy: 0.00001)
+                XCTAssertEqual(q[i].width, k, accuracy: 0.00001)
+            }
+            for i in 0..<9 {
+                XCTAssertEqual(a[i].x, 8 + pitch / 2 + CGFloat(i) * pitch, accuracy: 0.00001)
+                XCTAssertEqual(a[i].width, k, accuracy: 0.00001)
+            }
+            for i in 0..<7 {
+                XCTAssertEqual(z.letters[i].x, 8 + 1.5 * pitch + CGFloat(i) * pitch, accuracy: 0.00001)
+                XCTAssertEqual(z.letters[i].width, k, accuracy: 0.00001)
+            }
+            XCTAssertEqual(try XCTUnwrap(z.leading).x, 8)
+            XCTAssertEqual(try XCTUnwrap(z.leading).width, 1.5 * pitch - 16, accuracy: 0.00001)
+            XCTAssertEqual(z.trailing.maxX, width - 8, accuracy: 0.00001)
+            XCTAssertEqual(z.trailing.x - z.letters.last!.maxX, 16, accuracy: 0.00001)
+            let bottom = geometry.bottomRow(smallKeys: 3)
+            for i in 0..<3 {
+                XCTAssertEqual(bottom.small[i].x, 8 + CGFloat(i) * pitch, accuracy: 0.00001)
+                XCTAssertEqual(bottom.small[i].width, k, accuracy: 0.00001)
+            }
+            XCTAssertEqual(bottom.space.x, 8 + 3 * pitch, accuracy: 0.00001)
+            XCTAssertEqual(bottom.space.maxX, 7.5 * pitch, accuracy: 0.00001)
+            XCTAssertEqual(try XCTUnwrap(bottom.returnKey).x, 8 + 7.5 * pitch, accuracy: 0.00001)
+            XCTAssertEqual(try XCTUnwrap(bottom.returnKey).maxX, width - 8, accuracy: 0.00001)
+        }
+        let geometry = try XCTUnwrap(KeyboardPhonePortraitGeometry(width: 440))
+        let z = geometry.lastLetterRow(letters: 7)
+        XCTAssertEqual(try XCTUnwrap(z.leading).width, 48.8, accuracy: 0.00001)
+        XCTAssertEqual(z.trailing.x, 383.2, accuracy: 0.00001)
+        let bottom = geometry.bottomRow(smallKeys: 3)
+        XCTAssertEqual(bottom.space.x, 137.6, accuracy: 0.00001)
+        XCTAssertEqual(bottom.space.maxX, 324, accuracy: 0.00001)
+        XCTAssertEqual(try XCTUnwrap(bottom.returnKey).x, 332, accuracy: 0.00001)
+    }
+
+    func testRowsStackFromBAndNumberRowAddsOnlyHeight() throws {
+        for count in [3, 4] {
+            let height = KeyboardPhonePortraitGeometry.height(keyRows: count)
+            XCTAssertEqual(height, count == 3 ? 272 : 328)
+            let b = height - 7
+            for (row, offset) in [45.0, 101, 157, 213, 269].enumerated() {
+                XCTAssertEqual(KeyboardPhonePortraitGeometry.rowTop(aboveBottomRow: row, bottom: b), b - offset)
+            }
+            for page in KeyboardTypingLayout.allCases {
+                let plan = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: CGFloat(count) * 45 + CGFloat(count - 1) * 11,
+                    availableWidth: 424, compact: false, layout: page, keyRows: count, phonePortrait: true))
+                XCTAssertEqual(plan.keyHeight, 45)
+                XCTAssertEqual(plan.rowSpacing, 11)
+                XCTAssertEqual(plan.keySpacing, 8)
+            }
+        }
+    }
+
+    func testGapMidpointsAndEdgesRouteWithoutChangingVisibleFrames() throws {
+        let geometry = try XCTUnwrap(KeyboardPhonePortraitGeometry(width: 440))
+        func frames(_ spans: [KeyboardPhonePortraitGeometry.Span], _ y: CGFloat) -> [CGRect] {
+            spans.map { CGRect(x: $0.x, y: y, width: $0.width, height: 45) }
+        }
+        let z = geometry.lastLetterRow(letters: 7)
+        let bottom = geometry.bottomRow(smallKeys: 3)
+        let rows = [frames(geometry.characterRow(count: 10), 52), frames(geometry.characterRow(count: 9), 108),
+                    frames([try XCTUnwrap(z.leading)] + z.letters + [z.trailing], 164),
+                    frames(bottom.small + [bottom.space, try XCTUnwrap(bottom.returnKey)], 220)]
+        let regions = KeyboardKeyHitRegions.regions(rows: rows, bounds: CGRect(x: 0, y: 0, width: 440, height: 272))
+        let samples: [(CGPoint, Int, Int)] = [
+            (CGPoint(x: 47.2, y: 74), 0, 1), // Q/W midpoint: tie goes right
+            (CGPoint(x: 35, y: 102.5), 1, 0), // Q/A midpoint: tie goes down
+            (CGPoint(x: 4, y: 130), 1, 0), // left of A
+            (CGPoint(x: 64.8, y: 186), 2, 1), // Shift/Z midpoint
+            (CGPoint(x: 0, y: 74), 0, 0),
+            (CGPoint(x: 440, y: 271), 3, 4),
+            (CGPoint(x: 200, y: 272), 3, 3)]
+        for (point, r, i) in samples {
+            let key = try XCTUnwrap(KeyboardKeyHitRegions.key(at: point, regions: regions))
+            XCTAssertEqual(key.row, r); XCTAssertEqual(key.index, i)
+        }
+        XCTAssertNil(KeyboardKeyHitRegions.key(at: CGPoint(x: 20, y: 45), regions: regions))
+        XCTAssertEqual(rows[0][0], CGRect(x: 8, y: 52, width: 35.2, height: 45))
+        // Every point in the key area, including all larger gaps, has a key.
+        for y in stride(from: 47.0, through: 272, by: 2) {
+            for x in stride(from: 0.0, through: 440, by: 2) {
+                XCTAssertNotNil(KeyboardKeyHitRegions.key(at: CGPoint(x: x, y: y), regions: regions))
+            }
+        }
+    }
+
+    /// Spec 1.1 §6: narrower phones use 43-point keys 54 apart, a 51.3-point
+    /// band and nothing under the bottom row; 430 and wider keep 440's rows.
+    func testNarrowPhonesUseAppleRowsAndWidePhonesKeepTheirs() throws {
+        typealias Rows = KeyboardPhonePortraitGeometry.Rows
+        for width in [440.0, 430] { XCTAssertEqual(Rows(width: width), .large) }
+        for width in [429.0, 420, 402, 393, 375] { XCTAssertEqual(Rows(width: width), .compact) }
+        XCTAssertEqual(Rows.large.height(keyRows: 3), 272)
+        XCTAssertEqual(Rows.large.height(keyRows: 4), 328)
+        let compact = Rows.compact
+        XCTAssertEqual(compact.keyHeight, 43)
+        XCTAssertEqual(compact.rowPitch, 54)
+        XCTAssertEqual(compact.topBand, 51.3, accuracy: 0.00001)
+        XCTAssertEqual(compact.bottomPadding, 0)
+        XCTAssertEqual(compact.height(keyRows: 3), 256.3, accuracy: 0.00001)
+        XCTAssertEqual(compact.height(keyRows: 4), 310.3, accuracy: 0.00001)
+        // On 402 the keyboard's bottom edge is 799: rows land 4 points above Apple's 598/652/706/760.
+        let bottom: CGFloat = 799
+        for (row, appleTop) in [760.0, 706, 652, 598].enumerated() {
+            XCTAssertEqual(bottom - compact.bottomPadding - compact.keyHeight - CGFloat(row) * compact.rowPitch, appleTop - 4, accuracy: 0.00001)
+        }
+        let display = CGSize(width: 402, height: 874)
+        for (rows, height) in [(3, 256.3), (4, 310.3)] {
+            let metrics = KeyboardLayoutPolicy.metrics(viewWidth: 402, displaySize: display, sceneHeight: 874,
+                isPad: false, compactVertical: false, keyRows: rows, stockRows: true)
+            XCTAssertEqual(metrics.height, height, accuracy: 0.00001)
+            XCTAssertEqual(metrics.typingKeyHeight, 43)
+            for page in KeyboardTypingLayout.allCases {
+                let plan = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: CGFloat(rows) * 43 + CGFloat(rows - 1) * 11,
+                    availableWidth: 386, compact: false, layout: page, keyRows: rows, phonePortrait: true))
+                XCTAssertEqual(plan.keyHeight, 43)
+                XCTAssertEqual(plan.rowSpacing, 11)
+            }
+        }
+        let wide = KeyboardLayoutPolicy.metrics(viewWidth: 440, displaySize: CGSize(width: 440, height: 956), sceneHeight: 956,
+            isPad: false, compactVertical: false, keyRows: 3, stockRows: true)
+        XCTAssertEqual(wide.height, 272)
+        XCTAssertEqual(wide.typingKeyHeight, 45)
+    }
+
+    func testPortraitOptInLeavesLandscapePadAndSavedCustomMetricsUnchanged() throws {
+        let display = CGSize(width: 440, height: 956)
+        let old = KeyboardLayoutPolicy.metrics(viewWidth: 440, displaySize: display, sceneHeight: 956,
+            isPad: false, compactVertical: false)
+        XCTAssertEqual(old.height, 237, accuracy: 0.00001)
+        XCTAssertEqual(old.typingKeyHeight, 41.4, accuracy: 0.00001)
+        let stock = KeyboardLayoutPolicy.metrics(viewWidth: 440, displaySize: display, sceneHeight: 956,
+            isPad: false, compactVertical: false, stockRows: true)
+        XCTAssertEqual(stock.height, 328)
+        XCTAssertEqual(stock.typingKeyHeight, 45)
+        for (width, pad) in [(956.0, false), (820.0, true), (320.0, true)] {
+            let before = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: display, sceneHeight: 440,
+                isPad: pad, compactVertical: true)
+            let after = KeyboardLayoutPolicy.metrics(viewWidth: width, displaySize: display, sceneHeight: 440,
+                isPad: pad, compactVertical: true, stockRows: true)
+            XCTAssertEqual(after.height, before.height)
+            XCTAssertEqual(after.typingKeyHeight, before.typingKeyHeight)
+            XCTAssertFalse(after.usesPhonePortraitGeometry)
+        }
+        // Saving explicit rows forces the arrangement renderer even when
+        // the saved order looks like the stock layout.
+        var custom = MainKeyboardArrangement.standard(for: .english)
+        XCTAssertTrue(custom.convertToExplicitRows())
+        let rendering = KeyboardABCRendering(alphabet: .english, arrangement: custom, availableWidth: 424,
+            isPad: false, isLandscape: false, padLayout: .stock)
+        XCTAssertTrue(rendering.arranged)
+        let keyWidth = MainKeyboardArrangement.keyWidth(for: custom.rows, available: 424, spacing: 5)
+        XCTAssertEqual(keyWidth, 37.9, accuracy: 0.00001)
+        let last = custom.rows.last!
+        let widths = last.map { MainKeyboardArrangement.width(of: $0, keyWidth: keyWidth, spacing: 5) }
+        XCTAssertEqual(widths.first!, 59.35, accuracy: 0.00001)
+        XCTAssertEqual(widths.last!, 59.35, accuracy: 0.00001)
+        XCTAssertEqual(widths.reduce(0, +) + CGFloat(last.count - 1) * 5, 424, accuracy: 0.00001)
+        let customPlan = try XCTUnwrap(KeyboardTypingLayoutPolicy.plan(availableHeight: 177.6, availableWidth: 424,
+            compact: false, layout: .letters))
+        XCTAssertEqual(customPlan.keyHeight, 41.4, accuracy: 0.00001)
+        XCTAssertEqual(customPlan.rowSpacing, 4)
+        XCTAssertEqual(customPlan.keySpacing, 5)
+    }
+
+    func testOptionalGlobeAndCollapseKeepReturnAndFitSpace() throws {
+        for width: CGFloat in [375, 393, 402, 440] {
+            for count in 3...5 {
+                let geometry = try XCTUnwrap(KeyboardPhonePortraitGeometry(width: width))
+                let row = geometry.bottomRow(smallKeys: count)
+                XCTAssertGreaterThanOrEqual(row.space.width, 44)
+                XCTAssertEqual(row.returnKey, geometry.bottomRow(smallKeys: 3).returnKey)
+                XCTAssertEqual(row.space.x - row.small.last!.maxX, 8, accuracy: 0.00001)
+            }
+        }
+    }
+}

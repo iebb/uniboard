@@ -26,9 +26,16 @@ struct UniboardApp: App {
         }
         pageCacheWarningFixture = nil
 #endif
+        // Fresh installs type without the number row; anyone who opened an
+        // earlier Uniboard keeps it. Decided before this launch writes anything.
+        let group = SharedConfigurationLocation.shared.root()
+        // UI tests type digits from the number row on their fresh devices.
+        let earlierUse = group.map { ProcessInfo.processInfo.arguments.contains("--uitesting")
+            || KeyboardNumberRowDefault.hasEarlierUse(in: $0, defaults: .standard) }
         // Before any store reads: finish or discard an interrupted write, and
         // move the root files into the versioned configuration once.
         ConfigurationRecovery.run()
+        if let group, let earlierUse { KeyboardNumberRowDefault.recordIfNeeded(in: group, earlierUse: earlierUse) }
         // Once, in the current generation: the retired Number Row choice
         // becomes digits in the main keyboard's arrangements. Until then the
         // keyboard reads an earlier file the same way.

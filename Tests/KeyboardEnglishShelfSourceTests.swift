@@ -146,21 +146,21 @@ final class KeyboardEnglishShelfSourceTests: XCTestCase {
         let layout = text[start.lowerBound..<end.lowerBound]
         for guardrail in [
             "!model.showsUnicode && !model.expandedConversion && !model.finishingConversion",
-            "&& !isConversionLoading && !needsConversionRecovery && model.compositionShelfHeight > 0",
+            "&& ((language.mode == .koreanTwoSetHangul && unreadableNotice == nil) || (!isConversionLoading && !needsConversionRecovery)) && model.compositionShelfHeight > 0",
             "private var showsEnglishShelf: Bool { showsCompositionShelf && language.mode == .direct }",
-            "private var typingTopInset: CGFloat { showsEnglishShelf ? 0 : 4 }",
-            "private var typingContentTopGap: CGFloat { showsEnglishShelf ? 0 : contentGap }",
-            "if showsCompositionShelf {\n                    if showsEnglishShelf { englishShelf }\n                    else {\n                        conversionShelf\n                        Color.clear.frame(height: 4).accessibilityHidden(true)",
+            "private var typingTopInset: CGFloat { model.usesPhonePortraitGeometry ? 4 : showsEnglishShelf ? 0 : 4 }",
+            "private var typingContentTopGap: CGFloat { model.usesPhonePortraitGeometry ? model.phonePortraitRows.toolbarGap : showsEnglishShelf ? 0 : contentGap }",
+            "if showsCompositionShelf {\n                    if showsEnglishShelf { englishShelf }\n                    else {\n                        conversionShelf\n                        Color.clear.frame(height: model.usesPhonePortraitGeometry ? 0 : 4).accessibilityHidden(true)",
             "Color.clear.frame(height: typingContentTopGap).accessibilityHidden(true)",
             ".padding(.top, typingTopInset)",
             "Color.clear.frame(height: contentGap).accessibilityHidden(true)\n                controls",
             "textPreviewRow.frame(height: headerHeight)",
             "toolbar.frame(height: headerHeight)",
-            ".padding(.bottom, 6)"
+            ".padding(.bottom, model.usesPhonePortraitGeometry ? model.phonePortraitRows.bottomPadding : 6)"
         ] {
             XCTAssertTrue(layout.contains(guardrail), "Full English band = 0 + 44 + 0 + 0: \(guardrail)")
         }
-        XCTAssertTrue(text.contains("prefersCompactShelf: prefersCompactShelf, englishSingleRow: language.mode == .direct)"),
+        XCTAssertTrue(text.contains("prefersCompactShelf: prefersCompactShelf, englishSingleRow: language.mode == .direct,\n            reservedShelfHeight: portrait ? 42 : 0)"),
                       "Root height and merge fit must remove the same 12 points, not donate them to keys")
     }
 

@@ -32,6 +32,57 @@ final class MainKeyboardArrangementTests: XCTestCase {
         XCTAssertEqual(english.arranged(nil).rows, english.rows)
     }
 
+    func testRowsEqualToTheStockKeyboardAreTheStockDefaultWithOrWithoutTheNumberRow() throws {
+        let english = KeyboardAlphabet.english
+        let standard = Arrangement.standard(for: english), letters = Arrangement.letters(for: english)
+        // Stock legacy.
+        XCTAssertEqual(standard.stockEquivalent(for: english), standard)
+        XCTAssertEqual(letters.stockEquivalent(for: english), letters)
+        // Explicit stock without digits.
+        var explicitLetters = letters
+        XCTAssertTrue(explicitLetters.convertToExplicitRows())
+        XCTAssertFalse(explicitLetters.isLegacy)
+        XCTAssertEqual(explicitLetters.stockEquivalent(for: english), letters)
+        // Explicit stock with digits, as the editor's Add Number Row saves it.
+        var rows = explicitLetters.resolvedRows
+        rows.insert(.init(alignment: rows[0].alignment, cells: Arrangement.digits.map { .key($0) }), at: 0)
+        let added = ExplicitRowEditing.main(explicitLetters, rows: rows)
+        XCTAssertFalse(added.isLegacy)
+        XCTAssertNotEqual(added, standard, "The saved value itself stays explicit")
+        XCTAssertEqual(added.stockEquivalent(for: english), standard)
+        var explicitStandard = standard
+        XCTAssertTrue(explicitStandard.convertToExplicitRows())
+        XCTAssertEqual(explicitStandard.stockEquivalent(for: english), standard)
+        // One changed key stays custom, saved either way.
+        var swapped = rows
+        swapped[1].cells.swapAt(0, 1)
+        XCTAssertNil(ExplicitRowEditing.main(explicitLetters, rows: swapped).stockEquivalent(for: english))
+        var legacySwapped = standard
+        legacySwapped.keys.swapAt(10, 11)
+        XCTAssertNil(legacySwapped.stockEquivalent(for: english))
+        // So does an alignment or a gap.
+        var aligned = rows
+        aligned[0].alignment = .left
+        XCTAssertNil(Arrangement(rows: aligned).stockEquivalent(for: english))
+        var gapped = rows
+        gapped[2].cells.append(.halfGap)
+        XCTAssertNil(Arrangement(rows: gapped).stockEquivalent(for: english))
+        // Another layout's stock rows are not English's.
+        let other = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "ru"))
+        XCTAssertEqual(Arrangement.standard(for: other).stockEquivalent(for: other), .standard(for: other))
+        XCTAssertNil(Arrangement.standard(for: other).stockEquivalent(for: english))
+    }
+
+    #if os(macOS)
+    func testPhonePortraitTypesStockEquivalentRowsAsTheStockDefault() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let text = try String(contentsOf: root.appendingPathComponent("Keyboard/KeyboardViewController.swift"), encoding: .utf8)
+        XCTAssertTrue(text.contains("return typingPresentation.widthBasis.stockEquivalent(for: alphabet) != nil"))
+        XCTAssertTrue(text.contains("if isPhoneLayout, !isCompactLayout, !showsUnicode, let stock = saved.stockEquivalent(for: alphabet) { saved = stock }"),
+                      "The renderer, height and routing read the same stock rows; landscape, iPad and compact keep the saved ones")
+    }
+    #endif
+
     func testOnlyCompleteArrangementsInThreeRowsAreValid() {
         let english = KeyboardAlphabet.english
         let standard = Arrangement.letters(for: english)
@@ -1149,7 +1200,7 @@ extension MergedSymbolsTests {
                          "label: letters ? \"Letters\" : model.mergesSymbols ? \"Symbols\" : \"Numbers\"",
                          "fontSize: 13", "KeyboardMergedSymbolsPolicy.page(requested, merged: mergesSymbols)",
                          "KeyboardMergedSymbolsPolicy.page(typingState.layout, merged: merged)",
-                         "normalKeyHeight: conversionVisible ? compositionPlan.mergeNormalKeyHeight : metrics.typingKeyHeight",
+                         "normalKeyHeight: usesCompositionLayout ? compositionPlan.mergeNormalKeyHeight : metrics.typingKeyHeight",
                          "KeyboardCompositionLayoutPolicy.plan(", "actualGrantedHeight: view.bounds.height",
                          "if changed { invalidateInputMode() }"] {
             XCTAssertTrue(runtime.contains(required), "Runtime must retain integration: \(required)")

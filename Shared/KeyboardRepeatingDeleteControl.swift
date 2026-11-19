@@ -14,7 +14,11 @@ struct KeyboardDeleteContext: Equatable {
     }
 }
 
-final class RepeatingDeleteButton: UIButton {
+final class RepeatingDeleteButton: KeyboardStockButton {
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        keyboardStockTouchRect.contains(point)
+    }
+
     var contentPosition: KeyboardKeyContentPosition = .center { didSet { setNeedsLayout() } }
     override func titleRect(forContentRect contentRect: CGRect) -> CGRect {
         contentPosition.alignedRect(super.titleRect(forContentRect: contentRect), in: contentRect)

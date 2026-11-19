@@ -22,6 +22,56 @@ final class KeyboardSelfSizingInputViewTests: XCTestCase {
         return view
     }
 
+    func testStockGapsRouteToOriginalNativeControlsWithVisibleAccessibilityFrames() throws {
+        let root = KeyboardSelfSizingInputView(frame: CGRect(x: 0, y: 0, width: 440, height: 272), inputViewStyle: .keyboard)
+        let container = UIView(frame: root.bounds)
+        root.addSubview(container)
+        let q = KeyboardVariantButton(), w = KeyboardVariantButton(), a = KeyboardVariantButton()
+        for (key, id, frame) in [(q, "q", CGRect(x: 8, y: 52, width: 35.2, height: 45)),
+                                 (w, "w", CGRect(x: 51.2, y: 52, width: 35.2, height: 45)),
+                                 (a, "a", CGRect(x: 29.6, y: 108, width: 35.2, height: 45))] {
+            key.accessibilityIdentifier = "keyboard.typing.key.\(id)"
+            key.frame = frame
+            container.addSubview(key)
+        }
+        root.routesStockKeyGaps = true
+        XCTAssertTrue(root.hitTest(CGPoint(x: 47.2, y: 74), with: nil) === w)
+        XCTAssertTrue(root.hitTest(CGPoint(x: 4, y: 130), with: nil) === a)
+        XCTAssertTrue(a.point(inside: CGPoint(x: -25.6, y: 22), with: nil))
+        XCTAssertEqual(a.bounds, CGRect(x: 0, y: 0, width: 35.2, height: 45))
+        let visible = a.convert(a.bounds, to: root)
+        XCTAssertEqual(visible.minX, 29.6, accuracy: 0.00001)
+        XCTAssertEqual(visible.minY, 108, accuracy: 0.00001)
+        XCTAssertEqual(visible.width, 35.2, accuracy: 0.00001)
+        XCTAssertEqual(visible.height, 45, accuracy: 0.00001)
+        root.routesStockKeyGaps = false
+        XCTAssertFalse(a.point(inside: CGPoint(x: -25.6, y: 22), with: nil))
+        XCTAssertFalse(root.hitTest(CGPoint(x: 47.2, y: 74), with: nil) === w)
+    }
+
+    func testExpandedNativeFramesKeepVisibleAccessibilityAndNearestKeyGeometry() {
+        let root = KeyboardSelfSizingInputView(frame: CGRect(x: 0, y: 0, width: 440, height: 272), inputViewStyle: .keyboard)
+        let q = KeyboardVariantButton(), w = KeyboardVariantButton()
+        q.accessibilityIdentifier = "keyboard.typing.key.q"
+        w.accessibilityIdentifier = "keyboard.typing.key.w"
+        q.frame = CGRect(x: 0, y: 46.5, width: 47.2, height: 56)
+        q.keyboardVisualInsets = UIEdgeInsets(top: 5.5, left: 8, bottom: 5.5, right: 4)
+        w.frame = CGRect(x: 47.2, y: 46.5, width: 43.2, height: 56)
+        w.keyboardVisualInsets = UIEdgeInsets(top: 5.5, left: 4, bottom: 5.5, right: 4)
+        root.addSubview(q); root.addSubview(w)
+        root.routesStockKeyGaps = true
+        root.layoutIfNeeded()
+        XCTAssertEqual(q.keyboardVisibleBounds, CGRect(x: 8, y: 5.5, width: 35.2, height: 45))
+        XCTAssertTrue(root.hitTest(CGPoint(x: 47.2, y: 74), with: nil) === w)
+        XCTAssertTrue(root.hitTest(CGPoint(x: 4, y: 74), with: nil) === q)
+        let expected = UIAccessibility.convertToScreenCoordinates(q.keyboardVisibleBounds, in: q)
+        XCTAssertEqual(q.accessibilityFrame, expected)
+        XCTAssertEqual(q.accessibilityFrame.width, 35.2, accuracy: 0.00001)
+        XCTAssertEqual(q.accessibilityFrame.height, 45, accuracy: 0.00001)
+        q.isHighlighted = true
+        XCTAssertEqual(q.pressFeedback.frame, q.keyboardVisibleBounds)
+    }
+
     func testDefaultUsesPublicSelfSizingAndDoesNotClaimAnIntrinsicWidth() {
         let view = InputProbe(frame: CGRect(x: 0, y: 0, width: 390, height: 300), inputViewStyle: .keyboard)
         XCTAssertTrue(view.allowsSelfSizing)

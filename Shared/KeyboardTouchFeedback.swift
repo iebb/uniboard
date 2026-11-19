@@ -32,6 +32,7 @@ final class KeyboardTouchFeedback: UIView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func setPressed(_ pressed: Bool) {
+        if pressed, let superview { frame = superview.keyboardVisibleBounds }
         if !pressed { showHeld(false, accent: nil) }
         guard pressed != isPressed else { return }
         isPressed = pressed

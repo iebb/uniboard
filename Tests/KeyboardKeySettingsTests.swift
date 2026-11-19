@@ -235,6 +235,109 @@ final class KeyboardKeySettingsTests: XCTestCase {
         }
     }
 
+    /// The keys file of a group as the keyboard and app read it: the
+    /// install default comes from the group, never from an injected value.
+    private func groupSettings(_ group: URL, container: URL? = nil) -> Settings {
+        Settings(containerURL: { container ?? group }, standardNumberRow: {
+            KeyboardNumberRowDefault.standardNumberRow(forContainer: $0, group: group)
+        })
+    }
+
+    private func generation(in group: URL) throws -> URL {
+        let directory = group.appendingPathComponent(SharedConfigurationLocation.folderName, isDirectory: true)
+            .appendingPathComponent(SharedConfigurationLocation.directoryName(1), isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    func testAFreshInstallTypesWithoutTheNumberRow() throws {
+        try withContainer { group in
+            let english = KeyboardAlphabet.english
+            // Nothing in the group: the keyboard, even before the app opens, types without it.
+            XCTAssertFalse(KeyboardNumberRowDefault.hasEarlierUse(in: group))
+            XCTAssertEqual(groupSettings(group).loadSnapshot().effectiveArrangement(for: english), .letters(for: english))
+            // The app's first launch records off, then moves into a generation.
+            XCTAssertEqual(KeyboardNumberRowDefault.recordIfNeeded(in: group, earlierUse: false), false)
+            let directory = try generation(in: group)
+            XCTAssertEqual(KeyboardNumberRowDefault.root(ofContainer: directory).standardizedFileURL.path, group.standardizedFileURL.path)
+            let settings = groupSettings(group, container: directory)
+            // No earlier Number Row choice is read for it, and nothing digits-bearing is saved.
+            XCTAssertTrue(settings.migrateNumberRowIfNeeded())
+            let saved = settings.loadSnapshot()
+            XCTAssertTrue(saved.arrangements.isEmpty)
+            XCTAssertFalse(saved.standardNumberRow)
+            for alphabet in KeyboardAlphabet.catalog {
+                XCTAssertEqual(saved.effectiveArrangement(for: alphabet), .letters(for: alphabet), alphabet.id)
+            }
+            // Group state now exists, but the recorded value wins and never changes.
+            XCTAssertEqual(KeyboardNumberRowDefault.recordIfNeeded(in: group, earlierUse: true), false)
+            XCTAssertFalse(settings.loadSnapshot().standardNumberRow)
+            XCTAssertFalse(settings.emptySnapshot().standardNumberRow, "Reset All keeps the install's default")
+        }
+    }
+
+    func testAnEarlierInstallKeepsTheNumberRowEvenWhenTheKeyboardRunsFirst() throws {
+        try withContainer { group in
+            let english = KeyboardAlphabet.english
+            // An earlier Uniboard left a generation with a keys file and no explicit arrangement.
+            let directory = try generation(in: group)
+            try data(Settings.Snapshot(overrides: example.overrides)).write(to: directory.appendingPathComponent(Settings.filename))
+            XCTAssertTrue(KeyboardNumberRowDefault.hasEarlierUse(in: group))
+            // After the update the keyboard runs first: it reads on and writes nothing.
+            let keyboard = groupSettings(group, container: directory)
+            XCTAssertEqual(keyboard.loadSnapshot().effectiveArrangement(for: english), .standard(for: english))
+            XCTAssertNil(KeyboardNumberRowDefault.recorded(in: group))
+            // The app then records the same answer, as often as it launches.
+            XCTAssertEqual(KeyboardNumberRowDefault.recordIfNeeded(in: group, earlierUse: KeyboardNumberRowDefault.hasEarlierUse(in: group)), true)
+            XCTAssertEqual(KeyboardNumberRowDefault.recordIfNeeded(in: group, earlierUse: false), true)
+            XCTAssertEqual(keyboard.loadSnapshot().effectiveArrangement(for: english), .standard(for: english))
+            XCTAssertEqual(keyboard.loadSnapshot().overrides, example.overrides)
+            // Root files from before generations count as earlier use too.
+            try withContainer { older in
+                try Data("{}".utf8).write(to: older.appendingPathComponent(UnicodeEditionSettings.filename))
+                XCTAssertTrue(KeyboardNumberRowDefault.hasEarlierUse(in: older))
+                XCTAssertTrue(KeyboardNumberRowDefault.standardNumberRow(forContainer: older, group: older))
+            }
+            // A directory other than the group is never taken for a fresh install.
+            try withContainer { other in
+                XCTAssertTrue(KeyboardNumberRowDefault.standardNumberRow(forContainer: other, group: group))
+            }
+        }
+    }
+
+    func testANumberRowSomeoneChoseStaysWhateverTheDefault() throws {
+        let english = KeyboardAlphabet.english
+        for numberRow in [false, true] {
+            try withContainer { group in
+                KeyboardNumberRowDefault.recordIfNeeded(in: group, earlierUse: numberRow)
+                let settings = groupSettings(group)
+                var snapshot = settings.loadSnapshot()
+                XCTAssertEqual(snapshot.standardNumberRow, numberRow)
+                // The other choice is saved as an arrangement and read back as it was.
+                let chosen: MainKeyboardArrangement = numberRow ? .letters(for: english) : .standard(for: english)
+                snapshot = try XCTUnwrap(snapshot.updatingArrangement(chosen, for: "en"))
+                XCTAssertEqual(snapshot.arrangement(for: "en"), chosen)
+                XCTAssertTrue(settings.save(snapshot))
+                XCTAssertEqual(settings.loadSnapshot().effectiveArrangement(for: english), chosen)
+                // Recording again never changes it; other layouts keep the default.
+                KeyboardNumberRowDefault.recordIfNeeded(in: group, earlierUse: !numberRow)
+                let russian = try XCTUnwrap(KeyboardAlphabet.alphabet(id: "ru"))
+                XCTAssertEqual(settings.loadSnapshot().effectiveArrangement(for: english), chosen)
+                XCTAssertEqual(settings.loadSnapshot().effectiveArrangement(for: russian),
+                               numberRow ? .standard(for: russian) : .letters(for: russian))
+                // Choosing the default again stores nothing.
+                let back = try XCTUnwrap(settings.loadSnapshot().updatingArrangement(numberRow ? .standard(for: english) : .letters(for: english), for: "en"))
+                XCTAssertNil(back.arrangement(for: "en"))
+                // A saved custom arrangement is untouched by the default.
+                var custom = MainKeyboardArrangement.standard(for: english)
+                custom.keys.swapAt(0, 1)
+                let customized = try XCTUnwrap(back.updatingArrangement(custom, for: "en"))
+                XCTAssertTrue(settings.save(customized))
+                XCTAssertEqual(settings.loadSnapshot().effectiveArrangement(for: english), custom)
+            }
+        }
+    }
+
     private typealias Settings = KeyboardKeySettings
     private let container = URL(fileURLWithPath: "/injected-key-settings", isDirectory: true)
     private enum Failure: Error { case unavailable }

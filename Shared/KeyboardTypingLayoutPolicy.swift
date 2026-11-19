@@ -157,11 +157,19 @@ enum KeyboardTypingLayoutPolicy {
     /// Heights exclude the shared toolbar, grip and footer. ABC's row count
     /// still determines the outer budget; symbol rows divide that same content
     /// height, rather than leaving the former fourth row blank.
+    /// `phonePortrait` (the iPhone portrait default layout) keeps every page on
+    /// the same 45-point rows 56 apart instead, so switching pages never moves
+    /// a row; shorter pages leave their top rows empty.
     static func plan(availableHeight: CGFloat, availableWidth: CGFloat,
                      compact: Bool, layout: KeyboardTypingLayout,
                      isPad: Bool = false, isLandscape: Bool = false,
                      padLayout: KeyboardPadLayout = .ansiNumbers,
-                     keyRows: Int = MainKeyboardArrangement.maximumRows, mergedSymbols: Bool = false) -> KeyboardTypingLayoutPlan? {
+                     keyRows: Int = MainKeyboardArrangement.maximumRows, mergedSymbols: Bool = false,
+                     phonePortrait: Bool = false) -> KeyboardTypingLayoutPlan? {
+        if phonePortrait && !isPad {
+            return phonePortraitPlan(availableHeight: availableHeight, availableWidth: availableWidth,
+                                     layout: layout, keyRows: keyRows, mergedSymbols: mergedSymbols)
+        }
         let spacing: CGFloat = isPad && availableWidth >= 650 ? 6 : rowSpacing
         let keySpacing: CGFloat = isPad ? 7 : 5
         guard availableHeight.isFinite, availableWidth.isFinite,
@@ -183,6 +191,23 @@ enum KeyboardTypingLayoutPolicy {
             : (contentHeight - spacing * (rows - 1)) / rows
         return KeyboardTypingLayoutPlan(keyHeight: height, rowSpacing: spacing, keySpacing: keySpacing,
             numberRowCount: numberRows, mainRowsCount: mainRows, extraSymbolRowCount: extraRows)
+    }
+
+    private static func phonePortraitPlan(availableHeight: CGFloat, availableWidth: CGFloat, layout: KeyboardTypingLayout,
+                                          keyRows: Int, mergedSymbols: Bool) -> KeyboardTypingLayoutPlan? {
+        let spacing = KeyboardPhonePortraitGeometry.rowGap
+        let keySpacing = KeyboardPhonePortraitGeometry.keyGap
+        guard availableHeight.isFinite, availableWidth.isFinite,
+              availableHeight > spacing * 3, availableWidth > keySpacing * 9 else { return nil }
+        let numberRows = layout == .letters ? min(1, max(0, keyRows - 3)) : 0
+        let mainRows = layout == .symbols && mergedSymbols ? 4 : 3
+        // A short host scene shrinks the keys rather than dropping a row,
+        // by ABC's row count so every page keeps the same rows.
+        let rows = CGFloat(max(mainRows + numberRows, 3 + min(1, max(0, keyRows - 3))))
+        let key = KeyboardPhonePortraitGeometry.Rows(width: availableWidth + 16).keyHeight
+        let height = min(key, (availableHeight - spacing * (rows - 1)) / rows)
+        return KeyboardTypingLayoutPlan(keyHeight: height, rowSpacing: spacing, keySpacing: keySpacing,
+            numberRowCount: numberRows, mainRowsCount: mainRows, extraSymbolRowCount: 0)
     }
 
     /// Shared editor/extension symbol rendering context. Callers supply the
@@ -341,5 +366,212 @@ enum KeyboardMergedSymbolsPolicy {
 
     static func punctuationWidth(available: CGFloat, spacing: CGFloat, deleteWidth: CGFloat) -> CGFloat {
         max(0, (available - deleteWidth - spacing * 5) / 5)
+    }
+}
+
+/// iPhone portrait with the stock rows (the default layout): Apple's iOS 26
+/// keyboard. Every letter is one width on Apple's columns, rows sit 56 points
+/// apart counted up from the bottom row, and the bottom row lines up with the
+/// letters. Saved arrangements, iPad, landscape and the floating keyboard
+/// keep their own geometry. Horizontal positions are from the keyboard's left
+/// edge; rows are counted up from the bottom row.
+struct KeyboardPhonePortraitGeometry: Equatable {
+    struct Span: Equatable {
+        let x: CGFloat
+        let width: CGFloat
+        var maxX: CGFloat { x + width }
+    }
+
+    static let sideMargin: CGFloat = 8
+    static let keyGap: CGFloat = 8
+    static let rowGap: CGFloat = 11
+    static let keyHeight: CGFloat = 45
+    static let bottomPadding: CGFloat = 7
+    static let topPadding: CGFloat = 4
+    /// The toolbar's place and the gap under it: the band above the top key
+    /// row is 52 points, as tall as Apple's suggestion strip.
+    static let toolbarHeight: CGFloat = 42
+    static let toolbarGap: CGFloat = 6
+    static var topBand: CGFloat { topPadding + toolbarHeight + toolbarGap }
+    static var rowPitch: CGFloat { keyHeight + rowGap }
+
+    /// The keyboard's height with `keyRows` rows above the bottom row:
+    /// 272 points with three, 328 with the number row too.
+    static func height(keyRows: Int) -> CGFloat { Rows.large.height(keyRows: keyRows) }
+
+    /// Apple's rows by keyboard width (spec 1.1 §6); columns don't change.
+    /// Plus and Pro Max (430 points and wider): 45-point keys, the 52-point
+    /// band and 7 points under the bottom row, the constants above. Narrower
+    /// phones: 43-point keys 54 apart and a 51.3-point band. Apple's bottom
+    /// row there ends 17.7 points above the globe, below the bottom edge an
+    /// extension is given, so nothing goes under the bottom row and every
+    /// row sits as close to Apple's as the keyboard can draw.
+    struct Rows: Equatable {
+        let keyHeight: CGFloat
+        let bottomPadding: CGFloat
+        /// Between the toolbar's place and the top key row.
+        let toolbarGap: CGFloat
+        var rowGap: CGFloat { KeyboardPhonePortraitGeometry.rowGap }
+        var rowPitch: CGFloat { keyHeight + rowGap }
+        var topBand: CGFloat { KeyboardPhonePortraitGeometry.topPadding + KeyboardPhonePortraitGeometry.toolbarHeight + toolbarGap }
+
+        static let large = Rows(keyHeight: KeyboardPhonePortraitGeometry.keyHeight, bottomPadding: KeyboardPhonePortraitGeometry.bottomPadding,
+                                toolbarGap: KeyboardPhonePortraitGeometry.toolbarGap)
+        static let compact = Rows(keyHeight: 43, bottomPadding: 0, toolbarGap: 5.3)
+        static let largeMinimumWidth: CGFloat = 430
+        /// `width` is the keyboard's.
+        init(width: CGFloat) { self = width >= Self.largeMinimumWidth ? .large : .compact }
+        private init(keyHeight: CGFloat, bottomPadding: CGFloat, toolbarGap: CGFloat) {
+            self.keyHeight = keyHeight; self.bottomPadding = bottomPadding; self.toolbarGap = toolbarGap
+        }
+
+        /// 272 / 328 points on the large phones, 256.3 / 310.3 on the others.
+        func height(keyRows: Int) -> CGFloat {
+            let rows = CGFloat(max(1, keyRows))
+            return topBand + (rows + 1) * keyHeight + rows * rowGap + bottomPadding
+        }
+    }
+
+    /// Top of the row `index` rows above the bottom row, where `bottom` is
+    /// the bottom row's bottom edge (7 points above the keyboard's).
+    static func rowTop(aboveBottomRow index: Int, bottom: CGFloat) -> CGFloat {
+        bottom - keyHeight - CGFloat(index) * rowPitch
+    }
+
+    let width: CGFloat
+    /// Letter columns: English has ten. Other layouts use their widest row,
+    /// counting Shift and Delete as at least a key each.
+    let columns: Int
+
+    init?(width: CGFloat, alphabet: KeyboardAlphabet = .english) {
+        let rows = alphabet.rows
+        guard width.isFinite, rows.count == 3 else { return nil }
+        let functions = alphabet.isCaseless ? (alphabet.hasShiftSlot ? 2 : 1) : 2
+        self.width = width
+        columns = max(rows[0].count, rows[1].count, rows[2].count + functions)
+        guard keyWidth >= 1 else { return nil }
+    }
+
+    private var m: CGFloat { Self.sideMargin }
+    private var g: CGFloat { Self.keyGap }
+    private var available: CGFloat { width - 2 * m }
+    /// k = (W − 16 − 9 × 8) / 10 for English.
+    var keyWidth: CGFloat { (available - CGFloat(columns - 1) * g) / CGFloat(columns) }
+    var pitch: CGFloat { keyWidth + g }
+
+    /// `count` letter-wide keys centred on the columns: the Q row starts at
+    /// the margin and the A row half a key in.
+    func characterRow(count: Int) -> [Span] {
+        let start = m + CGFloat(columns - count) * pitch / 2
+        return (0..<max(0, count)).map { Span(x: start + CGFloat($0) * pitch, width: keyWidth) }
+    }
+
+    /// The last letter row. Cased layouts put Shift at the left margin and
+    /// Delete at the right, two gaps from the letters as Apple's are (one gap
+    /// when two would leave them narrower than a letter). Caseless layouts
+    /// keep one gap, with Delete and any Diacritics key at least a letter wide.
+    func lastLetterRow(letters count: Int, alphabet: KeyboardAlphabet = .english) -> (leading: Span?, letters: [Span], trailing: Span) {
+        let letters = CGFloat(count) * keyWidth + CGFloat(max(0, count - 1)) * g
+        if alphabet.isCaseless {
+            let functions = alphabet.hasShiftSlot ? 2 : 1
+            let function = max(keyWidth, (available - letters - CGFloat(functions) * g) / CGFloat(functions))
+            let total = letters + CGFloat(functions) * (function + g)
+            var x = m + (available - total) / 2
+            var leading: Span?
+            if alphabet.hasShiftSlot { leading = Span(x: x, width: function); x += function + g }
+            let keys = (0..<count).map { Span(x: x + CGFloat($0) * pitch, width: keyWidth) }
+            return (leading, keys, Span(x: x + letters + g, width: function))
+        }
+        var gap = 2 * g
+        if (available - letters - 2 * gap) / 2 < keyWidth { gap = g }
+        let function = (available - letters - 2 * gap) / 2
+        let start = m + function + gap
+        let keys = (0..<count).map { Span(x: start + CGFloat($0) * pitch, width: keyWidth) }
+        return (Span(x: m, width: function), keys, Span(x: start + letters + gap, width: function))
+    }
+
+    /// The 123 and #+= pages: the page key and Delete take English's Shift
+    /// and Delete places (1.5 keys less two gaps), and five punctuation keys
+    /// share the space between them. The merged page has no page key there.
+    func punctuationRow(count: Int, leadingKey: Bool) -> (leading: Span?, keys: [Span], trailing: Span) {
+        let function = 1.5 * pitch - 2 * g
+        let trailing = Span(x: width - m - function, width: function)
+        let start = leadingKey ? m + function + 2 * g : m
+        let end = trailing.x - 2 * g
+        let keys = max(1, count)
+        let key = (end - start - CGFloat(keys - 1) * g) / CGFloat(keys)
+        return (leadingKey ? Span(x: m, width: function) : nil,
+                (0..<count).map { Span(x: start + CGFloat($0) * (key + g), width: key) }, trailing)
+    }
+
+    /// The bottom row: `smallKeys` keys (U, page, ☆, and Globe or Collapse
+    /// when shown) one letter wide from the margin; Return from K's column
+    /// to the margin; Space between them, one gap from each.
+    func bottomRow(smallKeys: Int, showsReturn: Bool = true) -> (small: [Span], space: Span, returnKey: Span?) {
+        let small = (0..<max(0, smallKeys)).map { Span(x: m + CGFloat($0) * pitch, width: keyWidth) }
+        let returnX = m + (CGFloat(columns) - 2.5) * pitch
+        let returnKey = showsReturn ? Span(x: returnX, width: width - m - returnX) : nil
+        let spaceX = m + CGFloat(max(0, smallKeys)) * pitch
+        let spaceEnd = returnKey.map { $0.x - g } ?? width - m
+        return (small, Span(x: spaceX, width: spaceEnd - spaceX), returnKey)
+    }
+}
+
+/// Apple's keyboard has no dead zones: a tap in a gap goes to the nearest
+/// key. Each key's touch area reaches halfway into the gaps beside it, above
+/// and below it; the first and last key of a row reach the keyboard's edges,
+/// the bottom row reaches its bottom, and the top row reaches up half a row
+/// gap. Visible key frames, and so accessibility frames, do not change.
+enum KeyboardKeyHitRegions {
+    /// Indices of `frames` grouped into rows, top to bottom, each left to right.
+    static func rows(of frames: [CGRect], tolerance: CGFloat = 1) -> [[Int]] {
+        var rows: [[Int]] = []
+        for index in frames.indices.sorted(by: { frames[$0].minY < frames[$1].minY }) {
+            if let last = rows.last?.first, abs(frames[last].minY - frames[index].minY) <= tolerance {
+                rows[rows.count - 1].append(index)
+            } else {
+                rows.append([index])
+            }
+        }
+        return rows.map { $0.sorted { frames[$0].minX < frames[$1].minX } }
+    }
+
+    /// Touch areas for rows of visible frames, each row left to right.
+    static func regions(rows: [[CGRect]], bounds: CGRect) -> [[CGRect]] {
+        let rows = rows.filter { !$0.isEmpty }
+        guard !rows.isEmpty else { return [] }
+        let tops = rows.map { $0.map(\.minY).min() ?? 0 }
+        let bottoms = rows.map { $0.map(\.maxY).max() ?? 0 }
+        return rows.indices.map { r in
+            let top: CGFloat
+            if r == 0 { top = rows.count > 1 ? tops[0] - max(0, tops[1] - bottoms[0]) / 2 : tops[0] }
+            else { top = (bottoms[r - 1] + tops[r]) / 2 }
+            let bottom = r == rows.count - 1 ? max(bounds.maxY, bottoms[r]) : (bottoms[r] + tops[r + 1]) / 2
+            let row = rows[r]
+            return row.indices.map { i in
+                let left = i == 0 ? min(bounds.minX, row[i].minX) : (row[i - 1].maxX + row[i].minX) / 2
+                let right = i == row.count - 1 ? max(bounds.maxX, row[i].maxX) : (row[i].maxX + row[i + 1].minX) / 2
+                return CGRect(x: left, y: top, width: right - left, height: bottom - top)
+            }
+        }
+    }
+
+    /// The key whose touch area holds `point`, as (row, index in row).
+    static func key(at point: CGPoint, regions: [[CGRect]]) -> (row: Int, index: Int)? {
+        guard point.x.isFinite, point.y.isFinite else { return nil }
+        for (r, row) in regions.enumerated() {
+            for (i, region) in row.enumerated() where point.x >= region.minX && point.x < region.maxX
+                && point.y >= region.minY && point.y < region.maxY {
+                return (r, i)
+            }
+        }
+        // The far right and bottom edges belong to the last key.
+        for (r, row) in regions.enumerated() {
+            for (i, region) in row.enumerated() where point.x >= region.minX && point.x <= region.maxX
+                && point.y >= region.minY && point.y <= region.maxY {
+                return (r, i)
+            }
+        }
+        return nil
     }
 }

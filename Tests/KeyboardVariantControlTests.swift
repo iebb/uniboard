@@ -820,6 +820,33 @@ final class KeyboardVariantControlTests: XCTestCase {
         }
     }
 
+    func testHoldStartingInStockGapKeepsOriginalChoiceOnStationaryRelease() throws {
+        let clock = Clock(), route = Route(), owner = NSObject()
+        let state = KeyboardVariantInteraction(schedule: clock.schedule)
+        let button = KeyboardVariantButton(interaction: state)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 440, height: 272))
+        let input = KeyboardSelfSizingInputView(frame: window.bounds, inputViewStyle: .keyboard)
+        input.routesStockKeyGaps = true
+        window.addSubview(input); input.addSubview(button)
+        button.frame = CGRect(x: 8, y: 108, width: 35.2, height: 45)
+        button.accessibilityIdentifier = "keyboard.typing.key.a"
+        let mode = route.context!.modeIdentifier
+        button.configure(context: mode, key: "key", text: "a", variants: ["à"], enabled: true,
+            font: .systemFont(ofSize: 23)) { route.factory(rendered: mode) }
+        // Left margin is outside visible A, but belongs to its touch area.
+        let point = CGPoint(x: 4, y: 130)
+        XCTAssertTrue(input.hitTest(point, with: nil) === button)
+        XCTAssertTrue(button.beginPhysicalPress(owner: owner, point: button.convert(point, from: input)))
+        clock.fire()
+        let popup = try XCTUnwrap(input.subviews.first { $0.accessibilityIdentifier == "keyboard.variants" })
+        XCTAssertEqual(button.selectedIndex(at: point), 0)
+        state.move(owner: owner, index: button.selectedIndex(at: point), movedBeforeHold: false)
+        XCTAssertTrue(state.end(owner: owner, inside: true))
+        XCTAssertEqual(route.inserted, ["a"])
+        XCTAssertNil(popup.superview)
+        XCTAssertEqual(button.frame, CGRect(x: 8, y: 108, width: 35.2, height: 45))
+    }
+
     func testActualPopupIsInsideInputViewAndRotationCancelsBeforeInsertion() throws {
         let clock = Clock(), route = Route(), owner = NSObject(), state = KeyboardVariantInteraction(schedule: clock.schedule)
         let button = KeyboardVariantButton(interaction: state)

@@ -49,7 +49,7 @@ final class KeyboardSelfSizingInputViewTests: XCTestCase {
         XCTAssertFalse(root.hitTest(CGPoint(x: 47.2, y: 74), with: nil) === w)
     }
 
-    func testExpandedNativeFramesKeepVisibleAccessibilityAndNearestKeyGeometry() {
+    func testExpandedNativeFramesKeepVisibleAccessibilityAndNearestKeyGeometry() throws {
         let root = KeyboardSelfSizingInputView(frame: CGRect(x: 0, y: 0, width: 440, height: 272), inputViewStyle: .keyboard)
         let q = KeyboardVariantButton(), w = KeyboardVariantButton()
         q.accessibilityIdentifier = "keyboard.typing.key.q"
@@ -64,12 +64,64 @@ final class KeyboardSelfSizingInputViewTests: XCTestCase {
         XCTAssertEqual(q.keyboardVisibleBounds, CGRect(x: 8, y: 5.5, width: 35.2, height: 45))
         XCTAssertTrue(root.hitTest(CGPoint(x: 47.2, y: 74), with: nil) === w)
         XCTAssertTrue(root.hitTest(CGPoint(x: 4, y: 74), with: nil) === q)
-        let expected = UIAccessibility.convertToScreenCoordinates(q.keyboardVisibleBounds, in: q)
-        XCTAssertEqual(q.accessibilityFrame, expected)
-        XCTAssertEqual(q.accessibilityFrame.width, 35.2, accuracy: 0.00001)
-        XCTAssertEqual(q.accessibilityFrame.height, 45, accuracy: 0.00001)
+        // VoiceOver reads a plain subview the size of the visible key, whose
+        // outline iOS computes itself; the expanded control is only its container.
+        q.accessibilityLabel = "q"
+        XCTAssertFalse(q.isAccessibilityElement)
+        let outline = try XCTUnwrap(q.accessibilityElements?.first as? KeyboardKeyAccessibilityOutline)
+        XCTAssertEqual(q.accessibilityElements?.count, 1)
+        XCTAssertTrue(outline.superview === q)
+        XCTAssertEqual(outline.frame, q.keyboardVisibleBounds)
+        XCTAssertTrue(outline.isAccessibilityElement)
+        XCTAssertFalse(outline.isUserInteractionEnabled)
+        XCTAssertEqual(outline.accessibilityIdentifier, "keyboard.typing.key.q")
+        XCTAssertEqual(outline.accessibilityLabel, "q")
+        XCTAssertEqual(outline.accessibilityTraits, q.accessibilityTraits)
+        XCTAssertTrue(root.hitTest(outline.convert(CGPoint(x: outline.bounds.midX, y: outline.bounds.midY), to: root), with: nil) === q)
+        // A disabled key hides the outline with the control, as before.
+        q.isAccessibilityElement = false
+        XCTAssertFalse(outline.isAccessibilityElement)
+        q.isAccessibilityElement = true
+        // Without expanded frames the control is its own element again.
+        w.keyboardVisualInsets = .zero
+        w.layoutIfNeeded()
+        XCTAssertTrue(w.isAccessibilityElement)
+        XCTAssertNil(w.accessibilityElements)
+        XCTAssertFalse(w.subviews.contains { $0 is KeyboardKeyAccessibilityOutline })
         q.isHighlighted = true
         XCTAssertEqual(q.pressFeedback.frame, q.keyboardVisibleBounds)
+    }
+
+    func testNumberRowOnKeysSpeakThroughOutlinesTheSizeOfTheVisibleKeys() throws {
+        // Number row on at 440: 328 tall, digits one 56-point pitch above Q.
+        let root = KeyboardSelfSizingInputView(frame: CGRect(x: 0, y: 0, width: 440, height: 328), inputViewStyle: .keyboard)
+        let one = KeyboardVariantButton(), q = KeyboardVariantButton(), a = KeyboardVariantButton()
+        let inset = UIEdgeInsets(top: 5.5, left: 8, bottom: 5.5, right: 4)
+        for (key, id, y) in [(one, "number.1", 46.5), (q, "key.q", 102.5)] {
+            key.accessibilityIdentifier = "keyboard.typing.\(id)"
+            key.frame = CGRect(x: 0, y: y, width: 47.2, height: 56)
+            key.keyboardVisualInsets = inset
+            root.addSubview(key)
+        }
+        a.accessibilityIdentifier = "keyboard.typing.key.a"
+        a.frame = CGRect(x: 0, y: 158.5, width: 68.8, height: 56)
+        a.keyboardVisualInsets = UIEdgeInsets(top: 5.5, left: 29.6, bottom: 5.5, right: 4)
+        root.addSubview(a)
+        root.routesStockKeyGaps = true
+        root.layoutIfNeeded()
+        for key in [one, q, a] {
+            let outline = try XCTUnwrap(key.accessibilityElements?.first as? KeyboardKeyAccessibilityOutline)
+            XCTAssertFalse(key.isAccessibilityElement)
+            let spoken = outline.convert(outline.bounds, to: root), visible = key.convert(key.keyboardVisibleBounds, to: root)
+            for (s, v) in [(spoken.minX, visible.minX), (spoken.minY, visible.minY), (spoken.width, visible.width), (spoken.height, visible.height)] {
+                XCTAssertEqual(s, v, accuracy: 0.00001)
+            }
+            XCTAssertEqual(outline.accessibilityIdentifier, key.accessibilityIdentifier)
+            // VoiceOver's fallback touch at the outline centre reaches the key.
+            XCTAssertTrue(root.hitTest(outline.convert(CGPoint(x: outline.bounds.midX, y: outline.bounds.midY), to: root), with: nil) === key)
+        }
+        XCTAssertEqual(one.convert(one.keyboardVisibleBounds, to: root), CGRect(x: 8, y: 52, width: 35.2, height: 45))
+        XCTAssertEqual(q.convert(q.keyboardVisibleBounds, to: root), CGRect(x: 8, y: 108, width: 35.2, height: 45))
     }
 
     func testDefaultUsesPublicSelfSizingAndDoesNotClaimAnIntrinsicWidth() {

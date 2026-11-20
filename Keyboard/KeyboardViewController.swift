@@ -67,6 +67,7 @@ final class KeyboardViewController: UIInputViewController {
     private let keyTouchObserver = KeyboardKeyTouchObserver.make()
     /// Between viewWillAppear and viewWillDisappear: the preview caret may blink.
     private var isKeyboardShown = false
+    private var heightShortfallCheck: DispatchWorkItem?
     private weak var previewCursorControl: KeyboardPreviewCursorControl?
     private typealias HostSignature = KeyboardHostInputSignature
     private struct ExpectedHostEdit {
@@ -261,6 +262,28 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updateKeyboardHeight()
+        updateHeightShortfall()
+    }
+
+    /// iOS steps through shorter heights while opening the keyboard, so a
+    /// height below the request only counts as the host's limit once it lasts.
+    private func updateHeightShortfall() {
+        guard let input = view as? KeyboardSelfSizingInputView else { return }
+        guard view.bounds.height + 0.5 < input.requestedHeight else {
+            heightShortfallCheck?.cancel(); heightShortfallCheck = nil
+            if model.hostLimitsHeight { model.hostLimitsHeight = false }
+            return
+        }
+        guard !model.hostLimitsHeight, heightShortfallCheck == nil else { return }
+        let check = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.heightShortfallCheck = nil
+            guard let input = self.view as? KeyboardSelfSizingInputView,
+                  self.view.bounds.height + 0.5 < input.requestedHeight else { return }
+            self.model.hostLimitsHeight = true
+        }
+        heightShortfallCheck = check
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: check)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -276,6 +299,8 @@ final class KeyboardViewController: UIInputViewController {
         KeyboardVariantButton.cancelInteractions(in: view)
         previewCursorControl?.cancelGestures()
         isKeyboardShown = false
+        heightShortfallCheck?.cancel(); heightShortfallCheck = nil
+        model.hostLimitsHeight = false
         updatePreviewCaretLiveness()
         previewCursorDriver.reset()
         doubleSpaceState.reset()
@@ -2129,6 +2154,9 @@ private final class KeyboardModel: ObservableObject {
     @Published var typingKeyHeight: CGFloat = KeyboardTypingLayoutPolicy.regularKeyHeight
     /// The portrait rows for this keyboard's width; used while `usesPhonePortraitGeometry`.
     @Published var phonePortraitRows = KeyboardPhonePortraitGeometry.Rows.large
+    /// The host has kept the keyboard below its requested height, not just
+    /// stepped through a shorter height while opening.
+    @Published var hostLimitsHeight = false
     @Published private(set) var inputModeID = UUID()
     var inputModeChanged: (() -> Void)?
     var typingActivated: (() -> Void)?
@@ -4291,6 +4319,7 @@ private struct UnicodeKeyboardView: View {
             enabled: !model.showsUnicode, useUnicodeFonts: model.useUnicodeFonts,
             preservesNormalKeySize: language.mode != .direct || (model.typingState.alphabet.id == KeyboardAlphabet.english.id
                 && (language.preferences.effectiveEnglishSuggestions || language.preferences.effectiveEnglishAutocorrection)),
+            hostLimitsHeight: model.hostLimitsHeight,
             delete: delete, variants: typingVariantActions,
             keySettings: model.keySettings, returnTitle: language.rawInput.isEmpty ? model.returnTitle : "Confirm", action: action, shiftSlide: shiftSlide)
     }
@@ -5369,6 +5398,7 @@ private struct UnicodeKeyboardView: View {
 /// The mounted Unicode browser is not rebuilt for each English character.
 private struct KeyboardTypingRowsViewport<Content: View>: View {
     let scrolls: Bool
+    var clipsTop = false
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -5381,6 +5411,9 @@ private struct KeyboardTypingRowsViewport<Content: View>: View {
                     .defaultScrollAnchor(.bottom)
                     .accessibilityHint("Scroll to reach all normal-size key rows.")
             }
+        } else if clipsTop {
+            // Full-size rows taller than the space: bottom-anchored, clipped.
+            Color.clear.overlay(alignment: .bottom) { content }.clipped()
         } else {
             // Preserve the existing direct/fully-fitting keyboard hierarchy.
             content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -5401,6 +5434,7 @@ private struct KeyboardTypingView: View {
     let enabled: Bool
     let useUnicodeFonts: Bool
     let preservesNormalKeySize: Bool
+    let hostLimitsHeight: Bool
     let delete: (UUID, Bool) -> RepeatingDeleteButton.DeleteAction
     let variants: (UUID, String, Bool, Bool, Bool, Bool) -> KeyboardVariantActions?
     let keySettings: KeyboardKeySettings.Snapshot
@@ -5429,8 +5463,11 @@ private struct KeyboardTypingView: View {
             let spacing: CGFloat = phonePortrait ? 11 : isPad && geometry.size.width >= 650 ? 6 : 4
             let normalHeight = phonePortrait ? KeyboardPhonePortraitGeometry.Rows(width: geometry.size.width + 16).keyHeight : KeyboardTypingLayoutPolicy.typingKeyHeight(availableWidth: geometry.size.width, isPad: isPad)
             let minimumHeight = CGFloat(keyRows) * normalHeight + CGFloat(max(0, keyRows - 1)) * spacing
-            let scrolls = preservesNormalKeySize && geometry.size.height < minimumHeight
-            if let plan = KeyboardTypingLayoutPolicy.plan(availableHeight: preservesNormalKeySize ? max(geometry.size.height, minimumHeight) : geometry.size.height,
+            // Phone portrait rows keep their size through a transient short
+            // height: pinned to the bottom, the top rows cut off, no caption.
+            let holdsRows = phonePortrait && !hostLimitsHeight && geometry.size.height < minimumHeight
+            let scrolls = preservesNormalKeySize && geometry.size.height < minimumHeight && !holdsRows
+            if let plan = KeyboardTypingLayoutPolicy.plan(availableHeight: preservesNormalKeySize || holdsRows ? max(geometry.size.height, minimumHeight) : geometry.size.height,
                 availableWidth: geometry.size.width, compact: compact, layout: typing.state.layout,
                 isPad: isPad, isLandscape: explicitLetters ? false : isLandscape, padLayout: explicitLetters ? .stock : padLayout,
                 keyRows: arrangement.keyRows(widePad: isPad && geometry.size.width >= 650), mergedSymbols: mergedSymbols, phonePortrait: phonePortrait) {
@@ -5446,7 +5483,7 @@ private struct KeyboardTypingView: View {
                 // A caseless layout has no Shift: letters one width, rows centred.
                 let caseless = typing.state.layout == .letters
                     ? KeyboardTypingLayoutPolicy.caselessKeyWidths(for: typing.state.alphabet, available: geometry.size.width, spacing: isPad ? 7 : 5) : nil
-                KeyboardTypingRowsViewport(scrolls: scrolls) {
+                KeyboardTypingRowsViewport(scrolls: scrolls, clipsTop: holdsRows) {
                 VStack(spacing: plan.rowSpacing) {
                     if showsDiacriticsPanel {
                         // The panel takes the number row's and letter rows' place.

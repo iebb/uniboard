@@ -167,16 +167,69 @@ class KeyboardSelfSizingInputView: UIInputView {
 @MainActor
 protocol KeyboardStockVisibleControl: AnyObject {
     var keyboardVisualInsets: UIEdgeInsets { get set }
+    /// The control's own element state, which the outline speaks for.
+    var keyboardKeyIsAccessibilityElement: Bool { get }
+}
+
+/// A key whose native frame also covers the gaps speaks through this plain,
+/// non-interactive subview the size of the visible key, so iOS computes its
+/// outline from view geometry as for any other view. Everything it says and
+/// does is the owning control's; a touch at its centre hit-tests to the key.
+final class KeyboardKeyAccessibilityOutline: UIView {
+    private weak var owner: UIView?
+    init(owner: UIView) {
+        self.owner = owner
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        backgroundColor = nil
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Expanded keys expose only the outline; others stay their own element.
+    static func sync(_ outline: KeyboardKeyAccessibilityOutline, in control: UIView, expanded: Bool) {
+        if expanded {
+            if outline.superview !== control { control.insertSubview(outline, at: 0) }
+            outline.frame = control.keyboardVisibleBounds
+        } else if outline.superview != nil {
+            outline.removeFromSuperview()
+        }
+    }
+
+    override var isAccessibilityElement: Bool {
+        get { (owner as? KeyboardStockVisibleControl)?.keyboardKeyIsAccessibilityElement ?? false }
+        set {}
+    }
+    override var accessibilityIdentifier: String? { get { owner?.accessibilityIdentifier } set {} }
+    override var accessibilityLabel: String? { get { owner?.accessibilityLabel } set {} }
+    override var accessibilityValue: String? { get { owner?.accessibilityValue } set {} }
+    override var accessibilityHint: String? { get { owner?.accessibilityHint } set {} }
+    override var accessibilityTraits: UIAccessibilityTraits { get { owner?.accessibilityTraits ?? .none } set {} }
+    override var accessibilityLanguage: String? { get { owner?.accessibilityLanguage } set {} }
+    override var accessibilityUserInputLabels: [String]! { get { owner?.accessibilityUserInputLabels } set {} }
+    override var accessibilityCustomActions: [UIAccessibilityCustomAction]? { get { owner?.accessibilityCustomActions } set {} }
+    override func accessibilityActivate() -> Bool { owner?.accessibilityActivate() ?? false }
+    override func accessibilityIncrement() { owner?.accessibilityIncrement() }
+    override func accessibilityDecrement() { owner?.accessibilityDecrement() }
 }
 
 class KeyboardStockButton: UIButton, KeyboardStockVisibleControl {
     var keyboardVisualInsets = UIEdgeInsets.zero { didSet { setNeedsLayout() } }
+    private lazy var accessibilityOutline = KeyboardKeyAccessibilityOutline(owner: self)
     override func contentRect(forBounds bounds: CGRect) -> CGRect {
         super.contentRect(forBounds: bounds.inset(by: keyboardVisualInsets))
     }
-    override var accessibilityFrame: CGRect {
-        get { keyboardVisualInsets == .zero ? super.accessibilityFrame : UIAccessibility.convertToScreenCoordinates(keyboardVisibleBounds, in: self) }
-        set { super.accessibilityFrame = newValue }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        KeyboardKeyAccessibilityOutline.sync(accessibilityOutline, in: self, expanded: keyboardVisualInsets != .zero)
+    }
+    var keyboardKeyIsAccessibilityElement: Bool { super.isAccessibilityElement }
+    override var isAccessibilityElement: Bool {
+        get { keyboardVisualInsets == .zero && super.isAccessibilityElement }
+        set { super.isAccessibilityElement = newValue }
+    }
+    override var accessibilityElements: [Any]? {
+        get { keyboardVisualInsets == .zero ? super.accessibilityElements : [accessibilityOutline] }
+        set { super.accessibilityElements = newValue }
     }
 }
 

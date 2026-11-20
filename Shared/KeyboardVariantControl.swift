@@ -353,9 +353,15 @@ final class KeyboardVariantInteraction {
 @MainActor
 final class KeyboardVariantButton: UIControl, KeyboardStockVisibleControl {
     var keyboardVisualInsets = UIEdgeInsets.zero { didSet { setNeedsLayout() } }
-    override var accessibilityFrame: CGRect {
-        get { keyboardVisualInsets == .zero ? super.accessibilityFrame : UIAccessibility.convertToScreenCoordinates(keyboardVisibleBounds, in: self) }
-        set { super.accessibilityFrame = newValue }
+    private lazy var accessibilityOutline = KeyboardKeyAccessibilityOutline(owner: self)
+    var keyboardKeyIsAccessibilityElement: Bool { super.isAccessibilityElement }
+    override var isAccessibilityElement: Bool {
+        get { keyboardVisualInsets == .zero && super.isAccessibilityElement }
+        set { super.isAccessibilityElement = newValue }
+    }
+    override var accessibilityElements: [Any]? {
+        get { keyboardVisualInsets == .zero ? super.accessibilityElements : [accessibilityOutline] }
+        set { super.accessibilityElements = newValue }
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
@@ -447,6 +453,7 @@ final class KeyboardVariantButton: UIControl, KeyboardStockVisibleControl {
         }
         image.frame = contentPosition.alignedRect(CGRect(origin: .zero, size: image.image?.size ?? visual.size), in: visual)
         if contentPosition == .center { image.frame = visual }
+        KeyboardKeyAccessibilityOutline.sync(accessibilityOutline, in: self, expanded: keyboardVisualInsets != .zero)
         if interaction.hasPhysicalPress, !geometryIsCurrent { interaction.cancel() }
     }
 

@@ -8,6 +8,33 @@ import XCTest
 #endif
 
 final class KeyboardVariantPolicyTests: XCTestCase {
+    func testEveryStyledLowercaseLetterCapitalizesWithinItsStyle() {
+        let character = { (value: UInt32) in String(Character(Unicode.Scalar(value)!)) }
+        for index in 0..<26 {
+            // The offered styles, holes included (ℎ, ℯ, ℊ, ℴ and their capitals).
+            let lower = KeyboardVariantPolicy.letterStyles(index, uppercase: false)
+            let upper = KeyboardVariantPolicy.letterStyles(index, uppercase: true)
+            for style in 0..<9 {
+                XCTAssertEqual(KeyboardVariantPolicy.capital(of: lower[style]), upper[style], "style \(style) letter \(index)")
+            }
+            // Styles without holes: bold fraktur, sans-serif, sans-serif italic, sans-serif bold italic.
+            for base: UInt32 in [0x1D56C, 0x1D5A0, 0x1D608, 0x1D63C] {
+                let letter = UInt32(index)
+                XCTAssertEqual(KeyboardVariantPolicy.capital(of: character(base + 26 + letter)), character(base + letter))
+            }
+        }
+        for style: UInt32 in 0..<5 {
+            let base = 0x1D6A8 + style * 58
+            for offset: UInt32 in 26...50 {
+                let capital = offset == 43 ? base + 18 : base + offset - 26
+                XCTAssertEqual(KeyboardVariantPolicy.capital(of: character(base + offset)), character(capital), "Greek \(style) \(offset)")
+            }
+            XCTAssertEqual(KeyboardVariantPolicy.capital(of: character(base + 51)), character(base + 51), "∂ has no capital")
+        }
+        XCTAssertEqual(KeyboardVariantPolicy.capital(of: "𝘪𝘵'𝘴 ok"), "𝘐𝘛'𝘚 OK")
+        XCTAssertEqual(KeyboardVariantPolicy.capital(of: "𝟏"), "𝟏", "digits stay")
+    }
+
     func testUpOffersModifierFormsAndDownStyledFormsWithoutSymbols() {
         var state = KeyboardTypingState()
         let a = KeyboardVariantPolicy.gestureCandidates(for: "a", original: "a", state: state, settings: .defaults)

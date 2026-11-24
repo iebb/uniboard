@@ -54,6 +54,20 @@ final class KeyboardKeySettingsTests: XCTestCase {
         let changed = Settings.Snapshot(overrides: ["letter.q": .init(tap: ["ð"])])
         XCTAssertEqual(changed.tapOutput(for: "letter.q", defaultText: "q", shifted: false), "ð")
         XCTAssertEqual(changed.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Ð", "Shift types the changed letter's capital")
+        // Styled letters have no Unicode case mapping, so uppercased() alone left them lowercase.
+        let styled = Settings.Snapshot(overrides: [
+            "letter.a": .init(tap: ["𝘢"]), "letter.h": .init(tap: ["ℎ"]), "letter.e": .init(tap: ["ℯ"]),
+            "letter.b": .init(tap: ["𝖇"]), "letter.c": .init(tap: ["ⓒ"]), "letter.s": .init(tap: ["𝛓"]),
+            "letter.x": .init(tap: ["𝛂"]),
+        ])
+        XCTAssertEqual(styled.tapOutput(for: "letter.a", defaultText: "a", shifted: false), "𝘢")
+        XCTAssertEqual(styled.tapOutput(for: "letter.a", defaultText: "A", shifted: true), "𝘈", "sans-serif italic")
+        XCTAssertEqual(styled.tapOutput(for: "letter.h", defaultText: "H", shifted: true), "𝐻", "italic h lives in Letterlike Symbols")
+        XCTAssertEqual(styled.tapOutput(for: "letter.e", defaultText: "E", shifted: true), "ℰ", "script E is a Letterlike hole")
+        XCTAssertEqual(styled.tapOutput(for: "letter.b", defaultText: "B", shifted: true), "𝕭", "bold fraktur")
+        XCTAssertEqual(styled.tapOutput(for: "letter.c", defaultText: "C", shifted: true), "Ⓒ", "circled letters already case-map")
+        XCTAssertEqual(styled.tapOutput(for: "letter.x", defaultText: "X", shifted: true), "𝚨", "bold Greek alpha")
+        XCTAssertEqual(styled.tapOutput(for: "letter.s", defaultText: "S", shifted: true), "𝚺", "final sigma's capital is Sigma, not theta symbol")
         let shifted = Settings.Snapshot(overrides: ["letter.q": .init(tap: ["ð"], shiftedTap: ["Ω"])])
         XCTAssertEqual(shifted.tapOutput(for: "letter.q", defaultText: "Q", shifted: true), "Ω")
         let empty = Settings.Snapshot(overrides: ["letter.q": .init(tap: [])])

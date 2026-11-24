@@ -85,6 +85,38 @@ enum KeyboardVariantPolicy {
         0x1D549: 0x211D, 0x1D551: 0x2124
     ]
 
+    /// The capital of `text`, including styled letters Unicode gives no case
+    /// mapping: Mathematical Alphanumeric Latin and Greek letters (𝘢 → 𝘈,
+    /// 𝛂 → 𝚨) and the Letterlike lowercase filling their holes (ℎ → 𝐻).
+    static func capital(of text: String) -> String {
+        var result = String.UnicodeScalarView()
+        for scalar in text.uppercased().unicodeScalars {
+            result.append(mathCapital(scalar.value).flatMap { Unicode.Scalar($0) } ?? scalar)
+        }
+        return String(result)
+    }
+
+    /// Latin styles run 52 letters each from U+1D400 (A–Z, then a–z) up to
+    /// monospace; Greek styles run 58 each from U+1D6A8 (Α–Ω with ϴ, ∇, then
+    /// α–ω with ς, ∂ and six variant forms).
+    private static func mathCapital(_ value: UInt32) -> UInt32? {
+        if let capital = letterlikeLowercaseCapitals[value] { return capital }
+        if (0x1D400...0x1D6A3).contains(value), (value - 0x1D400) % 52 >= 26 {
+            return mathHoles[value - 26] ?? value - 26
+        }
+        if (0x1D6A8...0x1D7C9).contains(value) {
+            let offset = (value - 0x1D6A8) % 58
+            guard (26...50).contains(offset) else { return nil }
+            // Final sigma (43) sits where ϴ sits among the capitals; its capital is Σ (18).
+            return value - offset + (offset == 43 ? 18 : offset - 26)
+        }
+        return nil
+    }
+
+    /// ℎ, ℯ, ℊ and ℴ stand in for lowercase math letters; map each to its style's capital.
+    private static let letterlikeLowercaseCapitals: [UInt32: UInt32] = Dictionary(uniqueKeysWithValues:
+        mathHoles.filter { ($0.key - 0x1D400) % 52 >= 26 }.map { ($0.value, mathHoles[$0.key - 26] ?? $0.key - 26) })
+
     static func letterModifiers(_ index: Int, uppercase: Bool) -> [String] {
         guard (0..<26).contains(index) else { return [] }
         return scalars(uppercase ? [superscriptUpper[index]] : [superscriptLower[index], subscriptLower[index]])

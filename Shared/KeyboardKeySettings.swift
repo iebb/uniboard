@@ -160,15 +160,16 @@ struct KeyboardKeySettings {
             return overrides[keyID]?.candidates(for: gesture)
         }
         /// A tap types the key's own text unless the key was changed. With
-        /// Shift, a changed letter types its capital and other keys their
-        /// shifted text, unless a shifted value was saved too.
+        /// Shift, a changed letter types its capital (styled letters included:
+        /// 𝘢 types 𝘈) and other keys their shifted text, unless a shifted value
+        /// was saved too.
         func tapOutput(for keyID: String, defaultText: String, shifted: Bool) -> String? {
             guard let descriptor = KeyboardKeySettings.descriptor(for: keyID), KeyboardVariantPolicy.validText(defaultText) else { return nil }
             let values = overrides[keyID]
             if shifted, let value = values?.shiftedTap?.first { return value }
             guard let value = values?.tap?.first else { return defaultText }
             if !shifted { return value }
-            return descriptor.kind == .letter ? value.uppercased() : defaultText
+            return descriptor.kind == .letter ? KeyboardVariantPolicy.capital(of: value) : defaultText
         }
         /// The editor prepares a value first, then publishes it only if save succeeds.
         func updating(_ candidates: [String]?, for keyID: String, gesture: Gesture) -> Snapshot? {

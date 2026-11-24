@@ -119,7 +119,7 @@ final class KoreanHangulRuntimeTests: XCTestCase {
         XCTAssertFalse(LanguageInputMode.koreanRomaja.supportsConversionMyWords)
         XCTAssertTrue(LanguageInputMode.japaneseRomaji.supportsConversionMyWords)
         XCTAssertTrue(LanguageInputMode.mandarinPinyin.supportsConversionMyWords)
-        XCTAssertFalse(LanguageInputSettings.englishAssistanceAvailable)
+        XCTAssertTrue(LanguageInputSettings.englishAssistanceAvailable)
     }
     func testIndependentThreeRowLayoutHasNoNumberRowAndDoesNotMutateSavedArrangement() {
         var saved = MainKeyboardArrangement.standard(for: .english)
@@ -151,7 +151,7 @@ final class KoreanHangulRuntimeTests: XCTestCase {
             englishSuggestions: true, englishAutocorrection: true, packReferences: [pin, deferred])
         let bytes = try XCTUnwrap(LanguageInputSettings.encode(settings))
         XCTAssertEqual(LanguageInputSettings.decode(bytes), settings)
-        XCTAssertFalse(settings.effectiveEnglishAutocorrection)
+        XCTAssertTrue(settings.effectiveEnglishAutocorrection, "Saved English opt-in remains independent of enabled Korean modes")
         XCTAssertFalse(LanguageInputSettings.visibleModeOrder.contains(.koreanRomaja))
         XCTAssertTrue(LanguageInputSettings.visibleModeOrder.contains(.koreanTwoSetHangul))
         var configuration = UniboardConfiguration.factoryDefaults

@@ -1,11 +1,9 @@
 import Foundation
 import KanaKanjiConverterModule
 
-/// UI-owned isolation is deliberate: the pinned converter is mutable/non-Sendable
-/// (not itself @MainActor), and the non-Sendable pack lease must never cross actors.
-/// Requests/results alone are Sendable. No host text insertion or automatic commit.
-@MainActor
-public final class JapaneseLanguageConverter: LanguageConversionEngine {
+/// The mutable converter and its non-Sendable lease stay on one serial actor.
+/// Requests and results alone cross to the UI. No host insertion or automatic commit.
+public actor JapaneseLanguageConverter: LanguageConversionEngine {
     public static let engineABI = "azookey-80b8204f1cdfb364bb2ed355cf52c7ebb2519a0c"
 
     public enum InitializationError: Error {
@@ -18,7 +16,7 @@ public final class JapaneseLanguageConverter: LanguageConversionEngine {
     /// DEBUG explicitly disables kanji: upstream DEBUG logging includes typed text.
     public let kanjiResourceStatus: LanguageConversionStatus
     public let packRevision: String
-    private let installed: InstalledEngine?
+    private var installed: InstalledEngine?
     private let scratchDirectoryURL: URL
 
     /// Supply both the verified Dictionary directory and its live lease, or neither
@@ -67,6 +65,7 @@ public final class JapaneseLanguageConverter: LanguageConversionEngine {
 
     public func convert(_ request: LanguageConversionRequest) async throws -> LanguageConversionResult {
         try Task.checkCancellation()
+        _ = try engine()
         guard request.token.mode == .japaneseRomaji else {
             return empty(request, status: .unsupportedMode)
         }
@@ -95,7 +94,7 @@ public final class JapaneseLanguageConverter: LanguageConversionEngine {
         local = Array(local.prefix(limit))
         var candidates: [LanguageConversionCandidate] = []
         let engineLimit = limit - local.count
-        if reading.isComplete, engineLimit > 0, let converter = installed?.converter {
+        if reading.isComplete, engineLimit > 0, let converter = try engine() {
             // Feed the stable shared kana normalization directly. No reliance on
             // Roman/kana index equivalence: only full-input candidates are exposed.
             var composing = ComposingText()
@@ -133,15 +132,27 @@ public final class JapaneseLanguageConverter: LanguageConversionEngine {
         .init(token: request.token, preedit: request.rawInput, candidates: [], status: status)
     }
 
+    private func engine() throws -> KanaKanjiConverter? {
+        guard let installed else { return nil }
+        if installed.converter == nil {
+            #if !DEBUG
+            guard let dictionaryURL = installed.dictionaryURL else { return nil }
+            installed.converter = KanaKanjiConverter(dictionaryURL: dictionaryURL, preloadDictionary: false)
+            #endif
+        }
+        return installed.converter
+    }
+
     /// Destruction order is explicit: destroy the converter before dropping the lock
     /// lease, including all lazy shard/cache users. No @unchecked Sendable escape.
     private final class InstalledEngine {
         let lease: LanguagePackReadLease
-        private(set) var converter: KanaKanjiConverter?
+        var converter: KanaKanjiConverter?
+        let dictionaryURL: URL?
 
         init(lease: LanguagePackReadLease, dictionaryURL: URL?) {
             self.lease = lease
-            converter = dictionaryURL.map { KanaKanjiConverter(dictionaryURL: $0, preloadDictionary: false) }
+            self.dictionaryURL = dictionaryURL
         }
 
         deinit { converter = nil }

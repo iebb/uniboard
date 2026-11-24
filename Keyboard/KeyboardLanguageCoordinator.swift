@@ -61,8 +61,8 @@ final class KeyboardLanguageCoordinator: ObservableObject {
 
     var mode: LanguageInputMode { state.mode }
     var rawInput: String { state.rawInput }
-    var preedit: String { state.visibleResult?.preedit ?? (mode == .koreanTwoSetHangul ? "" : rawInput) }
-    var candidates: [LanguageConversionCandidate] { state.visibleResult?.candidates ?? [] }
+    var preedit: String { (state.visibleResult ?? displayResult)?.preedit ?? (mode == .koreanTwoSetHangul ? "" : rawInput) }
+    var candidates: [LanguageConversionCandidate] { (state.visibleResult ?? displayResult)?.candidates ?? [] }
     var token: LanguageCompositionToken { state.token }
     var choices: [LanguageInputMode] { enabledModes }
     var hasComposition: Bool { !rawInput.isEmpty }
@@ -98,6 +98,14 @@ final class KeyboardLanguageCoordinator: ObservableObject {
     private var dictionaryDirectory: URL?
     private var dictionaryRevision: UInt64 = 0
     private var dictionaryRevisionExhausted = false
+    /// Display-only previous result. Token checks, never this value, authorize commits.
+    private(set) var displayResult: LanguageConversionResult?
+    private enum OrderedEvent {
+        case boundary(LanguageCompositionToken, () -> Void)
+        case input(() -> Void)
+    }
+    private var boundaryQueue: [OrderedEvent] = []
+    private var drainingEvents = false
 
     /// root MUST be the same dedicated pack-store root used by the containing
     /// app. nil means inaccessible storage; it never guesses a different store.
@@ -276,6 +284,8 @@ final class KeyboardLanguageCoordinator: ObservableObject {
     /// host deletion, and does not select a pending controller-owned transition.
     func cancel() {
         conversionTask?.cancel()
+        boundaryQueue.removeAll()
+        displayResult = nil
         state.cancel()
         isConverting = false
         finishUnavailableCompositionIfNeeded()
@@ -286,6 +296,8 @@ final class KeyboardLanguageCoordinator: ObservableObject {
     /// when the original anchor cannot be validated. Clears live/parked input.
     func documentChanged() {
         conversionTask?.cancel()
+        boundaryQueue.removeAll()
+        displayResult = nil
         state.changeDocument(to: UUID())
         isConverting = false
         finishUnavailableCompositionIfNeeded()
@@ -303,9 +315,31 @@ final class KeyboardLanguageCoordinator: ObservableObject {
         return state.token == expected && anchorIsValid() && (!mode.supportsConversionMyWords || !dictionaryRevisionExhausted)
     }
 
+    /// Only boundaries carry composition tokens. Later keys belong to the session,
+    /// and may start another composition after a preceding boundary commits.
+    @discardableResult
+    func deferBoundary(token: LanguageCompositionToken, _ action: @escaping () -> Void) -> Bool {
+        guard state.token == token,
+              (state.pendingRequest?.token == token && isConverting) || !boundaryQueue.isEmpty else { return false }
+        let event = OrderedEvent.boundary(token, action)
+        // A replayed key can itself become a boundary. It must finish before
+        // any later keys already waiting in the queue.
+        if drainingEvents { boundaryQueue.insert(event, at: 0) }
+        else { boundaryQueue.append(event) }
+        return true
+    }
+
+    @discardableResult
+    func deferInput(_ action: @escaping () -> Void) -> Bool {
+        guard !drainingEvents, !boundaryQueue.isEmpty else { return false }
+        boundaryQueue.append(.input(action))
+        return true
+    }
+
     private func afterCommit(_ effects: [LanguageCompositionEffect]) {
         guard !effects.isEmpty else { return }
         conversionTask?.cancel()
+        displayResult = nil
         isConverting = false
         // Never schedule before the controller synchronously inserts the effect:
         // a partial-consumption adapter would otherwise validate the old anchor.
@@ -320,8 +354,29 @@ final class KeyboardLanguageCoordinator: ObservableObject {
         }
     }
 
+    private func drainBoundaries() {
+        guard !drainingEvents else { return }
+        drainingEvents = true
+        defer { drainingEvents = false }
+        while let event = boundaryQueue.first {
+            guard anchorIsValid() else { documentChanged(); return }
+            switch event {
+            case .boundary(let token, let action):
+                guard token == state.token else { boundaryQueue.removeAll(); return }
+                guard !isConverting else { return }
+                boundaryQueue.removeFirst()
+                action()
+            case .input(let action):
+                boundaryQueue.removeFirst()
+                action()
+            }
+        }
+    }
+
     private func stopWork() {
         conversionTask?.cancel()
+        boundaryQueue.removeAll()
+        displayResult = nil
         activationTask?.cancel()
         indexRefreshTask?.cancel()
         indexRefreshTask = nil
@@ -479,9 +534,12 @@ final class KeyboardLanguageCoordinator: ObservableObject {
 
     private func updateDictionary(_ revision: UUID?, directory: URL?) {
         guard revision != dictionaryUUID || directory != dictionaryDirectory else { return }
+        boundaryQueue.removeAll()
+        displayResult = nil
         guard dictionaryRevision < UInt64.max else {
             dictionaryRevisionExhausted = true
             conversionTask?.cancel()
+            isConverting = false
             state.changeDocument(to: UUID())
             resourceStatus = .failed
             changed()
@@ -514,6 +572,7 @@ final class KeyboardLanguageCoordinator: ObservableObject {
         }
         isConverting = true
         changed()
+        if displayResult == nil { displayResult = state.visibleResult }
         conversionTask = Task { [weak self, owner] in
             // Retain the scratch owner as well as the converter through awaiting
             // work. Dropping the active mode must not remove its scratch/lease.
@@ -530,9 +589,11 @@ final class KeyboardLanguageCoordinator: ObservableObject {
                 _ = self.revalidateResources(checkDictionary: true)
                 guard self.state.token == request.token, self.anchorIsValid() else { return }
                 let merged = Self.merging(custom: custom, into: result, request: request)
-                _ = self.state.receive(merged)
+                let accepted = self.state.receive(merged)
                 self.isConverting = false
+                if accepted { self.displayResult = merged }
                 self.changed()
+                Task { @MainActor [weak self] in self?.drainBoundaries() }
             } catch is CancellationError {
                 // Cancellation never changes a newer request's UI.
             } catch {
@@ -544,6 +605,7 @@ final class KeyboardLanguageCoordinator: ObservableObject {
                                              candidates: [], status: .failed))
                 self.isConverting = false
                 self.changed()
+                Task { @MainActor [weak self] in self?.drainBoundaries() }
             }
         }
     }

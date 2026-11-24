@@ -1,10 +1,8 @@
 import Foundation
 
-/// UI-owned adapter, matching the existing Japanese adapter's lease isolation.
-/// Only bounded read-only lookups occur here. Compilation/downloads are app-only.
-/// No host insertion, silent correction, learning, logging, or network requests.
-@MainActor
-public final class MandarinLanguageConverter: LanguageConversionEngine {
+/// The SQLite index and its non-Sendable lease stay on one serial actor.
+/// Only bounded read-only lookups occur here. No host insertion or learning.
+public actor MandarinLanguageConverter: LanguageConversionEngine {
     public static let engineABI = MandarinDictionaryIndex.engineABI
     public static let databaseFilename = "Mandarin.sqlite"
 
@@ -14,7 +12,7 @@ public final class MandarinLanguageConverter: LanguageConversionEngine {
 
     public let packRevision: String
     public let resourceStatus: LanguageConversionStatus
-    private let installed: InstalledEngine?
+    private var installed: InstalledEngine?
 
     /// Supply BOTH the store-verified database URL and its live read lease, or
     /// neither for missing-resource mode. Caller relinquishes release/use of the
@@ -36,7 +34,7 @@ public final class MandarinLanguageConverter: LanguageConversionEngine {
                   lease.pack.descriptor.files.contains(where: { $0.path == Self.databaseFilename }) else {
                 throw InitializationError.invalidInstalledPack
             }
-            installed = try InstalledEngine(lease: lease, databaseURL: actual)
+            installed = InstalledEngine(lease: lease, databaseURL: actual)
             packRevision = lease.pack.revision
             resourceStatus = .ready
         default:
@@ -50,7 +48,7 @@ public final class MandarinLanguageConverter: LanguageConversionEngine {
             return empty(request, status: .unsupportedMode)
         }
         guard request.token.packRevision.utf8.elementsEqual(packRevision.utf8),
-              let index = installed?.index else {
+              let index = try dictionary() else {
             return empty(request, status: .missingResources)
         }
         guard !request.rawInput.isEmpty else { return empty(request, status: .unsupportedInput) }
@@ -88,13 +86,20 @@ public final class MandarinLanguageConverter: LanguageConversionEngine {
         .init(token: request.token, preedit: request.rawInput, candidates: [], status: status)
     }
 
+    private func dictionary() throws -> MandarinDictionaryIndex? {
+        guard let installed else { return nil }
+        if installed.index == nil { installed.index = try MandarinDictionaryIndex(url: installed.databaseURL) }
+        return installed.index
+    }
+
     /// Close SQLite before releasing the version lease. No unchecked Sendable.
     private final class InstalledEngine {
         let lease: LanguagePackReadLease
-        private(set) var index: MandarinDictionaryIndex?
-        init(lease: LanguagePackReadLease, databaseURL: URL) throws {
+        var index: MandarinDictionaryIndex?
+        let databaseURL: URL
+        init(lease: LanguagePackReadLease, databaseURL: URL) {
             self.lease = lease
-            index = try MandarinDictionaryIndex(url: databaseURL)
+            self.databaseURL = databaseURL
         }
         deinit { index = nil }
     }

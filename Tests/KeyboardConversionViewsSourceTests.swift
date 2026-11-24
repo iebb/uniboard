@@ -369,7 +369,9 @@ final class KeyboardConversionViewsSourceTests: XCTestCase {
         XCTAssertFalse(candidate.contains("Text(\"Pending\")"))
         let controller = try source("Keyboard/KeyboardViewController.swift")
         let shelf = try block(in: controller, startingAt: "    private var conversionShelf: some View {")
-        XCTAssertTrue(shelf.contains("let token = language.state.token"))
+        XCTAssertTrue(shelf.contains("let displayed = language.state.visibleResult ?? language.displayResult"))
+        XCTAssertTrue(shelf.contains("let token = displayed?.token ?? language.state.token"),
+                      "Retained candidates must carry their original token, never borrow the current generation's authority")
         XCTAssertTrue(shelf.contains("onChoose: { controller?.chooseConversion($0, token: $1) }"))
         XCTAssertTrue(shelf.contains("onLiteral: { controller?.keepRomanLetters(token: token) }"))
     }

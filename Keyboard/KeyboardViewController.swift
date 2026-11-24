@@ -198,7 +198,8 @@ final class KeyboardViewController: UIInputViewController {
         }
         language.validateAnchor = { [weak self] in
             guard let self else { return false }
-            return self.compositionAnchor == nil || self.compositionAnchor == self.readCompositionAnchor()
+            let expected = self.compositionAnchor ?? self.conversionPostWriteAnchor
+            return expected == nil || expected == self.readCompositionAnchor()
         }
         language.onRefreshed = { [weak self] in self?.languageDidRefresh() }
         applyPrimaryLanguage()
@@ -547,6 +548,13 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func acknowledgeHostChange() {
+        // Proxy writes can produce multiple delayed text notifications. Only
+        // the complete byte-exact anchor acknowledges a conversion's own edit;
+        // a changed document, cursor, selection or either context still resets.
+        if let expected = compositionAnchor ?? conversionPostWriteAnchor {
+            if expected == readCompositionAnchor() { return }
+            invalidateComposition()
+        }
         let snapshot = englishContext()
         let manualAcknowledged = manualEnglishExpected.map { Self.sameEnglishObservation($0, snapshot) } == true
             || manualEnglishResult.map { Self.sameEnglishObservation($0, snapshot) } == true
@@ -1054,6 +1062,7 @@ final class KeyboardViewController: UIInputViewController {
         guard !model.showsUnicode else { return false }
         if language.rawInput.isEmpty { compositionAnchor = readCompositionAnchor() }
         guard compositionAnchor != nil, compositionAnchor == readCompositionAnchor() else { invalidateComposition(); return false }
+        if language.deferInput({ [weak self] in _ = self?.insertTypingText(text, normalTap: normalTap) }) { return true }
         // The mode-specific parser owns eligibility. Punctuation is a boundary,
         // not permission to reinterpret arbitrary explicit Unicode output.
         let recognized: Bool
@@ -1077,6 +1086,11 @@ final class KeyboardViewController: UIInputViewController {
     private func confirmConversion(then punctuation: String? = nil, space: Bool = false) -> Bool {
         guard !language.rawInput.isEmpty else { return false }
         guard compositionAnchor == readCompositionAnchor() else { invalidateComposition(); return true }
+        if language.isConverting {
+            return language.deferBoundary(token: language.token) { [weak self] in
+                _ = self?.confirmConversion(then: punctuation, space: space)
+            }
+        }
         if model.showsUnicode || model.compositionShelfHeight == 0 {
             queuedPunctuation = punctuation; model.queuedConversionPunctuation = punctuation
             model.expandedConversion = true
@@ -1108,7 +1122,23 @@ final class KeyboardViewController: UIInputViewController {
         } else { expectedHostEdit = nil }
         invalidateEnglish()
         previewCursorDriver.keyboardWillEdit()
+        // Punctuation or an empty-buffer Return can follow a queued commit.
+        // Advance its exact anchor as part of the same synchronous transaction,
+        // so its callbacks cannot discard later queued keys.
+        let previousConversionAnchor = conversionPostWriteAnchor
+        let tracksConversionWrite = !completingConversion && previousConversionAnchor != nil
+            && previousConversionAnchor == readCompositionAnchor()
+        let expectedConversionAnchor = previousConversionAnchor.flatMap { expectedAnchor(afterInserting: text, into: $0) }
+        if tracksConversionWrite { completingConversion = true }
         proxy.insertText(text)
+        if tracksConversionWrite {
+            completingConversion = false
+            guard let expectedConversionAnchor, readCompositionAnchor() == expectedConversionAnchor else {
+                invalidateComposition()
+                return false
+            }
+            conversionPostWriteAnchor = expectedConversionAnchor
+        }
         onInserted()
         return true
     }
@@ -1756,24 +1786,45 @@ final class KeyboardViewController: UIInputViewController {
             self?.typedSinceAppear = true
             if isQuery { self?.invalidateEnglish(); self?.model.deleteQueryCharacter() }
             else {
-                if let self, self.language.backspace() {
-                    if self.language.rawInput.isEmpty { self.compositionAnchor = nil }
-                    return
-                }
-                if let self, self.englishSurfaceAvailable, self.english.hasImmediateUndo {
-                    // A dispatched rollback owns this Backspace even on partial
-                    // failure: never follow it with an unrelated extra delete.
-                    if let plan = self.english.planUndo(context: self.englishContext(), hostPermission: self.englishPermission) {
-                        _ = self.executeEnglishPlan(plan)
-                        self.didEditHostText()
+                let performDelete = { [weak self] in
+                    if let self, self.language.backspace() {
+                        if self.language.rawInput.isEmpty { self.compositionAnchor = nil }
                         return
                     }
+                    if let self, self.englishSurfaceAvailable, self.english.hasImmediateUndo {
+                        // A dispatched rollback owns this Backspace even on partial
+                        // failure: never follow it with an unrelated extra delete.
+                        if let plan = self.english.planUndo(context: self.englishContext(), hostPermission: self.englishPermission) {
+                            _ = self.executeEnglishPlan(plan)
+                            self.didEditHostText()
+                            return
+                        }
+                    }
+                    let expectedDeletionAnchor: CompositionAnchor?
+                    if let self, let anchor = self.conversionPostWriteAnchor,
+                       anchor == self.readCompositionAnchor(), let before = anchor.before,
+                       anchor.selection?.isEmpty != false {
+                        expectedDeletionAnchor = CompositionAnchor(document: anchor.document, interaction: anchor.interaction,
+                            before: Array(String(decoding: before, as: UTF8.self).dropLast().utf8),
+                            after: anchor.after, selection: anchor.selection)
+                    } else { expectedDeletionAnchor = nil }
+                    self?.invalidateEnglish()
+                    self?.expectedHostEdit = nil
+                    self?.previewCursorDriver.keyboardWillEdit()
+                    if expectedDeletionAnchor != nil { self?.completingConversion = true }
+                    self?.textDocumentProxy.deleteBackward()
+                    if let expectedDeletionAnchor {
+                        self?.completingConversion = false
+                        guard self?.readCompositionAnchor() == expectedDeletionAnchor else {
+                            self?.invalidateComposition()
+                            return
+                        }
+                        self?.conversionPostWriteAnchor = expectedDeletionAnchor
+                    }
+                    self?.didEditHostText()
                 }
-                self?.invalidateEnglish()
-                self?.expectedHostEdit = nil
-                self?.previewCursorDriver.keyboardWillEdit()
-                self?.textDocumentProxy.deleteBackward()
-                self?.didEditHostText()
+                if let self, self.language.deferInput(performDelete) { return }
+                performDelete()
             }
         })
     }
@@ -1839,8 +1890,12 @@ final class KeyboardViewController: UIInputViewController {
                 self.doubleSpaceState.reset(); self.expectedHostEdit = nil
                 self.invalidateEnglish()
                 self.model.toggleCapsLock()
-            case .space: self.spaceKey()
-            case .returnKey: self.returnKey()
+            case .space:
+                if self.language.deferInput({ [weak self] in self?.spaceKey() }) { break }
+                self.spaceKey()
+            case .returnKey:
+                if self.language.deferInput({ [weak self] in self?.returnKey() }) { break }
+                self.returnKey()
             case .shift:
                 guard !self.model.showsUnicode else { return false }
                 self.doubleSpaceState.reset()
@@ -4278,10 +4333,11 @@ private struct UnicodeKeyboardView: View {
     }
 
     private var conversionShelf: some View {
-        let token = language.state.token
+        let displayed = language.state.visibleResult ?? language.displayResult
+        let token = displayed?.token ?? language.state.token
         return KeyboardConversionShelf(mode: language.mode, rawInput: language.rawInput,
             preedit: language.preedit,
-            candidates: language.state.visibleResult?.candidates ?? [], token: token,
+            candidates: displayed?.candidates ?? [], token: token,
             statusText: conversionStatusText, height: model.compositionShelfHeight,
             onChoose: { controller?.chooseConversion($0, token: $1) },
             onLiteral: { controller?.keepRomanLetters(token: token) },
@@ -4289,11 +4345,12 @@ private struct UnicodeKeyboardView: View {
     }
 
     private var expandedConversionPanel: some View {
-        let token = language.state.token
+        let displayed = language.state.visibleResult ?? language.displayResult
+        let token = displayed?.token ?? language.state.token
         return GeometryReader { geometry in
             KeyboardExpandedConversionView(mode: language.mode, rawInput: language.rawInput,
             preedit: language.preedit,
-            candidates: language.state.visibleResult?.candidates ?? [], token: token,
+            candidates: displayed?.candidates ?? [], token: token,
             statusText: conversionStatusText, height: geometry.size.height,
             onChoose: { controller?.chooseConversion($0, token: $1) },
             onLiteral: { controller?.keepRomanLetters(token: token) },

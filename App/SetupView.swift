@@ -112,6 +112,15 @@ struct SetupView: View {
             } footer: {
                 Text("Uniboard searches its bundled Unicode database offline, with no accounts. Your typing, searches and favorites are never sent to a server, even with Full Access. iOS uses its own keyboard in password and phone-number fields, and some apps disallow third-party keyboards.")
             }
+            Section {
+                Link("Uniboard on GitHub", destination: URL(string: "https://github.com/iebb/uniboard")!)
+                Link("Send Feedback on GitHub", destination: URL(string: "https://github.com/iebb/uniboard/issues")!)
+                Link("Join the Beta", destination: URL(string: "https://testflight.apple.com/join/HvQZ5aNH")!)
+            } header: {
+                Text("Open Source")
+            } footer: {
+                Text("Uniboard is open source. Read the code, report problems and suggest ideas on GitHub. Posting needs a free GitHub account. Join the beta to try new versions in TestFlight before they're released.")
+            }
         }
         .accessibilityIdentifier("settingsForm")
         .navigationTitle("Settings")

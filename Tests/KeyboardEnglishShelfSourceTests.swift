@@ -19,9 +19,9 @@ final class KeyboardEnglishShelfSourceTests: XCTestCase {
         return String(text[start.lowerBound..<end.lowerBound])
     }
 
-    func testReleaseGateKeepsEnglishRuntimeAndGeometryColdWithoutChangingLiteralTraits() throws {
+    func testEnglishRuntimeUsesOptInPreferencesAndSurfacePolicyWithoutChangingLiteralTraits() throws {
         let text = try controllerSource()
-        XCTAssertTrue(text.contains("LanguageInputSettings.englishAssistanceAvailable && language.mode == .direct"))
+        XCTAssertTrue(text.contains("LanguageInputSettings.englishAssistanceAvailable && KeyboardEnglishInputPolicy.permitsCorrectionSurface(mode: language.mode, alphabet: model.typingState.alphabet)"))
         XCTAssertFalse(text.contains("language.preferences.englishSuggestions"))
         XCTAssertFalse(text.contains("language.preferences.englishAutocorrection"))
         XCTAssertTrue(text.contains("suggestionsEnabled: language.preferences.effectiveEnglishSuggestions"))
@@ -29,7 +29,7 @@ final class KeyboardEnglishShelfSourceTests: XCTestCase {
         XCTAssertTrue(text.contains("if let self, self.englishSurfaceAvailable, self.english.hasImmediateUndo {"))
         XCTAssertTrue(text.contains("&& (language.mode != .direct || LanguageInputSettings.englishAssistanceAvailable)"))
         XCTAssertTrue(text.contains("&& (language.preferences.effectiveEnglishSuggestions || language.preferences.effectiveEnglishAutocorrection)"),
-                      "Saved deferred switches must not affect Direct Typing key sizing")
+                      "English shelf sizing follows the independent opt-in switches")
         let start = try XCTUnwrap(text.range(of: "    private var permitsEnglishAssistance: Bool {"))
         let end = try XCTUnwrap(text[start.upperBound...].firstIndex(of: "}"))
         XCTAssertFalse(text[start.lowerBound...end].contains("englishAssistanceAvailable"),

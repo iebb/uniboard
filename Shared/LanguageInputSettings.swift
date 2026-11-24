@@ -16,7 +16,7 @@ public struct LanguageInputSettings {
     /// Release availability is presentation/runtime policy, NOT a storage migration.
     /// Keep deferred preferences and pack references intact for export and later releases.
     public static let visibleModeOrder: [LanguageInputMode] = [.direct, .japaneseRomaji, .mandarinPinyin, .koreanTwoSetHangul]
-    public static let englishAssistanceAvailable = false
+    public static let englishAssistanceAvailable = true
 
     /// A pinned identity, never a download instruction or resource location.
     /// A pack ID identifies one mode and one pinned version in a snapshot.

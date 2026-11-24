@@ -10,6 +10,7 @@ struct KeyboardHostInputTraits: Equatable {
     /// Included in Equatable signatures so same-field .no transitions invalidate
     /// in-flight English correction and rollback even if visible text is equal.
     let autocorrectionType: UITextAutocorrectionType?
+    let spellCheckingType: UITextSpellCheckingType?
     let returnKey: UIReturnKeyType
     let textContentType: UITextContentType?
     /// A secure field never shares its text and never gets automatic capitals.
@@ -20,6 +21,7 @@ struct KeyboardHostInputTraits: Equatable {
         keyboardType = source.keyboardType ?? .default
         capitalization = source.autocapitalizationType ?? .sentences
         autocorrectionType = source.autocorrectionType
+        spellCheckingType = source.spellCheckingType
         returnKey = source.returnKeyType ?? .default
         let contentType: UITextContentType? = source.textContentType ?? nil
         textContentType = contentType
@@ -29,13 +31,20 @@ struct KeyboardHostInputTraits: Equatable {
     /// Automatic correction is stricter than reversible capitalization/help.
     /// Explicit host .no always wins over the keyboard's opt-in preference.
     var englishCorrectionPermission: KeyboardCorrectionHostPermission {
-        guard permitsEnglishAssistance else { return .literalField }
-        guard let autocorrectionType else { return .unknown }
+        let autocorrection: Bool?
         switch autocorrectionType {
-        case .no: return .autocorrectionDisabled
-        case .default, .yes: return .permits
-        @unknown default: return .unknown
+        case .no?: autocorrection = false
+        case .default?, .yes?: autocorrection = true
+        default: autocorrection = nil
         }
+        let spellChecking: Bool?
+        switch spellCheckingType {
+        case .no?: spellChecking = false
+        case .default?, .yes?: spellChecking = true
+        default: spellChecking = nil
+        }
+        return KeyboardEnglishInputPolicy.correctionPermission(permitsAssistance: permitsEnglishAssistance,
+            autocorrection: autocorrection, spellChecking: spellChecking)
     }
 
     /// These identifier/address/code fields must remain literal even when a

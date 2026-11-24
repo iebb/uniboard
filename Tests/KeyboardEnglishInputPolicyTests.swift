@@ -13,6 +13,29 @@ final class KeyboardEnglishInputPolicyTests: XCTestCase {
         KeyboardEnglishInputScope(documentIdentifier: document, modeIdentifier: mode)
     }
 
+    func testCorrectionSurfaceOnlyPermitsEnglishDirectTyping() {
+        for mode in LanguageInputMode.allCases {
+            for alphabet in KeyboardAlphabet.catalog {
+                XCTAssertEqual(KeyboardEnglishInputPolicy.permitsCorrectionSurface(mode: mode, alphabet: alphabet),
+                    mode == .direct && alphabet.id == "en", "\(mode) / \(alphabet.id)")
+            }
+        }
+    }
+
+    func testEitherHostOptOutBlocksCorrectionAndMissingPermissionFailsClosed() {
+        for correction: Bool? in [nil, false, true] {
+            for spelling: Bool? in [nil, false, true] {
+                let actual = KeyboardEnglishInputPolicy.correctionPermission(permitsAssistance: true,
+                    autocorrection: correction, spellChecking: spelling)
+                let expected: KeyboardCorrectionHostPermission = correction == false || spelling == false
+                    ? .autocorrectionDisabled : correction == true ? .permits : .unknown
+                XCTAssertEqual(actual, expected)
+                XCTAssertEqual(KeyboardEnglishInputPolicy.correctionPermission(permitsAssistance: false,
+                    autocorrection: correction, spellChecking: spelling), .literalField)
+            }
+        }
+    }
+
     func testExplicitCapitalizationModesAndMissingEmptyEditorContext() {
         for before: String? in [nil, "", "hello", "hello. "] {
             XCTAssertFalse(KeyboardEnglishInputPolicy.shouldCapitalize(mode: .none, before: before))

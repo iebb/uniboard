@@ -70,18 +70,31 @@ final class LanguageInputSettingsTests: XCTestCase {
         XCTAssertTrue(value.isValid)
     }
 
+    func testEnglishAssistanceStartsOffForFactoryAndMissingOrInvalidStorage() throws {
+        let directory = try temporaryDirectory()
+        let store = LanguageInputSettings(directory: { directory })
+        for value in [LanguageInputSettings.defaultValue, LanguageInputSettings.Value.defaults, store.load()] {
+            XCTAssertFalse(value.englishSuggestions)
+            XCTAssertFalse(value.englishAutocorrection)
+            XCTAssertFalse(value.effectiveEnglishSuggestions)
+            XCTAssertFalse(value.effectiveEnglishAutocorrection)
+        }
+        try Data("invalid".utf8).write(to: directory.appendingPathComponent(LanguageInputSettings.filename))
+        XCTAssertEqual(store.load(), .defaults)
+    }
+
     func testReleaseAvailabilityDoesNotChangeStorageOrderOrSavedEnglishFlags() throws {
         XCTAssertEqual(LanguageInputSettings.modeOrder, [.direct, .japaneseRomaji, .mandarinPinyin, .koreanRomaja, .koreanTwoSetHangul])
         XCTAssertEqual(LanguageInputSettings.visibleModeOrder, [.direct, .japaneseRomaji, .mandarinPinyin, .koreanTwoSetHangul])
-        XCTAssertFalse(LanguageInputSettings.englishAssistanceAvailable)
+        XCTAssertTrue(LanguageInputSettings.englishAssistanceAvailable)
         for suggestions in [false, true] {
             for correction in [false, true] {
                 let value = LanguageInputSettings.Value(enabledModes: LanguageInputSettings.modeOrder,
                     englishSuggestions: suggestions, englishAutocorrection: correction,
                     packReferences: [pin(.direct, id: "english.words"), pin(.koreanRomaja, id: "korean.words")])
                 let bytes = try XCTUnwrap(LanguageInputSettings.encode(value))
-                XCTAssertFalse(value.effectiveEnglishSuggestions)
-                XCTAssertFalse(value.effectiveEnglishAutocorrection)
+                XCTAssertEqual(value.effectiveEnglishSuggestions, suggestions)
+                XCTAssertEqual(value.effectiveEnglishAutocorrection, correction)
                 XCTAssertTrue(value.isEnabled(.koreanRomaja), "Availability must not masquerade as a storage edit")
                 XCTAssertEqual(LanguageInputSettings.decode(bytes), value)
                 XCTAssertEqual(LanguageInputSettings.encode(value), bytes, "Reading runtime policy must not mutate the snapshot")
@@ -99,8 +112,8 @@ final class LanguageInputSettingsTests: XCTestCase {
         let url = directory.appendingPathComponent(LanguageInputSettings.filename)
         let savedBytes = try Data(contentsOf: url)
         let loaded = store.load()
-        XCTAssertFalse(loaded.effectiveEnglishSuggestions)
-        XCTAssertFalse(loaded.effectiveEnglishAutocorrection)
+        XCTAssertTrue(loaded.effectiveEnglishSuggestions)
+        XCTAssertTrue(loaded.effectiveEnglishAutocorrection)
         XCTAssertEqual(loaded, value)
         XCTAssertEqual(try Data(contentsOf: url), savedBytes)
         var configuration = UniboardConfiguration.factoryDefaults

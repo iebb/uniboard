@@ -9,6 +9,20 @@ enum KeyboardAutomaticCapitalization: CaseIterable, Sendable {
 enum KeyboardEnglishInputPolicy {
     static let maximumContextScalars = 128
 
+    /// English assistance must never follow another layout or a conversion mode.
+    static func permitsCorrectionSurface(mode: LanguageInputMode, alphabet: KeyboardAlphabet) -> Bool {
+        mode == .direct && alphabet.id == KeyboardAlphabet.english.id
+    }
+
+    /// Missing autocorrection permission is unknown. Either explicit host opt-out wins.
+    static func correctionPermission(permitsAssistance: Bool, autocorrection: Bool?,
+                                     spellChecking: Bool?) -> KeyboardCorrectionHostPermission {
+        guard permitsAssistance else { return .literalField }
+        if autocorrection == false || spellChecking == false { return .autocorrectionDisabled }
+        guard autocorrection == true else { return .unknown }
+        return .permits
+    }
+
     static func shouldCapitalize(mode: KeyboardAutomaticCapitalization, before: String?) -> Bool {
         switch mode {
         case .none: return false

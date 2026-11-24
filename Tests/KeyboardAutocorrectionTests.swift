@@ -428,6 +428,13 @@ final class KeyboardAutocorrectionTests: XCTestCase {
         XCTAssertEqual(disabled.englishCorrectionPermission, .autocorrectionDisabled)
         XCTAssertNotEqual(enabled, disabled)
         field.autocorrectionType = .default
+        field.spellCheckingType = .no
+        let noSpelling = KeyboardHostInputTraits(reading: field)
+        XCTAssertEqual(noSpelling.spellCheckingType, .no)
+        XCTAssertEqual(noSpelling.englishCorrectionPermission, .autocorrectionDisabled)
+        field.spellCheckingType = .yes
+        let spelling = KeyboardHostInputTraits(reading: field)
+        XCTAssertNotEqual(noSpelling, spelling, "Same-field host changes invalidate correction transactions")
         XCTAssertEqual(KeyboardHostInputTraits(reading: field).englishCorrectionPermission, .permits)
         field.isSecureTextEntry = true
         XCTAssertEqual(KeyboardHostInputTraits(reading: field).englishCorrectionPermission, .literalField)

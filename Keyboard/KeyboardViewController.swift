@@ -580,7 +580,7 @@ final class KeyboardViewController: UIInputViewController {
     // MARK: English assistance (local, opt-in, synchronous proxy transactions)
 
     private var englishSurfaceAvailable: Bool {
-        LanguageInputSettings.englishAssistanceAvailable && language.mode == .direct && model.typingState.alphabet.id == KeyboardAlphabet.english.id
+        LanguageInputSettings.englishAssistanceAvailable && KeyboardEnglishInputPolicy.permitsCorrectionSurface(mode: language.mode, alphabet: model.typingState.alphabet)
             && !model.showsUnicode && !model.isSearching && !model.hasSymbolBoardOverlay
             && !model.hasKeyboardPanel && !model.finishingConversion && !model.expandedConversion
     }

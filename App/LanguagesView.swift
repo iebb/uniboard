@@ -229,9 +229,6 @@ private struct LanguageModeDetailView: View {
                         LabeledContent("Output", value: "Simplified")
                         Text("Traditional output isn’t available. The current Simplified mapping is a conservative subset, not full OpenCC t2s.").font(.footnote)
                     }
-                    if mode != .direct && LanguageInputSettings.englishAssistanceAvailable {
-                        Text("Language conversion choices are separate from English autocorrection.").font(.footnote)
-                    }
                 }
                 if mode != .koreanTwoSetHangul {
                 Section {
@@ -560,23 +557,23 @@ struct EnglishLanguageSettingsView: View {
             Section {
                 Toggle("English Suggestions", isOn: Binding(get: { model.preferences.englishSuggestions }, set: { model.setEnglishSuggestions($0) }))
                     .disabled((!available && !model.preferences.englishSuggestions) || model.hasOperation)
-            } footer: { Text("Show English word suggestions you can tap to insert. Suggestions don’t replace text automatically.") }
+            } footer: { Text("Shows English words you can tap while you type. Nothing changes unless you tap one.") }
             Section {
                 Toggle("English Autocorrection", isOn: Binding(get: { model.preferences.englishAutocorrection }, set: { model.setEnglishAutocorrection($0) }))
                     .disabled((!available && !model.preferences.englishAutocorrection) || model.hasOperation)
             } footer: {
-                Text("Correct English words automatically when you finish a word. Press Backspace immediately after a correction to restore your spelling.")
+                Text("Fixes misspelled English words when you finish a word. To get your spelling back, tap Undo or press Backspace right away.")
             }
             Section {
-                Text("Language conversion choices are separate from English autocorrection.")
-                Text("Both options start Off and are independent. They use the device’s English (US) spelling dictionary, not a downloaded language pack. Results can vary by device and system version.")
+                Text("Both start Off. They only work in Direct Typing and don't change Japanese, Chinese or Korean typing.")
+                Text("They use your iPhone's English (US) dictionary, so results can differ between devices.")
                 if !available {
-                    Label("The English (US) spelling dictionary isn’t available on this device. These options can’t be enabled here.", systemImage: "exclamationmark.triangle")
+                    Label("Your iPhone doesn't have the English (US) dictionary, so these can't be turned on.", systemImage: "exclamationmark.triangle")
                 }
                 NavigationLink { LanguageTypingGuideView(mode: .direct) } label: { Label("Typing Guide", systemImage: "questionmark.circle") }
             }
         }
-        .navigationTitle("English Autocorrection")
+        .navigationTitle("English")
         .navigationBarTitleDisplayMode(.inline)
         .task { model.refresh() }
         .alert("Language Settings", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
@@ -670,9 +667,9 @@ private struct LanguageTypingGuideView: View {
                 Section("Direct Typing") {
                     Text("Type characters without language conversion.")
                     if LanguageInputSettings.englishAssistanceAvailable {
-                        Text("English Suggestions offers tap-only choices. English Autocorrection is separate and starts Off.")
-                        Text("When an eligible correction happens, use Undo Correction or press Backspace immediately to restore the original pre-delimiter word. For a space-triggered correction, restoration removes that space and leaves your word editable. Cursor, selection or field changes end that rollback.")
-                        Text("Custom outputs and exact Unicode actions aren’t automatic replacements. URL, email and code-like text are excluded from English autocorrection; insufficient host context must leave text unchanged rather than perform a blind replacement.")
+                        Text("English Suggestions shows words you can tap. English Autocorrection fixes words on its own. Both start Off.")
+                        Text("After a fix, tap Undo “{word}” or press Backspace right away to get your spelling back. If the fix happened when you typed a space, the space goes too, so you can keep editing the word. Moving the cursor ends the chance to undo.")
+                        Text("Web addresses, email addresses and code aren't corrected. If Uniboard can't see enough of your text to be sure, it leaves it as typed.")
                     }
                 }
             }
